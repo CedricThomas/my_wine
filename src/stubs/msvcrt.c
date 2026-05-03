@@ -359,7 +359,7 @@ void wine_abort(void)
     /* Simpler: just print the key values via separate syscalls */
     /* Return address */
     {
-        char h[16] = "RET=";
+        char h[22] = "RET=";
         int p = 4;
         uintptr_t v = ret_addr;
         for (int i = 60; i >= 0; i -= 4) h[p++] = hex[(v >> i) & 0xf];
@@ -367,10 +367,10 @@ void wine_abort(void)
         long rr = 1;
         __asm__ volatile("syscall" : "+a"(rr) : "D"(2), "S"(h), "d"(p) : "rcx","r11","memory","cc");
     }
-    
+
     /* RSP */
     {
-        char h[16] = "RSP=";
+        char h[22] = "RSP=";
         int p = 4;
         uintptr_t v = rsp_val;
         for (int i = 60; i >= 0; i -= 4) h[p++] = hex[(v >> i) & 0xf];
@@ -378,10 +378,10 @@ void wine_abort(void)
         long rr = 1;
         __asm__ volatile("syscall" : "+a"(rr) : "D"(2), "S"(h), "d"(p) : "rcx","r11","memory","cc");
     }
-    
+
     /* RBP */
     {
-        char h[16] = "RBP=";
+        char h[22] = "RBP=";
         int p = 4;
         uintptr_t v = rbp_val;
         for (int i = 60; i >= 0; i -= 4) h[p++] = hex[(v >> i) & 0xf];
@@ -389,10 +389,10 @@ void wine_abort(void)
         long rr = 1;
         __asm__ volatile("syscall" : "+a"(rr) : "D"(2), "S"(h), "d"(p) : "rcx","r11","memory","cc");
     }
-    
+
     /* Dump 8 stack values from rsp */
     {
-        char h[16] = "SP0=";
+        char h[22] = "SP0=";
         int p = 4;
         uintptr_t v = ret_addr;  /* [rsp] = return address */
         for (int i = 60; i >= 0; i -= 4) h[p++] = hex[(v >> i) & 0xf];
@@ -400,19 +400,19 @@ void wine_abort(void)
         long rr = 1;
         __asm__ volatile("syscall" : "+a"(rr) : "D"(2), "S"(h), "d"(p) : "rcx","r11","memory","cc");
     }
-    
+
     /* Read [rsp+8] */
     { uintptr_t v2; __asm__ volatile("movq 8(%%rsp), %0" : "=&r"(v2));
-      char h[16] = "SP1="; int p = 4;
+      char h[22] = "SP1="; int p = 4;
       for (int i = 60; i >= 0; i -= 4) h[p++] = hex[(v2 >> i) & 0xf];
       h[p++] = '\n'; h[p] = '\0';
       long rr = 1;
       __asm__ volatile("syscall" : "+a"(rr) : "D"(2), "S"(h), "d"(p) : "rcx","r11","memory","cc");
     }
-    
+
     /* Read [rsp+16] */
     { uintptr_t v2; __asm__ volatile("movq 16(%%rsp), %0" : "=&r"(v2));
-      char h[16] = "SP2="; int p = 4;
+      char h[22] = "SP2="; int p = 4;
       for (int i = 60; i >= 0; i -= 4) h[p++] = hex[(v2 >> i) & 0xf];
       h[p++] = '\n'; h[p] = '\0';
       long rr = 1;

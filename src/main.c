@@ -97,9 +97,10 @@ static void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
     if (text_start == 0) return NULL;
 
     uint8_t *text_base = (uint8_t *)image_base + text_start;
+    uint64_t text_size = text_end - text_start;
     uint64_t target_val = (uint64_t)(uintptr_t)target_addr;
 
-    for (uint64_t off = 0; off < (text_end - text_start) - 5; off++) {
+    for (uint64_t off = 0; off + 6 <= text_size; off++) {
         if (text_base[off] == 0xff && text_base[off + 1] == 0x25) {
             int32_t disp = *(int32_t *)(text_base + off + 2);
             uint64_t instr_addr = text_start + off;
@@ -488,13 +489,14 @@ static int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt)
         fprintf(stderr, "WARNING: .text section not found, skipping thunk scan\n");
     } else {
         uint8_t *text_base = (uint8_t *)base + text_start;
+        uint64_t text_size = text_end - text_start;
 
         /* Step 1: scan .text for all ff 25 xx xx xx xx (jmp *disp32(%rip)),
          * collect unique target addresses */
         uint64_t thunk_targets[256];
         int num_targets = 0;
 
-        for (uint64_t off = 0; off < (text_end - text_start) - 5; off++) {
+        for (uint64_t off = 0; off + 6 <= text_size; off++) {
             if (text_base[off] == 0xff && text_base[off + 1] == 0x25) {
                 int32_t disp = *(int32_t *)(text_base + off + 2);
                 uint64_t instr_addr = text_start + off;
