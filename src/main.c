@@ -24,6 +24,7 @@
 #include <ucontext.h>
 #include <sys/syscall.h>
 #include <sys/user.h>  // for REG_RIP, REG_RSP, etc.
+#include <stdbool.h>
 
 #include "include/pe.h"
 #include "include/ntdll.h"
@@ -167,9 +168,24 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
             perror("ARCH_SET_GS");
             _exit(1);
         }
-        /* Patch __acrt_iob_func thunk to return __wine_iob directly.
-         * Dynamically locate the .text jump-thunk via IAT instead of
-         * hardcoding an offset like 0x27a0. */
+        /*
+         * Patch __acrt_iob_func to return __wine_iob_data directly.
+         *
+         * WHY: The PE's __acrt_iob_func (msvcrt import wrapper) does:
+         *   1. mov %ecx,%ebx     ; save index
+         *   2. call __iob_func   ; our stub (ms_abi) may clobber rcx upper bits
+         *   3. mov %ebx,%ecx     ; restore lower 32 bits (upper 32 remain garbage)
+         *   4. lea (%rcx,%rcx,2),%rdx  ; rdx = rcx*3 (GARBAGE from upper bits)
+         *   5. shl $4,%rdx       ; rdx *= 16 = rcx*48 (still GARBAGE)
+         *   6. add %rdx,%rax     ; rax = base + garbage → wrong FILE*
+         *
+         * We cannot fix this from __iob_func alone because the garbage is in
+         * rcx which our function doesn't control. Patching the wrapper to return
+         * the base directly (bypassing the broken index math) is the cleanest fix.
+         *
+         * Patch: movabs $<addr>,%rax; ret; 4x NOP (15 bytes total)
+         * This replaces the jmp thunk or wrapper with a direct return.
+         */
         {
             uint64_t image_base = entry_abs & ~0xFFFFFUL;
             void *base = (void *)(uintptr_t)image_base;
@@ -183,19 +199,41 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
             IMAGE_SECTION_HEADER *sections =
                 (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
 
-            void *acrt_fn = find_text_thunk(base, nt, sections,
-                                            (void *)__iob_func);
-            if (acrt_fn == NULL) {
-                fprintf(stderr, "WARNING: __acrt_iob_func thunk not found in .text\n");
+            void *thunk = find_text_thunk(base, nt, sections,
+                                          (void *)__iob_func);
+            if (thunk == NULL) {
+                fprintf(stderr, "WARNING: __acrt_iob_func thunk not found, skipping patch\n");
             } else {
-                void *page = (void *)((uintptr_t)acrt_fn & ~(uintptr_t)4095);
-                mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC);
-                uint8_t *code = (uint8_t *)acrt_fn;
-                code[0] = 0x48; code[1] = 0xb8;
-                *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
-                code[10] = 0xc3; /* ret */
-                for (int k = 11; k < 15; k++) code[k] = 0x90;
-                mprotect(page, 4096, PROT_READ|PROT_EXEC);
+                uint8_t *code = (uint8_t *)thunk;
+                uintptr_t thunk_abs = (uintptr_t)thunk;
+                uintptr_t page_addr = thunk_abs & ~(uintptr_t)4095;
+                void *page = (void *)page_addr;
+
+                /* Validate: first two bytes should be ff 25 (jmp *disp32(%rip)) or 48 bb (movabs) */
+                bool is_jmp_thunk = (code[0] == 0xff && code[1] == 0x25);
+                if (!is_jmp_thunk) {
+                    fprintf(stderr, "WARNING: __acrt_iob_func at 0x%lx has unexpected opcode 0x%02x 0x%02x, skipping patch\n",
+                            thunk_abs, code[0], code[1]);
+                } else {
+                    if (mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC) == 0) {
+                        /* movabs $imm64, %rax */
+                        code[0] = 0x48;                /* REX.W */
+                        code[1] = 0xb8;                /* movabs rax, imm64 */
+                        *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
+                        /* ret */
+                        code[10] = 0xc3;
+                        /* NOP padding to fill 15 bytes */
+                        for (int k = 11; k < 15; k++) code[k] = 0x90;
+
+                        if (mprotect(page, 4096, PROT_READ|PROT_EXEC) != 0) {
+                            perror("mprotect restore __acrt_iob_func");
+                        }
+                        fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",
+                                thunk_abs);
+                    } else {
+                        perror("mprotect __acrt_iob_func");
+                    }
+                }
             }
         }
 
