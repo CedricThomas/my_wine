@@ -31,7 +31,11 @@ int _commode = 0;
 int _fmode = 0;
 char **_msvcrt_environ = NULL;
 
-static char _cmdline_storage[4096] = "./hello.exe";
+/* Set from main.c before jump_to_entry; used by __getmainargs and _acmdln */
+char **g_guest_argv  = NULL;
+char **g_guest_envp  = NULL;
+
+char _cmdline_storage[4096];  /* filled from g_guest_argv[0] in main.c */
 char *_acmdln = _cmdline_storage;
 
 /* Static variables for additional CRT refptr patches */
@@ -227,29 +231,25 @@ void *__p__fmode(void)
     return &_fmode;
 }
 
-/* __getmainargs: parse command line and environment */
+/* __getmainargs: return the actual argv/envp passed from main.c */
 __attribute__((ms_abi, force_align_arg_pointer))
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *pStartInfo)
 {
-    static char *dummy_argv[2] = { "./hello.exe", NULL };
-    static char *dummy_envp[2] = { "PATH=/usr/bin", NULL };
-
     if (argc) *argc = 1;
-    if (argv) *argv = dummy_argv;
-    if (envp) *envp = dummy_envp;
+    if (argv) *argv = g_guest_argv ? g_guest_argv : (char **)(uintptr_t)0;
+    if (envp) *envp = g_guest_envp ? g_guest_envp : (char **)(uintptr_t)0;
 
     /* Also write to the PE's .bss section so the CRT can find them.
      * The .bss lives at image_base + 0x7000.
      *   argc at 0x7028 (4 bytes), argv at 0x7020 (8 bytes), envp at 0x7018 (8 bytes)
      * The CRT reads argv from 0x7020 and does two-level indirection: mov (%r13),%rcx
-     * If argv is NULL there, dereferencing 0 → SIGSEGV.
-     */
+     * If argv is NULL there, dereferencing 0 → SIGSEGV. */
     uint64_t image_base = g_image_base_ref;
     if (image_base) {
         char *bss = (char *)image_base + 0x7000;
         *(uint32_t *)(bss + 0x028) = 1;            // argc = 1
-        *(uint64_t *)(bss + 0x020) = (uint64_t)(uintptr_t)dummy_argv;  // argv
-        *(uint64_t *)(bss + 0x018) = (uint64_t)(uintptr_t)dummy_envp;  // envp
+        *(uint64_t *)(bss + 0x020) = (uint64_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);  // argv
+        *(uint64_t *)(bss + 0x018) = (uint64_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);  // envp
     }
 
     (void)expand_env;

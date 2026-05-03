@@ -12,6 +12,13 @@ extern int _fmode;
 extern char **_msvcrt_environ;
 extern char *_acmdln;
 
+/* Guest argv/envp set from main.c before entry jump */
+extern char **g_guest_argv;
+extern char **g_guest_envp;
+
+/* _cmdline_storage buffer and pointer - set from main.c before entry jump */
+extern char _cmdline_storage[4096];
+
 /* CRT startup functions */
 __attribute__((ms_abi))
 void __set_app_type(int type);

@@ -33,6 +33,8 @@
 #include "include/syscall/signal_handler.h"
 #include "include/syscall/dispatcher.h"
 
+extern char **environ;  // from libc, for guest envp
+
 /* SEH frame: { next=NULL, handler } — NULL-terminated chain */
 static uint64_t g_seh_frame[2] __attribute__((aligned(8))) = { 0, 0 };
 
@@ -66,15 +68,20 @@ static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
 __attribute__((ms_abi))
 static int seh_crash_handler(void *exception_record, void *establisher_frame,
                               void *context_record, void *dispatcher_context);
-static void run_guest(void (*entry)(void), void *stack_top, void *peb);
+static void run_guest(void (*entry)(void), void *stack_top, void *peb,
+                       char **guest_argv, char **guest_envp);
 static void crash_handler(int sig, siginfo_t *info, void *ucontext);
 
 /* ── Jump to entry point ────────────────────────────────────── */
 
-static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *teb)
+static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *teb,
+                          char **guest_argv, char **guest_envp)
 {
     (void)stack_base;  /* suppress unused warning */
     void *peb = *(void **)((char *)teb + 0x60);
+    (void)peb;  /* not passed to run_guest anymore */
+    (void)guest_argv;  /* used in child below */
+    (void)guest_envp;  /* used in child below */
     pid_t pid = fork();
 
     if (pid < 0) { perror("fork"); return 1; }
@@ -134,12 +141,10 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
             mprotect(page, 4096, PROT_READ|PROT_EXEC);
         }
 
-        /* Skip CRT and jump directly to main() at RVA 0x550 */
+        /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
         {
-            uint64_t image_base = entry_abs & ~0xFFFFFUL;
-            uint64_t main_addr = image_base + 0x1000 + 0x550;
-            void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)main_addr;
-            run_guest(entry, stack_top, NULL);
+            void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
+            run_guest(entry, stack_top, NULL, guest_argv, guest_envp);
         }
 
         fprintf(stderr, "my_wine: inline jump returned\n");
@@ -611,12 +616,9 @@ static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
 
 typedef void (*entry_point_fn)(void);
 
-/* Dummy argv/envp for the guest main() call */
-static const char *g_argv[] = { "./hello.exe", NULL };
-static const char *g_envp[] = { "PATH=/usr/bin", NULL };
-
 __attribute__((noinline, noreturn))
-static void run_guest(entry_point_fn entry, void *stack_top, void *peb)
+static void run_guest(entry_point_fn entry, void *stack_top, void *peb,
+                       char **guest_argv, char **guest_envp)
 {
     (void)peb;
     __asm__ volatile(
@@ -628,8 +630,8 @@ static void run_guest(entry_point_fn entry, void *stack_top, void *peb)
         :
         : "r"(stack_top),
           "r"((uintptr_t)1),
-          "r"((uintptr_t)g_argv),
-          "r"((uintptr_t)g_envp),
+          "r"((uintptr_t)guest_argv),
+          "r"((uintptr_t)guest_envp),
           "r"(entry)
         : "memory", "cc"
     );
@@ -887,28 +889,46 @@ int main(int argc, char *argv[])
             *(uint64_t *)(data_base + 0x700c) = 0;     // managedapp = 0
             *(uint64_t *)(data_base + 0x7004) = 0;     // startinfo = NULL
             *(uint32_t *)(data_base + 0x7010) = 0;     // mainret = 0
-            *(uint64_t *)(data_base + 0x7018) = 0;     // envp = NULL (set by __getmainargs)
-            *(uint64_t *)(data_base + 0x7020) = 0;     // argv = NULL (set by __getmainargs)
-
-            /*
-             * Pre-seed argv/envp in the PE's .bss so the CRT doesn't crash
-             * when it reads them before calling __getmainargs.
-             * The CRT does: mov 0x5ce2(%rip),%r13  (loads argv from .bss)
-             *               mov (%r13),%rcx          (reads argv[0])
-             * If argv is NULL, this dereferences 0 → SIGSEGV.
-             */
-            { static const char *argv_init[] = { "./hello.exe", NULL };
-              static const char *envp_init[] = { "PATH=/usr/bin", NULL };
-              *(uint64_t *)(data_base + 0x7020) = (uint64_t)(uintptr_t)argv_init;
-              *(uint64_t *)(data_base + 0x7018) = (uint64_t)(uintptr_t)envp_init;
-            }
+            *(uint64_t *)(data_base + 0x7018) = 0;     // envp (set properly in step 11)
+            *(uint64_t *)(data_base + 0x7020) = 0;     // argv (set properly in step 11)
 
             printf(".data section: vaddr=0x%lx, size=0x%lx, initialized globals\n",
                    (unsigned long)data_vaddr, (unsigned long)data_size);
         }
     }
 
-    /* 11. Jump to entry point (pass absolute address, not RVA) */
+    /* 11. Build guest argv/envp from actual host arguments */
+    char *guest_argv[2];
+    guest_argv[0] = argv[1];  /* the PE path */
+    guest_argv[1] = NULL;
+    char **guest_envp = environ;  /* real host environment */
+
+    /* Set msvcrt globals so __getmainargs can return the real values */
+    g_guest_argv = guest_argv;
+    g_guest_envp = guest_envp;
+
+    /* Fill _cmdline_storage so _acmdln points to the actual PE path */
+    strncpy(_cmdline_storage, argv[1], sizeof(_cmdline_storage) - 1);
+    _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
+
+    /* Pre-seed argv/envp pointers in the PE's .bss so the CRT doesn't
+     * crash when reading them before calling __getmainargs. */
+    {
+        int data_section_idx = -1;
+        for (int i = 0; i < num_sections; i++) {
+            if (memcmp(sections[i].Name, ".data", 5) == 0) {
+                data_section_idx = i;
+                break;
+            }
+        }
+        if (data_section_idx >= 0) {
+            uint8_t *data_base = (uint8_t *)base + sections[data_section_idx].VirtualAddress;
+            *(uint64_t *)(data_base + 0x7020) = (uint64_t)(uintptr_t)guest_argv;
+            *(uint64_t *)(data_base + 0x7018) = (uint64_t)(uintptr_t)guest_envp;
+        }
+    }
+
+    /* 12. Jump to entry point (pass absolute address, not RVA) */
     uint64_t entry_abs = (uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint;
-    return jump_to_entry(entry_abs, stack_top, g_stack_base, teb);
+    return jump_to_entry(entry_abs, stack_top, g_stack_base, teb, guest_argv, guest_envp);
 }
