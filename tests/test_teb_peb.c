@@ -21,10 +21,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <sys/syscall.h>
-#include <asm/prctl.h>
 
 #include "pe.h"
+#include "src/loader/loader_priv.h"
 
 /* ── Forward declarations from loader_priv.h ───────────────── */
 
@@ -79,27 +78,24 @@ static void install_crash_safety(void)
 
 static int can_set_gs_base(void)
 {
-    /* Try a test set/get cycle with a known value.
-     * Use a mapped page as a "safe" test value to avoid
-     * triggering kernel validation. */
     void *page = mmap(NULL, 4096, PROT_READ|PROT_WRITE,
                       MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     if (page == MAP_FAILED)
         return 0;
 
-    if (syscall(__NR_arch_prctl, ARCH_SET_GS, (unsigned long)page) != 0) {
+    if (set_gs_base(page) != 0) {
         munmap(page, 4096);
         return 0;
     }
 
-    uint64_t got = (uint64_t)syscall(__NR_arch_prctl, ARCH_GET_GS, 0);
-    if (got != (uint64_t)(uintptr_t)page) {
+    void *got = get_gs_base();
+    if (got != page) {
         munmap(page, 4096);
         return 0;
     }
 
-    /* Restore GS to NULL (we can't restore the original safely) */
-    syscall(__NR_arch_prctl, ARCH_SET_GS, 0);
+    /* Restore GS to NULL */
+    set_gs_base(NULL);
     munmap(page, 4096);
 
     return 1;
@@ -134,8 +130,8 @@ static void test_teb_peb_setup(void)
     check("setup_teb_peb returns non-NULL", teb != NULL);
 
     /* Read the GS base to confirm it points to TEB */
-    uint64_t gs_base = (uint64_t)syscall(__NR_arch_prctl, ARCH_GET_GS, 0);
-    check("GS base == TEB address", (void *)gs_base == teb);
+    void *gs_base = get_gs_base();
+    check("GS base == TEB address", gs_base == teb);
 
     /* Verify gs:[0x00] — SEH chain (set by entry.c in child;
      * setup_teb_peb leaves it as 0 for the parent test) */
@@ -172,7 +168,7 @@ static void test_teb_peb_setup(void)
     check("munmap TEB succeeds", rc_teb == 0);
 
     /* Restore GS base to 0 to avoid corrupting the test runner */
-    syscall(__NR_arch_prctl, ARCH_SET_GS, 0);
+    set_gs_base(NULL);
 }
 
 /* ── Test: stack setup ─────────────────────────────────────── */
