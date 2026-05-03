@@ -31,6 +31,10 @@
 #include "include/syscall/thunk_gen.h"
 #include "include/syscall/signal_handler.h"
 #include "include/syscall/dispatcher.h"
+
+/* SEH frame: { next=NULL, handler } — NULL-terminated chain */
+static uint64_t g_seh_frame[2] __attribute__((aligned(8))) = { 0, 0 };
+
 static void *g_stack_base = NULL;
 
 /* ── External data accessor from msvcrt.c ─────────────────────── */
@@ -58,6 +62,9 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
 static int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
 static void *setup_teb_peb(void);
 static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
+__attribute__((ms_abi))
+static int seh_crash_handler(void *exception_record, void *establisher_frame,
+                              void *context_record, void *dispatcher_context);
 static void run_guest(void (*entry)(void), void *stack_top, void *peb);
 
 /* ── Jump to entry point ────────────────────────────────────── */
@@ -510,8 +517,11 @@ static void *setup_teb_peb(void)
     /* Zero the TEB */
     memset(teb, 0, teb_size);
 
-    /* Set TEB self-pointer at offset 0x00 */
-    *(void **)teb = teb;
+    /* Set up SEH chain: gs:[0x00] points to EXCEPTION_REGISTRATION_RECORD
+     * which is { next=NULL, handler=seh_crash_handler } */
+    g_seh_frame[0] = 0;  /* next = NULL (end of chain) */
+    g_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
+    *(void **)teb = (void *)g_seh_frame;  /* gs:[0x00] = SEH chain head */
 
     /* Fix gs:[0x30] null deref crash at 0x1400011d4:
      *   mov rax, gs:[0x30]  →  rax must be TEB
@@ -628,6 +638,30 @@ static void run_guest(entry_point_fn entry, void *stack_top, void *peb)
 }
 
 /* ── Crash handler ──────────────────────────────────────────── */
+
+/* SEH handler — called when an exception occurs in guest code.
+ * On x86_64, SEH handlers receive (ExceptionRecord, EstablisherFrame, ContextRecord, DispatcherContext)
+ * in RCX, RDX, R8, R9 per Microsoft x64 ABI. */
+__attribute__((ms_abi, used))
+static int seh_crash_handler(void *exception_record, void *establisher_frame,
+                              void *context_record, void *dispatcher_context)
+{
+    (void)exception_record;
+    (void)establisher_frame;
+    (void)context_record;
+    (void)dispatcher_context;
+
+    /* Dump info via syscall (stderr) */
+    { const char t[] = "SEV: SEH handler invoked (exception in guest code)\n";
+      syscall(SYS_write, 2, t, sizeof(t)-1); }
+
+    /* Extract exit code from exception record if possible, else use 0xC0000005 (ACCESS_VIOLATION) */
+    uint64_t exit_code = 0xC0000005;
+
+    /* Call NtTerminateProcess to exit cleanly */
+    syscall(__NR_exit, (int)(exit_code & 0xFF));
+    return 1; /* ExceptionContinueExecution (never reached) */
+}
 
 static void run_guest(void (*entry)(void), void *stack_top, void *peb);
 static void crash_handler(int sig, siginfo_t *info, void *ucontext)
