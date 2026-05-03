@@ -5,12 +5,9 @@
  * and the NtClose handler.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 #include <unistd.h>
-
+#include "handler_abi.h"
 #include "ntdll_priv.h"
 
 /* ── Handle Table ──────────────────────────────────────────────── */
@@ -74,12 +71,15 @@ void free_handle(uint64_t handle)
 
 /* ── NtClose ───────────────────────────────────────────────────── */
 
+HANDLER
 uint64_t handler_NtClose(uint64_t handle)
 {
     int fd = handle_to_fd(handle);
     if (fd < 0) return STATUS_INVALID_HANDLE;
 
-    close(fd);
+    long res;
+    __asm__ volatile("syscall" : "=a"(res) : "a"(3), "D"(fd) : "rcx", "r11", "cc");
+    (void)res;
     free_handle(handle);
 
     return STATUS_SUCCESS;

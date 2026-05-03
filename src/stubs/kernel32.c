@@ -1,19 +1,28 @@
 #define _GNU_SOURCE
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
-#include <unistd.h>
+#include <stddef.h>
 #include <time.h>
+#include <unistd.h>
 #include <sys/mman.h>
-#include <errno.h>
 #include "include/kernel32.h"
 #include "include/ntdll.h"
 #include "include/syscall/thunk_gen.h"
 #include "include/wine_abi.h"
 #include "include/abi_wrappers.h"
-#include <asm/unistd_64.h>
+
+/* Linux x86_64 syscall numbers */
+#define SYS_write      1
+#define SYS_exit_group 231
+#define SYS_nanosleep  35
+
+/* Helper: write a static message to stderr via direct syscall */
+static inline void write_to_stderr(const char *msg)
+{
+    long ret;
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_write), "D"(2), "S"(msg), "d"((size_t)__builtin_strlen(msg)) : "rcx", "r11", "memory", "cc");
+    (void)ret;
+}
 
 
 /*
@@ -53,7 +62,7 @@ int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x3D);
     if (thunk == NULL) {
-        fprintf(stderr, "my_wine: WriteFile: thunk 0x3D not found\n");
+        write_to_stderr("my_wine: WriteFile: thunk 0x3D not found\n");
         return 0;
     }
 
@@ -91,7 +100,7 @@ int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x3C);
     if (thunk == NULL) {
-        fprintf(stderr, "my_wine: ReadFile: thunk 0x3C not found\n");
+        write_to_stderr("my_wine: ReadFile: thunk 0x3C not found\n");
         return 0;
     }
 
@@ -128,8 +137,9 @@ void ExitProcess(uint32_t uExitCode)
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x2A);
     if (thunk == NULL) {
-        fprintf(stderr, "my_wine: ExitProcess: thunk 0x2A not found\n");
-        _exit(1);
+        write_to_stderr("my_wine: ExitProcess: thunk 0x2A not found\n");
+        long ret;
+        __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_exit_group), "D"(1) : "rcx", "r11", "cc");
     }
 
     /*
@@ -174,7 +184,7 @@ void *GetModuleHandleA(const char *lpModuleName)
 WINE_STUB
 int lstrlenA(const char *lpString)
 {
-    return (int)strlen(lpString);
+    return (int)__builtin_strlen(lpString);
 }
 
 /* ── Critical Section stubs ─────────────────────────────────── */
@@ -182,7 +192,7 @@ int lstrlenA(const char *lpString)
 WINE_STUB
 void InitializeCriticalSection(CRITICAL_SECTION *cs)
 {
-    if (cs) memset(cs, 0, sizeof(*cs));
+    if (cs) __builtin_memset(cs, 0, sizeof(*cs));
 }
 
 WINE_STUB
@@ -219,7 +229,7 @@ WINE_STUB
 void GetStartupInfoA(STARTUPINFOA *lpStartupInfo)
 {
     if (lpStartupInfo) {
-        memset(lpStartupInfo, 0, sizeof(*lpStartupInfo));
+        __builtin_memset(lpStartupInfo, 0, sizeof(*lpStartupInfo));
         lpStartupInfo->cb = sizeof(STARTUPINFOA);
     }
 }
@@ -235,7 +245,6 @@ void *SetUnhandledExceptionFilter(void *callback)
 
 /* ── Sleep ──────────────────────────────────────────────────── */
 
-
 WINE_STUB
 void Sleep(uint32_t dwMilliseconds)
 {
@@ -243,7 +252,8 @@ void Sleep(uint32_t dwMilliseconds)
     ts.tv_sec  = dwMilliseconds / 1000;
     ts.tv_nsec = (dwMilliseconds % 1000) * 1000000L;
     /* Call nanosleep syscall directly (avoids ABI mismatch with libc wrapper) */
-    long ret = syscall(__NR_nanosleep, &ts, NULL);
+    long ret;
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_nanosleep), "D"(&ts), "S"((const void *)0) : "rcx", "r11", "memory", "cc");
     (void)ret;
 }
 
@@ -261,7 +271,6 @@ void *TlsGetValue(uint32_t dwTlsIndex)
 WINE_STUB
 int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect)
 {
-    fprintf(stderr, "VP: addr=%p sz=0x%x prot=%u\n", lpAddress, dwSize, flNewProtect);
     int prot = 0;
     switch ((int)flNewProtect) {
     case PAGE_READONLY:        prot = PROT_READ; break;
@@ -278,19 +287,17 @@ int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint
     }
 
     /* mprotect requires page-aligned addresses */
-    size_t page_size = sysconf(_SC_PAGESIZE);
+    size_t page_size = 4096; /* constant instead of sysconf(_SC_PAGESIZE) to avoid libc */
     void *page_start = (void *)((uintptr_t)lpAddress & ~(page_size - 1));
     uintptr_t offset = (uintptr_t)lpAddress - (uintptr_t)page_start;
     size_t total_size = offset + dwSize;
     size_t aligned_size = (total_size + page_size - 1) & ~(size_t)(page_size - 1);
 
     if (sysv_mprotect(page_start, aligned_size, prot) != 0) {
-        fprintf(stderr, "VP FAIL: page=%p sz=0x%zx prot=0x%x errno=%d\n", page_start, aligned_size, prot, errno);
-        perror("VirtualProtect: mprotect");
-        g_last_error = errno;
+        write_to_stderr("my_wine: VirtualProtect: mprotect failed\n");
+        g_last_error = 1; /* fixed error code instead of errno */
         return 0;
     }
-    fprintf(stderr, "VP OK: page=%p sz=0x%zx\n", page_start, aligned_size);
     return 1;
 }
 

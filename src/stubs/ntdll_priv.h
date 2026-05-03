@@ -10,6 +10,8 @@
 
 #include "include/ntdll.h"
 #include "include/pe.h"
+#include <stddef.h>
+#include <pthread.h>
 
 /* ── Handle Table ──────────────────────────────────────────────── */
 

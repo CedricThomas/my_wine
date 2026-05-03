@@ -9,7 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
-
+#include "handler_abi.h"
 #include "ntdll_priv.h"
 
 /* ── Event / Thread storage ────────────────────────────────────── */
@@ -20,6 +20,7 @@ int event_count = 0;
 wine_thread_t threads[MAX_THREADS];
 int thread_count = 0;
 
+HANDLER
 uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
                                uint64_t object_attributes, uint64_t event_type,
                                uint64_t initial_state)
@@ -68,6 +69,7 @@ static void *thread_wrapper(void *arg)
     return NULL;
 }
 
+HANDLER
 uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_access,
                                    uint64_t object_attributes, uint64_t process_handle,
                                    uint64_t start_routine, uint64_t argument,
@@ -132,6 +134,7 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
     return STATUS_SUCCESS;
 }
 
+HANDLER
 uint64_t handler_NtGetContextThread(uint64_t thread_handle, uint64_t context)
 {
     (void)thread_handle;
@@ -141,6 +144,7 @@ uint64_t handler_NtGetContextThread(uint64_t thread_handle, uint64_t context)
     return STATUS_SUCCESS;
 }
 
+HANDLER
 uint64_t handler_NtSetContextThread(uint64_t thread_handle, uint64_t context)
 {
     (void)thread_handle; (void)context;

@@ -5,14 +5,17 @@
  * NtMapViewOfSection, NtUnmapViewOfSection
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-
+#include "handler_abi.h"
 #include "ntdll_priv.h"
+#include "include/abi_wrappers.h"
+
+/* Linux x86_64 syscall numbers */
+#define SYS_munmap  11
+#define SYS_fstat    5
 
 /* ── Section / View storage ────────────────────────────────────── */
 
@@ -35,6 +38,7 @@ int map_protect(uint64_t protect)
     }
 }
 
+HANDLER
 uint64_t handler_NtAllocateVirtualMemory(uint64_t process, uint64_t *base_address,
                                           uint64_t zero_bits, uint64_t *region_size,
                                           uint64_t allocation_type, uint64_t protect)
@@ -51,7 +55,7 @@ uint64_t handler_NtAllocateVirtualMemory(uint64_t process, uint64_t *base_addres
     if (base_address != 0 && *base_address != 0)
         addr = (void *)(uintptr_t)*base_address;
 
-    void *result = mmap(addr, (size_t)*region_size, prot,
+    void *result = sysv_mmap(addr, (size_t)*region_size, prot,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (result == MAP_FAILED)
         return STATUS_MEMORY_NOT_AVAILABLE;
@@ -59,12 +63,13 @@ uint64_t handler_NtAllocateVirtualMemory(uint64_t process, uint64_t *base_addres
     if (base_address != 0)
         *base_address = (uint64_t)(uintptr_t)result;
 
-    /* mmap with MAP_ANONYMOUS returns exactly the requested size; */
+    /* sysv_mmap with MAP_ANONYMOUS returns exactly the requested size; */
     /* *region_size already holds the correct value. */
 
     return STATUS_SUCCESS;
 }
 
+HANDLER
 uint64_t handler_NtFreeVirtualMemory(uint64_t process, uint64_t *base_address,
                                       uint64_t *region_size, uint64_t free_type)
 {
@@ -76,8 +81,9 @@ uint64_t handler_NtFreeVirtualMemory(uint64_t process, uint64_t *base_address,
     if (base_address == 0 || *base_address == 0)
         return STATUS_INVALID_PARAMETER;
 
-    int ret = munmap((void *)(uintptr_t)*base_address, (size_t)*region_size);
-    if (ret != 0)
+    long res;
+    __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_munmap), "D"((void *)(uintptr_t)*base_address), "S"((size_t)*region_size) : "rcx", "r11", "cc");
+    if (res != 0)
         return STATUS_UNSUCCESSFUL;
 
     *base_address = 0;
@@ -86,6 +92,7 @@ uint64_t handler_NtFreeVirtualMemory(uint64_t process, uint64_t *base_address,
     return STATUS_SUCCESS;
 }
 
+HANDLER
 uint64_t handler_NtMapViewOfSection(uint64_t section_handle, uint64_t process,
                                      uint64_t *base_address, uint64_t zero_bits,
                                      uint64_t commit_size, uint64_t *section_offset,
@@ -119,13 +126,13 @@ uint64_t handler_NtMapViewOfSection(uint64_t section_handle, uint64_t process,
     void *result;
     if (sec->fd >= 0) {
         /* File-backed mapping */
-        result = mmap(addr, view_sz, prot, MAP_PRIVATE, sec->fd, (off_t)offset);
+        result = sysv_mmap(addr, view_sz, prot, MAP_PRIVATE, sec->fd, (off_t)offset);
     } else {
         /* Anonymous mapping — copy from section backing store */
-        result = mmap(addr, view_sz, prot,
+        result = sysv_mmap(addr, view_sz, prot,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (result != MAP_FAILED && sec->base != NULL)
-            memcpy(result, (const char *)sec->base + offset, view_sz);
+            sysv_memcpy(result, (const char *)sec->base + offset, view_sz);
     }
 
     if (result == MAP_FAILED)
@@ -158,6 +165,7 @@ int find_view(void *base)
     return -1;
 }
 
+HANDLER
 uint64_t handler_NtUnmapViewOfSection(uint64_t process, uint64_t base_address)
 {
     (void)process;
@@ -172,8 +180,9 @@ uint64_t handler_NtUnmapViewOfSection(uint64_t process, uint64_t base_address)
 
     size_t view_sz = views[idx].size;
 
-    int ret = munmap(views[idx].base, view_sz);
-    if (ret != 0)
+    long res;
+    __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_munmap), "D"(views[idx].base), "S"(view_sz) : "rcx", "r11", "cc");
+    if (res != 0)
         return STATUS_UNSUCCESSFUL;
 
     /* Remove the view from the registry */
@@ -183,6 +192,7 @@ uint64_t handler_NtUnmapViewOfSection(uint64_t process, uint64_t base_address)
     return STATUS_SUCCESS;
 }
 
+HANDLER
 uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_access,
                                   uint64_t object_attributes, uint64_t *max_size,
                                   uint64_t page_protection, uint64_t section_attributes,
@@ -203,28 +213,31 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
         fd = handle_to_fd(file_handle);
         if (fd < 0)
             return STATUS_INVALID_HANDLE;
-        /* Get actual file size */
+        /* Get actual file size via fstat syscall */
         struct stat st;
-        if (fstat(fd, &st) < 0)
+        long res;
+        __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_fstat), "D"(fd), "S"(&st) : "rcx", "r11", "memory", "cc");
+        if (res < 0)
             return STATUS_UNSUCCESSFUL;
         size = (size_t)st.st_size;
     }
 
     /* Allocate memory for the section with requested protection */
     int prot = map_protect(page_protection);
-    void *base = mmap(NULL, size, prot,
+    void *base = sysv_mmap(NULL, size, prot,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (base == MAP_FAILED)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
     if (fd >= 0) {
         /* Map file to a temporary address, copy into anonymous backing, unmap temp */
-        void *temp_map = mmap(NULL, size, PROT_READ,
+        void *temp_map = sysv_mmap(NULL, size, PROT_READ,
                               MAP_PRIVATE, fd, 0);
         if (temp_map == MAP_FAILED)
             return STATUS_UNSUCCESSFUL;
-        memcpy(base, temp_map, size);
-        munmap(temp_map, size);
+        sysv_memcpy(base, temp_map, size);
+        long res;
+        __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_munmap), "D"(temp_map), "S"(size) : "rcx", "r11", "cc");
     }
 
     int idx = section_count++;

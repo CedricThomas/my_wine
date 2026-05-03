@@ -4,23 +4,28 @@
  * NtTerminateProcess, NtCallbackReturn, NtQueryInformationProcess
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
-#include <unistd.h>
-
+#include <stddef.h>
+#include "handler_abi.h"
 #include "ntdll_priv.h"
 
+/* Linux x86_64 syscall numbers */
+#define SYS_exit     60
+#define SYS_getpid   39
+
+HANDLER
 uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_status)
 {
     if (process_handle != 0xFFFFFFFF)
         return STATUS_SUCCESS;
 
-    exit((int)exit_status);
-    return STATUS_SUCCESS; /* unreachable */
+    long ret;
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_exit), "D"((unsigned long)exit_status) : "rcx", "r11", "cc");
+    /* __builtin_unreachable() ensures the compiler knows this doesn't return */
+    __builtin_unreachable();
 }
 
+HANDLER
 uint64_t handler_NtCallbackReturn(void)
 {
     return STATUS_SUCCESS;
@@ -41,6 +46,7 @@ uint64_t handler_NtCallbackReturn(void)
  * VM_COUNTERS (x64, 80 bytes) for ProcessWorkingSetSize:
  *   12 uint64_t fields
  */
+HANDLER
 uint64_t handler_NtQueryInformationProcess(uint64_t process_handle,
                                             uint64_t info_class,
                                             uint64_t buffer,
@@ -61,8 +67,10 @@ uint64_t handler_NtQueryInformationProcess(uint64_t process_handle,
         out[1] = 0;                         /* PebBaseAddress — set by loader */
         out[2] = 1;                         /* AffinityMask */
         out[3] = 8;                         /* BasePriority */
-        out[4] = getpid();                  /* UniqueProcessId */
-        out[5] = getpid();                  /* InheritedFromUniqueProcessId */
+        long ret;
+        __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_getpid) : "rcx", "r11", "cc");
+        out[4] = (uint64_t)ret;             /* UniqueProcessId */
+        out[5] = (uint64_t)ret;             /* InheritedFromUniqueProcessId */
         if (return_length) *(uint32_t *)(uintptr_t)return_length = 40;
         return STATUS_SUCCESS;
     }
@@ -70,7 +78,7 @@ uint64_t handler_NtQueryInformationProcess(uint64_t process_handle,
         if (length < 80) return STATUS_BUFFER_TOO_SMALL;
         uint64_t *out = (uint64_t *)(uintptr_t)buffer;
         /* All zeros is a valid approximation */
-        memset(out, 0, 80);
+        __builtin_memset(out, 0, 80);
         if (return_length) *(uint32_t *)(uintptr_t)return_length = 80;
         return STATUS_SUCCESS;
     }

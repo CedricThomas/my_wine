@@ -132,7 +132,7 @@ $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
-	$(BUILDDIR)/gs_base.o
+	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
@@ -146,7 +146,7 @@ $(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
-	$(BUILDDIR)/gs_base.o
+	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
@@ -155,7 +155,7 @@ $(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c \
 	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
-	$(BUILDDIR)/thunk_gen.o
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/abi_wrappers.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
@@ -166,11 +166,11 @@ $(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/m
 $(BUILDDIR)/pe_parser.o: include/pe.h include/pe_parser.h
 
 # Stubs
-$(BUILDDIR)/ntdll_handle.o: include/ntdll.h src/stubs/ntdll_priv.h
-$(BUILDDIR)/ntdll_io.o: include/ntdll.h src/stubs/ntdll_priv.h
-$(BUILDDIR)/ntdll_memory.o: include/ntdll.h include/pe.h src/stubs/ntdll_priv.h
-$(BUILDDIR)/ntdll_process.o: include/ntdll.h src/stubs/ntdll_priv.h
-$(BUILDDIR)/ntdll_objects.o: include/ntdll.h src/stubs/ntdll_priv.h
+$(BUILDDIR)/ntdll_handle.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
+$(BUILDDIR)/ntdll_io.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
+$(BUILDDIR)/ntdll_memory.o: include/ntdll.h include/pe.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
+$(BUILDDIR)/ntdll_process.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
+$(BUILDDIR)/ntdll_objects.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
 $(BUILDDIR)/kernel32.o: include/kernel32.h include/ntdll.h include/syscall/thunk_gen.h src/stubs/ntdll_priv.h
 $(BUILDDIR)/crt_globals.o: src/stubs/msvcrt_priv.h
 $(BUILDDIR)/crt_file.o: src/stubs/msvcrt_priv.h
