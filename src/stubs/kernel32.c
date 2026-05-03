@@ -13,18 +13,29 @@
 #include "include/syscall/thunk_gen.h"
 #include <asm/unistd_64.h>
 
-/* Debug: check stack alignment at critical function entry */
+/* Debug: check stack alignment at critical function entry.
+ * Uses only syscall() and inline asm — no C library calls to avoid ABI issues in ms_abi functions. */
 #define ASSERT_STACK_ALIGNED(func_name) do { \
     uintptr_t _sp; \
     __asm__ volatile("mov %%rsp, %0" : "=r"(_sp)); \
     if (_sp % 16 != 0) { \
-        const char *msg = "ASSERT: stack not 16-byte aligned at entry to "; \
-        syscall(__NR_write, 2, msg, sizeof(msg)-1); \
-        syscall(__NR_write, 2, func_name, strlen(func_name)); \
-        char hex_buf[20]; \
-        int hlen = snprintf(hex_buf, sizeof(hex_buf), " rsp=0x%lx (mod16=%ld)\n", \
-                           (unsigned long)_sp, (long)(_sp % 16)); \
-        syscall(__NR_write, 2, hex_buf, hlen); \
+        size_t _len = 0; \
+        const char *_s = (func_name); \
+        while (_s[_len]) _len++; \
+        const char _hdr[] = "ASSERT: misaligned stack in "; \
+        syscall(__NR_write, 2, _hdr, sizeof(_hdr)-1); \
+        syscall(__NR_write, 2, _s, _len); \
+        char _buf[32]; \
+        size_t _p = 0; \
+        const char _xd[] = "0123456789abcdef"; \
+        _buf[_p++] = ' '; _buf[_p++] = 'r'; _buf[_p++] = 's'; _buf[_p++] = 'p'; _buf[_p++] = '='; \
+        _buf[_p++] = '0'; _buf[_p++] = 'x'; \
+        for (int _b = 56; _b >= 0; _b -= 4) _buf[_p++] = _xd[(_sp >> _b) & 0xf]; \
+        _buf[_p++] = ' '; \
+        _buf[_p++] = 'm'; _buf[_p++] = '1'; _buf[_p++] = '6'; _buf[_p++] = '='; \
+        _buf[_p++] = '0' + (_sp % 16); \
+        _buf[_p++] = '\n'; \
+        syscall(__NR_write, 2, _buf, _p); \
     } \
 } while(0)
 
