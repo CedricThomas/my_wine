@@ -24,6 +24,7 @@
 #include <ucontext.h>
 #include <sys/syscall.h>
 #include <sys/user.h>  // for REG_RIP, REG_RSP, etc.
+#include <search.h>   // for bsearch, qsort
 #include <stdbool.h>
 
 #include "include/pe.h"
@@ -373,7 +374,27 @@ static void set_import(const char *name, void *address)
             return;
         }
     }
-    fprintf(stderr, "ERROR: set_import: symbol '%s' not found in import table\n", name);
+    fprintf(stderr, "ERROR: set_import: symbol '%s' not found\n", name);
+}
+
+/* ── Binary-search helpers (t3.4) ─────────────────────────── */
+
+static int import_entry_cmp(const void *a, const void *b)
+{
+    return strcmp(((const import_entry_t *)a)->name,
+                  ((const import_entry_t *)b)->name);
+}
+
+static int import_cmp_by_name(const void *key, const void *elem)
+{
+    return strcmp((const char *)key, ((const import_entry_t *)elem)->name);
+}
+
+static void init_import_table(void)
+{
+    /* Sort import_table by name for bsearch. Exclude the sentinel entry. */
+    size_t count = sizeof(import_table) / sizeof(import_entry_t) - 1;
+    qsort(import_table, count, sizeof(import_entry_t), import_entry_cmp);
 }
 
 static void init_msvcrt_imports(void)
@@ -394,19 +415,24 @@ static void init_msvcrt_imports(void)
 
 static void *resolve_import(const char *dll_name, const char *func_name)
 {
-    for (int i = 0; import_table[i].name != NULL; i++) {
-        if (strcmp(import_table[i].name, func_name) == 0) {
-            /* Verify DLL matches (prevent cross-DLL name collisions) */
-            if (import_table[i].dll_name && strcmp(import_table[i].dll_name, dll_name) != 0) {
-                fprintf(stderr, "  WARNING: %s found in %s but requested from %s\n",
-                        func_name, import_table[i].dll_name, dll_name);
-                continue;  /* Skip mismatched DLL */
-            }
-            return import_table[i].address;
-        }
+    size_t count = sizeof(import_table) / sizeof(import_entry_t) - 1;
+    import_entry_t *entry = bsearch(func_name, import_table,
+                                     count, sizeof(import_entry_t), import_cmp_by_name);
+    if (entry == NULL) {
+        fprintf(stderr, "  ERROR: unresolved import: %s!%s\n", dll_name, func_name);
+        return NULL;
     }
-    fprintf(stderr, "  ERROR: unresolved import: %s!%s\n", dll_name, func_name);
-    return NULL;
+    if (entry->address == NULL) {
+        fprintf(stderr, "  ERROR: import %s!%s has NULL address (not initialized)\n",
+                dll_name, func_name);
+        return NULL;
+    }
+    if (entry->dll_name && strcmp(entry->dll_name, dll_name) != 0) {
+        fprintf(stderr, "  WARNING: %s found in %s but requested from %s\n",
+                func_name, entry->dll_name, dll_name);
+        return NULL;
+    }
+    return entry->address;
 }
 
 static int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt)
@@ -624,7 +650,33 @@ static int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt)
             }
 
             if (!did_match) {
-                /* Fallback: match by position (nth target <- nth flat entry) */
+                /* Try ILT RVA offset matching: if the thunk target address falls
+                 * within the import data directory (ILT region), compute which
+                 * slot it corresponds to by offset / 8 and match against the
+                 * flat array at that index. */
+                if (current_val != 0) {
+                    uint64_t import_dir_va = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+                    uint64_t import_dir_end = import_dir_va + opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+                    if (target >= import_dir_va && target < import_dir_end) {
+                        int slot_idx = (int)((target - import_dir_va) / 8);
+                        if (slot_idx >= 0 && slot_idx < num_flat &&
+                            flat[slot_idx].resolved_addr != 0) {
+                            *target_ptr = flat[slot_idx].resolved_addr;
+                            printf("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx\n",
+                                   flat[slot_idx].dll_name, flat[slot_idx].func_name,
+                                   (unsigned long)target, (unsigned long)flat[slot_idx].resolved_addr);
+                            matched++;
+                            did_match = 1;
+                        }
+                    }
+                }
+            }
+
+            if (!did_match) {
+                /* LAST RESORT: match by position (nth target <- nth flat entry).
+                 * The linker guarantees thunk targets and ILT entries appear in
+                 * the same DLL+function order, so positional matching works as
+                 * an absolute fallback. */
                 if (t < num_flat && flat[t].resolved_addr != 0) {
                     *target_ptr = flat[t].resolved_addr;
                     printf("    Thunk patch (pos match): %s!%s at 0x%lx <- 0x%lx\n",
@@ -946,8 +998,9 @@ int main(int argc, char *argv[])
     /* Save the image base for later use (import resolution, TEB/PEB, etc.) */
     g_image_base = base;
 
-    /* Initialize dynamic msvcrt import entries */
+    /* Initialize dynamic msvcrt import entries, then sort for bsearch */
     init_msvcrt_imports();
+    init_import_table();
 
 
     /* Patch CRT refptrs so the PE can find our global variables */
