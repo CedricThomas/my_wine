@@ -250,19 +250,18 @@ static uint64_t find_symbol_rva_from_file(const char *file_path,
         size_t sym_name_len = strlen(sym_name);
 
         int matched = 0;
-        if (strncmp(sym_name, name, sym_name_len) == 0 &&
-            name[sym_name_len] == '\0') {
+        /* Prefer .refptr entries over bare symbol names.
+         * mingw-w64 COFF tables often have bare "mingw_app_type" in .idata
+         * (wrong address) and ".rdata$.refptr.mingw_app_type" / ".refptr.mingw_app_type"
+         * in .rdata (correct address). Check refptr prefixes FIRST so we
+         * always find the right entry before the bare-name fallback. */
+        const char *prefix = ".rdata$.refptr.";
+        size_t plen = strlen(prefix);
+        if (sym_name_len > plen &&
+            strncmp(sym_name, prefix, plen) == 0 &&
+            strncmp(sym_name + plen, name, sym_name_len - plen) == 0 &&
+            name[sym_name_len - plen] == '\0') {
             matched = 1;
-        }
-        if (!matched) {
-            const char *prefix = ".rdata$.refptr.";
-            size_t plen = strlen(prefix);
-            if (sym_name_len > plen &&
-                strncmp(sym_name, prefix, plen) == 0 &&
-                strncmp(sym_name + plen, name, sym_name_len - plen) == 0 &&
-                name[sym_name_len - plen] == '\0') {
-                matched = 1;
-            }
         }
         if (!matched) {
             const char *prefix2 = ".refptr.";
@@ -271,6 +270,13 @@ static uint64_t find_symbol_rva_from_file(const char *file_path,
                 strncmp(sym_name, prefix2, plen2) == 0 &&
                 strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0 &&
                 name[sym_name_len - plen2] == '\0') {
+                matched = 1;
+            }
+        }
+        if (!matched) {
+            /* Exact name match (last resort — .idata may have bare name with wrong address) */
+            if (strncmp(sym_name, name, sym_name_len) == 0 &&
+                name[sym_name_len] == '\0') {
                 matched = 1;
             }
         }
