@@ -6,6 +6,7 @@
  */
 
 #define _GNU_SOURCE
+#define CRT_STDIO_C
 
 #include <stdio.h>
 #include <string.h>

@@ -82,16 +82,21 @@ typedef union {
 extern iob_union __wine_iob;
 
 /* ── Internal wine_* functions (defined in crt_stdio.c / crt_stdlib.c) ── */
+/*
+ * Guarded by #ifdef so each .c file only sees declarations for functions
+ * it actually defines, suppressing -Wunused-function in files that don't.
+ */
 
-/* crt_stdio.c */
+#ifdef CRT_STDIO_C
 WINE_STUB_STATIC
 int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap);
 WINE_STUB_STATIC
 int wine_fprintf(wine_FILE *stream, const char *format, ...);
 WINE_STUB_STATIC
 size_t wine_fwrite(const void *ptr, size_t size, size_t nmemb, wine_FILE *stream);
+#endif
 
-/* crt_stdlib.c */
+#ifdef CRT_STDLIB_C
 WINE_STUB_STATIC
 void wine__exit(int code);
 WINE_STUB_STATIC
@@ -112,6 +117,7 @@ WINE_STUB_STATIC
 int wine_strncmp(const void *s1, const void *s2, size_t n);
 WINE_STUB_STATIC
 void wine_signal(int sig, void (*handler)(int));
+#endif
 
 /* ── __msvcrt_* function pointer exports ─────────────────── */
 
