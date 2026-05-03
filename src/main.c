@@ -539,10 +539,10 @@ static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
     if (reserve == 0) reserve = 1024 * 1024; /* 1MB default */
     if (commit  == 0) commit   = 4096;        /* 1 page minimum */
 
-    /* CRITICAL: ensure at least 4MB of stack for CRT startup (mainCRTStartup
+    /* CRITICAL: ensure at least 512KB of stack for CRT startup (mainCRTStartup
      * needs significant stack for nested calls to __getmainargs, _initterm, etc.)
      * The PE header often specifies only 4KB commit, which is insufficient. */
-    if (commit < 4 * 1024 * 1024) commit = 4 * 1024 * 1024;
+    if (commit < 512 * 1024) commit = 512 * 1024;
 
     /* Align to page boundary */
     reserve = (reserve + 4095) & ~(uint64_t)4095;
