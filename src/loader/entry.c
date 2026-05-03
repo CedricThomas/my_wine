@@ -38,7 +38,8 @@
 
 /* Guest entry trampoline (implemented in run_guest.S) */
 extern void run_guest(void (*entry)(void), void *stack_top, void *peb,
-                       char **guest_argv, char **guest_envp) __attribute__((noreturn));
+                       char **guest_argv, char **guest_envp,
+                       void (*exit_process)(uint32_t)) __attribute__((noreturn));
 
 /* Accessor for __wine_iob_data — used for patching __acrt_iob_func */
 extern void *__wine_iob_data(void);
@@ -320,7 +321,7 @@ static __attribute__((noreturn)) void setup_child_and_run(
         }
     }
 
-    /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
+    /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup or main) */
     /* Watchdog: 60s timeout to allow full CRT startup */
     { struct sigaction w; memset(&w,0,sizeof(w));
       w.sa_sigaction=wd_handler; w.sa_flags=SA_SIGINFO; sigemptyset(&w.sa_mask);
@@ -328,7 +329,23 @@ static __attribute__((noreturn)) void setup_child_and_run(
       setitimer(ITIMER_REAL,&t,NULL); }
     {
         void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
-        run_guest(entry, stack_top, NULL, guest_argv, guest_envp);
+
+        /* Find ExitProcess from the import table so we can call it after main returns */
+        void (*exit_fn)(uint32_t) = NULL;
+        for (int i = 0; import_table[i].name != NULL; i++) {
+            if (strcmp(import_table[i].name, "ExitProcess") == 0 &&
+                import_table[i].address != NULL) {
+                exit_fn = (void (*)(uint32_t))import_table[i].address;
+                break;
+            }
+        }
+        if (!exit_fn) {
+            fprintf(stderr, "ERROR: ExitProcess not found in import table\n");
+            _exit(1);
+        }
+        fprintf(stderr, "my_wine: ExitProcess at %p\n", (void *)exit_fn);
+
+        run_guest(entry, stack_top, NULL, guest_argv, guest_envp, exit_fn);
     }
 
     fprintf(stderr, "my_wine: inline jump returned\n");

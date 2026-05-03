@@ -139,7 +139,31 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* 10. Jump to entry point (pass absolute address, not RVA) */
-    uint64_t entry_abs = (uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint;
+    /* 10. Look up user main() symbol; fall back to entry point if not found */
+    uint64_t main_rva = 0;
+    {
+        IMAGE_SYMBOL *symbols = NULL;
+        char *string_table = NULL;
+        int sym_count = parse_symbol_table_from_image(base, &nt, nt.OptionalHeader.SizeOfHeaders,
+                                                       &symbols, &string_table);
+        if (sym_count > 0) {
+            main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                          sections, nt.FileHeader.NumberOfSections,
+                                          "main");
+        }
+    }
+
+    uint64_t entry_abs;
+    if (main_rva != 0) {
+        entry_abs = (uint64_t)(uintptr_t)base + main_rva;
+        fprintf(stderr, "Bypassing CRT: jumping to main() at 0x%lx instead of entry 0x%lx\n",
+                (unsigned long)entry_abs,
+                (unsigned long)((uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint));
+    } else {
+        entry_abs = (uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint;
+        fprintf(stderr, "WARNING: 'main' symbol not found, using entry point 0x%lx\n",
+                (unsigned long)entry_abs);
+    }
+
     return jump_to_entry(entry_abs, stack_top, g_stack_base, teb, guest_argv, guest_envp);
 }
