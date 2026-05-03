@@ -2,56 +2,60 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O2 -g -I .
 LDFLAGS = -lrt -lpthread -lseccomp
 
-# Object files stay in project root
-OBJS = my_wine.o pe_parser.o thunk_gen.o signal_handler.o dispatcher.o \
-       ntdll.o kernel32.o msvcrt.o
+BUILDDIR = build
+OBJS = $(BUILDDIR)/my_wine.o $(BUILDDIR)/pe_parser.o $(BUILDDIR)/thunk_gen.o \
+       $(BUILDDIR)/signal_handler.o $(BUILDDIR)/dispatcher.o \
+       $(BUILDDIR)/ntdll.o $(BUILDDIR)/kernel32.o $(BUILDDIR)/msvcrt.o
 
 all: my_wine
+
+$(BUILDDIR):
+	mkdir -p $(BUILDDIR)
 
 my_wine: $(OBJS)
 	$(CC) $(CFLAGS) -o my_wine $(OBJS) $(LDFLAGS)
 
-# Explicit compile rules mapping subdirectory sources to root .o files
-my_wine.o: src/main.c
+# Explicit compile rules mapping subdirectory sources to build/ .o files
+$(BUILDDIR)/my_wine.o: src/main.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-pe_parser.o: src/pe_parser.c
+$(BUILDDIR)/pe_parser.o: src/pe_parser.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-thunk_gen.o: src/syscall/thunk_gen.c
+$(BUILDDIR)/thunk_gen.o: src/syscall/thunk_gen.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-signal_handler.o: src/syscall/signal_handler.c
+$(BUILDDIR)/signal_handler.o: src/syscall/signal_handler.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-dispatcher.o: src/syscall/dispatcher.c
+$(BUILDDIR)/dispatcher.o: src/syscall/dispatcher.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-ntdll.o: src/stubs/ntdll.c
+$(BUILDDIR)/ntdll.o: src/stubs/ntdll.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 STUB_CFLAGS = $(CFLAGS) -mno-red-zone
 
-kernel32.o: src/stubs/kernel32.c
+$(BUILDDIR)/kernel32.o: src/stubs/kernel32.c | $(BUILDDIR)
 	$(CC) $(STUB_CFLAGS) -c $< -o $@
 
-msvcrt.o: src/stubs/msvcrt.c
+$(BUILDDIR)/msvcrt.o: src/stubs/msvcrt.c | $(BUILDDIR)
 	$(CC) $(STUB_CFLAGS) -c $< -o $@
 
 # Header dependencies (for recompilation when headers change)
-my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
-pe_parser.o: include/pe.h
-thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h
-signal_handler.o:
-dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
-ntdll.o: include/ntdll.h
-kernel32.o: include/kernel32.h include/ntdll.h include/syscall/thunk_gen.h
-msvcrt.o: include/msvcrt.h
+$(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
+$(BUILDDIR)/pe_parser.o: include/pe.h
+$(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h
+$(BUILDDIR)/signal_handler.o:
+$(BUILDDIR)/dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
+$(BUILDDIR)/ntdll.o: include/ntdll.h
+$(BUILDDIR)/kernel32.o: include/kernel32.h include/ntdll.h include/syscall/thunk_gen.h
+$(BUILDDIR)/msvcrt.o: include/msvcrt.h
 
 hello.exe: hello.c build_test.sh
 	bash build_test.sh
 
 clean:
-	rm -f *.o my_wine test_parse hello.exe
+	rm -rf $(BUILDDIR) my_wine test_parse hello.exe *.o
 
-.PHONY: all clean hello.exe
+.PHONY: all clean hello.exe $(BUILDDIR)

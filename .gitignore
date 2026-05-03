@@ -1,0 +1,25 @@
+# Object files
+*.o
+
+# Build directory
+build/
+
+# Test executables
+test_parse
+test_exec
+test_exec2
+test_exec3
+test_exec4
+test_exec_same_stack
+test_pe_exec
+test_pe_exec2
+test_pe_exec3
+test_pe_exec4
+test_pe_exec5
+test_pe_exec6
+
+# Windows executables
+*.exe
+
+# Main binary
+my_wine
