@@ -88,22 +88,29 @@ $(BUILDDIR)/entry.o: src/loader/entry.c | $(BUILDDIR)
 	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
 
 # ── Test targets ────────────────────────────────────────────────
+# Test binaries (native ELF) + the hello_world sample .exe they exercise.
 
-test: all $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+SHELL.EXE = samples/hello_world/hello_world.exe
+
+$(SHELL.EXE):
+	@bash samples/samples.sh build hello_world
+
+# test depends on my_wine, the test binaries, AND hello_world.exe
+test: all $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Running test_parse ==="
-	@if [ -f hello.exe ]; then \
-		./$(BUILDDIR)/test_parse hello.exe; \
+	@if [ -f $(SHELL.EXE) ]; then \
+		timeout 5 ./$(BUILDDIR)/test_parse $(SHELL.EXE); \
 	else \
-		echo "No hello.exe found — running error/negative tests only"; \
-		./$(BUILDDIR)/test_parse; \
+		echo "No hello_world.exe found — running error/negative tests only"; \
+		timeout 5 ./$(BUILDDIR)/test_parse; \
 	fi
 	@echo "=== Running test_import_resolution (t7.3) ==="
-	./$(BUILDDIR)/test_import_resolution
+	timeout 5 ./$(BUILDDIR)/test_import_resolution
 	@echo "=== Running test_teb_peb (t7.4) ==="
-	./$(BUILDDIR)/test_teb_peb
+	timeout 30 ./$(BUILDDIR)/test_teb_peb
 	@echo "=== Running test_syscall_dispatch (t7.5) ==="
-	./$(BUILDDIR)/test_syscall_dispatch
+	timeout 5 ./$(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Tests completed ==="
 
 $(BUILDDIR)/test_parse: tests/test_parse.c $(BUILDDIR)/pe_parser.o
@@ -176,20 +183,24 @@ $(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_hand
 $(BUILDDIR)/signal_handler.o: include/syscall/signal_handler.h
 $(BUILDDIR)/dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
 
-# ── Native sample entry ─────────────────────────────────────────
-$(BUILDDIR)/native_main.o: samples/native_main.c | $(BUILDDIR)
-	@echo "  CC samples/native_main.c"
-	@$(CC) $(CFLAGS) -I src -I src/stubs -I src/loader -I include -c $< -o $@
+# ── Samples ──────────────────────────────────────────────────────
+# Cross-compile samples to PE .exe via Docker (mingw-w64)
+# See: samples/samples.sh
+#
+#   make samples              build all samples
+#   make samples NAME=foo     build one sample
+#   make run-sample NAME=foo  build + run under ./my_wine
 
-# Header deps
-$(BUILDDIR)/native_main.o: src/stubs/ntdll_priv.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
+SAMPLE ?=
 
-# ── Convenience ─────────────────────────────────────────────────
+samples:
+	@bash samples/samples.sh build $(SAMPLE)
 
-samples: $(BUILDDIR)/native_main.o
-	@bash run_samples.sh build
+run-sample:
+	@bash samples/samples.sh run $(SAMPLE)
 
 clean:
 	rm -rf $(BUILDDIR) my_wine *.o
+	find samples/ -name '*.exe' -delete 2>/dev/null || true
 
-.PHONY: all clean test samples $(BUILDDIR)
+.PHONY: all clean test samples run-sample $(BUILDDIR)

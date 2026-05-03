@@ -1,12 +1,20 @@
-#include "wine_native.h"
+/*
+ * hello.c — Minimal my_wine sample.
+ *
+ * Uses kernel32 WriteFile + ExitProcess (the two APIs my_wine supports
+ * first). Build: ./build_samples.sh hello_world
+ * Run:   ./build_samples.sh run hello_world
+ */
 
-int wine_user_main(int argc, char *argv[])
+#include <windows.h>
+
+int main(void)
 {
-    void *hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+    HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
     const char msg[] = "Hello from my_wine!\r\n";
-    uint32_t written;
+    DWORD written;
 
-    WriteFile(hStdout, msg, (uint32_t)sizeof(msg) - 1, &written, NULL);
+    WriteFile(hStdout, msg, (DWORD)(sizeof(msg) - 1), &written, NULL);
     ExitProcess(0);
 
     return 0;

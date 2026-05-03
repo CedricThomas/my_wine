@@ -58,7 +58,7 @@ static void check(const char *label, int condition)
 
 static const char *find_hello_exe(void)
 {
-    const char *paths[] = { "hello.exe", "examples/hello.exe", NULL };
+    const char *paths[] = { "samples/hello_world/hello_world.exe", NULL };
     for (int i = 0; paths[i]; i++) {
         if (access(paths[i], F_OK) == 0)
             return paths[i];
@@ -140,20 +140,12 @@ static void test_import_resolution_pipeline(void)
             if (non_zero && page_aligned) {
                 valid_entries++;
             } else {
-                /* Non-page-aligned but non-zero: might be a valid function
-                 * pointer if it's in our stub space. Check if it looks
-                 * like a reasonable code pointer. */
-                if (non_zero && (val & 0xFF) != 0) {
-                    /* Might be a function not at page boundary —
-                     * check if it's in a plausible code region */
-                    uintptr_t abs_val = (uintptr_t)val;
-                    /* Our stubs live in libc range (~0x7f...) or
-                     * our binary range. Accept if in user-space range. */
-                    if (abs_val < 0xfffffffffffe0000UL) {
-                        valid_entries++;
-                    } else {
-                        invalid_entries++;
-                    }
+                /* Non-page-aligned: might be a function pointer, data import, or
+                 * global variable address. Check if it's in the user-space range
+                 * (our stubs in ELF binary range ~0x55-0x7f...) */
+                uintptr_t abs_val = (uintptr_t)val;
+                if (non_zero && abs_val < 0xfffffffffffe0000UL) {
+                    valid_entries++;
                 } else {
                     invalid_entries++;
                 }

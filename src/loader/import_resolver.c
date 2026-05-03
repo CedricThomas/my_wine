@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <search.h>   // for bsearch, qsort
+#include <strings.h>   // strcasecmp
 #include <stdbool.h>
 
 #include "include/pe.h"
@@ -208,10 +209,11 @@ static void *resolve_import(const char *dll_name, const char *func_name)
                 dll_name, func_name);
         return NULL;
     }
-    if (entry->dll_name && strcmp(entry->dll_name, dll_name) != 0) {
-        fprintf(stderr, "  WARNING: %s found in %s but requested from %s\n",
+    /* DLL name mismatch: warn but still resolve (same function
+     * may be exported from multiple DLLs by the PE compiler) */
+    if (entry->dll_name && strcasecmp(entry->dll_name, dll_name) != 0) {
+        fprintf(stderr, "  WARNING: %s found in %s but requested from %s (resolving anyway)\n",
                 func_name, entry->dll_name, dll_name);
-        return NULL;
     }
     return entry->address;
 }
