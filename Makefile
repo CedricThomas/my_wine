@@ -7,7 +7,9 @@ OBJS = $(BUILDDIR)/my_wine.o $(BUILDDIR)/pe_parser.o $(BUILDDIR)/thunk_gen.o \
        $(BUILDDIR)/signal_handler.o $(BUILDDIR)/dispatcher.o \
        $(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
        $(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
-       $(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o $(BUILDDIR)/msvcrt.o \
+       $(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
+       $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o $(BUILDDIR)/crt_startup.o \
+       $(BUILDDIR)/crt_stdio.o $(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o \
        $(BUILDDIR)/run_guest.o \
        $(BUILDDIR)/loader/image_mapper.o \
        $(BUILDDIR)/loader/import_resolver.o \
@@ -73,7 +75,23 @@ STUB_CFLAGS = $(CFLAGS) -mno-red-zone
 $(BUILDDIR)/kernel32.o: src/stubs/kernel32.c | $(BUILDDIR)
 	$(CC) $(STUB_CFLAGS) -c $< -o $@
 
-$(BUILDDIR)/msvcrt.o: src/stubs/msvcrt.c | $(BUILDDIR)
+# ── msvcrt split files ─────────────────────────────────────────
+$(BUILDDIR)/crt_globals.o: src/stubs/crt_globals.c src/stubs/msvcrt_priv.h | $(BUILDDIR)
+	$(CC) $(STUB_CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/crt_file.o: src/stubs/crt_file.c src/stubs/msvcrt_priv.h | $(BUILDDIR)
+	$(CC) $(STUB_CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/crt_startup.o: src/stubs/crt_startup.c src/stubs/msvcrt_priv.h | $(BUILDDIR)
+	$(CC) $(STUB_CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/crt_stdio.o: src/stubs/crt_stdio.c src/stubs/msvcrt_priv.h | $(BUILDDIR)
+	$(CC) $(STUB_CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/crt_stdlib.o: src/stubs/crt_stdlib.c src/stubs/msvcrt_priv.h | $(BUILDDIR)
+	$(CC) $(STUB_CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/crt_refptrs.o: src/stubs/crt_refptrs.c src/stubs/msvcrt_priv.h | $(BUILDDIR)
 	$(CC) $(STUB_CFLAGS) -c $< -o $@
 
 $(BUILDDIR)/run_guest.o: src/run_guest.S | $(BUILDDIR)
@@ -105,12 +123,17 @@ $(BUILDDIR)/ntdll_memory.o: include/ntdll.h include/pe.h
 $(BUILDDIR)/ntdll_process.o: include/ntdll.h
 $(BUILDDIR)/ntdll_objects.o: include/ntdll.h
 $(BUILDDIR)/kernel32.o: include/kernel32.h include/ntdll.h include/syscall/thunk_gen.h
-$(BUILDDIR)/msvcrt.o: include/msvcrt.h include/pe_parser.h
+$(BUILDDIR)/crt_globals.o: src/stubs/msvcrt_priv.h
+$(BUILDDIR)/crt_file.o: src/stubs/msvcrt_priv.h
+$(BUILDDIR)/crt_startup.o: src/stubs/msvcrt_priv.h
+$(BUILDDIR)/crt_stdio.o: src/stubs/msvcrt_priv.h
+$(BUILDDIR)/crt_stdlib.o: src/stubs/msvcrt_priv.h
+$(BUILDDIR)/crt_refptrs.o: src/stubs/msvcrt_priv.h include/pe_parser.h
 # Header dependencies for loader modules
 $(BUILDDIR)/loader/image_mapper.o: include/pe.h include/pe_parser.h
-$(BUILDDIR)/loader/import_resolver.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
+$(BUILDDIR)/loader/import_resolver.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h src/stubs/msvcrt_priv.h
 $(BUILDDIR)/loader/teb_peb.o: include/pe.h
-$(BUILDDIR)/loader/entry.o: include/pe.h include/msvcrt.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h
+$(BUILDDIR)/loader/entry.o: include/pe.h include/msvcrt.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h src/stubs/msvcrt_priv.h
 
 hello.exe: hello.c build_test.sh
 	bash build_test.sh
