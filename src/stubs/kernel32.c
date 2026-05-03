@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <sys/mman.h>
 #include "include/kernel32.h"
 #include "include/ntdll.h"
@@ -248,11 +249,16 @@ void *SetUnhandledExceptionFilter(void *callback)
 WINE_STUB
 void Sleep(uint32_t dwMilliseconds)
 {
+    char buf[64];
+    long ret;
+    int len = sprintf(buf, "TRACE: Sleep(%u)\n", dwMilliseconds);
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_write), "D"(2), "S"(buf), "d"((size_t)len) : "rcx", "r11", "memory", "cc");
+    (void)ret;
+
     struct timespec ts;
     ts.tv_sec  = dwMilliseconds / 1000;
     ts.tv_nsec = (dwMilliseconds % 1000) * 1000000L;
     /* Call nanosleep syscall directly (avoids ABI mismatch with libc wrapper) */
-    long ret;
     __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_nanosleep), "D"(&ts), "S"((const void *)0) : "rcx", "r11", "memory", "cc");
     (void)ret;
 }

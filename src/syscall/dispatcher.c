@@ -79,6 +79,14 @@ static inline uint64_t read_guest_stack(ucontext_t *ctx, int index)
 
 /* ── Dispatcher ───────────────────────────────────────────────── */
 
+/* Helper: write a static message to stderr via direct inline syscall */
+static inline void disp_write_stderr(const char *msg)
+{
+    long ret;
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(msg), "d"((size_t)__builtin_strlen(msg)) : "rcx", "r11", "memory", "cc");
+    (void)ret;
+}
+
 /*
  * handle_syscall — dispatch a Windows NT syscall to its handler.
  *
@@ -97,6 +105,11 @@ static inline uint64_t read_guest_stack(ucontext_t *ctx, int index)
  */
 int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 {
+    /* Trace every syscall invocation to stderr via direct write syscall */
+    char trace_buf[32];
+    int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)syscall_number);
+    long __t; __asm__ volatile("syscall" : "=a"(__t) : "a"(1), "D"(2), "S"(trace_buf), "d"((size_t)trace_len) : "rcx", "r11", "memory", "cc"); (void)__t;
+
     /* syscall_number comes from si_syscall which includes the 0xF000
      * Wine offset. Strip it to get the base NT syscall number.       */
     uint64_t nt_nr = syscall_number - 0xF000;
