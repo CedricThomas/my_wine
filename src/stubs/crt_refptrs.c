@@ -242,7 +242,7 @@ static uint64_t find_symbol_rva_from_file(const char *file_path,
             sym_name = (const char *)sym->N.ShortName;
             sym_name_len = strlen(sym_name);
         } else if (string_table) {
-            uint32_t offset = sym->N.Name.Short;
+            uint32_t offset = sym->N.Name.Long;
             if (offset > 0) {
                 sym_name = string_table + offset;
                 sym_name_len = strlen(sym_name);
