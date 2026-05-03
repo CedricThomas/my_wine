@@ -16,7 +16,7 @@
  *         DECLARE_IMPORT("kernel32.dll", "GetStdHandle", GetStdHandle)
  *         ...
  *         // msvcrt data symbols (address-of)
- *         DECLARE_IMPORT_ADDR("msvcrt.dll", "_acmdln", _acmdln)
+ *         DECLARE_IMPORT_ADDR("msvcrt.dll", "_fmode", _fmode)
  *         ...
  *         { NULL, NULL, NULL }  // sentinel
  *     };
@@ -44,6 +44,6 @@
  *   addr  — expression whose address to store (e.g. _acmdln)
  */
 #define DECLARE_IMPORT_ADDR(dll, name, addr) \
-    { (dll), (name), (void *)(addr) }
+    { (dll), (name), (void *)&(addr) }
 
 #endif /* IMPORT_REGISTRY_H */
