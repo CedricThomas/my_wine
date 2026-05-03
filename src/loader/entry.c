@@ -143,37 +143,10 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
 
     /*
      * Find the .text jmp-thunk whose IAT target resolves to __iob_func.
-     * The helper scans "ff 25 disp32" instructions and checks the
-     * dereferenced IAT pointer.
+     * Use find_text_thunk() to scan "ff 25 disp32" instructions and check
+     * the dereferenced IAT pointer.
      */
-    uint64_t text_start = 0, text_end2 = 0;
-    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
-        if (memcmp(sections[i].Name, ".text", 5) == 0) {
-            text_start = sections[i].VirtualAddress;
-            text_end2   = text_start + sections[i].Misc.VirtualSize;
-            if (text_end2 < text_start || sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
-                text_end2 = text_start + sections[i].SizeOfRawData;
-            break;
-        }
-    }
-
-    uint8_t *text_base2 = (uint8_t *)base + text_start;
-    uint64_t text_size2 = text_end2 - text_start;
-    uint64_t target_val = (uint64_t)(uintptr_t)__iob_func;
-    void *thunk = NULL;
-
-    for (uint64_t off = 0; off + 6 <= text_size2; off++) {
-        if (text_base2[off] == 0xff && text_base2[off + 1] == 0x25) {
-            int32_t disp = *(int32_t *)(text_base2 + off + 2);
-            uint64_t instr_addr = text_start + off;
-            uint64_t target_rva = instr_addr + 6 + disp;
-            uint64_t *target_ptr = (uint64_t *)((char *)base + target_rva);
-            if (*target_ptr == target_val) {
-                thunk = (void *)((char *)base + instr_addr);
-                break;
-            }
-        }
-    }
+    void *thunk = find_text_thunk(base, nt, sections, __iob_func);
 
     if (thunk == NULL) {
         fprintf(stderr, "WARNING: __acrt_iob_func thunk not found, skipping patch\n");
@@ -219,6 +192,82 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
 }
 
 /**
+ * Set up the child process and jump to the PE entry point.
+ * Called in the forked child; does not return.
+ */
+static __attribute__((noreturn)) void setup_child_and_run(
+        uint64_t entry_abs, void *stack_top, void *teb,
+        char **guest_argv, char **guest_envp)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = crash_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGTRAP, &sa, NULL);
+    { const char t[] = "CHILD: all handlers set\n";
+      syscall(SYS_write, 2, t, sizeof(t)-1); }
+
+    /* Set up signal stack for reliable signal handling */
+    {
+        void *sigstack_mem = mmap(NULL, 65536, PROT_READ|PROT_WRITE,
+                                  MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+        if (sigstack_mem != MAP_FAILED) {
+            stack_t ss;
+            ss.ss_sp = sigstack_mem;
+            ss.ss_size = 65536;
+            ss.ss_flags = 0;
+            sigaltstack(&ss, NULL);
+        }
+    }
+
+    /* Wire up SEH handler in the child's SEH frame */
+    g_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
+
+    generate_all_thunks();
+    setup_sigsys_handler(handle_syscall);
+    /* setup_seccomp(); */
+
+    fprintf(stderr, "my_wine: jumping to entry 0x%lx via inline asm\n",
+            (unsigned long)entry_abs);
+    fflush(stderr);
+
+    /* Re-set GS base in child (inherited from parent but let's be sure) */
+    if (syscall(__NR_arch_prctl, ARCH_SET_GS, (unsigned long)teb) != 0) {
+        perror("ARCH_SET_GS");
+        _exit(1);
+    }
+
+    /* Patch __acrt_iob_func thunk to return __wine_iob_data directly */
+    uint64_t image_base = entry_abs & ~0xFFFFFUL;
+    void *base = (void *)(uintptr_t)image_base;
+    const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
+    uint32_t pe_off = img_dos->e_lfanew;
+    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((char *)base + pe_off);
+    uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
+                       nt->FileHeader.SizeOfOptionalHeader;
+    IMAGE_SECTION_HEADER *sections =
+        (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
+
+    patch_acrt_iob(base, nt, sections);
+
+    /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
+    {
+        void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
+        run_guest(entry, stack_top, NULL, guest_argv, guest_envp);
+    }
+
+    fprintf(stderr, "my_wine: inline jump returned\n");
+    fflush(stderr);
+    _exit(1);
+}
+
+/**
  * Fork and jump to the PE entry point.
  *
  * In the child process:
@@ -244,81 +293,12 @@ int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *t
                   char **guest_argv, char **guest_envp)
 {
     (void)stack_base;  /* suppress unused warning */
-    void *peb = *(void **)((char *)teb + 0x60);
-    (void)peb;  /* not passed to run_guest anymore */
-    (void)guest_argv;  /* used in child below */
-    (void)guest_envp;  /* used in child below */
     pid_t pid = fork();
 
     if (pid < 0) { perror("fork"); return 1; }
 
     if (pid == 0) {
-        struct sigaction sa;
-        memset(&sa, 0, sizeof(sa));
-        sa.sa_sigaction = crash_handler;
-        sa.sa_flags = SA_SIGINFO;
-        sigemptyset(&sa.sa_mask);
-        sigaction(SIGSEGV, &sa, NULL);
-        sigaction(SIGILL, &sa, NULL);
-        sigaction(SIGABRT, &sa, NULL);
-        sigaction(SIGFPE, &sa, NULL);
-        sigaction(SIGBUS, &sa, NULL);
-        sigaction(SIGTRAP, &sa, NULL);
-        { const char t[] = "CHILD: all handlers set\n";
-          syscall(SYS_write, 2, t, sizeof(t)-1); }
-
-        /* Set up signal stack for reliable signal handling */
-        {
-            void *sigstack_mem = mmap(NULL, 65536, PROT_READ|PROT_WRITE,
-                                      MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-            if (sigstack_mem != MAP_FAILED) {
-                stack_t ss;
-                ss.ss_sp = sigstack_mem;
-                ss.ss_size = 65536;
-                ss.ss_flags = 0;
-                sigaltstack(&ss, NULL);
-            }
-        }
-
-        /* Wire up SEH handler in the child's SEH frame */
-        g_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
-
-        generate_all_thunks();
-        setup_sigsys_handler(handle_syscall);
-        /* setup_seccomp(); */
-
-        fprintf(stderr, "my_wine: jumping to entry 0x%lx via inline asm\n",
-                (unsigned long)entry_abs);
-        fflush(stderr);
-
-        /* Re-set GS base in child (inherited from parent but let's be sure) */
-        if (syscall(__NR_arch_prctl, ARCH_SET_GS, (unsigned long)teb) != 0) {
-            perror("ARCH_SET_GS");
-            _exit(1);
-        }
-        /* Patch __acrt_iob_func thunk to return __wine_iob_data directly */
-        uint64_t image_base = entry_abs & ~0xFFFFFUL;
-        void *base = (void *)(uintptr_t)image_base;
-        const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
-        uint32_t pe_off = img_dos->e_lfanew;
-        IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((char *)base + pe_off);
-        uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
-                           nt->FileHeader.SizeOfOptionalHeader;
-        IMAGE_SECTION_HEADER *sections =
-            (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
-
-        patch_acrt_iob(base, nt, sections);
-
-
-        /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
-        {
-            void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
-            run_guest(entry, stack_top, NULL, guest_argv, guest_envp);
-        }
-
-        fprintf(stderr, "my_wine: inline jump returned\n");
-        fflush(stderr);
-        _exit(1);
+        setup_child_and_run(entry_abs, stack_top, teb, guest_argv, guest_envp);
     }
 
     int status;

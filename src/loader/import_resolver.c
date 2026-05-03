@@ -21,6 +21,14 @@
 #include "include/msvcrt.h"
 #include "loader_priv.h"
 
+/* Flat import entry used in pass 2 thunk patching */
+struct import_flat {
+    uint64_t   ilt_value;      /* OriginalFirstThunk[i].AddressOfData */
+    uint64_t   resolved_addr;  /* FirstThunk[i].AddressOfData (from pass 1) */
+    const char *dll_name;
+    const char *func_name;
+};
+
 /* Name→address table for NT, kernel32 and msvcrt functions */
 import_entry_t import_table[] = {
     /* ntdll functions (via syscall thunks) */
@@ -267,31 +275,22 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
 }
 
 /**
- * Pass 2: patch thunk IAT targets found by scanning .text
- * (for non-standard import layouts where .text jmp thunks reference
- *  addresses that differ from the descriptor's FirstThunk).
+ * Scan .text for "ff 25" (jmp *disp32(%rip)) instructions, collect and
+ * deduplicate unique IAT target addresses, sort by address.
+ * Returns the number of targets collected.
  */
-static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
+static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
+                                 uint64_t targets[256])
 {
-    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
-
-    if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
-        return 0;
-    }
-
-    uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    IMAGE_IMPORT_DESCRIPTOR *desc_start = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
-
-    /* Find .text section — compute section headers from the actual image. */
+    /* Find .text section */
     const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
     uint32_t pe_off = img_dos->e_lfanew;
     uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
                        nt->FileHeader.SizeOfOptionalHeader;
     IMAGE_SECTION_HEADER *sections = (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
-    uint16_t num_sections = nt->FileHeader.NumberOfSections;
 
     uint64_t text_start = 0, text_end = 0;
-    for (uint16_t i = 0; i < num_sections; i++) {
+    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
         if (memcmp(sections[i].Name, ".text", 5) == 0) {
             text_start = sections[i].VirtualAddress;
             text_end   = text_start + sections[i].Misc.VirtualSize;
@@ -308,10 +307,6 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
 
     uint8_t *text_base = (uint8_t *)base + text_start;
     uint64_t text_size = text_end - text_start;
-
-    /* Step 1: scan .text for all ff 25 xx xx xx xx (jmp *disp32(%rip)),
-     * collect unique target addresses */
-    uint64_t thunk_targets[256];
     int num_targets = 0;
 
     for (uint64_t off = 0; off + 6 <= text_size; off++) {
@@ -323,41 +318,41 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
             /* Deduplicate */
             int dup = 0;
             for (int t = 0; t < num_targets; t++) {
-                if (thunk_targets[t] == target) { dup = 1; break; }
+                if (targets[t] == target) { dup = 1; break; }
             }
             if (!dup && num_targets < 256) {
-                thunk_targets[num_targets++] = target;
+                targets[num_targets++] = target;
             }
         }
     }
 
-    /* Step 2: sort targets by address */
-    for (int i = 0; i < num_targets - 1; i++) {
-        for (int j = i + 1; j < num_targets; j++) {
-            if (thunk_targets[j] < thunk_targets[i]) {
-                uint64_t tmp = thunk_targets[i];
-                thunk_targets[i] = thunk_targets[j];
-                thunk_targets[j] = tmp;
-            }
+    /* Sort targets by address (insertion sort) */
+    for (int i = 1; i < num_targets; i++) {
+        uint64_t key = targets[i];
+        int j = i - 1;
+        while (j >= 0 && targets[j] > key) {
+            targets[j + 1] = targets[j];
+            j--;
         }
+        targets[j + 1] = key;
     }
 
-    printf("  Found %d thunk targets in .text (range 0x%lx-0x%lx)\n",
-           num_targets,
-           num_targets > 0 ? (unsigned long)thunk_targets[0] : 0,
-           num_targets > 0 ? (unsigned long)thunk_targets[num_targets - 1] + 7 : 0);
+    return num_targets;
+}
 
-    /* Step 3: build flat array of (ILT_value, resolved_addr, func_name) from
-     * all import descriptors in DLL order */
-    struct import_flat {
-        uint64_t ilt_value;       /* OriginalFirstThunk[i].AddressOfData */
-        uint64_t resolved_addr;   /* FirstThunk[i].AddressOfData (from pass 1) */
-        const char *dll_name;
-        const char *func_name;
-    };
-    struct import_flat flat[256];
+/**
+ * Build a flat array of (ILT value, resolved address, func name) from
+ * all import descriptors, in DLL order.
+ * Returns the number of flat entries created.
+ */
+static int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
+                                   struct import_flat flat[256])
+{
+    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
+    uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    IMAGE_IMPORT_DESCRIPTOR *desc_start = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
+
     int num_flat = 0;
-
     IMAGE_IMPORT_DESCRIPTOR *desc = desc_start;
     while (desc->Name != 0 && num_flat < 256) {
         const char *dll_name = (const char *)((char *)base + desc->Name);
@@ -379,38 +374,41 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
         desc++;
     }
 
-    printf("  Flat import array: %d entries from %d descriptors\n",
-           num_flat, (int)(desc - desc_start));
+    return num_flat;
+}
 
-    /* Step 4: match thunk targets to flat entries
-     * The thunk IAT may contain:
-     * (a) ILT RVAs (if from file data that was copied as OriginalFirstThunk)
-     * (b) Already-resolved addresses (if the target overlaps with FirstThunk
-     *     that pass 1 populated)
-     * (c) Garbage/random file data
-     *
-     * Strategy: try matching by resolved_addr first (handles overlap case),
-     * then by ILT value, then by position. */
+/**
+ * Match thunk IAT targets against the flat import array and patch mismatches.
+ * Uses four strategies: resolved-address overlap, ILT value match,
+ * ILT offset/slot match, and positional fallback.
+ */
+static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
+                               uint64_t *targets, int num_targets,
+                               struct import_flat *flat, int num_flat)
+{
+    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
+    uint64_t import_dir_va = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    uint64_t import_dir_end = import_dir_va + opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+
     int matched = 0;
     for (int t = 0; t < num_targets; t++) {
-        uint64_t target = thunk_targets[t];
+        uint64_t target = targets[t];
         uint64_t *target_ptr = (uint64_t *)((char *)base + target);
         uint64_t current_val = *target_ptr;
 
         int did_match = 0;
 
-        /* Try matching by resolved address (target overlaps with IAT from pass 1) */
+        /* Strategy 1: resolved address overlap (target overlaps with IAT from pass 1) */
         for (int f = 0; f < num_flat; f++) {
             if (flat[f].resolved_addr == current_val) {
-                /* Already has the correct resolved address - no write needed */
                 matched++;
                 did_match = 1;
                 break;
             }
         }
 
+        /* Strategy 2: ILT value match */
         if (!did_match && current_val != 0) {
-            /* Try matching by ILT RVA */
             for (int f = 0; f < num_flat; f++) {
                 if (flat[f].ilt_value == current_val && flat[f].resolved_addr != 0) {
                     *target_ptr = flat[f].resolved_addr;
@@ -424,34 +422,24 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
             }
         }
 
-        if (!did_match) {
-            /* Try ILT RVA offset matching: if the thunk target address falls
-             * within the import data directory (ILT region), compute which
-             * slot it corresponds to by offset / 8 and match against the
-             * flat array at that index. */
-            if (current_val != 0) {
-                uint64_t import_dir_va = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-                uint64_t import_dir_end = import_dir_va + opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
-                if (target >= import_dir_va && target < import_dir_end) {
-                    int slot_idx = (int)((target - import_dir_va) / 8);
-                    if (slot_idx >= 0 && slot_idx < num_flat &&
-                        flat[slot_idx].resolved_addr != 0) {
-                        *target_ptr = flat[slot_idx].resolved_addr;
-                        printf("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx\n",
-                               flat[slot_idx].dll_name, flat[slot_idx].func_name,
-                               (unsigned long)target, (unsigned long)flat[slot_idx].resolved_addr);
-                        matched++;
-                        did_match = 1;
-                    }
+        /* Strategy 3: ILT offset/slot match */
+        if (!did_match && current_val != 0) {
+            if (target >= import_dir_va && target < import_dir_end) {
+                int slot_idx = (int)((target - import_dir_va) / 8);
+                if (slot_idx >= 0 && slot_idx < num_flat &&
+                    flat[slot_idx].resolved_addr != 0) {
+                    *target_ptr = flat[slot_idx].resolved_addr;
+                    printf("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx\n",
+                           flat[slot_idx].dll_name, flat[slot_idx].func_name,
+                           (unsigned long)target, (unsigned long)flat[slot_idx].resolved_addr);
+                    matched++;
+                    did_match = 1;
                 }
             }
         }
 
+        /* Strategy 4: positional fallback */
         if (!did_match) {
-            /* LAST RESORT: match by position (nth target <- nth flat entry).
-             * The linker guarantees thunk targets and ILT entries appear in
-             * the same DLL+function order, so positional matching works as
-             * an absolute fallback. */
             if (t < num_flat && flat[t].resolved_addr != 0) {
                 *target_ptr = flat[t].resolved_addr;
                 printf("    Thunk patch (pos match): %s!%s at 0x%lx <- 0x%lx\n",
@@ -461,6 +449,40 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
             }
         }
     }
+
+    return matched;
+}
+
+/**
+ * Pass 2: patch thunk IAT targets found by scanning .text
+ * (for non-standard import layouts where .text jmp thunks reference
+ *  addresses that differ from the descriptor's FirstThunk).
+ */
+static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
+{
+    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
+
+    if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
+        return 0;
+    }
+
+    uint64_t thunk_targets[256];
+    int num_targets = collect_thunk_targets(base, nt, thunk_targets);
+
+    if (num_targets == 0)
+        return 0;
+
+    printf("  Found %d thunk targets in .text (range 0x%lx-0x%lx)\n",
+           num_targets,
+           (unsigned long)thunk_targets[0],
+           (unsigned long)thunk_targets[num_targets - 1] + 7);
+
+    struct import_flat flat[256];
+    int num_flat = build_flat_import_array(base, nt, flat);
+
+    printf("  Flat import array: %d entries\n", num_flat);
+
+    int matched = patch_thunk_targets(base, nt, thunk_targets, num_targets, flat, num_flat);
 
     printf("  Thunk IAT patched: %d/%d targets resolved\n", matched, num_targets);
 
