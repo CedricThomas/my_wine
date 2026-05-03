@@ -593,41 +593,8 @@ void patch_crt_refptrs(void *image_base, void *nt_ptr)
      * (the PE writes envp through this pointer) */
     __imp___initenv_stub = (void **)(image_base + 0x7018);  /* envp in .bss */
 
-    /*
-     * Patch __acrt_iob_func to fix the rcx corruption bug.
-     * The PE code does:
-     *   call __iob_func     ; our __iob_func may clobber rcx upper bits
-     *   mov %ebx,%ecx       ; restores lower 32 bits
-     *   lea (%rcx,%rcx,2),%rdx  ; uses rcx (with garbage upper bits!)
-     *
-     * Fix: replace lea/shl/add with a version that uses ebx (clean 32-bit)
-     * New code:
-     *   mov %ebx,%ecx       ; restore index (clears upper bits)
-     *   mov %ecx,%edx       ; edx = index  (32-bit write clears upper)
-     *   lea (%rdx,%rdx,2),%rdx  ; rdx = index * 3
-     *   shl $0x4,%rdx       ; rdx *= 16 = index * 48
-     *   add %rdx,%rax       ; rax = base + index*48
-     */
-    {
-        char *acrt_fn = (char *)image_base + 0x27ac;
-        char *page_start = (char *)((uint64_t)acrt_fn & ~(uint64_t)4095);
-        if (mprotect(page_start, 4096, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
-            /* Replace 13 bytes starting at 0x27ac:
-             * Original: mov%ebx,%ecx | lea(%rcx,%rcx,2),%rdx | shl$4,%rdx | add%rdx,%rax
-             * New:      mov%ebx,%edx | imul$48,%edx,%edx | 3NOP | add%rdx,%rax
-             * Uses ebx (clean 32-bit) instead of rcx (garbage upper bits)
-             */
-            unsigned char new_code[] = {
-                0x89, 0xda,             /* mov %ebx,%edx (clears rdx upper) */
-                0x6b, 0xda, 0x30,       /* imul $48,%edx,%edx (clears rdx upper) */
-                0x90, 0x90, 0x90, 0x90, 0x90,  /* 5 NOP to fill to 13 bytes */
-                0x48, 0x01, 0xd0,            /* add %rdx,%rax */
-            };
-            memcpy(acrt_fn, new_code, sizeof(new_code));
-            fprintf(stderr, "patched __acrt_iob_func to use ebx directly\n");
-        }
-        mprotect(page_start, 4096, PROT_READ | PROT_EXEC);
-    }
+    /* __acrt_iob_func patching is done dynamically in the child process
+     * (main.c:jump_to_entry) via find_text_thunk(). No need to patch here. */
 
     uint64_t image_size = nt->OptionalHeader.SizeOfImage;
     fprintf(stderr, "patch_crt_refptrs: image_size=0x%lx\n", (unsigned long)image_size);

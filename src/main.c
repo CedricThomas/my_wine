@@ -72,6 +72,46 @@ void run_guest(void (*entry)(void), void *stack_top, void *peb,
                        char **guest_argv, char **guest_envp);
 static void crash_handler(int sig, siginfo_t *info, void *ucontext);
 
+/* ── Dynamic thunk locator ──────────────────────────────────── */
+
+/* Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
+ * Scans all "ff 25 disp32" (jmp *disp(%rip)) instructions in .text and
+ * checks if the dereferenced IAT pointer equals target_addr.
+ * Returns the absolute address of the thunk instruction, or NULL. */
+static void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
+                              IMAGE_SECTION_HEADER *sections,
+                              void *target_addr)
+{
+    /* Locate .text section */
+    uint64_t text_start = 0, text_end = 0;
+    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        if (memcmp(sections[i].Name, ".text", 5) == 0) {
+            text_start = sections[i].VirtualAddress;
+            text_end   = text_start + sections[i].Misc.VirtualSize;
+            if (text_end < text_start || sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
+                text_end = text_start + sections[i].SizeOfRawData;
+            break;
+        }
+    }
+    if (text_start == 0) return NULL;
+
+    uint8_t *text_base = (uint8_t *)image_base + text_start;
+    uint64_t target_val = (uint64_t)(uintptr_t)target_addr;
+
+    for (uint64_t off = 0; off < (text_end - text_start) - 5; off++) {
+        if (text_base[off] == 0xff && text_base[off + 1] == 0x25) {
+            int32_t disp = *(int32_t *)(text_base + off + 2);
+            uint64_t instr_addr = text_start + off;
+            uint64_t target_rva = instr_addr + 6 + disp;
+            uint64_t *target_ptr = (uint64_t *)((char *)image_base + target_rva);
+            if (*target_ptr == target_val) {
+                return (void *)((char *)image_base + instr_addr);
+            }
+        }
+    }
+    return NULL;
+}
+
 /* ── Jump to entry point ────────────────────────────────────── */
 
 static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *teb,
@@ -127,18 +167,36 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
             perror("ARCH_SET_GS");
             _exit(1);
         }
-        /* Patch __acrt_iob_func to bypass IAT and return __wine_iob directly */
+        /* Patch __acrt_iob_func thunk to return __wine_iob directly.
+         * Dynamically locate the .text jump-thunk via IAT instead of
+         * hardcoding an offset like 0x27a0. */
         {
             uint64_t image_base = entry_abs & ~0xFFFFFUL;
-            void *acrt_fn = (void *)(image_base + 0x27a0);
-            void *page = (void *)((uintptr_t)acrt_fn & ~(uintptr_t)4095);
-            mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC);
-            uint8_t *code = (uint8_t *)acrt_fn;
-            code[0] = 0x48; code[1] = 0xb8;
-            *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
-            code[10] = 0xc3; /* ret */
-            for (int k = 11; k < 15; k++) code[k] = 0x90;
-            mprotect(page, 4096, PROT_READ|PROT_EXEC);
+            void *base = (void *)(uintptr_t)image_base;
+
+            /* Reconstruct NT headers and section table from the live image */
+            const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
+            uint32_t pe_off = img_dos->e_lfanew;
+            IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((char *)base + pe_off);
+            uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
+                               nt->FileHeader.SizeOfOptionalHeader;
+            IMAGE_SECTION_HEADER *sections =
+                (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
+
+            void *acrt_fn = find_text_thunk(base, nt, sections,
+                                            (void *)__iob_func);
+            if (acrt_fn == NULL) {
+                fprintf(stderr, "WARNING: __acrt_iob_func thunk not found in .text\n");
+            } else {
+                void *page = (void *)((uintptr_t)acrt_fn & ~(uintptr_t)4095);
+                mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC);
+                uint8_t *code = (uint8_t *)acrt_fn;
+                code[0] = 0x48; code[1] = 0xb8;
+                *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
+                code[10] = 0xc3; /* ret */
+                for (int k = 11; k < 15; k++) code[k] = 0x90;
+                mprotect(page, 4096, PROT_READ|PROT_EXEC);
+            }
         }
 
         /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
