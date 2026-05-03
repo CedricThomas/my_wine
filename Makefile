@@ -59,7 +59,7 @@ $(BUILDDIR)/msvcrt.o: src/stubs/msvcrt.c | $(BUILDDIR)
 $(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
 $(BUILDDIR)/pe_parser.o: include/pe.h
 $(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h
-$(BUILDDIR)/signal_handler.o:
+$(BUILDDIR)/signal_handler.o: include/syscall/signal_handler.h
 $(BUILDDIR)/dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
 $(BUILDDIR)/ntdll.o: include/ntdll.h
 $(BUILDDIR)/kernel32.o: include/kernel32.h include/ntdll.h include/syscall/thunk_gen.h
