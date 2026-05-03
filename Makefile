@@ -9,6 +9,19 @@ OBJS = $(BUILDDIR)/my_wine.o $(BUILDDIR)/pe_parser.o $(BUILDDIR)/thunk_gen.o \
 
 all: my_wine
 
+test: all $(BUILDDIR)/pe_parser.o
+	@echo "=== Compiling tests ==="
+	$(CC) $(CFLAGS) -I include -o $(BUILDDIR)/test_parse tests/test_parse.c $(BUILDDIR)/pe_parser.o
+	@echo "=== Running tests ==="
+	@if [ -f hello.exe ]; then \
+		./$(BUILDDIR)/test_parse hello.exe; \
+	elif [ -f examples/hello.exe ]; then \
+		./$(BUILDDIR)/test_parse examples/hello.exe; \
+	else \
+		echo "SKIP: no hello.exe found (build it with 'make hello.exe' first)"; \
+	fi
+	@echo "=== Tests completed ==="
+
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
@@ -56,6 +69,6 @@ hello.exe: hello.c build_test.sh
 	bash build_test.sh
 
 clean:
-	rm -rf $(BUILDDIR) my_wine test_parse hello.exe *.o
+	rm -rf $(BUILDDIR) my_wine hello.exe *.o
 
-.PHONY: all clean hello.exe $(BUILDDIR)
+.PHONY: all clean test hello.exe $(BUILDDIR)
