@@ -11,14 +11,7 @@
 #include <linux/seccomp.h>
 #include <linux/filter.h>
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
-
-/* Dispatcher function: receives the (elevated) syscall number and the
- * full ucontext.  Returns 0 on success (handler modified the context
- * to produce a result) or non-zero on failure.                       */
-typedef int (*dispatcher_func_t)(uint64_t syscall_num, ucontext_t *ctx);
+#include "include/syscall/signal_handler.h"
 
 /* ------------------------------------------------------------------ */
 /*  Registered thunk addresses (dynamic array)                        */
