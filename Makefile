@@ -27,7 +27,8 @@ test: all $(BUILDDIR)/pe_parser.o
 	elif [ -f examples/hello.exe ]; then \
 		./$(BUILDDIR)/test_parse examples/hello.exe; \
 	else \
-		echo "SKIP: no hello.exe found (build it with 'make hello.exe' first)"; \
+		echo "No hello.exe found — running error/negative tests only"; \
+		./$(BUILDDIR)/test_parse; \
 	fi
 	@echo "=== Tests completed ==="
 
