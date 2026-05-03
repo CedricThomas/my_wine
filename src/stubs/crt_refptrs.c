@@ -114,7 +114,34 @@ void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_H
     fprintf(stderr, "patch_crt_refptrs: .refptr section at VA=0x%lx, size=0x%lx\n",
             (unsigned long)refptr_base, (unsigned long)refptr_size);
 
-    /* Try COFF symbol table for dynamic name-based discovery */
+    /*
+     * ── Data-driven refptr patching from the PE symbol table ──
+     *
+     * Instead of hardcoding every refptr offset, this code uses the PE's
+     * own COFF symbol table to discover the runtime addresses of known
+     * CRT symbols (e.g. __CTOR_LIST__, __initenv, _fmode).  The
+     * refptr_mappings[] array provides the *names* and *target stub
+     * addresses*; the symbol table supplies the *offset within .refptr*.
+     *
+     * Two discovery strategies (primary -> fallback):
+     *
+     *   1. COFF symbol table lookup  (data-driven, name-based)
+     *      parse_symbol_table_from_image() reads the symbols embedded in
+     *      the PE's header region.  lookup_symbol_value() matches names
+     *      and returns the section-relative offset.  When the symbol table
+     *      is present this path resolves every refptr automatically.
+     *
+     *   2. Section-relative offset   (hardcoded fallback)
+     *      If the symbol table is absent (stripped binaries, etc.) the
+     *      pre-computed rel_offset in refptr_mappings[] is used.  These
+     *      offsets are linker-dependent but more portable than absolute
+     *      RVAs because they work with any image base and section layout.
+     *
+     * This approach is "data-driven" because the symbol table acts as the
+     * source of truth — adding a new refptr mapping only requires appending
+     * an entry to refptr_mappings[] (no offset computation needed when
+     * the symbol table is available).
+     */
     IMAGE_SYMBOL *symbols = NULL;
     char *string_table = NULL;
     int sym_count = parse_symbol_table_from_image(
