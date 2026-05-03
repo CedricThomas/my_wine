@@ -133,6 +133,8 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
 
     /* Store in handle table */
     uint64_t handle = fd_to_handle(fd);
+    /* Free the malloc'd path buffer on all paths after open() succeeded.
+     * Placed before the handle check so it runs on both success and failure. */
     free((void *)path);
     if (handle == 0) {
         close(fd);

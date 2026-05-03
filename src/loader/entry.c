@@ -178,6 +178,10 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
                     /* NOP padding to fill 15 bytes */
                     for (int k = 11; k < 15; k++) code[k] = 0x90;
 
+                    /* Restore RX permissions.
+                     * This runs in the child process; if restore fails, the
+                     * page remains RWX which is suboptimal but the patch
+                     * was applied. Non-fatal in child context. */
                     if (mprotect(page, 4096, PROT_READ|PROT_EXEC) != 0) {
                         perror("mprotect restore __acrt_iob_func");
                     }

@@ -65,8 +65,14 @@ static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p (stub)\n",
             name, (unsigned long)rva, (unsigned long)old_val, target);
 
-    /* Restore read-only */
-    mprotect(page_start, 4096, PROT_READ);
+    /* Restore read-only.
+     * If this fails, log with perror but don't abort — the page is still
+     * writable which is suboptimal (leaves a writable page where we
+     * intended read-only) but not fatal. The patch was already applied
+     * successfully above. */
+    if (mprotect(page_start, 4096, PROT_READ) != 0) {
+        perror("patch_crt_refptrs: mprotect restore");
+    }
 }
 
 void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
