@@ -876,7 +876,7 @@ int main(int argc, char *argv[])
 
     /* Patch CRT refptrs so the PE can find our global variables */
 
-    patch_crt_refptrs(base, &nt);
+    patch_crt_refptrs(base, &nt, sections);
 
 
     /* 7. Resolve imports */
@@ -896,7 +896,17 @@ int main(int argc, char *argv[])
 
     if (!stack_top) return 1;
 
-    /* 10. Zero .data section and initialize global variables */
+    /* 10. Zero .data section and initialize global variables
+     *
+     * The memset below zeros the entire .data section, so the zero-init
+     * values (has_cctor=0, managedapp=0, startinfo=NULL, mainret=0, envp=NULL,
+     * argv=NULL) are redundant — they are already zero after memset.
+     *
+     * The offsets below (0x004, 0x008, 0x010, 0x018, 0x020, 0x028) are
+     * relative to the .data section base. They are CRT-specific variable
+     * offsets that ideally would come from the PE's symbol table, but are
+     * linker-defined for mingw-w64 CRT startup layout.
+     */
     {
         int data_section_idx = -1;
         for (int i = 0; i < num_sections; i++) {
@@ -918,17 +928,14 @@ int main(int argc, char *argv[])
             /* Zero the entire .data section */
             memset((uint8_t *)base + data_vaddr, 0, data_size);
 
-            uint8_t *data_base = (uint8_t *)base;
+            /* Compute base within .data section dynamically */
+            uint8_t *data_base = (uint8_t *)base + data_vaddr;
 
-            *(uint32_t *)(data_base + 0x7028) = 1;     // argc = 1
-            *(uint64_t *)(data_base + 0x7008) = 0;     // has_cctor = 0
-            *(uint64_t *)(data_base + 0x700c) = 0;     // managedapp = 0
-            *(uint64_t *)(data_base + 0x7004) = 0;     // startinfo = NULL
-            *(uint32_t *)(data_base + 0x7010) = 0;     // mainret = 0
-            *(uint64_t *)(data_base + 0x7018) = 0;     // envp (set properly in step 11)
-            *(uint64_t *)(data_base + 0x7020) = 0;     // argv (set properly in step 11)
+            /* argc = 1, relative to .data section base
+             * (was: data_base + 0x7028; offset = 0x7028 - 0x7000 = 0x028) */
+            *(uint32_t *)(data_base + 0x028) = 1;
 
-            printf(".data section: vaddr=0x%lx, size=0x%lx, initialized globals\n",
+            printf(".data section: vaddr=0x%lx, size=0x%lx, initialized argc\n",
                    (unsigned long)data_vaddr, (unsigned long)data_size);
         }
     }
@@ -948,19 +955,18 @@ int main(int argc, char *argv[])
     _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
 
     /* Pre-seed argv/envp pointers in the PE's .bss so the CRT doesn't
-     * crash when reading them before calling __getmainargs. */
+     * crash when reading them before calling __getmainargs.
+     *
+     * Use .bss section VA dynamically (set by patch_crt_refptrs in g_bss_vaddr).
+     * The offsets (0x018, 0x020) are relative to .bss base and are CRT-specific;
+     * they correspond to the mingw-w64 CRT's envp/argv locations. */
     {
-        int data_section_idx = -1;
-        for (int i = 0; i < num_sections; i++) {
-            if (memcmp(sections[i].Name, ".data", 5) == 0) {
-                data_section_idx = i;
-                break;
-            }
-        }
-        if (data_section_idx >= 0) {
-            uint8_t *data_base = (uint8_t *)base + sections[data_section_idx].VirtualAddress;
-            *(uint64_t *)(data_base + 0x7020) = (uint64_t)(uintptr_t)guest_argv;
-            *(uint64_t *)(data_base + 0x7018) = (uint64_t)(uintptr_t)guest_envp;
+        if (g_bss_vaddr != 0) {
+            uint8_t *bss_base = (uint8_t *)base + g_bss_vaddr;
+            *(uint64_t *)(bss_base + 0x020) = (uint64_t)(uintptr_t)guest_argv;  // argv
+            *(uint64_t *)(bss_base + 0x018) = (uint64_t)(uintptr_t)guest_envp;  // envp
+        } else {
+            fprintf(stderr, "WARNING: g_bss_vaddr not set, skipping .bss pre-seed\n");
         }
     }
 

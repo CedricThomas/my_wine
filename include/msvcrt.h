@@ -94,9 +94,11 @@ extern void *__msvcrt__exit;
 extern void *__msvcrt_abort;
 extern void *__msvcrt_signal;
 
+/* BSS VirtualAddress — set by patch_crt_refptrs, used for dynamic .bss access */
+extern uint32_t g_bss_vaddr;
+
 /* Patch refptrs in the PE's .rdata to point to our globals */
-/* Forward declaration - full type in pe.h */
-struct image_nt_headers64_fwd;
-void patch_crt_refptrs(void *image_base, void *nt_headers);
+#include "pe.h"
+void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections);
 
 #endif /* MY_WINE_MSVCRT_H */

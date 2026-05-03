@@ -45,6 +45,9 @@ static int dowildcard_val = 0;
 static int newmode_val = 0;
 static uint64_t g_image_base_ref = 0;  // will be set to image base at runtime
 
+/* .bss section VirtualAddress — set dynamically by patch_crt_refptrs */
+uint32_t g_bss_vaddr = 0;
+
 /*
  * Zero-valued stubs for two-level refptrs.
  * The CRT startup code does two-level indirection:
@@ -240,13 +243,15 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
     if (envp) *envp = g_guest_envp ? g_guest_envp : (char **)(uintptr_t)0;
 
     /* Also write to the PE's .bss section so the CRT can find them.
-     * The .bss lives at image_base + 0x7000.
-     *   argc at 0x7028 (4 bytes), argv at 0x7020 (8 bytes), envp at 0x7018 (8 bytes)
-     * The CRT reads argv from 0x7020 and does two-level indirection: mov (%r13),%rcx
+     * The .bss section VA is found dynamically via g_bss_vaddr (set in patch_crt_refptrs).
+     *   argc at +0x028 (4 bytes), argv at +0x020 (8 bytes), envp at +0x018 (8 bytes)
+     * These relative offsets are mingw-w64 CRT-specific and ideally would come from
+     * the symbol table, but they are linker-defined for the CRT startup layout.
+     * The CRT reads argv from this location and does two-level indirection: mov (%r13),%rcx
      * If argv is NULL there, dereferencing 0 → SIGSEGV. */
     uint64_t image_base = g_image_base_ref;
-    if (image_base) {
-        char *bss = (char *)image_base + 0x7000;
+    if (image_base && g_bss_vaddr != 0) {
+        char *bss = (char *)image_base + g_bss_vaddr;
         *(uint32_t *)(bss + 0x028) = 1;            // argc = 1
         *(uint64_t *)(bss + 0x020) = (uint64_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);  // argv
         *(uint64_t *)(bss + 0x018) = (uint64_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);  // envp
@@ -581,17 +586,34 @@ static const refptr_patch_t refptr_patches[] = {
 };
 #define REF_PTR_COUNT (sizeof(refptr_patches) / sizeof(refptr_patches[0]) - 1) // minus terminator
 
-void patch_crt_refptrs(void *image_base, void *nt_ptr)
+/* Forward declaration for find_section_by_name from pe_parser.c */
+extern IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS64 *nt_headers,
+                                                   const IMAGE_SECTION_HEADER *sections,
+                                                   const char *name);
+
+void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
 {
-    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)nt_ptr;
     if (!image_base || !nt) return;
 
     /* Set g_image_base_ref to actual image base before applying patches */
     g_image_base_ref = (uint64_t)(uintptr_t)image_base;
 
-    /* Set __imp___initenv_stub to point to PE's envp in .bss
-     * (the PE writes envp through this pointer) */
-    __imp___initenv_stub = (void **)(image_base + 0x7018);  /* envp in .bss */
+    /* Dynamically find .bss section to set __imp___initenv_stub and g_bss_vaddr */
+    if (sections) {
+        IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+        if (bss_sec) {
+            g_bss_vaddr = bss_sec->VirtualAddress;
+            /* Set __imp___initenv_stub to point to PE's envp in .bss
+             * (the PE writes envp through this pointer) */
+            __imp___initenv_stub = (void **)((char *)image_base + g_bss_vaddr + 0x018);
+        } else {
+            fprintf(stderr, "patch_crt_refptrs: WARNING: .bss section not found\n");
+            g_bss_vaddr = 0;
+        }
+    } else {
+        /* Fallback: no sections available */
+        g_bss_vaddr = 0;
+    }
 
     /* __acrt_iob_func patching is done dynamically in the child process
      * (main.c:jump_to_entry) via find_text_thunk(). No need to patch here. */
