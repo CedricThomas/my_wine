@@ -170,7 +170,7 @@ void *__wine_iob_data(void)
  */
 
 /* __iob_func returns pointer to the contiguous array of FILE structs */
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *__iob_func(void)
 {
     return __wine_iob.bytes;
@@ -178,23 +178,23 @@ void *__iob_func(void)
 
 /* ── CRT Startup Functions ────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void __set_app_type(int type)
 {
     __msvcrt_app_type = type;
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void __initenv(void)
 {
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void _initterm(void)
 {
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *_initterm_e(const void **pi, const void **pe)
 {
     if (pi) *pi = NULL;
@@ -202,7 +202,7 @@ void *_initterm_e(const void **pi, const void **pe)
     return NULL;
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *_onexit(void (*func)(void))
 {
     (void)func;
@@ -215,20 +215,20 @@ void *_onexit(void (*func)(void))
  * With our refptr patches, these may not be called, but we provide correct
  * implementations just in case.
  */
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *__p__commode(void)
 {
     return &_commode;
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *__p__fmode(void)
 {
     return &_fmode;
 }
 
 /* __getmainargs: parse command line and environment */
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *pStartInfo)
 {
     static char *dummy_argv[2] = { "./hello.exe", NULL };
@@ -256,18 +256,18 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
     (void)pStartInfo;
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *_setargv(void)
 {
     return NULL;
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void __lconv_init(void)
 {
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void __setusermatherr(void (*handler)(void))
 {
     (void)handler;
@@ -275,14 +275,14 @@ void __setusermatherr(void (*handler)(void))
 
 /* ── Forward declarations for internal functions ───────────── */
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void wine__exit(int code);
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap);
 
 /* ── Stdlib Stubs ─────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void _amsg_exit(int msg)
 {
     /* Trace: _amsg_exit called with msg=%d */
@@ -305,7 +305,7 @@ void _amsg_exit(int msg)
     wine__exit(1);
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void _cexit(void)
 {
     wine__exit(0);
@@ -313,7 +313,7 @@ void _cexit(void)
 
 /* ── Internal implementations with unique names ────────────── */
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void wine__exit(int code)
 {
     /* Call Linux sys_exit directly */
@@ -321,7 +321,7 @@ void wine__exit(int code)
     __builtin_unreachable();
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void wine_abort(void)
 {
     /* Dump registers to stack, then write them via syscall */
@@ -417,50 +417,50 @@ void wine_abort(void)
     wine__exit(134);
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 int wine_exit(int code)
 {
     wine__exit(code);
     __builtin_unreachable();
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void *wine_malloc(size_t size)
 {
     return __builtin_malloc(size);
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void *wine_calloc(size_t nmemb, size_t size)
 {
     return __builtin_calloc(nmemb, size);
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void wine_free(void *ptr)
 {
     __builtin_free(ptr);
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void *wine_memcpy(void *dest, const void *src, size_t n)
 {
     return __builtin_memcpy(dest, src, n);
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 size_t wine_strlen(const void *s)
 {
     return __builtin_strlen(s);
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 int wine_strncmp(const void *s1, const void *s2, size_t n)
 {
     return strncmp(s1, s2, n);
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 int wine_fprintf(wine_FILE *stream, const char *format, ...)
 {
     va_list ap;
@@ -470,7 +470,7 @@ int wine_fprintf(wine_FILE *stream, const char *format, ...)
     return ret;
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap)
 {
     if (stream == NULL) return -1;
@@ -496,7 +496,7 @@ int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap)
     return (int)len;
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 size_t wine_fwrite(const void *ptr, size_t size, size_t nmemb, wine_FILE *stream)
 {
     if (stream == NULL) return 0;
@@ -517,7 +517,7 @@ size_t wine_fwrite(const void *ptr, size_t size, size_t nmemb, wine_FILE *stream
     return (size_t)res / size;
 }
 
-static __attribute__((ms_abi))
+static __attribute__((ms_abi, force_align_arg_pointer))
 void wine_signal(int sig, void (*handler)(int))
 {
     signal(sig, handler);

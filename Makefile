@@ -30,11 +30,13 @@ dispatcher.o: src/syscall/dispatcher.c
 ntdll.o: src/stubs/ntdll.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+STUB_CFLAGS = $(CFLAGS) -mno-red-zone
+
 kernel32.o: src/stubs/kernel32.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(STUB_CFLAGS) -c $< -o $@
 
 msvcrt.o: src/stubs/msvcrt.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(STUB_CFLAGS) -c $< -o $@
 
 # Header dependencies (for recompilation when headers change)
 my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h

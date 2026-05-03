@@ -56,10 +56,9 @@
 
 /* ── GetStdHandle ───────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *GetStdHandle(int nStdHandle)
 {
-    ASSERT_STACK_ALIGNED("GetStdHandle");
     switch (nStdHandle) {
     case STD_INPUT_HANDLE:  return (void *)(uintptr_t)0x7FFFFFFFUL;
     case STD_OUTPUT_HANDLE: return (void *)(uintptr_t)0x7FFFFFFEUL;
@@ -70,11 +69,10 @@ void *GetStdHandle(int nStdHandle)
 
 /* ── WriteFile ──────────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
               uint32_t *lpNumberOfBytesWritten, void *lpOverlapped)
 {
-    ASSERT_STACK_ALIGNED("WriteFile");
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x3D);
     if (thunk == NULL) {
@@ -109,11 +107,10 @@ int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
 
 /* ── ReadFile ───────────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
              uint32_t *lpNumberOfBytesRead, void *lpOverlapped)
 {
-    ASSERT_STACK_ALIGNED("ReadFile");
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x3C);
     if (thunk == NULL) {
@@ -148,10 +145,9 @@ int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
 
 /* ── ExitProcess ────────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void ExitProcess(uint32_t uExitCode)
 {
-    ASSERT_STACK_ALIGNED("ExitProcess");
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x2A);
     if (thunk == NULL) {
@@ -170,7 +166,7 @@ void ExitProcess(uint32_t uExitCode)
 
 /* ── GetProcAddress ─────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *GetProcAddress(void *hModule, const char *lpProcName)
 {
     (void)hModule;
@@ -180,7 +176,7 @@ void *GetProcAddress(void *hModule, const char *lpProcName)
 
 /* ── LoadLibraryA ───────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *LoadLibraryA(const char *lpLibFileName)
 {
     (void)lpLibFileName;
@@ -189,7 +185,7 @@ void *LoadLibraryA(const char *lpLibFileName)
 
 /* ── GetModuleHandleA ───────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *GetModuleHandleA(const char *lpModuleName)
 {
     (void)lpModuleName;
@@ -198,7 +194,7 @@ void *GetModuleHandleA(const char *lpModuleName)
 
 /* ── lstrlenA ───────────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 int lstrlenA(const char *lpString)
 {
     return (int)strlen(lpString);
@@ -206,25 +202,25 @@ int lstrlenA(const char *lpString)
 
 /* ── Critical Section stubs ─────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void InitializeCriticalSection(CRITICAL_SECTION *cs)
 {
     if (cs) memset(cs, 0, sizeof(*cs));
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void EnterCriticalSection(CRITICAL_SECTION *cs)
 {
     if (cs) cs->LockCount++;
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void LeaveCriticalSection(CRITICAL_SECTION *cs)
 {
     if (cs) cs->RecursionCount--;
 }
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void DeleteCriticalSection(CRITICAL_SECTION *cs)
 {
     (void)cs;
@@ -234,7 +230,7 @@ void DeleteCriticalSection(CRITICAL_SECTION *cs)
 
 static __thread uint32_t g_last_error = 0;
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 uint32_t GetLastError(void)
 {
     return g_last_error;
@@ -242,7 +238,7 @@ uint32_t GetLastError(void)
 
 /* ── GetStartupInfoA ────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void GetStartupInfoA(STARTUPINFOA *lpStartupInfo)
 {
     if (lpStartupInfo) {
@@ -253,7 +249,7 @@ void GetStartupInfoA(STARTUPINFOA *lpStartupInfo)
 
 /* ── SetUnhandledExceptionFilter ───────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *SetUnhandledExceptionFilter(void *callback)
 {
     (void)callback;
@@ -262,7 +258,7 @@ void *SetUnhandledExceptionFilter(void *callback)
 
 /* ── Sleep ──────────────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void Sleep(uint32_t dwMilliseconds)
 {
     struct timespec ts;
@@ -273,7 +269,7 @@ void Sleep(uint32_t dwMilliseconds)
 
 /* ── TlsGetValue ───────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 void *TlsGetValue(uint32_t dwTlsIndex)
 {
     (void)dwTlsIndex;
@@ -282,7 +278,7 @@ void *TlsGetValue(uint32_t dwTlsIndex)
 
 /* ── VirtualProtect ─────────────────────────────────────────── */
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect)
 {
     fprintf(stderr, "VP: addr=%p sz=0x%x prot=%u\n", lpAddress, dwSize, flNewProtect);
@@ -333,7 +329,7 @@ typedef struct {
     uint32_t __unused2;
 } MEMORY_BASIC_INFORMATION;
 
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
 {
     if (!lpAddress || !lpBuffer) {
@@ -363,7 +359,7 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
  * MSVC for exception dispatch. For our minimal runtime we just
  * return ExceptionContinueSearch (1) to skip the handler.
  */
-__attribute__((ms_abi))
+__attribute__((ms_abi, force_align_arg_pointer))
 uint64_t __C_specific_handler(uint64_t exception_record, uint64_t establisher_frame,
                                uint64_t context_record, uint64_t dispatcher_context,
                                uint64_t image_base, uint64_t module_data,
