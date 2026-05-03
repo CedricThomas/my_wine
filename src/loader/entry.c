@@ -75,34 +75,44 @@ static int seh_crash_handler(void *exception_record, void *establisher_frame,
 static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 {
     (void)info;
-    const char *sig_name = "UNKNOWN";
-    if (sig == SIGSEGV) sig_name = "SIGSEGV";
-    else if (sig == SIGILL) sig_name = "SIGILL";
-    else if (sig == SIGABRT) sig_name = "SIGABRT";
-    else if (sig == SIGFPE) sig_name = "SIGFPE";
-    else if (sig == SIGBUS) sig_name = "SIGBUS";
-    else if (sig == SIGTRAP) sig_name = "SIGTRAP";
+    const char sig_sev[] = "CRASH: SIGSEGV";
+    const char sig_ill[] = "CRASH: SIGILL";
+    const char sig_abt[] = "CRASH: SIGABRT";
+    const char sig_fpe[] = "CRASH: SIGFPE";
+    const char sig_bus[] = "CRASH: SIGBUS";
+    const char sig_trap[] = "CRASH: SIGTRAP";
+    const char sig_unk[] = "CRASH: UNKNOWN";
+
+    const char *sig_name = sig_unk;
+    int sig_len = 13;
+    if (sig == SIGSEGV) { sig_name = sig_sev; sig_len = 13; }
+    else if (sig == SIGILL) { sig_name = sig_ill; sig_len = 12; }
+    else if (sig == SIGABRT) { sig_name = sig_abt; sig_len = 13; }
+    else if (sig == SIGFPE) { sig_name = sig_fpe; sig_len = 12; }
+    else if (sig == SIGBUS) { sig_name = sig_bus; sig_len = 12; }
+    else if (sig == SIGTRAP) { sig_name = sig_trap; sig_len = 13; }
+
+    long ret;
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(sig_name), "d"((size_t)sig_len) : "rcx","r11","memory","cc");
 
     ucontext_t *uc = (ucontext_t *)ucontext;
     if (uc) {
         greg_t *regs = uc->uc_mcontext.gregs;
-        char hex_buf[256];
-        int hlen;
-
-        const char *hdr = "CRASH: ";
-        syscall(SYS_write, 2, hdr, 7);
-        syscall(SYS_write, 2, sig_name, strlen(sig_name));
-
-        hlen = snprintf(hex_buf, sizeof(hex_buf),
-            " RIP=0x%llx RSP=0x%llx EFL=0x%llx\n"
-            " RAX=0x%llx RBX=0x%llx RCX=0x%llx RDX=0x%llx\n"
-            " RSI=0x%llx RDI=0x%llx RBP=0x%llx R12=0x%llx\n"
-            " R13=0x%llx R14=0x%llx R15=0x%llx\n",
-            (unsigned long long)regs[REG_RIP], (unsigned long long)regs[REG_RSP], (unsigned long long)regs[REG_EFL],
-            (unsigned long long)regs[REG_RAX], (unsigned long long)regs[REG_RBX], (unsigned long long)regs[REG_RCX], (unsigned long long)regs[REG_RDX],
-            (unsigned long long)regs[REG_RSI], (unsigned long long)regs[REG_RDI], (unsigned long long)regs[REG_RBP], (unsigned long long)regs[REG_R12],
-            (unsigned long long)regs[REG_R13], (unsigned long long)regs[REG_R14], (unsigned long long)regs[REG_R15]);
-        syscall(SYS_write, 2, hex_buf, hlen);
+        char hex_buf[200];
+        int off = 0;
+        const char *labels[] = {" RIP=", " RSP=", " RAX="};
+        int reg_indices[] = {REG_RIP, REG_RSP, REG_RAX};
+        for (int j = 0; j < 3; j++) {
+            for (int k = 0; labels[j][k]; k++) hex_buf[off++] = labels[j][k];
+            uint64_t val = (uint64_t)regs[reg_indices[j]];
+            for (int i = 15; i >= 0; i--) {
+                uint8_t nib = (val >> (4*i)) & 0xf;
+                hex_buf[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a');
+            }
+        }
+        hex_buf[off++] = '\n';
+        hex_buf[off] = '\0';
+        __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(hex_buf), "d"((size_t)off) : "rcx","r11","memory","cc");
     }
 
     _exit(139);
@@ -199,15 +209,25 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
  * Set up the child process and jump to the PE entry point.
  * Called in the forked child; does not return.
  */
-static void wd_handler(int sig, siginfo_t *info, void *uc_ptr)
-{ (void)sig; (void)info;
+static void wd_handler(int sig, siginfo_t *info, void *uc_ptr) { (void)sig; (void)info;
    ucontext_t *uc = (ucontext_t*)uc_ptr;
    greg_t *r = uc->uc_mcontext.gregs;
-   char b[200]; int n = snprintf(b,sizeof(b),"WD:RIP=0x%lx RSP=0x%lx RAX=0x%lx RSI=0x%lx RBX=0x%lx RCX=0x%lx RDI=0x%lx R8=0x%lx R9=0x%lx R12=0x%lx\n",
-     (unsigned long)r[REG_RIP],(unsigned long)r[REG_RSP],(unsigned long)r[REG_RAX],
-     (unsigned long)r[REG_RSI],(unsigned long)r[REG_RBX],(unsigned long)r[REG_RCX],
-     (unsigned long)r[REG_RDI],(unsigned long)r[REG_R8],(unsigned long)r[REG_R9],
-     (unsigned long)r[REG_R12]); syscall(SYS_write,2,b,n); syscall(__NR_exit,0xFF); }
+   char b[150]; int off = 0;
+   const char hdr[] = "WD:RIP=0x";
+   for (int i = 0; hdr[i]; i++) b[off++] = hdr[i];
+   uint64_t val = (uint64_t)r[REG_RIP];
+   for (int i = 15; i >= 0; i--) { uint8_t nib = (val >> (4*i)) & 0xf; b[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a'); }
+   const char hdr2[] = " RSP=0x";
+   for (int i = 0; hdr2[i]; i++) b[off++] = hdr2[i];
+   val = (uint64_t)r[REG_RSP];
+   for (int i = 15; i >= 0; i--) { uint8_t nib = (val >> (4*i)) & 0xf; b[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a'); }
+   const char hdr3[] = " RAX=0x";
+   for (int i = 0; hdr3[i]; i++) b[off++] = hdr3[i];
+   val = (uint64_t)r[REG_RAX];
+   for (int i = 15; i >= 0; i--) { uint8_t nib = (val >> (4*i)) & 0xf; b[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a'); }
+   b[off++] = '\n'; b[off] = '\0';
+   long ret; __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(b), "d"((size_t)off) : "rcx","r11","memory","cc");
+   __asm__ volatile("syscall" : "=a"(ret) : "a"(60), "D"(0xFF) : "rcx","r11","cc"); }
 
 static __attribute__((noreturn)) void setup_child_and_run(
         uint64_t entry_abs, void *stack_top, void *teb,
@@ -301,9 +321,10 @@ static __attribute__((noreturn)) void setup_child_and_run(
     }
 
     /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
-    /* Watchdog */{ struct sigaction w; memset(&w,0,sizeof(w));
+    /* Watchdog: 60s timeout to allow full CRT startup */
+    { struct sigaction w; memset(&w,0,sizeof(w));
       w.sa_sigaction=wd_handler; w.sa_flags=SA_SIGINFO; sigemptyset(&w.sa_mask);
-      sigaction(SIGALRM,&w,NULL); struct itimerval t={.it_interval={0,0},.it_value={1,0}};
+      sigaction(SIGALRM,&w,NULL); struct itimerval t={.it_interval={0,0},.it_value={60,0}};
       setitimer(ITIMER_REAL,&t,NULL); }
     {
         void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;

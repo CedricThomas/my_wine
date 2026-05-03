@@ -2,7 +2,7 @@
 CC       = gcc
 CFLAGS   = -Wall -Wextra -O2 -g -I.
 LDFLAGS  = -lrt -lpthread -lseccomp
-STUB_CFLAGS = $(CFLAGS) -mno-red-zone
+STUB_CFLAGS = $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions
 
 # ── Build ───────────────────────────────────────────────────────
 BUILDDIR = build
@@ -50,7 +50,7 @@ $(BUILDDIR)/%.o: %.c | $(BUILDDIR)
 # src/main.c → CFLAGS + -mno-red-zone (entry point, not a stub)
 $(BUILDDIR)/main.o: src/main.c | $(BUILDDIR)
 	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
+	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
 # src/pe_parser.c → CFLAGS only (no -mno-red-zone)
 $(BUILDDIR)/pe_parser.o: src/pe_parser.c | $(BUILDDIR)
@@ -65,7 +65,7 @@ $(BUILDDIR)/run_guest.o: src/run_guest.S | $(BUILDDIR)
 # src/syscall/signal_handler.c → CFLAGS + -mno-red-zone
 $(BUILDDIR)/signal_handler.o: src/syscall/signal_handler.c | $(BUILDDIR)
 	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
+	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
 # src/loader/image_mapper.c → CFLAGS only (no -mno-red-zone)
 $(BUILDDIR)/image_mapper.o: src/loader/image_mapper.c | $(BUILDDIR)
@@ -80,17 +80,17 @@ $(BUILDDIR)/import_resolver.o: src/loader/import_resolver.c | $(BUILDDIR)
 # src/loader/teb_peb.c → CFLAGS + -mno-red-zone
 $(BUILDDIR)/teb_peb.o: src/loader/teb_peb.c | $(BUILDDIR)
 	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
+	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
 # src/loader/entry.c → CFLAGS + -mno-red-zone
 $(BUILDDIR)/entry.o: src/loader/entry.c | $(BUILDDIR)
 	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
+	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
 # src/loader/gs_base.c → CFLAGS + -mno-red-zone
 $(BUILDDIR)/gs_base.o: src/loader/gs_base.c | $(BUILDDIR)
 	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
+	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
 # ── Test targets ────────────────────────────────────────────────
 # Test binaries (native ELF) + the hello_world sample .exe they exercise.
