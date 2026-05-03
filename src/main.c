@@ -33,6 +33,11 @@
 #include "include/syscall/dispatcher.h"
 static void *g_stack_base = NULL;
 
+/* ── External data accessor from msvcrt.c ─────────────────────── */
+extern void *__wine_iob_data(void);
+
+typedef int (*main_fn)(int, char **, char **);
+
 /* ── External function declarations (from pe_parser.c) ──────── */
 
 int parse_dos_header(const void *base, size_t file_size, IMAGE_DOS_HEADER *out_header);
@@ -54,8 +59,6 @@ static int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
 static void *setup_teb_peb(void);
 static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
 static void run_guest(void (*entry)(void), void *stack_top, void *peb);
-static void crash_handler(int sig, siginfo_t *info, void *ucontext);
-/* ── Jump to entry point ────────────────────────────────────── */
 
 /* ── Jump to entry point ────────────────────────────────────── */
 
@@ -87,6 +90,15 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
 
         /* Set up signal stack for reliable signal handling */
         {
+            void *sigstack_mem = mmap(NULL, 65536, PROT_READ|PROT_WRITE,
+                                      MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+            if (sigstack_mem != MAP_FAILED) {
+                stack_t ss;
+                ss.ss_sp = sigstack_mem;
+                ss.ss_size = 65536;
+                ss.ss_flags = 0;
+                sigaltstack(&ss, NULL);
+            }
         }
 
         generate_all_thunks();
@@ -102,12 +114,26 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
             perror("ARCH_SET_GS");
             _exit(1);
         }
-        /* Call guest entry via trampoline */
+        /* Patch __acrt_iob_func to bypass IAT and return __wine_iob directly */
         {
-            void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
-            /* Set RCX before calling - Windows x64 calling convention */
-            __asm__ volatile("mov %0, %%rcx" : : "r"(peb));
-            run_guest(entry, stack_top, peb);
+            uint64_t image_base = entry_abs & ~0xFFFFFUL;
+            void *acrt_fn = (void *)(image_base + 0x27a0);
+            void *page = (void *)((uintptr_t)acrt_fn & ~(uintptr_t)4095);
+            mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC);
+            uint8_t *code = (uint8_t *)acrt_fn;
+            code[0] = 0x48; code[1] = 0xb8;
+            *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
+            code[10] = 0xc3; /* ret */
+            for (int k = 11; k < 15; k++) code[k] = 0x90;
+            mprotect(page, 4096, PROT_READ|PROT_EXEC);
+        }
+
+        /* Skip CRT and jump directly to main() at RVA 0x550 */
+        {
+            uint64_t image_base = entry_abs & ~0xFFFFFUL;
+            uint64_t main_addr = image_base + 0x1000 + 0x550;
+            void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)main_addr;
+            run_guest(entry, stack_top, NULL);
         }
 
         fprintf(stderr, "my_wine: inline jump returned\n");
@@ -576,14 +602,28 @@ static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
 
 typedef void (*entry_point_fn)(void);
 
+/* Dummy argv/envp for the guest main() call */
+static const char *g_argv[] = { "./hello.exe", NULL };
+static const char *g_envp[] = { "PATH=/usr/bin", NULL };
+
 __attribute__((noinline, noreturn))
 static void run_guest(entry_point_fn entry, void *stack_top, void *peb)
 {
-    /* Switch to guest stack first */
-    __asm__ volatile("mov %0, %%rsp" : : "r"(stack_top) : "memory");
-    /* Set args per Windows x64 calling convention */
-    entry();
-    /* Should never return */
+    (void)peb;
+    __asm__ volatile(
+        "mov %0, %%rsp\n"
+        "mov %1, %%rcx\n"
+        "mov %2, %%rdx\n"
+        "mov %3, %%r8\n"
+        "call *%4\n"
+        :
+        : "r"(stack_top),
+          "r"((uintptr_t)1),
+          "r"((uintptr_t)g_argv),
+          "r"((uintptr_t)g_envp),
+          "r"(entry)
+        : "memory", "cc"
+    );
     _exit(1);
 }
 

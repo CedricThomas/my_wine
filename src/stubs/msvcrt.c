@@ -139,6 +139,12 @@ static iob_union __wine_iob = {
     .f[2] = { ._fd = 2, ._flag = (uintptr_t)(WINE_IOWRT  | WINE_IONBF) },
 };
 
+/* Accessor for use from main.c to patch __acrt_iob_func */
+void *__wine_iob_data(void)
+{
+    return __wine_iob.bytes;
+}
+
 /*
  * __iob_func: returns the base of the FILE array.
  * But we make it a naked function that reads the index from the
