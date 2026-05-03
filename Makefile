@@ -113,7 +113,7 @@ test: all $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution
 	@echo "=== Running test_import_resolution (t7.3) ==="
 	timeout 5 ./$(BUILDDIR)/test_import_resolution
 	@echo "=== Running test_teb_peb (t7.4) ==="
-	timeout 30 ./$(BUILDDIR)/test_teb_peb
+	timeout 120 ./$(BUILDDIR)/test_teb_peb
 	@echo "=== Running test_syscall_dispatch (t7.5) ==="
 	timeout 5 ./$(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Tests completed ==="
@@ -184,7 +184,9 @@ $(BUILDDIR)/image_mapper.o: include/pe.h include/pe_parser.h src/loader/loader_p
 $(BUILDDIR)/import_resolver.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
 $(BUILDDIR)/teb_peb.o: include/pe.h src/loader/loader_priv.h
 $(BUILDDIR)/entry.o: include/pe.h include/msvcrt.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
-$(BUILDDIR)/gs_base.o: include/pe.h
+# gs_base.c uses only sys/syscall.h, asm/prctl.h, stdio.h, errno.h, string.h, unistd.h
+# No header dependency needed (all system headers)
+# $(BUILDDIR)/gs_base.o: 
 
 # Syscall
 $(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h

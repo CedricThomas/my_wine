@@ -73,6 +73,8 @@ build_sample() {
         return
     fi
 
+    ensure_image
+
     # Cross-compile via Docker
     # Mount project read-only at /project; output dir writable at /out
     # Rewrite host paths -> /project/... for use inside the container
@@ -116,8 +118,6 @@ run_sample() {
 # ── Main ─────────────────────────────────────────────────────────
 MODE="${1:-build}"
 TARGET="${2:-}"
-
-ensure_image
 
 case "$MODE" in
     build)

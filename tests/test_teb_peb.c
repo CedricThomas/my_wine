@@ -106,7 +106,7 @@ static int can_set_gs_base(void)
 static void test_teb_peb_setup(void)
 {
     if (!can_set_gs_base()) {
-        printf("\n=== TEB/PEB Setup: SKIPPED (arch_prctl ARCH_SET_GS unavailable) ===\n");
+        printf("\n=== TEB/PEB Setup: SKIPPED (neither arch_prctl nor FSGSBASE can set GS base) ===\n");
         return;
     }
 
