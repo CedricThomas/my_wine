@@ -13,8 +13,6 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <sys/syscall.h>
-#include <asm/prctl.h>
 
 #include "include/pe.h"
 #include "loader_priv.h"
@@ -76,16 +74,15 @@ void *setup_teb_peb(void)
     *(uint8_t *)((char *)peb + 0x002) = 0;
 
     /* Set GS segment to point to TEB */
-    if (syscall(__NR_arch_prctl, ARCH_SET_GS, (unsigned long)teb) != 0) {
-        perror("arch_prctl ARCH_SET_GS");
+    if (set_gs_base(teb) != 0) {
+        fprintf(stderr, "my_wine: cannot set GS base, guest execution will fail\n");
         munmap(peb, peb_size);
         munmap(teb, teb_size);
         return NULL;
     }
 
     printf("TEB at %p, PEB at %p\n", teb, peb);
-    printf("arch_prctl(ARCH_GET_GS) = %p\n",
-           (void *)syscall(__NR_arch_prctl, ARCH_GET_GS, 0));
+    printf("GS base: %p (verify via get_gs_base)\n", get_gs_base());
 
     return teb;
 }

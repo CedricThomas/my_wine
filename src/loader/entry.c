@@ -20,7 +20,6 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
-#include <asm/prctl.h>
 #include <asm/unistd_64.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -244,8 +243,8 @@ static __attribute__((noreturn)) void setup_child_and_run(
     fflush(stderr);
 
     /* Re-set GS base in child (inherited from parent but let's be sure) */
-    if (syscall(__NR_arch_prctl, ARCH_SET_GS, (unsigned long)teb) != 0) {
-        perror("ARCH_SET_GS");
+    if (set_gs_base(teb) != 0) {
+        fprintf(stderr, "my_wine: cannot set GS base in child, aborting\n");
         _exit(1);
     }
 

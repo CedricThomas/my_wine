@@ -73,4 +73,9 @@ void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
 int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base,
                   void *teb, char **guest_argv, char **guest_envp);
 
+/* ── gs_base.c ─────────────────────────────────────────────── */
+
+int set_gs_base(void *addr);
+void *get_gs_base(void);
+
 #endif /* MY_WINE_LOADER_PRIV_H */
