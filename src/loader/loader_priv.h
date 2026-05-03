@@ -20,9 +20,6 @@ extern void *g_image_base;
 /* Set by teb_peb.c (setup_stack), read by main.c */
 extern void *g_stack_base;
 
-/* SEH frame: { next=NULL, handler } — NULL-terminated chain */
-extern uint64_t g_seh_frame[2];
-
 /* ── Import resolver types ─────────────────────────────────── */
 
 typedef struct {

@@ -20,7 +20,6 @@
 #include "loader_priv.h"
 
 void *g_stack_base = NULL;
-uint64_t g_seh_frame[2] __attribute__((aligned(8))) = { 0, 0 };
 
 /**
  * Set up the TEB (Thread Environment Block) and PEB (Process Environment Block).
@@ -45,11 +44,7 @@ void *setup_teb_peb(void)
     /* Zero the TEB */
     memset(teb, 0, teb_size);
 
-    /* Set up SEH chain: gs:[0x00] points to EXCEPTION_REGISTRATION_RECORD
-     * which is { next=NULL, handler=seh_crash_handler } */
-    g_seh_frame[0] = 0;  /* next = NULL (end of chain) */
-    /* g_seh_frame[1] set to seh_crash_handler address by entry.c */
-    *(void **)teb = (void *)g_seh_frame;  /* gs:[0x00] = SEH chain head */
+    /* SEH chain (gs:[0x00]) is set up by the child in entry.c */
 
     /* Fix gs:[0x30] null deref crash at 0x1400011d4:
      *   mov rax, gs:[0x30]  →  rax must be TEB

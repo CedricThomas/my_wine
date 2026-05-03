@@ -230,8 +230,10 @@ static __attribute__((noreturn)) void setup_child_and_run(
         }
     }
 
-    /* Wire up SEH handler in the child's SEH frame */
-    g_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
+    /* Set up SEH chain (must be done in child; frame must persist for guest SEH walk) */
+    static __attribute__((aligned(8))) uint64_t child_seh_frame[2];
+    child_seh_frame[0] = 0;  /* next = NULL (end of chain) */
+    child_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
 
     generate_all_thunks();
     setup_sigsys_handler(handle_syscall);
@@ -246,6 +248,9 @@ static __attribute__((noreturn)) void setup_child_and_run(
         perror("ARCH_SET_GS");
         _exit(1);
     }
+
+    /* Point TEB gs:[0x00] to our SEH frame */
+    *(void **)((uint8_t *)teb) = (void *)child_seh_frame;
 
     /* Patch __acrt_iob_func thunk to return __wine_iob_data directly */
     uint64_t image_base = entry_abs & ~0xFFFFFUL;
