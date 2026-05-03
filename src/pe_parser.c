@@ -1,0 +1,283 @@
+/*
+ * pe.c — PE32+ binary parser
+ *
+ * Reads and validates DOS header, NT headers, sections, and imports
+ * from a PE file mapped into memory.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <strings.h>
+
+#include "include/pe.h"
+
+/* ── Helpers ───────────────────────────────────────────────────── */
+
+/* Return a pointer at a file offset, or NULL if offset + len exceeds file_size */
+static const void *safe_ptr_at(const void *base, size_t offset, size_t len, size_t file_size)
+{
+    if (len > file_size || offset > file_size - len)
+        return NULL;
+    return (const uint8_t *)base + offset;
+}
+
+/* Convert RVA to file offset using the section table. Returns -1 if not mappable. */
+static int rva_to_offset(const IMAGE_NT_HEADERS64 *nt, const IMAGE_SECTION_HEADER *sections,
+                         uint32_t rva, size_t file_size)
+{
+    uint16_t num = nt->FileHeader.NumberOfSections;
+    for (uint16_t i = 0; i < num; i++) {
+        const IMAGE_SECTION_HEADER *sec = &sections[i];
+        uint32_t sec_start = sec->VirtualAddress;
+        uint32_t sec_end   = sec_start + sec->Misc.VirtualSize;
+        if (rva >= sec_start && rva < sec_end) {
+            size_t off = (size_t)(sec->PointerToRawData + (rva - sec_start));
+            if (off <= file_size)
+                return (int)off;
+            return -1;
+        }
+    }
+    /* Might be in headers before first section */
+    if (rva < nt->OptionalHeader.SizeOfHeaders)
+        return (int)rva;
+    return -1;
+}
+
+/* Derive section table offset from DOS header and NT headers */
+static int compute_section_table_offset(const IMAGE_DOS_HEADER *dos,
+                                        const IMAGE_NT_HEADERS64 *nt)
+{
+    uint32_t pe_off = dos->e_lfanew;
+    size_t sec_off = (size_t)pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
+                     (size_t)nt->FileHeader.SizeOfOptionalHeader;
+    return (int)sec_off;
+}
+
+/* ── DOS Header ────────────────────────────────────────────────── */
+
+int parse_dos_header(const void *base, size_t file_size, IMAGE_DOS_HEADER *out_header)
+{
+    if (file_size < sizeof(IMAGE_DOS_HEADER))
+        return -1;
+
+    const IMAGE_DOS_HEADER *hdr = safe_ptr_at(base, 0, sizeof(IMAGE_DOS_HEADER), file_size);
+    if (!hdr)
+        return -1;
+
+    if (hdr->e_magic != IMAGE_DOS_SIGNATURE)
+        return -1;
+
+    memcpy(out_header, hdr, sizeof(IMAGE_DOS_HEADER));
+    return 0;
+}
+
+/* ── NT Headers ────────────────────────────────────────────────── */
+
+int parse_nt_headers(const void *base, size_t file_size,
+                     const IMAGE_DOS_HEADER *dos_header,
+                     IMAGE_NT_HEADERS64 *out_nt_headers)
+{
+    uint32_t pe_offset = dos_header->e_lfanew;
+
+    /* Need at least the PE signature (4 bytes) */
+    if (pe_offset + sizeof(uint32_t) > file_size)
+        return -1;
+
+    const uint32_t *sig_ptr = safe_ptr_at(base, pe_offset, sizeof(uint32_t), file_size);
+    if (!sig_ptr || *sig_ptr != IMAGE_NT_SIGNATURE)
+        return -1;
+
+    /* Need full NT headers */
+    if (pe_offset + sizeof(IMAGE_NT_HEADERS64) > file_size)
+        return -1;
+
+    const IMAGE_NT_HEADERS64 *nt = safe_ptr_at(base, pe_offset, sizeof(IMAGE_NT_HEADERS64), file_size);
+    if (!nt)
+        return -1;
+
+    /* Validate machine type */
+    if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
+        return -1;
+
+    /* Validate optional header magic (PE32+) */
+    if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        return -1;
+
+    memcpy(out_nt_headers, nt, sizeof(IMAGE_NT_HEADERS64));
+    return 0;
+}
+
+/* ── Sections ───────────────────────────────────────────────────── */
+
+int parse_sections(const void *base, size_t file_size,
+                   const IMAGE_NT_HEADERS64 *nt_headers,
+                   IMAGE_SECTION_HEADER **out_sections)
+{
+    uint16_t num = nt_headers->FileHeader.NumberOfSections;
+    size_t section_table_size = num * sizeof(IMAGE_SECTION_HEADER);
+
+    /* Re-parse DOS header to get the PE offset for section table location */
+    const IMAGE_DOS_HEADER *dos = safe_ptr_at(base, 0, sizeof(IMAGE_DOS_HEADER), file_size);
+    if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE)
+        return -1;
+
+    int sec_table_off = compute_section_table_offset(dos, nt_headers);
+    if (sec_table_off < 0 || (size_t)sec_table_off + section_table_size > file_size)
+        return -1;
+
+    const IMAGE_SECTION_HEADER *sec = safe_ptr_at(base, (size_t)sec_table_off, section_table_size, file_size);
+    if (!sec)
+        return -1;
+
+    /* Validate each section's raw data region is within file bounds */
+    for (uint16_t i = 0; i < num; i++) {
+        const IMAGE_SECTION_HEADER *s = &sec[i];
+        if (s->PointerToRawData != 0) {
+            if ((size_t)s->PointerToRawData + (size_t)s->SizeOfRawData > file_size)
+                return -1;
+        }
+    }
+
+    /* Sections are embedded in the binary — no allocation needed. */
+    *out_sections = (IMAGE_SECTION_HEADER *)sec;
+    return (int)num;
+}
+
+/* ── Find section by name ───────────────────────────────────────── */
+
+IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS64 *nt_headers,
+                                            const IMAGE_SECTION_HEADER *sections,
+                                            const char *name)
+{
+    uint16_t num = nt_headers->FileHeader.NumberOfSections;
+    size_t name_len = strlen(name);
+    if (name_len > 8)
+        return NULL;
+
+    for (uint16_t i = 0; i < num; i++) {
+        /* Case-insensitive comparison of the 8-byte name field */
+        if (strncasecmp((const char *)sections[i].Name, name, name_len) == 0 &&
+            sections[i].Name[name_len] == '\0') {
+            return (IMAGE_SECTION_HEADER *)&sections[i];
+        }
+    }
+    return NULL;
+}
+
+/* ── Parse imports ───────────────────────────────────────────────── */
+
+int parse_imports(const void *base, size_t file_size,
+                  const IMAGE_NT_HEADERS64 *nt_headers,
+                  IMAGE_IMPORT_DESCRIPTOR **out_first_descriptor)
+{
+    const IMAGE_DATA_DIRECTORY *imp_dir =
+        &nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+
+    if (imp_dir->VirtualAddress == 0 || imp_dir->Size == 0)
+        return 0; /* No imports */
+
+    /* Get section table for RVA-to-offset conversion */
+    const IMAGE_DOS_HEADER *dos = safe_ptr_at(base, 0, sizeof(IMAGE_DOS_HEADER), file_size);
+    if (!dos)
+        return -1;
+
+    int sec_table_off = compute_section_table_offset(dos, nt_headers);
+    uint16_t num_sections = nt_headers->FileHeader.NumberOfSections;
+    size_t sec_table_size = num_sections * sizeof(IMAGE_SECTION_HEADER);
+
+    if (sec_table_off < 0 || (size_t)sec_table_off + sec_table_size > file_size)
+        return -1;
+
+    const IMAGE_SECTION_HEADER *sections = safe_ptr_at(base, (size_t)sec_table_off, sec_table_size, file_size);
+    if (!sections)
+        return -1;
+
+    /* Convert import directory RVA to file offset */
+    int imp_offset = rva_to_offset(nt_headers, sections, imp_dir->VirtualAddress, file_size);
+    if (imp_offset < 0)
+        return -1;
+
+    /* Walk the import descriptor chain */
+    int count = 0;
+    size_t current = (size_t)imp_offset;
+
+    while (1) {
+        if (current + sizeof(IMAGE_IMPORT_DESCRIPTOR) > file_size)
+            return -1;
+
+        const IMAGE_IMPORT_DESCRIPTOR *desc = safe_ptr_at(base, current,
+                                                          sizeof(IMAGE_IMPORT_DESCRIPTOR), file_size);
+        if (!desc)
+            return -1;
+
+        /* Termination: Name field is zero */
+        if (desc->Name == 0)
+            break;
+
+        /* Validate Name RVA is accessible */
+        int name_off = rva_to_offset(nt_headers, sections, desc->Name, file_size);
+        if (name_off < 0)
+            return -1;
+
+        count++;
+        current += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+
+        /* Check we haven't gone past the import directory size */
+        if (current > (size_t)imp_offset + imp_dir->Size)
+            return -1;
+    }
+
+    if (count == 0)
+        return 0;
+
+    *out_first_descriptor = (IMAGE_IMPORT_DESCRIPTOR *)((const uint8_t *)base + (size_t)imp_offset);
+    return count;
+}
+
+/* ── Dump headers (debug) ───────────────────────────────────────── */
+
+void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
+                  const IMAGE_SECTION_HEADER *sections)
+{
+    (void)dos;
+
+    fprintf(stderr, "=== PE Header Dump ===\n");
+    fprintf(stderr, "Machine:           0x%04x (%s)\n",
+            nt->FileHeader.Machine,
+            nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "unknown");
+    fprintf(stderr, "Entry point:       0x%08x\n", nt->OptionalHeader.AddressOfEntryPoint);
+    fprintf(stderr, "Image base:        0x%016" PRIx64 "\n", nt->OptionalHeader.ImageBase);
+    fprintf(stderr, "Section count:     %u\n", nt->FileHeader.NumberOfSections);
+    fprintf(stderr, "\n");
+
+    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        const IMAGE_SECTION_HEADER *s = &sections[i];
+        char name[9];
+        memcpy(name, s->Name, 8);
+        name[8] = '\0';
+
+        fprintf(stderr, "Section %u:\n", i);
+        fprintf(stderr, "  Name:             %s\n", name);
+        fprintf(stderr, "  VirtualAddress:   0x%08x\n", s->VirtualAddress);
+        fprintf(stderr, "  VirtualSize:      0x%08x\n", s->Misc.VirtualSize);
+        fprintf(stderr, "  SizeOfRawData:    0x%08x\n", s->SizeOfRawData);
+        fprintf(stderr, "  PointerToRawData: 0x%08x\n", s->PointerToRawData);
+        fprintf(stderr, "  Characteristics:  0x%08x", s->Characteristics);
+
+        /* Decode common characteristic flags */
+        char flags[128] = "";
+        if (s->Characteristics & IMAGE_SCN_MEM_READ)
+            strcat(flags, " R");
+        if (s->Characteristics & IMAGE_SCN_MEM_WRITE)
+            strcat(flags, " W");
+        if (s->Characteristics & IMAGE_SCN_MEM_EXECUTE)
+            strcat(flags, " X");
+        fprintf(stderr, "%s\n", flags);
+        fprintf(stderr, "\n");
+    }
+
+    fprintf(stderr, "=====================\n");
+}
