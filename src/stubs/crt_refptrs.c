@@ -235,19 +235,9 @@ static uint64_t find_symbol_rva_from_file(const char *file_path,
 
     for (uint32_t i = 0; i < sym_count; i++) {
         const IMAGE_SYMBOL *sym = &symbols[i];
-        const char *sym_name = NULL;
-        size_t sym_name_len = 0;
-
-        if (sym->N.ShortName[0] != 0) {
-            sym_name = (const char *)sym->N.ShortName;
-            sym_name_len = strlen(sym_name);
-        } else if (string_table) {
-            uint32_t offset = sym->N.Name.Long;
-            if (offset > 0) {
-                sym_name = string_table + offset;
-                sym_name_len = strlen(sym_name);
-            }
-        }
+        const char *sym_name = get_symbol_name(sym, string_table);
+        if (!sym_name) continue;
+        size_t sym_name_len = strlen(sym_name);
 
         if (sym_name) {
             int matched = 0;
