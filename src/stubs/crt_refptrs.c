@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -233,58 +234,76 @@ static uint64_t find_symbol_rva_from_file(const char *file_path,
         }
     }
 
+    /*
+     * Scan all symbols, preferring section-bound over absolute.
+     * Some mingw-w64 builds have garbage absolute symbols (sec=0) with
+     * wrong values that appear before the real section-bound entry.
+     */
+    uint64_t best_rva = 0;
+    int has_section_match = 0;
+
     for (uint32_t i = 0; i < sym_count; i++) {
         const IMAGE_SYMBOL *sym = &symbols[i];
         const char *sym_name = get_symbol_name(sym, string_table);
         if (!sym_name) continue;
         size_t sym_name_len = strlen(sym_name);
 
-        if (sym_name) {
-            int matched = 0;
-            if (strncmp(sym_name, name, sym_name_len) == 0 &&
-                name[sym_name_len] == '\0') {
+        int matched = 0;
+        if (strncmp(sym_name, name, sym_name_len) == 0 &&
+            name[sym_name_len] == '\0') {
+            matched = 1;
+        }
+        if (!matched) {
+            const char *prefix = ".rdata$.refptr.";
+            size_t plen = strlen(prefix);
+            if (sym_name_len > plen &&
+                strncmp(sym_name, prefix, plen) == 0 &&
+                strncmp(sym_name + plen, name, sym_name_len - plen) == 0 &&
+                name[sym_name_len - plen] == '\0') {
                 matched = 1;
             }
-            if (!matched) {
-                const char *prefix = ".rdata$.refptr.";
-                size_t plen = strlen(prefix);
-                if (sym_name_len > plen &&
-                    strncmp(sym_name, prefix, plen) == 0 &&
-                    strncmp(sym_name + plen, name, sym_name_len - plen) == 0 &&
-                    name[sym_name_len - plen] == '\0') {
-                    matched = 1;
-                }
+        }
+        if (!matched) {
+            const char *prefix2 = ".refptr.";
+            size_t plen2 = strlen(prefix2);
+            if (sym_name_len > plen2 &&
+                strncmp(sym_name, prefix2, plen2) == 0 &&
+                strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0 &&
+                name[sym_name_len - plen2] == '\0') {
+                matched = 1;
             }
-            if (!matched) {
-                const char *prefix2 = ".refptr.";
-                size_t plen2 = strlen(prefix2);
-                if (sym_name_len > plen2 &&
-                    strncmp(sym_name, prefix2, plen2) == 0 &&
-                    strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0 &&
-                    name[sym_name_len - plen2] == '\0') {
-                    matched = 1;
-                }
+        }
+        if (!matched) {
+            /* Substring fallback: the COFF string table may have truncated
+             * entries like "ta$.refptr.mingw_app_type" where the target name
+             * appears as a substring. Only match if the name is long enough
+             * (>8 chars) to avoid false positives on short symbols. */
+            if (sym_name_len > 8 && strstr(sym_name, name) != NULL) {
+                matched = 1;
             }
+        }
 
-            if (matched) {
-                int32_t section_num = sym->SectionNumber;
-                if (section_num == 0) {
-                    munmap(file_map, st.st_size);
-                    return sym->Value;
-                }
-                if (section_num > 0 && (size_t)section_num <=
-                    nt->FileHeader.NumberOfSections) {
-                    IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
-                    uint64_t rva = sec->VirtualAddress + sym->Value;
-                    munmap(file_map, st.st_size);
-                    return rva;
-                }
+        if (!matched) continue;
+
+        int32_t section_num = sym->SectionNumber;
+
+        /* Prefer section-bound symbols. If we already have one, skip.
+         * For absolute symbols (sec=0), remember as fallback only. */
+        if (section_num > 0 && (size_t)section_num <=
+            nt->FileHeader.NumberOfSections) {
+            if (!has_section_match) {
+                IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
+                best_rva = sec->VirtualAddress + sym->Value;
+                has_section_match = 1;
             }
+        } else if (section_num == 0 && !has_section_match) {
+            /* Fallback: absolute symbol, but only if no section-bound one */
+            best_rva = sym->Value;
         }
     }
 
     munmap(file_map, st.st_size);
-    return 0;
+    return best_rva;
 }
 
 void patch_crt_refptrs(const char *file_path, void *image_base,
@@ -326,6 +345,64 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
                                map->name, image_size);
             patched_any = 1;
             if (strstr(map->name, "initenv")) patched_initenv = 1;
+        }
+    }
+
+    /* ── Fallback: scan data sections for refptrs to .bss when COFF fails ──
+     * Some mingw-w64 builds don't include certain CRT symbols in the COFF
+     * symbol table (only in DWARF). Scan data sections for 8-byte values
+     * pointing into .bss and patch them to our stubs. */
+    if (bss_sec && bss_sec->Misc.VirtualSize > 0) {
+        uint64_t bss_start = bss_sec->VirtualAddress;
+        uint64_t bss_end = bss_start + bss_sec->Misc.VirtualSize;
+
+        /* Find which mappings still need patching */
+        bool patched[REF_MAP_COUNT];
+        memset(patched, 0, sizeof(patched));
+        for (size_t i = 0; i < REF_MAP_COUNT; i++) {
+            uint64_t trva = find_symbol_rva_from_file(file_path,
+                                                     nt, sections,
+                                                     refptr_mappings[i].name);
+            patched[i] = (trva != 0);
+        }
+
+        /* Scan .rdata and .data for 8-byte values pointing into .bss */
+        const char *scan_names[] = {".rdata", ".data", NULL};
+        int next_unpatched = 0;
+        for (int si = 0; scan_names[si]; si++) {
+            IMAGE_SECTION_HEADER *scan_sec = find_section_by_name(nt, sections, scan_names[si]);
+            if (!scan_sec) continue;
+            uint64_t sec_vaddr = scan_sec->VirtualAddress;
+            uint64_t sec_size = scan_sec->Misc.VirtualSize;
+            if (sec_size == 0) sec_size = scan_sec->SizeOfRawData;
+
+            for (uint64_t off = 0; off + 8 <= sec_size; off += 8) {
+                uint64_t *entry = (uint64_t *)((char *)image_base + sec_vaddr + off);
+                uint64_t val = *entry;
+
+                /* Check if this entry points into .bss */
+                if (val >= (uint64_t)(uintptr_t)image_base + bss_start &&
+                    val < (uint64_t)(uintptr_t)image_base + bss_end) {
+
+                    /* Find next unpatched mapping that's a .bss variable
+                     * Heuristic: skip __CTOR/__DTOR/__xi/__xc which are .CRT */
+                    for (size_t mi = next_unpatched; mi < REF_MAP_COUNT; mi++) {
+                        if (patched[mi]) continue;
+                        const refptr_mapping_t *map = &refptr_mappings[mi];
+                        if (strstr(map->name, "__CTOR") || strstr(map->name, "__DTOR") ||
+                            strstr(map->name, "__xi_") || strstr(map->name, "__xc_"))
+                            continue;
+
+                        apply_refptr_patch(image_base, sec_vaddr + off,
+                                           map->target, map->name, image_size);
+                        patched[mi] = true;
+                        next_unpatched = (int)(mi + 1);
+                        patched_any = 1;
+                        if (strstr(map->name, "initenv")) patched_initenv = 1;
+                        break;
+                    }
+                }
+            }
         }
     }
 

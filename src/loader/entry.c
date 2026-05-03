@@ -274,6 +274,21 @@ static __attribute__((noreturn)) void setup_child_and_run(
 
     patch_acrt_iob(base, nt, sections);
 
+    /* Ensure .bss is writable after fork (mprotect may not propagate) */
+    for (uint32_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        if (sections[i].Characteristics & IMAGE_SCN_MEM_WRITE) {
+            size_t sz = sections[i].Misc.VirtualSize;
+            if (sz == 0) sz = sections[i].SizeOfRawData;
+            if (sz == 0) continue;
+            sz = (sz + 4095) & ~(size_t)4095;
+            uintptr_t addr = (uintptr_t)base + sections[i].VirtualAddress;
+            if (mprotect((void *)addr, sz, PROT_READ|PROT_WRITE) != 0) {
+                fprintf(stderr, "WARNING: mprotect write section '%.8s' at 0x%lx failed\n",
+                        sections[i].Name, (unsigned long)addr);
+            }
+        }
+    }
+
     /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
     {
         void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
