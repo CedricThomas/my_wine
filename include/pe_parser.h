@@ -73,6 +73,18 @@ int parse_symbol_table_from_image(void *image_base,
                                    char **out_string_table);
 
 /*
+ * Parse the COFF symbol table directly from the PE file on disk.
+ * Reads PointerToSymbolTable as a file offset, so it works even when
+ * the symbol table lies beyond SizeOfHeaders.
+ * Returns number of symbols, or 0 on failure.
+ * The symbols and string_table are malloc'd; only symbols needs freeing.
+ */
+int parse_symbol_table_from_file(const char *path,
+                                  const IMAGE_NT_HEADERS64 *nt_headers,
+                                  IMAGE_SYMBOL **out_symbols,
+                                  char **out_string_table);
+
+/*
  * Get the name of a COFF symbol. Short names (8 bytes) or
  * long names from the string table. Returns NULL if unavailable.
  */

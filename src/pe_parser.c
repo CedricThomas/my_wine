@@ -5,12 +5,18 @@
  * from a PE file mapped into memory.
  */
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <strings.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 #include "include/pe.h"
 
@@ -289,6 +295,103 @@ int parse_symbol_table_from_image(void *image_base,
 }
 
 /*
+ * Parse the COFF symbol table directly from the PE file on disk.
+ * Unlike parse_symbol_table_from_image(), this reads PointerToSymbolTable
+ * as a file offset (not image offset), so it works even when the symbol
+ * table lies beyond SizeOfHeaders.
+ *
+ * The symbols and string_table are returned as malloc'd memory.
+ * The string_table is embedded right after the symbols in the same buffer,
+ * so only symbols needs to be freed (free(symbols) releases everything).
+ *
+ * Returns number of symbols, or 0 on failure.
+ */
+int parse_symbol_table_from_file(const char *path,
+                                  const IMAGE_NT_HEADERS64 *nt_headers,
+                                  IMAGE_SYMBOL **out_symbols,
+                                  char **out_string_table)
+{
+    uint32_t ptr   = nt_headers->FileHeader.PointerToSymbolTable;
+    uint32_t count = nt_headers->FileHeader.NumberOfSymbols;
+
+    *out_symbols = NULL;
+    *out_string_table = NULL;
+
+    if (ptr == 0 || count == 0)
+        return 0;
+
+    size_t sym_table_size = (size_t)count * IMAGE_SIZEOF_SYMBOL;
+
+    /* Open and mmap the file */
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return 0;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        return 0;
+    }
+
+    void *map = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (map == MAP_FAILED) {
+        close(fd);
+        return 0;
+    }
+
+    /* Validate symbol table is within file bounds */
+    if (ptr + sym_table_size > (size_t)st.st_size) {
+        munmap(map, (size_t)st.st_size);
+        close(fd);
+        return 0;
+    }
+
+    /* Read string table size (4 bytes right after the symbol table entries) */
+    size_t str_off = ptr + sym_table_size;
+    uint32_t str_data_size = 0;  /* size excluding the 4-byte length field */
+    if (str_off + 4 <= (size_t)st.st_size) {
+        str_data_size = *((const uint32_t *)((const uint8_t *)map + str_off));
+        /* Clamp to actual file bounds — some linkers leave the length
+         * field slightly larger than the real data on disk. */
+        size_t max_available = (size_t)st.st_size - str_off - 4;
+        if (str_data_size > max_available) {
+            str_data_size = (uint32_t)max_available;
+        }
+    }
+
+    /* Allocate combined buffer: symbols + 4-byte length + string data */
+    size_t total_alloc = sym_table_size + 4 + (str_data_size > 0 ? str_data_size : 0);
+    char *buf = (char *)malloc(total_alloc);
+    if (!buf) {
+        munmap(map, (size_t)st.st_size);
+        close(fd);
+        return 0;
+    }
+
+    /* Copy symbol table */
+    memcpy(buf, (const uint8_t *)map + ptr, sym_table_size);
+
+    /* Copy string table (length field + string data) */
+    if (str_data_size > 0) {
+        memcpy(buf + sym_table_size,
+               (const uint8_t *)map + str_off,
+               4 + str_data_size);
+    } else {
+        /* No string table — write zero length */
+        *((uint32_t *)(buf + sym_table_size)) = 0;
+    }
+
+    *out_symbols = (IMAGE_SYMBOL *)buf;
+    if (str_data_size > 0) {
+        *out_string_table = buf + sym_table_size + 4;  /* skip the length prefix */
+    }
+
+    munmap(map, (size_t)st.st_size);
+    close(fd);
+    return (int)count;
+}
+
+/*
  * Get the name of a COFF symbol. Short names fit in 8 bytes;
  * long names are stored in the string table with a 4-byte offset prefix.
  */
@@ -338,18 +441,15 @@ uint32_t lookup_symbol_value(const IMAGE_SYMBOL *symbols, int count,
         return 0;
 
     for (int i = 0; i < count; i++) {
-        /* Skip aux symbols */
+        const char *sym_name = get_symbol_name(&symbols[i], string_table);
+        if (sym_name && strncmp(sym_name, name, name_len) == 0 && sym_name[name_len] == '\0')
+            return symbols[i].Value;
+        /* Skip aux symbols that follow this entry */
         if (symbols[i].NumberOfAuxSymbols > 0) {
             i += symbols[i].NumberOfAuxSymbols;
             if (i >= count)
                 break;
-            continue;
         }
-        const char *sym_name = get_symbol_name(&symbols[i], string_table);
-        if (!sym_name)
-            continue;
-        if (strncmp(sym_name, name, name_len) == 0 && sym_name[name_len] == '\0')
-            return symbols[i].Value;
     }
     return 0;
 }
@@ -371,14 +471,8 @@ uint32_t lookup_symbol_rva(const IMAGE_SYMBOL *symbols, int count,
     if (name_len == 0) return 0;
 
     for (int i = 0; i < count; i++) {
-        if (symbols[i].NumberOfAuxSymbols > 0) {
-            i += symbols[i].NumberOfAuxSymbols;
-            if (i >= count) break;
-            continue;
-        }
         const char *sym_name = get_symbol_name(&symbols[i], string_table);
-        if (!sym_name) continue;
-        if (strncmp(sym_name, name, name_len) == 0 && sym_name[name_len] == '\0') {
+        if (sym_name && strncmp(sym_name, name, name_len) == 0 && sym_name[name_len] == '\0') {
             int32_t sec_num = symbols[i].SectionNumber;
             if (sec_num > 0 && (uint16_t)sec_num <= (uint16_t)num_sections) {
                 uint32_t rva = sections[sec_num - 1].VirtualAddress + symbols[i].Value;
@@ -388,6 +482,11 @@ uint32_t lookup_symbol_rva(const IMAGE_SYMBOL *symbols, int count,
             if (sec_num == 0) {
                 return symbols[i].Value;
             }
+        }
+        /* Skip aux symbols that follow this entry */
+        if (symbols[i].NumberOfAuxSymbols > 0) {
+            i += symbols[i].NumberOfAuxSymbols;
+            if (i >= count) break;
         }
     }
     return 0;

@@ -144,12 +144,12 @@ int main(int argc, char *argv[])
     {
         IMAGE_SYMBOL *symbols = NULL;
         char *string_table = NULL;
-        int sym_count = parse_symbol_table_from_image(base, &nt, nt.OptionalHeader.SizeOfHeaders,
-                                                       &symbols, &string_table);
+        int sym_count = parse_symbol_table_from_file(argv[1], &nt, &symbols, &string_table);
         if (sym_count > 0) {
             main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
                                           sections, nt.FileHeader.NumberOfSections,
                                           "main");
+            free(symbols);  // free the malloc'd buffer
         }
     }
 
