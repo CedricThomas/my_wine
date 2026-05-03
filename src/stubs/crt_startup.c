@@ -66,7 +66,7 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
     if (envp) *envp = g_guest_envp ? g_guest_envp : (char **)(uintptr_t)0;
 
     /* Also write to the PE's .bss section so the CRT can find them.
-     * The .bss section VA is found dynamically via g_bss_vaddr (set in patch_crt_refptrs).
+     * The .bss section VA is found dynamically via g_crt_ctx.bss_vaddr (set in patch_crt_refptrs).
      *   argc at +0x028 (4 bytes), argv at +0x020 (8 bytes), envp at +0x018 (8 bytes)
      * These relative offsets are mingw-w64 CRT-specific and ideally would come from
      * the symbol table, but they are linker-defined for the CRT startup layout.

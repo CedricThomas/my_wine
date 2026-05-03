@@ -82,7 +82,7 @@ void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_H
     /* Set g_crt_ctx.image_base to actual image base before applying patches */
     g_crt_ctx.image_base = (uint64_t)(uintptr_t)image_base;
 
-    /* Dynamically find .bss section to set __imp___initenv_stub and g_bss_vaddr */
+    /* Dynamically find .bss section to set __imp___initenv_stub and g_crt_ctx.bss_vaddr */
     IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec) {
         g_crt_ctx.bss_vaddr = bss_sec->VirtualAddress;

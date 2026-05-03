@@ -124,7 +124,7 @@ int main(int argc, char *argv[])
     /* Pre-seed argv/envp pointers in the PE's .bss so the CRT doesn't
      * crash when reading them before calling __getmainargs.
      *
-     * Use .bss section VA dynamically (set by patch_crt_refptrs in g_bss_vaddr).
+     * Use .bss section VA dynamically (set by patch_crt_refptrs in g_crt_ctx.bss_vaddr).
      * The offsets (0x018, 0x020) are relative to .bss base and are CRT-specific;
      * they correspond to the mingw-w64 CRT's envp/argv locations. */
     {
