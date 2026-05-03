@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <ucontext.h>
 #include <sys/syscall.h>
+#include <sys/user.h>  // for REG_RIP, REG_RSP, etc.
 
 #include "include/pe.h"
 #include "include/ntdll.h"
@@ -66,11 +67,9 @@ __attribute__((ms_abi))
 static int seh_crash_handler(void *exception_record, void *establisher_frame,
                               void *context_record, void *dispatcher_context);
 static void run_guest(void (*entry)(void), void *stack_top, void *peb);
+static void crash_handler(int sig, siginfo_t *info, void *ucontext);
 
 /* ── Jump to entry point ────────────────────────────────────── */
-
-static void run_guest(void (*entry)(void), void *stack_top, void *peb);
-static void crash_handler(int sig, siginfo_t *info, void *ucontext);
 
 static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *teb)
 {
@@ -663,9 +662,9 @@ static int seh_crash_handler(void *exception_record, void *establisher_frame,
     return 1; /* ExceptionContinueExecution (never reached) */
 }
 
-static void run_guest(void (*entry)(void), void *stack_top, void *peb);
 static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 {
+    (void)info;
     const char *sig_name = "UNKNOWN";
     if (sig == SIGSEGV) sig_name = "SIGSEGV";
     else if (sig == SIGILL) sig_name = "SIGILL";
@@ -673,40 +672,31 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
     else if (sig == SIGFPE) sig_name = "SIGFPE";
     else if (sig == SIGBUS) sig_name = "SIGBUS";
     else if (sig == SIGTRAP) sig_name = "SIGTRAP";
-
-    struct sigcontext *sc = (struct sigcontext *)ucontext;
-    if (sc) {
-        char hex_buf[128];
+    
+    ucontext_t *uc = (ucontext_t *)ucontext;
+    if (uc) {
+        greg_t *regs = uc->uc_mcontext.gregs;
+        char hex_buf[256];
         int hlen;
-
+        
         const char *hdr = "CRASH: ";
         syscall(SYS_write, 2, hdr, 7);
         syscall(SYS_write, 2, sig_name, strlen(sig_name));
-
-        hlen = snprintf(hex_buf, sizeof(hex_buf), " RIP=0x%lx RSP=0x%lx RFLAGS=0x%lx\n",
-                        (unsigned long)sc->rip, (unsigned long)sc->rsp, (unsigned long)sc->eflags);
+        
+        hlen = snprintf(hex_buf, sizeof(hex_buf),
+            " RIP=0x%llx RSP=0x%llx EFL=0x%llx\n"
+            " RAX=0x%llx RBX=0x%llx RCX=0x%llx RDX=0x%llx\n"
+            " RSI=0x%llx RDI=0x%llx RBP=0x%llx R12=0x%llx\n"
+            " R13=0x%llx R14=0x%llx R15=0x%llx\n",
+            (unsigned long long)regs[REG_RIP], (unsigned long long)regs[REG_RSP], (unsigned long long)regs[REG_EFL],
+            (unsigned long long)regs[REG_RAX], (unsigned long long)regs[REG_RBX], (unsigned long long)regs[REG_RCX], (unsigned long long)regs[REG_RDX],
+            (unsigned long long)regs[REG_RSI], (unsigned long long)regs[REG_RDI], (unsigned long long)regs[REG_RBP], (unsigned long long)regs[REG_R12],
+            (unsigned long long)regs[REG_R13], (unsigned long long)regs[REG_R14], (unsigned long long)regs[REG_R15]);
         syscall(SYS_write, 2, hex_buf, hlen);
-
-        hlen = snprintf(hex_buf, sizeof(hex_buf), "  RAX=0x%lx RBX=0x%lx RCX=0x%lx RDX=0x%lx\n",
-                        (unsigned long)sc->rax, (unsigned long)sc->rbx,
-                        (unsigned long)sc->rcx, (unsigned long)sc->rdx);
-        syscall(SYS_write, 2, hex_buf, hlen);
-
-        hlen = snprintf(hex_buf, sizeof(hex_buf), "  RSI=0x%lx RDI=0x%lx RBP=0x%lx R12=0x%lx\n",
-                        (unsigned long)sc->rsi, (unsigned long)sc->rdi,
-                        (unsigned long)sc->rbp, (unsigned long)sc->r12);
-        int hlen2 = snprintf(hex_buf + hlen, sizeof(hex_buf) - hlen,
-                        "  R13=0x%lx R14=0x%lx R15=0x%lx\n",
-                        (unsigned long)sc->r13, (unsigned long)sc->r14,
-                        (unsigned long)sc->r15);
-        syscall(SYS_write, 2, hex_buf, hlen + hlen2);
     }
-
+    
     _exit(139);
 }
-
-/* ── Jump to entry point ────────────────────────────────────── */
-
 
 /* ── main ────────────────────────────────────────────────────── */
 
