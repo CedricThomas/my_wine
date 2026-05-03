@@ -86,4 +86,15 @@ uint32_t lookup_symbol_value(const IMAGE_SYMBOL *symbols, int count,
                              const char *string_table,
                              const char *name);
 
+/*
+ * Look up a symbol name and return its full RVA
+ * (section VirtualAddress + symbol Value).
+ * Returns 0 if not found or if the symbol has no valid section.
+ */
+uint32_t lookup_symbol_rva(const IMAGE_SYMBOL *symbols, int count,
+                            const char *string_table,
+                            const IMAGE_SECTION_HEADER *sections,
+                            int num_sections,
+                            const char *name);
+
 #endif /* MY_WINE_PE_PARSER_H */

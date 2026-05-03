@@ -354,6 +354,45 @@ uint32_t lookup_symbol_value(const IMAGE_SYMBOL *symbols, int count,
     return 0;
 }
 
+/*
+ * Look up a symbol name in the COFF symbol table and return its full RVA
+ * (section VirtualAddress + symbol Value). For the 'main' function, this
+ * gives the address within the mapped image.
+ *
+ * Returns 0 if not found or if the symbol has no valid section.
+ */
+uint32_t lookup_symbol_rva(const IMAGE_SYMBOL *symbols, int count,
+                            const char *string_table,
+                            const IMAGE_SECTION_HEADER *sections,
+                            int num_sections,
+                            const char *name)
+{
+    size_t name_len = strlen(name);
+    if (name_len == 0) return 0;
+
+    for (int i = 0; i < count; i++) {
+        if (symbols[i].NumberOfAuxSymbols > 0) {
+            i += symbols[i].NumberOfAuxSymbols;
+            if (i >= count) break;
+            continue;
+        }
+        const char *sym_name = get_symbol_name(&symbols[i], string_table);
+        if (!sym_name) continue;
+        if (strncmp(sym_name, name, name_len) == 0 && sym_name[name_len] == '\0') {
+            int32_t sec_num = symbols[i].SectionNumber;
+            if (sec_num > 0 && (uint16_t)sec_num <= (uint16_t)num_sections) {
+                uint32_t rva = sections[sec_num - 1].VirtualAddress + symbols[i].Value;
+                return rva;
+            }
+            /* Absolute symbol (sec==0) — Value is the address directly */
+            if (sec_num == 0) {
+                return symbols[i].Value;
+            }
+        }
+    }
+    return 0;
+}
+
 /* ── Dump headers (debug) ───────────────────────────────────────── */
 
 void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
