@@ -18,10 +18,10 @@ OBJS = $(BUILDDIR)/my_wine.o $(BUILDDIR)/pe_parser.o $(BUILDDIR)/thunk_gen.o \
 
 all: my_wine
 
-test: all $(BUILDDIR)/pe_parser.o
+test: all $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Compiling tests ==="
-	$(CC) $(CFLAGS) -I include -o $(BUILDDIR)/test_parse tests/test_parse.c $(BUILDDIR)/pe_parser.o
-	@echo "=== Running tests ==="
+	@echo "=== Running test_parse ==="
 	@if [ -f hello.exe ]; then \
 		./$(BUILDDIR)/test_parse hello.exe; \
 	elif [ -f examples/hello.exe ]; then \
@@ -30,7 +30,54 @@ test: all $(BUILDDIR)/pe_parser.o
 		echo "No hello.exe found — running error/negative tests only"; \
 		./$(BUILDDIR)/test_parse; \
 	fi
+	@echo "=== Running test_import_resolution (t7.3) ==="
+	./$(BUILDDIR)/test_import_resolution
+	@echo "=== Running test_teb_peb (t7.4) ==="
+	./$(BUILDDIR)/test_teb_peb
+	@echo "=== Running test_syscall_dispatch (t7.5) ==="
+	./$(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Tests completed ==="
+
+# ── Test: test_parse ──────────────────────────────────────────
+$(BUILDDIR)/test_parse: tests/test_parse.c $(BUILDDIR)/pe_parser.o
+	$(CC) $(CFLAGS) -I include -o $@ $< $(BUILDDIR)/pe_parser.o
+
+# ── t7.3: test_import_resolution ──────────────────────────────
+# Links against pe_parser, image_mapper, import_resolver and all
+# CRT/ntdll stubs (for __msvcrt_* and handler_* symbols)
+$(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
+	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/loader/image_mapper.o \
+	$(BUILDDIR)/loader/import_resolver.o \
+	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
+	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
+	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o \
+	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
+	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
+	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o
+	$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
+
+# ── t7.4: test_teb_peb ────────────────────────────────────────
+$(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
+	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/loader/image_mapper.o \
+	$(BUILDDIR)/loader/import_resolver.o $(BUILDDIR)/loader/teb_peb.o \
+	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
+	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
+	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o \
+	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
+	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
+	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o
+	$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
+
+# ── t7.5: test_syscall_dispatch ───────────────────────────────
+$(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c \
+	$(BUILDDIR)/dispatcher.o $(BUILDDIR)/signal_handler.o \
+	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
+	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
+	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
+	$(BUILDDIR)/thunk_gen.o
+	$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
