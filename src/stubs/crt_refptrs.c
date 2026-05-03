@@ -24,7 +24,7 @@ const refptr_mapping_t refptr_mappings[] = {
     { "__DTOR_LIST__",              (void *)&dtor_list_stub,              0x010 },
     { "__xi_a",                     (void *)&xi_a_stub,                   0x020 },
     { "__dyn_tls_init_callback",    (void *)&dyn_tls_callback_stub,       0x030 },
-    { "__image_base__",             (void *)&g_image_base_ref,            0x040 },
+    { "__image_base__",             (void *)&g_crt_ctx.image_base,        0x040 },
     { "__imp___initenv",            (void *)&__imp___initenv_stub,        0x050 },
     { "__mingw_oldexcpt_handler",   (void *)&mingw_excpt_handler_stub,    0x090 },
     { "__native_startup_lock",      (void *)&native_startup_lock,         0x0a0 },
@@ -79,19 +79,19 @@ void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_H
 {
     if (!image_base || !nt || !sections) return;
 
-    /* Set g_image_base_ref to actual image base before applying patches */
-    g_image_base_ref = (uint64_t)(uintptr_t)image_base;
+    /* Set g_crt_ctx.image_base to actual image base before applying patches */
+    g_crt_ctx.image_base = (uint64_t)(uintptr_t)image_base;
 
     /* Dynamically find .bss section to set __imp___initenv_stub and g_bss_vaddr */
     IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec) {
-        g_bss_vaddr = bss_sec->VirtualAddress;
+        g_crt_ctx.bss_vaddr = bss_sec->VirtualAddress;
         /* Set __imp___initenv_stub to point to PE's envp in .bss
          * (the PE writes envp through this pointer) */
-        __imp___initenv_stub = (void **)((char *)image_base + g_bss_vaddr + 0x018);
+        __imp___initenv_stub = (void **)((char *)image_base + g_crt_ctx.bss_vaddr + 0x018);
     } else {
         fprintf(stderr, "patch_crt_refptrs: WARNING: .bss section not found\n");
-        g_bss_vaddr = 0;
+        g_crt_ctx.bss_vaddr = 0;
     }
 
     /* __acrt_iob_func patching is done dynamically in the child process

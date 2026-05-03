@@ -94,8 +94,13 @@ extern void *__msvcrt__exit;
 extern void *__msvcrt_abort;
 extern void *__msvcrt_signal;
 
-/* BSS VirtualAddress — set by patch_crt_refptrs, used for dynamic .bss access */
-extern uint32_t g_bss_vaddr;
+/* CRT context — image base and .bss VA */
+typedef struct {
+    uint64_t image_base;    /* Base address of the loaded PE image */
+    uint32_t bss_vaddr;     /* VirtualAddress of the .bss section */
+} crt_context_t;
+
+extern crt_context_t g_crt_ctx;
 
 /* Patch refptrs in the PE's .rdata to point to our globals */
 #include "pe.h"

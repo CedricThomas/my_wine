@@ -36,9 +36,7 @@ extern int native_startup_lock;
 extern int native_startup_state;
 extern int dowildcard_val;
 extern int newmode_val;
-extern uint64_t g_image_base_ref;
-
-extern uint32_t g_bss_vaddr;
+extern crt_context_t g_crt_ctx;
 
 extern uint64_t dyn_tls_callback_stub;
 extern uint64_t mingw_excpt_handler_stub;

@@ -128,12 +128,12 @@ int main(int argc, char *argv[])
      * The offsets (0x018, 0x020) are relative to .bss base and are CRT-specific;
      * they correspond to the mingw-w64 CRT's envp/argv locations. */
     {
-        if (g_bss_vaddr != 0) {
-            uint8_t *bss_base = (uint8_t *)base + g_bss_vaddr;
+        if (g_crt_ctx.bss_vaddr != 0) {
+            uint8_t *bss_base = (uint8_t *)base + g_crt_ctx.bss_vaddr;
             *(uint64_t *)(bss_base + 0x020) = (uint64_t)(uintptr_t)guest_argv;  // argv
             *(uint64_t *)(bss_base + 0x018) = (uint64_t)(uintptr_t)guest_envp;  // envp
         } else {
-            fprintf(stderr, "WARNING: g_bss_vaddr not set, skipping .bss pre-seed\n");
+            fprintf(stderr, "WARNING: g_crt_ctx.bss_vaddr not set, skipping .bss pre-seed\n");
         }
     }
 

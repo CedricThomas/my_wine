@@ -25,10 +25,8 @@ int native_startup_lock = 0;
 int native_startup_state = 0;
 int dowildcard_val = 0;
 int newmode_val = 0;
-uint64_t g_image_base_ref = 0;
-
-/* .bss section VirtualAddress — set dynamically by patch_crt_refptrs */
-uint32_t g_bss_vaddr = 0;
+/* CRT context — image base and .bss VA */
+crt_context_t g_crt_ctx = { 0 };
 
 /*
  * Zero-valued stubs for two-level refptrs.

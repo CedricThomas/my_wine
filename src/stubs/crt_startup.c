@@ -72,9 +72,9 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
      * the symbol table, but they are linker-defined for the CRT startup layout.
      * The CRT reads argv from this location and does two-level indirection: mov (%r13),%rcx
      * If argv is NULL there, dereferencing 0 → SIGSEGV. */
-    uint64_t image_base = g_image_base_ref;
-    if (image_base && g_bss_vaddr != 0) {
-        char *bss = (char *)image_base + g_bss_vaddr;
+    uint64_t image_base = g_crt_ctx.image_base;
+    if (image_base && g_crt_ctx.bss_vaddr != 0) {
+        char *bss = (char *)image_base + g_crt_ctx.bss_vaddr;
         *(uint32_t *)(bss + 0x028) = 1;            // argc = 1
         *(uint64_t *)(bss + 0x020) = (uint64_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);  // argv
         *(uint64_t *)(bss + 0x018) = (uint64_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);  // envp
