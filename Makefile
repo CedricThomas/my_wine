@@ -30,7 +30,7 @@ my_wine: $(OBJS)
 
 # Explicit compile rules mapping subdirectory sources to build/ .o files
 $(BUILDDIR)/my_wine.o: src/main.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
 
 $(BUILDDIR)/pe_parser.o: src/pe_parser.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
