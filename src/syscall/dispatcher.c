@@ -56,6 +56,7 @@ static inline int is_valid_guest_ptr(uint64_t ptr, size_t min_size)
  */
 static inline uint64_t read_guest_stack(ucontext_t *ctx, int index)
 {
+    if (index < 0 || index > 15) return 0;
     uintptr_t rsp = (uintptr_t)ctx->uc_mcontext.gregs[REG_RSP];
 
     /* Validate RSP is in a reasonable user-space range */
@@ -113,10 +114,23 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
 
     case 0x07: /* NtQueryInformationProcess */
+    {
+        uint64_t h_buffer = arg3;
+        uint64_t h_ret_len = read_guest_stack(ctx, 1);
+        if (h_buffer != 0 && !is_valid_guest_ptr(h_buffer, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at buffer\n",
+                    (unsigned long)h_buffer);
+            return STATUS_ACCESS_VIOLATION;
+        }
+        if (h_ret_len != 0 && !is_valid_guest_ptr(h_ret_len, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at return_length\n",
+                    (unsigned long)h_ret_len);
+            return STATUS_ACCESS_VIOLATION;
+        }
         result = handler_NtQueryInformationProcess(
-            arg1, arg2, arg3, arg4,
-            read_guest_stack(ctx, 1));
+            arg1, arg2, h_buffer, arg4, h_ret_len);
         break;
+    }
 
     case 0x0F: /* NtClose */
         result = handler_NtClose(arg1);
@@ -188,12 +202,26 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     }
 
     case 0x24: /* NtGetContextThread */
+    {
+        if (arg2 != 0 && !is_valid_guest_ptr(arg2, sizeof(uint64_t))) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at context\n",
+                    (unsigned long)arg2);
+            return STATUS_ACCESS_VIOLATION;
+        }
         result = handler_NtGetContextThread(arg1, arg2);
         break;
+    }
 
     case 0x26: /* NtSetContextThread */
+    {
+        if (arg2 != 0 && !is_valid_guest_ptr(arg2, sizeof(uint64_t))) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at context\n",
+                    (unsigned long)arg2);
+            return STATUS_ACCESS_VIOLATION;
+        }
         result = handler_NtSetContextThread(arg1, arg2);
         break;
+    }
 
     case 0x28: /* NtMapViewOfSection */
     {
@@ -252,20 +280,48 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
 
     case 0x3C: /* NtReadFile */
+    {
+        uint64_t h_buffer = read_guest_stack(ctx, 1);
+        uint64_t h_bytes_read = read_guest_stack(ctx, 4);
+        if (h_buffer != 0 && !is_valid_guest_ptr(h_buffer, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at buffer\n",
+                    (unsigned long)h_buffer);
+            return STATUS_ACCESS_VIOLATION;
+        }
+        if (h_bytes_read != 0 && !is_valid_guest_ptr(h_bytes_read, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at bytes_read\n",
+                    (unsigned long)h_bytes_read);
+            return STATUS_ACCESS_VIOLATION;
+        }
         result = handler_NtReadFile(arg1, arg2, arg3, arg4,
-                                    read_guest_stack(ctx, 1),
+                                    h_buffer,
                                     read_guest_stack(ctx, 2),
                                     read_guest_stack(ctx, 3),
-                                    read_guest_stack(ctx, 4));
+                                    h_bytes_read);
         break;
+    }
 
     case 0x3D: /* NtWriteFile */
+    {
+        uint64_t h_buffer = read_guest_stack(ctx, 1);
+        uint64_t h_bytes_written = read_guest_stack(ctx, 4);
+        if (h_buffer != 0 && !is_valid_guest_ptr(h_buffer, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at buffer\n",
+                    (unsigned long)h_buffer);
+            return STATUS_ACCESS_VIOLATION;
+        }
+        if (h_bytes_written != 0 && !is_valid_guest_ptr(h_bytes_written, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at bytes_written\n",
+                    (unsigned long)h_bytes_written);
+            return STATUS_ACCESS_VIOLATION;
+        }
         result = handler_NtWriteFile(arg1, arg2, arg3, arg4,
-                                     read_guest_stack(ctx, 1),
+                                     h_buffer,
                                      read_guest_stack(ctx, 2),
                                      read_guest_stack(ctx, 3),
-                                     read_guest_stack(ctx, 4));
+                                     h_bytes_written);
         break;
+    }
 
     case 0x48: /* NtCreateEvent */
     {
@@ -356,6 +412,16 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
             }
             p_handle = (uint64_t *)(uintptr_t)arg1;
             h_handle = *p_handle;
+        }
+        if (arg3 != 0 && !is_valid_guest_ptr(arg3, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at object_attributes\n",
+                    (unsigned long)arg3);
+            return STATUS_ACCESS_VIOLATION;
+        }
+        if (arg4 != 0 && !is_valid_guest_ptr(arg4, 8)) {
+            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at io_status_block\n",
+                    (unsigned long)arg4);
+            return STATUS_ACCESS_VIOLATION;
         }
         result = handler_NtOpenFile(&h_handle, arg2, arg3, arg4,
                                     read_guest_stack(ctx, 1),

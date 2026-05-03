@@ -98,6 +98,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
         if (object_name_ptr != 0) {
             /* Read UNICODE_STRING (12 bytes) */
             uint16_t wcs_len = *(uint16_t *)(uintptr_t)object_name_ptr;
+            if (wcs_len > 16384) wcs_len = 16384; /* cap at 8192 wchar_t */
             const wchar_t *wcs = (const wchar_t *)(
                 (uintptr_t)object_name_ptr + 12
             );
