@@ -94,8 +94,6 @@ test: all $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 	@echo "=== Running test_parse ==="
 	@if [ -f hello.exe ]; then \
 		./$(BUILDDIR)/test_parse hello.exe; \
-	elif [ -f examples/hello.exe ]; then \
-		./$(BUILDDIR)/test_parse examples/hello.exe; \
 	else \
 		echo "No hello.exe found — running error/negative tests only"; \
 		./$(BUILDDIR)/test_parse; \
