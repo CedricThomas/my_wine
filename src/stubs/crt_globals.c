@@ -21,7 +21,7 @@ char _cmdline_storage[4096];
 char *_acmdln = _cmdline_storage;
 
 /* Static variables for additional CRT refptr patches */
-int native_startup_lock = 0;
+uint64_t native_startup_lock = 0;
 int native_startup_state = 0;
 int dowildcard_val = 0;
 int newmode_val = 0;

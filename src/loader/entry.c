@@ -20,6 +20,7 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
+#include <sys/time.h>
 #include <asm/unistd_64.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -198,6 +199,16 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
  * Set up the child process and jump to the PE entry point.
  * Called in the forked child; does not return.
  */
+static void wd_handler(int sig, siginfo_t *info, void *uc_ptr)
+{ (void)sig; (void)info;
+   ucontext_t *uc = (ucontext_t*)uc_ptr;
+   greg_t *r = uc->uc_mcontext.gregs;
+   char b[200]; int n = snprintf(b,sizeof(b),"WD:RIP=0x%lx RSP=0x%lx RAX=0x%lx RSI=0x%lx RBX=0x%lx RCX=0x%lx RDI=0x%lx R8=0x%lx R9=0x%lx R12=0x%lx\n",
+     (unsigned long)r[REG_RIP],(unsigned long)r[REG_RSP],(unsigned long)r[REG_RAX],
+     (unsigned long)r[REG_RSI],(unsigned long)r[REG_RBX],(unsigned long)r[REG_RCX],
+     (unsigned long)r[REG_RDI],(unsigned long)r[REG_R8],(unsigned long)r[REG_R9],
+     (unsigned long)r[REG_R12]); syscall(SYS_write,2,b,n); syscall(__NR_exit,0xFF); }
+
 static __attribute__((noreturn)) void setup_child_and_run(
         uint64_t entry_abs, void *stack_top, void *teb,
         char **guest_argv, char **guest_envp)
@@ -236,7 +247,7 @@ static __attribute__((noreturn)) void setup_child_and_run(
 
     generate_all_thunks();
     setup_sigsys_handler(handle_syscall);
-    /* setup_seccomp(); */
+    setup_seccomp();
 
     fprintf(stderr, "my_wine: jumping to entry 0x%lx via inline asm\n",
             (unsigned long)entry_abs);
@@ -290,6 +301,10 @@ static __attribute__((noreturn)) void setup_child_and_run(
     }
 
     /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup) */
+    /* Watchdog */{ struct sigaction w; memset(&w,0,sizeof(w));
+      w.sa_sigaction=wd_handler; w.sa_flags=SA_SIGINFO; sigemptyset(&w.sa_mask);
+      sigaction(SIGALRM,&w,NULL); struct itimerval t={.it_interval={0,0},.it_value={1,0}};
+      setitimer(ITIMER_REAL,&t,NULL); }
     {
         void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
         run_guest(entry, stack_top, NULL, guest_argv, guest_envp);

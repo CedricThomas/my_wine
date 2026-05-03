@@ -12,6 +12,7 @@
 #include "include/ntdll.h"
 #include "include/syscall/thunk_gen.h"
 #include "include/wine_abi.h"
+#include "include/abi_wrappers.h"
 #include <asm/unistd_64.h>
 
 
@@ -234,13 +235,16 @@ void *SetUnhandledExceptionFilter(void *callback)
 
 /* ── Sleep ──────────────────────────────────────────────────── */
 
+
 WINE_STUB
 void Sleep(uint32_t dwMilliseconds)
 {
     struct timespec ts;
     ts.tv_sec  = dwMilliseconds / 1000;
     ts.tv_nsec = (dwMilliseconds % 1000) * 1000000L;
-    nanosleep(&ts, NULL);
+    /* Call nanosleep syscall directly (avoids ABI mismatch with libc wrapper) */
+    long ret = syscall(__NR_nanosleep, &ts, NULL);
+    (void)ret;
 }
 
 /* ── TlsGetValue ───────────────────────────────────────────── */
@@ -280,7 +284,7 @@ int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint
     size_t total_size = offset + dwSize;
     size_t aligned_size = (total_size + page_size - 1) & ~(size_t)(page_size - 1);
 
-    if (mprotect(page_start, aligned_size, prot) != 0) {
+    if (sysv_mprotect(page_start, aligned_size, prot) != 0) {
         fprintf(stderr, "VP FAIL: page=%p sz=0x%zx prot=0x%x errno=%d\n", page_start, aligned_size, prot, errno);
         perror("VirtualProtect: mprotect");
         g_last_error = errno;

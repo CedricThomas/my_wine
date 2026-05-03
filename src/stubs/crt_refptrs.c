@@ -37,6 +37,7 @@ const refptr_mapping_t refptr_mappings[] = {
     { "__xi_a (dup)",               (void *)&xi_a_stub,                   0x0e0 },
     { "__xi_z",                     (void *)&xi_z_stub,                   0x0f0 },
     { "_commode",                   (void *)&_commode,                    0x100 },
+    { "__imp__acmdln",          (void *)&_acmdln,                   0x050 },
     { "_dowildcard",                (void *)&dowildcard_val,              0x110 },
     { "_fmode",                     (void *)&_fmode,                      0x120 },
     { "_newmode",                   (void *)&newmode_val,                 0x150 },

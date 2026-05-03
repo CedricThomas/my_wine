@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <signal.h>
 #include "msvcrt_priv.h"
+#include "include/abi_wrappers.h"
 
 /* ── _amsg_exit / _cexit (called from CRT startup) ────────── */
 
@@ -110,19 +111,19 @@ int wine_exit(int code)
 WINE_STUB_STATIC
 void *wine_malloc(size_t size)
 {
-    return __builtin_malloc(size);
+    return sysv_malloc(size);
 }
 
 WINE_STUB_STATIC
 void *wine_calloc(size_t nmemb, size_t size)
 {
-    return __builtin_calloc(nmemb, size);
+    return sysv_calloc(nmemb, size);
 }
 
 WINE_STUB_STATIC
 void wine_free(void *ptr)
 {
-    __builtin_free(ptr);
+    sysv_free(ptr);
 }
 
 WINE_STUB_STATIC

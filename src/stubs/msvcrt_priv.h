@@ -32,7 +32,7 @@ extern char **g_guest_envp;
 extern char _cmdline_storage[4096];
 extern char *_acmdln;
 
-extern int native_startup_lock;
+extern uint64_t native_startup_lock;
 extern int native_startup_state;
 extern int dowildcard_val;
 extern int newmode_val;
