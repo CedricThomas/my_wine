@@ -20,6 +20,9 @@ extern void *g_image_base;
 /* Set by teb_peb.c (setup_stack), read by main.c */
 extern void *g_stack_base;
 
+/* Set by teb_peb.c (setup_stack), read by entry.c for cleanup */
+extern size_t g_stack_size;
+
 /* ── Import resolver types ─────────────────────────────────── */
 
 typedef struct {

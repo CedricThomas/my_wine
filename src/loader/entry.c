@@ -277,6 +277,42 @@ static __attribute__((noreturn)) void setup_child_and_run(
 }
 
 /**
+ * cleanup_guest — unmap all guest resources (TEB, PEB, stack, thunk pages).
+ *
+ * Called after the child exits to reclaim mmap'd memory. Although the
+ * OS cleans everything when the parent exits too, this is done for
+ * correctness and to keep resource accounting clean.
+ *
+ * @param  teb        TEB pointer (NULL to skip TEB/PEB cleanup)
+ * @param  stack_base guest stack base (NULL to skip stack cleanup)
+ */
+static void cleanup_guest(void *teb, void *stack_base)
+{
+    if (teb) {
+        /* Unmap PEB first (it's separate from TEB, stored at teb+0x60) */
+        void *peb = *(void **)((char *)teb + 0x60);
+        if (peb) {
+            if (munmap(peb, 4096) != 0) {
+                perror("cleanup_guest: munmap PEB");
+            }
+        }
+        /* Unmap TEB */
+        if (munmap(teb, 4096) != 0) {
+            perror("cleanup_guest: munmap TEB");
+        }
+    }
+
+    if (stack_base && g_stack_size > 0) {
+        if (munmap(stack_base, g_stack_size) != 0) {
+            perror("cleanup_guest: munmap stack");
+        }
+    }
+
+    /* Unmap thunk pages (from thunk_gen.c via signal_handler) */
+    cleanup_thunk_pages();
+}
+
+/**
  * Fork and jump to the PE entry point.
  *
  * In the child process:
@@ -312,6 +348,9 @@ int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *t
 
     int status;
     waitpid(pid, &status, 0);
+
+    /* Clean up guest resources now that the child has exited */
+    cleanup_guest(teb, stack_base);
 
     if (WIFEXITED(status)) {
         int code = WEXITSTATUS(status);

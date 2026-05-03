@@ -19,6 +19,27 @@
 /* ── Guest stack reader ───────────────────────────────────────── */
 
 /*
+ * is_valid_guest_ptr — check if a guest-space pointer is in a reasonable
+ * range (image, stack, or heap). Prevents segfaults from garbage pointers.
+ *
+ * @ptr   the guest-space pointer value to validate
+ * @min_size  minimum number of bytes the caller intends to read through ptr
+ *
+ * @return 1 if the pointer passes all checks, 0 otherwise.
+ */
+static inline int is_valid_guest_ptr(uint64_t ptr, size_t min_size)
+{
+    if (ptr == 0) return 0;               /* NULL is explicitly handled */
+    if (ptr > 0xfffffffffffe0000UL)       /* must be in user-space       */
+        return 0;
+    /* Alignment check: offset must be at least sizeof(uint64_t) aligned
+     * so a uint64_t read/won't fault on most architectures.              */
+    if (ptr & 7) return 0;
+    (void)min_size; /* reserved for future range-checking against a known region */
+    return 1;
+}
+
+/*
  * read_guest_stack — read an argument from the guest stack.
  *
  * In the Windows x64 ABI, args 5+ are placed on the stack after the
@@ -31,11 +52,27 @@
  *   ...
  *
  * The guest stack is mmap'd into our address space, so we can
- * dereference it directly.
+ * dereference it directly. RSP is validated before dereference.
  */
 static inline uint64_t read_guest_stack(ucontext_t *ctx, int index)
 {
-    uint64_t *stack = (uint64_t *)(uintptr_t)ctx->uc_mcontext.gregs[REG_RSP];
+    uintptr_t rsp = (uintptr_t)ctx->uc_mcontext.gregs[REG_RSP];
+
+    /* Validate RSP is in a reasonable user-space range */
+    if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
+        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
+                (unsigned long)rsp);
+        return 0;
+    }
+
+    /* Additional guard: RSP must pass our guest-ptr validator */
+    if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
+        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
+                (unsigned long)rsp);
+        return 0;
+    }
+
+    uint64_t *stack = (uint64_t *)(uintptr_t)rsp;
     return stack[index];
 }
 
@@ -93,8 +130,24 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         uint64_t h_region_sz = arg4;
         uint64_t *p_base = NULL;
         uint64_t *p_region = NULL;
-        if (arg2 != 0) { p_base = (uint64_t *)(uintptr_t)arg2; h_base_addr = *p_base; }
-        if (arg4 != 0) { p_region = (uint64_t *)(uintptr_t)arg4; h_region_sz = *p_region; }
+        if (arg2 != 0) {
+            if (!is_valid_guest_ptr(arg2, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at base_address\n",
+                        (unsigned long)arg2);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_base = (uint64_t *)(uintptr_t)arg2;
+            h_base_addr = *p_base;
+        }
+        if (arg4 != 0) {
+            if (!is_valid_guest_ptr(arg4, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at region_size\n",
+                        (unsigned long)arg4);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_region = (uint64_t *)(uintptr_t)arg4;
+            h_region_sz = *p_region;
+        }
         result = handler_NtAllocateVirtualMemory(
             arg1, &h_base_addr, arg3, &h_region_sz,
             read_guest_stack(ctx, 1),
@@ -110,8 +163,24 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         uint64_t h_region_sz = arg3;
         uint64_t *p_base = NULL;
         uint64_t *p_region = NULL;
-        if (arg2 != 0) { p_base = (uint64_t *)(uintptr_t)arg2; h_base_addr = *p_base; }
-        if (arg3 != 0) { p_region = (uint64_t *)(uintptr_t)arg3; h_region_sz = *p_region; }
+        if (arg2 != 0) {
+            if (!is_valid_guest_ptr(arg2, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at base_address\n",
+                        (unsigned long)arg2);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_base = (uint64_t *)(uintptr_t)arg2;
+            h_base_addr = *p_base;
+        }
+        if (arg3 != 0) {
+            if (!is_valid_guest_ptr(arg3, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at region_size\n",
+                        (unsigned long)arg3);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_region = (uint64_t *)(uintptr_t)arg3;
+            h_region_sz = *p_region;
+        }
         result = handler_NtFreeVirtualMemory(arg1, &h_base_addr, &h_region_sz, arg4);
         if (p_base != NULL)    *p_base = h_base_addr;
         if (p_region != NULL) *p_region = h_region_sz;
@@ -134,9 +203,33 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         uint64_t *p_base = NULL;
         uint64_t *p_offset = NULL;
         uint64_t *p_vsz = NULL;
-        if (arg3 != 0) { p_base = (uint64_t *)(uintptr_t)arg3; h_base_addr = *p_base; }
-        if (h_section_off != 0) { p_offset = (uint64_t *)(uintptr_t)read_guest_stack(ctx, 1); h_section_off = *p_offset; }
-        if (h_view_sz != 0) { p_vsz = (uint64_t *)(uintptr_t)read_guest_stack(ctx, 2); h_view_sz = *p_vsz; }
+        if (arg3 != 0) {
+            if (!is_valid_guest_ptr(arg3, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at base_address\n",
+                        (unsigned long)arg3);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_base = (uint64_t *)(uintptr_t)arg3;
+            h_base_addr = *p_base;
+        }
+        if (h_section_off != 0) {
+            if (!is_valid_guest_ptr(h_section_off, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at section_offset\n",
+                        (unsigned long)h_section_off);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_offset = (uint64_t *)(uintptr_t)h_section_off;
+            h_section_off = *p_offset;
+        }
+        if (h_view_sz != 0) {
+            if (!is_valid_guest_ptr(h_view_sz, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at view_size\n",
+                        (unsigned long)h_view_sz);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_vsz = (uint64_t *)(uintptr_t)h_view_sz;
+            h_view_sz = *p_vsz;
+        }
         result = handler_NtMapViewOfSection(
             arg1, arg2, &h_base_addr, arg4,
             read_guest_stack(ctx, 1),
@@ -178,7 +271,15 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     {
         uint64_t h_handle = arg1;
         uint64_t *p_handle = NULL;
-        if (arg1 != 0) { p_handle = (uint64_t *)(uintptr_t)arg1; h_handle = *p_handle; }
+        if (arg1 != 0) {
+            if (!is_valid_guest_ptr(arg1, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at event_handle\n",
+                        (unsigned long)arg1);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_handle = (uint64_t *)(uintptr_t)arg1;
+            h_handle = *p_handle;
+        }
         result = handler_NtCreateEvent(&h_handle, arg2, arg3, arg4,
                                        read_guest_stack(ctx, 1));
         if (p_handle != NULL) *p_handle = h_handle;
@@ -191,8 +292,24 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         uint64_t h_max_sz = arg4;
         uint64_t *p_handle = NULL;
         uint64_t *p_max = NULL;
-        if (arg1 != 0) { p_handle = (uint64_t *)(uintptr_t)arg1; h_handle = *p_handle; }
-        if (arg4 != 0) { p_max = (uint64_t *)(uintptr_t)arg4; h_max_sz = *p_max; }
+        if (arg1 != 0) {
+            if (!is_valid_guest_ptr(arg1, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at section_handle\n",
+                        (unsigned long)arg1);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_handle = (uint64_t *)(uintptr_t)arg1;
+            h_handle = *p_handle;
+        }
+        if (arg4 != 0) {
+            if (!is_valid_guest_ptr(arg4, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at maximum_size\n",
+                        (unsigned long)arg4);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_max = (uint64_t *)(uintptr_t)arg4;
+            h_max_sz = *p_max;
+        }
         result = handler_NtCreateSection(&h_handle, arg2, arg3, &h_max_sz,
                                          read_guest_stack(ctx, 1),
                                          read_guest_stack(ctx, 2),
@@ -206,7 +323,15 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     {
         uint64_t h_handle = arg1;
         uint64_t *p_handle = NULL;
-        if (arg1 != 0) { p_handle = (uint64_t *)(uintptr_t)arg1; h_handle = *p_handle; }
+        if (arg1 != 0) {
+            if (!is_valid_guest_ptr(arg1, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at thread_handle\n",
+                        (unsigned long)arg1);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_handle = (uint64_t *)(uintptr_t)arg1;
+            h_handle = *p_handle;
+        }
         result = handler_NtCreateThreadEx(&h_handle, arg2, arg3, arg4,
                                           read_guest_stack(ctx, 1),
                                           read_guest_stack(ctx, 2),
@@ -223,7 +348,15 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     {
         uint64_t h_handle = arg1;
         uint64_t *p_handle = NULL;
-        if (arg1 != 0) { p_handle = (uint64_t *)(uintptr_t)arg1; h_handle = *p_handle; }
+        if (arg1 != 0) {
+            if (!is_valid_guest_ptr(arg1, 8)) {
+                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at file_handle\n",
+                        (unsigned long)arg1);
+                return STATUS_ACCESS_VIOLATION;
+            }
+            p_handle = (uint64_t *)(uintptr_t)arg1;
+            h_handle = *p_handle;
+        }
         result = handler_NtOpenFile(&h_handle, arg2, arg3, arg4,
                                     read_guest_stack(ctx, 1),
                                     read_guest_stack(ctx, 2));

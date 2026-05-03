@@ -20,6 +20,7 @@
 #include "loader_priv.h"
 
 void *g_stack_base = NULL;
+size_t g_stack_size = 0;
 
 /**
  * Set up the TEB (Thread Environment Block) and PEB (Process Environment Block).
@@ -135,5 +136,6 @@ void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
     /* Store stack_base at a known location for later use */
     *(void **)((uintptr_t)stack_top - 8) = stack_base;
     g_stack_base = stack_base;
+    g_stack_size = commit;
     return (void *)stack_top;
 }

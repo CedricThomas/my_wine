@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <signal.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/prctl.h>
 #include <seccomp.h>
@@ -12,6 +13,8 @@
 #include <linux/filter.h>
 
 #include "include/syscall/signal_handler.h"
+
+#define THUNK_PAGE 4096  /* from thunk_gen.c: each thunk occupies one page */
 
 /* ------------------------------------------------------------------ */
 /*  Registered thunk addresses (dynamic array)                        */
@@ -109,6 +112,27 @@ int setup_sigsys_handler(dispatcher_func_t dispatcher)
     }
 
     return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  cleanup_thunk_pages                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * cleanup_thunk_pages — unmap all registered thunk pages.
+ *
+ * Called after the guest child exits (in the parent after waitpid)
+ * to reclaim the mmap'd memory used for syscall thunks.
+ */
+void cleanup_thunk_pages(void)
+{
+    for (int i = 0; i < thunk_count; i++) {
+        if (thunk_addrs[i] != NULL) {
+            munmap(thunk_addrs[i], THUNK_PAGE);
+            thunk_addrs[i] = NULL;
+        }
+    }
+    thunk_count = 0;
 }
 
 /* ------------------------------------------------------------------ */
