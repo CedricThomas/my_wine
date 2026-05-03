@@ -265,6 +265,16 @@ static uint64_t find_symbol_rva_from_file(const char *file_path,
                     matched = 1;
                 }
             }
+            if (!matched) {
+                const char *prefix2 = ".refptr.";
+                size_t plen2 = strlen(prefix2);
+                if (sym_name_len > plen2 &&
+                    strncmp(sym_name, prefix2, plen2) == 0 &&
+                    strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0 &&
+                    name[sym_name_len - plen2] == '\0') {
+                    matched = 1;
+                }
+            }
 
             if (matched) {
                 int32_t section_num = sym->SectionNumber;
