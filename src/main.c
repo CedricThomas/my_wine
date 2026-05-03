@@ -666,8 +666,42 @@ static int seh_crash_handler(void *exception_record, void *establisher_frame,
 static void run_guest(void (*entry)(void), void *stack_top, void *peb);
 static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 {
-    (void)info;
-    (void)ucontext;
+    const char *sig_name = "UNKNOWN";
+    if (sig == SIGSEGV) sig_name = "SIGSEGV";
+    else if (sig == SIGILL) sig_name = "SIGILL";
+    else if (sig == SIGABRT) sig_name = "SIGABRT";
+    else if (sig == SIGFPE) sig_name = "SIGFPE";
+    else if (sig == SIGBUS) sig_name = "SIGBUS";
+    else if (sig == SIGTRAP) sig_name = "SIGTRAP";
+
+    struct sigcontext *sc = (struct sigcontext *)ucontext;
+    if (sc) {
+        char hex_buf[128];
+        int hlen;
+
+        const char *hdr = "CRASH: ";
+        syscall(SYS_write, 2, hdr, 7);
+        syscall(SYS_write, 2, sig_name, strlen(sig_name));
+
+        hlen = snprintf(hex_buf, sizeof(hex_buf), " RIP=0x%lx RSP=0x%lx RFLAGS=0x%lx\n",
+                        (unsigned long)sc->rip, (unsigned long)sc->rsp, (unsigned long)sc->eflags);
+        syscall(SYS_write, 2, hex_buf, hlen);
+
+        hlen = snprintf(hex_buf, sizeof(hex_buf), "  RAX=0x%lx RBX=0x%lx RCX=0x%lx RDX=0x%lx\n",
+                        (unsigned long)sc->rax, (unsigned long)sc->rbx,
+                        (unsigned long)sc->rcx, (unsigned long)sc->rdx);
+        syscall(SYS_write, 2, hex_buf, hlen);
+
+        hlen = snprintf(hex_buf, sizeof(hex_buf), "  RSI=0x%lx RDI=0x%lx RBP=0x%lx R12=0x%lx\n",
+                        (unsigned long)sc->rsi, (unsigned long)sc->rdi,
+                        (unsigned long)sc->rbp, (unsigned long)sc->r12);
+        int hlen2 = snprintf(hex_buf + hlen, sizeof(hex_buf) - hlen,
+                        "  R13=0x%lx R14=0x%lx R15=0x%lx\n",
+                        (unsigned long)sc->r13, (unsigned long)sc->r14,
+                        (unsigned long)sc->r15);
+        syscall(SYS_write, 2, hex_buf, hlen + hlen2);
+    }
+
     _exit(139);
 }
 

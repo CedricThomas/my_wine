@@ -11,6 +11,22 @@
 #include "include/kernel32.h"
 #include "include/ntdll.h"
 #include "include/syscall/thunk_gen.h"
+#include <asm/unistd_64.h>
+
+/* Debug: check stack alignment at critical function entry */
+#define ASSERT_STACK_ALIGNED(func_name) do { \
+    uintptr_t _sp; \
+    __asm__ volatile("mov %%rsp, %0" : "=r"(_sp)); \
+    if (_sp % 16 != 0) { \
+        const char *msg = "ASSERT: stack not 16-byte aligned at entry to "; \
+        syscall(__NR_write, 2, msg, sizeof(msg)-1); \
+        syscall(__NR_write, 2, func_name, strlen(func_name)); \
+        char hex_buf[20]; \
+        int hlen = snprintf(hex_buf, sizeof(hex_buf), " rsp=0x%lx (mod16=%ld)\n", \
+                           (unsigned long)_sp, (long)(_sp % 16)); \
+        syscall(__NR_write, 2, hex_buf, hlen); \
+    } \
+} while(0)
 
 /*
  * Direct handler declarations for kernel32 stubs.
@@ -32,6 +48,7 @@
 __attribute__((ms_abi))
 void *GetStdHandle(int nStdHandle)
 {
+    ASSERT_STACK_ALIGNED("GetStdHandle");
     switch (nStdHandle) {
     case STD_INPUT_HANDLE:  return (void *)(uintptr_t)0x7FFFFFFFUL;
     case STD_OUTPUT_HANDLE: return (void *)(uintptr_t)0x7FFFFFFEUL;
@@ -46,6 +63,7 @@ __attribute__((ms_abi))
 int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
               uint32_t *lpNumberOfBytesWritten, void *lpOverlapped)
 {
+    ASSERT_STACK_ALIGNED("WriteFile");
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x3D);
     if (thunk == NULL) {
@@ -84,6 +102,7 @@ __attribute__((ms_abi))
 int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
              uint32_t *lpNumberOfBytesRead, void *lpOverlapped)
 {
+    ASSERT_STACK_ALIGNED("ReadFile");
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x3C);
     if (thunk == NULL) {
@@ -121,6 +140,7 @@ int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
 __attribute__((ms_abi))
 void ExitProcess(uint32_t uExitCode)
 {
+    ASSERT_STACK_ALIGNED("ExitProcess");
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(0x2A);
     if (thunk == NULL) {
