@@ -290,101 +290,118 @@ static void *g_image_base = NULL;
 /* Maps function names to our implementations */
 
 typedef struct {
+    const char *dll_name;
     const char *name;
     void *address;
 } import_entry_t;
 
-/* Name→address table for NT and kernel32 functions */
+/* Name→address table for NT, kernel32 and msvcrt functions */
 static import_entry_t import_table[] = {
     /* ntdll functions (via syscall thunks) */
-    { "NtWriteFile", (void*)handler_NtWriteFile },
-    { "NtReadFile", (void*)handler_NtReadFile },
-    { "NtClose", (void*)handler_NtClose },
-    { "NtTerminateProcess", (void*)handler_NtTerminateProcess },
-    { "NtCallbackReturn", (void*)handler_NtCallbackReturn },
-    { "NtQueryInformationProcess", (void*)handler_NtQueryInformationProcess },
-    { "NtAllocateVirtualMemory", (void*)handler_NtAllocateVirtualMemory },
-    { "NtFreeVirtualMemory", (void*)handler_NtFreeVirtualMemory },
-    { "NtCreateSection", (void*)handler_NtCreateSection },
-    { "NtMapViewOfSection", (void*)handler_NtMapViewOfSection },
-    { "NtUnmapViewOfSection", (void*)handler_NtUnmapViewOfSection },
-    { "NtCreateEvent", (void*)handler_NtCreateEvent },
-    { "NtCreateThreadEx", (void*)handler_NtCreateThreadEx },
-    { "NtOpenFile", (void*)handler_NtOpenFile },
-    { "NtGetContextThread", (void*)handler_NtGetContextThread },
-    { "NtSetContextThread", (void*)handler_NtSetContextThread },
+    { "ntdll.dll", "NtWriteFile", (void*)handler_NtWriteFile },
+    { "ntdll.dll", "NtReadFile", (void*)handler_NtReadFile },
+    { "ntdll.dll", "NtClose", (void*)handler_NtClose },
+    { "ntdll.dll", "NtTerminateProcess", (void*)handler_NtTerminateProcess },
+    { "ntdll.dll", "NtCallbackReturn", (void*)handler_NtCallbackReturn },
+    { "ntdll.dll", "NtQueryInformationProcess", (void*)handler_NtQueryInformationProcess },
+    { "ntdll.dll", "NtAllocateVirtualMemory", (void*)handler_NtAllocateVirtualMemory },
+    { "ntdll.dll", "NtFreeVirtualMemory", (void*)handler_NtFreeVirtualMemory },
+    { "ntdll.dll", "NtCreateSection", (void*)handler_NtCreateSection },
+    { "ntdll.dll", "NtMapViewOfSection", (void*)handler_NtMapViewOfSection },
+    { "ntdll.dll", "NtUnmapViewOfSection", (void*)handler_NtUnmapViewOfSection },
+    { "ntdll.dll", "NtCreateEvent", (void*)handler_NtCreateEvent },
+    { "ntdll.dll", "NtCreateThreadEx", (void*)handler_NtCreateThreadEx },
+    { "ntdll.dll", "NtOpenFile", (void*)handler_NtOpenFile },
+    { "ntdll.dll", "NtGetContextThread", (void*)handler_NtGetContextThread },
+    { "ntdll.dll", "NtSetContextThread", (void*)handler_NtSetContextThread },
     /* kernel32 functions */
-    { "GetStdHandle", (void*)GetStdHandle },
-    { "WriteFile", (void*)WriteFile },
-    { "ReadFile", (void*)ReadFile },
-    { "ExitProcess", (void*)ExitProcess },
-    { "GetProcAddress", (void*)GetProcAddress },
-    { "LoadLibraryA", (void*)LoadLibraryA },
-    { "GetModuleHandleA", (void*)GetModuleHandleA },
-    { "lstrlenA", (void*)lstrlenA },
-    { "DeleteCriticalSection", (void*)DeleteCriticalSection },
-    { "EnterCriticalSection", (void*)EnterCriticalSection },
-    { "GetLastError", (void*)GetLastError },
-    { "GetStartupInfoA", (void*)GetStartupInfoA },
-    { "InitializeCriticalSection", (void*)InitializeCriticalSection },
-    { "LeaveCriticalSection", (void*)LeaveCriticalSection },
-    { "SetUnhandledExceptionFilter", (void*)SetUnhandledExceptionFilter },
-    { "Sleep", (void*)Sleep },
-    { "TlsGetValue", (void*)TlsGetValue },
-    { "VirtualProtect", (void*)VirtualProtect },
-    { "VirtualQuery", (void*)VirtualQuery },
-    { "__C_specific_handler", (void*)__C_specific_handler },
-    /* msvcrt functions (non-const entries, initialized at runtime) */
-    { "__getmainargs", (void*)__getmainargs },
-    { "__initenv", (void*)__initenv },
-    { "__iob_func", (void*)__iob_func },
-    { "__lconv_init", (void*)__lconv_init },
-    { "__set_app_type", (void*)__set_app_type },
-    { "__setusermatherr", (void*)__setusermatherr },
-    { "_acmdln", (void*)&_acmdln },
-    { "_amsg_exit", (void*)_amsg_exit },
-    { "_cexit", (void*)_cexit },
-    { "_commode", (void*)&_commode },
-    { "_fmode", (void*)&_fmode },
-    { "_initterm", (void*)_initterm },
-    { "_onexit", (void*)_onexit },
+    { "kernel32.dll", "GetStdHandle", (void*)GetStdHandle },
+    { "kernel32.dll", "WriteFile", (void*)WriteFile },
+    { "kernel32.dll", "ReadFile", (void*)ReadFile },
+    { "kernel32.dll", "ExitProcess", (void*)ExitProcess },
+    { "kernel32.dll", "GetProcAddress", (void*)GetProcAddress },
+    { "kernel32.dll", "LoadLibraryA", (void*)LoadLibraryA },
+    { "kernel32.dll", "GetModuleHandleA", (void*)GetModuleHandleA },
+    { "kernel32.dll", "lstrlenA", (void*)lstrlenA },
+    { "kernel32.dll", "DeleteCriticalSection", (void*)DeleteCriticalSection },
+    { "kernel32.dll", "EnterCriticalSection", (void*)EnterCriticalSection },
+    { "kernel32.dll", "GetLastError", (void*)GetLastError },
+    { "kernel32.dll", "GetStartupInfoA", (void*)GetStartupInfoA },
+    { "kernel32.dll", "InitializeCriticalSection", (void*)InitializeCriticalSection },
+    { "kernel32.dll", "LeaveCriticalSection", (void*)LeaveCriticalSection },
+    { "kernel32.dll", "SetUnhandledExceptionFilter", (void*)SetUnhandledExceptionFilter },
+    { "kernel32.dll", "Sleep", (void*)Sleep },
+    { "kernel32.dll", "TlsGetValue", (void*)TlsGetValue },
+    { "kernel32.dll", "VirtualProtect", (void*)VirtualProtect },
+    { "kernel32.dll", "VirtualQuery", (void*)VirtualQuery },
+    { "ntdll.dll", "__C_specific_handler", (void*)__C_specific_handler },
+    /* msvcrt functions (statically known) */
+    { "msvcrt.dll", "__getmainargs", (void*)__getmainargs },
+    { "msvcrt.dll", "__initenv", (void*)__initenv },
+    { "msvcrt.dll", "__iob_func", (void*)__iob_func },
+    { "msvcrt.dll", "__lconv_init", (void*)__lconv_init },
+    { "msvcrt.dll", "__set_app_type", (void*)__set_app_type },
+    { "msvcrt.dll", "__setusermatherr", (void*)__setusermatherr },
+    { "msvcrt.dll", "_acmdln", (void*)&_acmdln },
+    { "msvcrt.dll", "_amsg_exit", (void*)_amsg_exit },
+    { "msvcrt.dll", "_cexit", (void*)_cexit },
+    { "msvcrt.dll", "_commode", (void*)&_commode },
+    { "msvcrt.dll", "_fmode", (void*)&_fmode },
+    { "msvcrt.dll", "_initterm", (void*)_initterm },
+    { "msvcrt.dll", "_onexit", (void*)_onexit },
     /* Dynamic entries - filled by init_msvcrt_imports() */
-    { "abort", NULL },
-    { "calloc", NULL },
-    { "exit", NULL },
-    { "fprintf", NULL },
-    { "free", NULL },
-    { "fwrite", NULL },
-    { "malloc", NULL },
-    { "memcpy", NULL },
-    { "signal", NULL },
-    { "strlen", NULL },
-    { "strncmp", NULL },
-    { "vfprintf", NULL },
-    { NULL, NULL }
+    { "msvcrt.dll", "abort", NULL },
+    { "msvcrt.dll", "calloc", NULL },
+    { "msvcrt.dll", "exit", NULL },
+    { "msvcrt.dll", "fprintf", NULL },
+    { "msvcrt.dll", "free", NULL },
+    { "msvcrt.dll", "fwrite", NULL },
+    { "msvcrt.dll", "malloc", NULL },
+    { "msvcrt.dll", "memcpy", NULL },
+    { "msvcrt.dll", "signal", NULL },
+    { "msvcrt.dll", "strlen", NULL },
+    { "msvcrt.dll", "strncmp", NULL },
+    { "msvcrt.dll", "vfprintf", NULL },
+    { NULL, NULL, NULL }
 };
+
+static void set_import(const char *name, void *address)
+{
+    for (int i = 0; import_table[i].name != NULL; i++) {
+        if (strcmp(import_table[i].name, name) == 0) {
+            import_table[i].address = address;
+            return;
+        }
+    }
+    fprintf(stderr, "ERROR: set_import: symbol '%s' not found in import table\n", name);
+}
 
 static void init_msvcrt_imports(void)
 {
-    import_table[49].address = __msvcrt_abort;    /* abort */
-    import_table[50].address = __msvcrt_calloc;   /* calloc */
-    import_table[51].address = __msvcrt_exit;     /* exit */
-    import_table[52].address = __msvcrt_fprintf;  /* fprintf */
-    import_table[53].address = __msvcrt_free;     /* free */
-    import_table[54].address = __msvcrt_fwrite;   /* fwrite */
-    import_table[55].address = __msvcrt_malloc;   /* malloc */
-    import_table[56].address = __msvcrt_memcpy;   /* memcpy */
-    import_table[57].address = __msvcrt_signal;   /* signal */
-    import_table[58].address = __msvcrt_strlen;   /* strlen */
-    import_table[59].address = __msvcrt_strncmp;  /* strncmp */
-    import_table[60].address = __msvcrt_vfprintf; /* vfprintf */
+    set_import("abort",    __msvcrt_abort);
+    set_import("calloc",   __msvcrt_calloc);
+    set_import("exit",     __msvcrt_exit);
+    set_import("fprintf",  __msvcrt_fprintf);
+    set_import("free",     __msvcrt_free);
+    set_import("fwrite",   __msvcrt_fwrite);
+    set_import("malloc",   __msvcrt_malloc);
+    set_import("memcpy",   __msvcrt_memcpy);
+    set_import("signal",   __msvcrt_signal);
+    set_import("strlen",   __msvcrt_strlen);
+    set_import("strncmp",  __msvcrt_strncmp);
+    set_import("vfprintf", __msvcrt_vfprintf);
 }
 
 static void *resolve_import(const char *dll_name, const char *func_name)
 {
-    (void)dll_name; // We don't distinguish between DLLs for now
     for (int i = 0; import_table[i].name != NULL; i++) {
         if (strcmp(import_table[i].name, func_name) == 0) {
+            /* Verify DLL matches (prevent cross-DLL name collisions) */
+            if (import_table[i].dll_name && strcmp(import_table[i].dll_name, dll_name) != 0) {
+                fprintf(stderr, "  WARNING: %s found in %s but requested from %s\n",
+                        func_name, import_table[i].dll_name, dll_name);
+                continue;  /* Skip mismatched DLL */
+            }
             return import_table[i].address;
         }
     }
