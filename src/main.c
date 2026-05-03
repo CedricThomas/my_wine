@@ -68,7 +68,7 @@ static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
 __attribute__((ms_abi))
 static int seh_crash_handler(void *exception_record, void *establisher_frame,
                               void *context_record, void *dispatcher_context);
-static void run_guest(void (*entry)(void), void *stack_top, void *peb,
+void run_guest(void (*entry)(void), void *stack_top, void *peb,
                        char **guest_argv, char **guest_envp);
 static void crash_handler(int sig, siginfo_t *info, void *ucontext);
 
@@ -612,31 +612,9 @@ static void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
     return (void *)stack_top;
 }
 
-/* ── Guest entry trampoline ─────────────────────────────────── */
-
-typedef void (*entry_point_fn)(void);
-
-__attribute__((noinline, noreturn))
-static void run_guest(entry_point_fn entry, void *stack_top, void *peb,
-                       char **guest_argv, char **guest_envp)
-{
-    (void)peb;
-    __asm__ volatile(
-        "mov %0, %%rsp\n"
-        "mov %1, %%rcx\n"
-        "mov %2, %%rdx\n"
-        "mov %3, %%r8\n"
-        "call *%4\n"
-        :
-        : "r"(stack_top),
-          "r"((uintptr_t)1),
-          "r"((uintptr_t)guest_argv),
-          "r"((uintptr_t)guest_envp),
-          "r"(entry)
-        : "memory", "cc"
-    );
-    _exit(1);
-}
+/* ── Guest entry trampoline (implemented in run_guest.S) ──── */
+extern void run_guest(void (*entry)(void), void *stack_top, void *peb,
+                       char **guest_argv, char **guest_envp) __attribute__((noreturn));
 
 /* ── Crash handler ──────────────────────────────────────────── */
 

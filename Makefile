@@ -5,7 +5,8 @@ LDFLAGS = -lrt -lpthread -lseccomp
 BUILDDIR = build
 OBJS = $(BUILDDIR)/my_wine.o $(BUILDDIR)/pe_parser.o $(BUILDDIR)/thunk_gen.o \
        $(BUILDDIR)/signal_handler.o $(BUILDDIR)/dispatcher.o \
-       $(BUILDDIR)/ntdll.o $(BUILDDIR)/kernel32.o $(BUILDDIR)/msvcrt.o
+       $(BUILDDIR)/ntdll.o $(BUILDDIR)/kernel32.o $(BUILDDIR)/msvcrt.o \
+       $(BUILDDIR)/run_guest.o
 
 all: my_wine
 
@@ -54,6 +55,9 @@ $(BUILDDIR)/kernel32.o: src/stubs/kernel32.c | $(BUILDDIR)
 
 $(BUILDDIR)/msvcrt.o: src/stubs/msvcrt.c | $(BUILDDIR)
 	$(CC) $(STUB_CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/run_guest.o: src/run_guest.S | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Header dependencies (for recompilation when headers change)
 $(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
