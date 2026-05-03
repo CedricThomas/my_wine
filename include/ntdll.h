@@ -25,6 +25,15 @@ typedef uint64_t        BOOL;
 #define PAGE_EXECUTE_READWRITE 0x40
 #define PAGE_EXECUTE_WRITECOPY 0x80
 
+// --- Memory allocation constants ---
+
+#define MEM_COMMIT       0x1000
+#define MEM_RESERVE      0x2000
+#define MEM_DECOMMIT     0x4000
+#define MEM_RELEASE      0x8000
+#define MEM_PRIVATE      0x20000
+#define MEM_MAPPED       0x40000
+
 // --- NT Status Codes ---
 
 #define STATUS_SUCCESS              0x00000000

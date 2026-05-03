@@ -260,11 +260,11 @@ int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint
     fprintf(stderr, "VP: addr=%p sz=0x%x prot=%u\n", lpAddress, dwSize, flNewProtect);
     int prot = 0;
     switch ((int)flNewProtect) {
-    case  2: prot = PROT_READ; break;                    /* PAGE_READONLY */
-    case  4: prot = PROT_READ | PROT_WRITE; break;      /* PAGE_READWRITE */
-    case 16: prot = PROT_EXEC; break;                    /* PAGE_EXECUTE */
-    case 32: prot = PROT_READ | PROT_EXEC; break;        /* PAGE_EXECUTE_READ */
-    case 64: prot = PROT_READ | PROT_WRITE | PROT_EXEC; break; /* PAGE_EXECUTE_READWRITE */
+    case PAGE_READONLY:        prot = PROT_READ; break;
+    case PAGE_READWRITE:       prot = PROT_READ | PROT_WRITE; break;
+    case PAGE_EXECUTE:         prot = PROT_EXEC; break;
+    case PAGE_EXECUTE_READ:    prot = PROT_READ | PROT_EXEC; break;
+    case PAGE_EXECUTE_READWRITE: prot = PROT_READ | PROT_WRITE | PROT_EXEC; break;
     default: prot = PROT_READ | PROT_WRITE; break;
     }
 
@@ -320,11 +320,11 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
     MEMORY_BASIC_INFORMATION *mbi = (MEMORY_BASIC_INFORMATION *)lpBuffer;
     mbi->BaseAddress = lpAddress;
     mbi->AllocationBase = lpAddress;
-    mbi->AllocationProtect = 4; /* PAGE_READWRITE */
+    mbi->AllocationProtect = PAGE_READWRITE;
     mbi->RegionSize = 4096;
-    mbi->State = 0x2000; /* MEM_COMMIT */
-    mbi->Protect = 4; /* PAGE_READWRITE */
-    mbi->Type = 0x20000; /* MEM_PRIVATE */
+    mbi->State = MEM_COMMIT;
+    mbi->Protect = PAGE_READWRITE;
+    mbi->Type = MEM_PRIVATE;
 
     return sizeof(MEMORY_BASIC_INFORMATION);
 }
