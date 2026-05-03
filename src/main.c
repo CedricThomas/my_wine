@@ -199,6 +199,18 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
             IMAGE_SECTION_HEADER *sections =
                 (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
 
+            /* Compute .text section end for bounds checking */
+            uint64_t text_end = 0;
+            for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+                if (memcmp(sections[i].Name, ".text", 5) == 0) {
+                    text_end = sections[i].VirtualAddress + sections[i].Misc.VirtualSize;
+                    if (text_end < sections[i].VirtualAddress ||
+                        sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
+                        text_end = sections[i].VirtualAddress + sections[i].SizeOfRawData;
+                    break;
+                }
+            }
+
             void *thunk = find_text_thunk(base, nt, sections,
                                           (void *)__iob_func);
             if (thunk == NULL) {
@@ -209,29 +221,36 @@ static int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, 
                 uintptr_t page_addr = thunk_abs & ~(uintptr_t)4095;
                 void *page = (void *)page_addr;
 
-                /* Validate: first two bytes should be ff 25 (jmp *disp32(%rip)) or 48 bb (movabs) */
+                /* Validate: first two bytes should be ff 25 (jmp *disp32(%rip)) */
                 bool is_jmp_thunk = (code[0] == 0xff && code[1] == 0x25);
                 if (!is_jmp_thunk) {
                     fprintf(stderr, "WARNING: __acrt_iob_func at 0x%lx has unexpected opcode 0x%02x 0x%02x, skipping patch\n",
                             thunk_abs, code[0], code[1]);
                 } else {
-                    if (mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC) == 0) {
-                        /* movabs $imm64, %rax */
-                        code[0] = 0x48;                /* REX.W */
-                        code[1] = 0xb8;                /* movabs rax, imm64 */
-                        *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
-                        /* ret */
-                        code[10] = 0xc3;
-                        /* NOP padding to fill 15 bytes */
-                        for (int k = 11; k < 15; k++) code[k] = 0x90;
-
-                        if (mprotect(page, 4096, PROT_READ|PROT_EXEC) != 0) {
-                            perror("mprotect restore __acrt_iob_func");
-                        }
-                        fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",
-                                thunk_abs);
+                    /* Bounds check: ensure 15-byte patch won't exceed .text section */
+                    uint64_t thunk_off = (uint64_t)thunk - (uint64_t)base;
+                    if (text_end == 0 || thunk_off + 15 > text_end) {
+                        fprintf(stderr, "WARNING: __acrt_iob_func thunk at 0x%lx is too close to .text end (need 15 bytes, have %ld), skipping patch\n",
+                                (unsigned long)thunk_off, (long)(text_end > thunk_off ? text_end - thunk_off : 0));
                     } else {
-                        perror("mprotect __acrt_iob_func");
+                        if (mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC) == 0) {
+                            /* movabs $imm64, %rax */
+                            code[0] = 0x48;                /* REX.W */
+                            code[1] = 0xb8;                /* movabs rax, imm64 */
+                            *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
+                            /* ret */
+                            code[10] = 0xc3;
+                            /* NOP padding to fill 15 bytes */
+                            for (int k = 11; k < 15; k++) code[k] = 0x90;
+
+                            if (mprotect(page, 4096, PROT_READ|PROT_EXEC) != 0) {
+                                perror("mprotect restore __acrt_iob_func");
+                            }
+                            fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",
+                                    thunk_abs);
+                        } else {
+                            perror("mprotect __acrt_iob_func");
+                        }
                     }
                 }
             }
