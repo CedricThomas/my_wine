@@ -87,6 +87,11 @@ $(BUILDDIR)/entry.o: src/loader/entry.c | $(BUILDDIR)
 	@echo "  CC $<"
 	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
 
+# src/loader/gs_base.c → CFLAGS + -mno-red-zone
+$(BUILDDIR)/gs_base.o: src/loader/gs_base.c | $(BUILDDIR)
+	@echo "  CC $<"
+	@$(CC) $(CFLAGS) -mno-red-zone -c $< -o $@
+
 # ── Test targets ────────────────────────────────────────────────
 # Test binaries (native ELF) + the hello_world sample .exe they exercise.
 
@@ -126,7 +131,8 @@ $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
+	$(BUILDDIR)/gs_base.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
@@ -139,7 +145,8 @@ $(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
 	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
+	$(BUILDDIR)/gs_base.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
@@ -177,6 +184,7 @@ $(BUILDDIR)/image_mapper.o: include/pe.h include/pe_parser.h src/loader/loader_p
 $(BUILDDIR)/import_resolver.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
 $(BUILDDIR)/teb_peb.o: include/pe.h src/loader/loader_priv.h
 $(BUILDDIR)/entry.o: include/pe.h include/msvcrt.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
+$(BUILDDIR)/gs_base.o: include/pe.h
 
 # Syscall
 $(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h
