@@ -1,6 +1,7 @@
 #ifndef MY_WINE_MSVCRT_H
 #define MY_WINE_MSVCRT_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* ── MSVCRT CRT Startup Stubs ──────────────────────────────── */

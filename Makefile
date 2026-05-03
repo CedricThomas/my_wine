@@ -113,8 +113,8 @@ $(BUILDDIR)/test_parse: tests/test_parse.c $(BUILDDIR)/pe_parser.o
 	@$(CC) $(CFLAGS) -I include -o $@ $< $(BUILDDIR)/pe_parser.o
 
 $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
-	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/loader/image_mapper.o \
-	$(BUILDDIR)/loader/import_resolver.o \
+	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/image_mapper.o \
+	$(BUILDDIR)/import_resolver.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
 	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o \
@@ -126,8 +126,8 @@ $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
 $(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
-	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/loader/image_mapper.o \
-	$(BUILDDIR)/loader/import_resolver.o $(BUILDDIR)/loader/teb_peb.o \
+	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/image_mapper.o \
+	$(BUILDDIR)/import_resolver.o $(BUILDDIR)/teb_peb.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
 	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o \
@@ -178,12 +178,20 @@ $(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_hand
 $(BUILDDIR)/signal_handler.o: include/syscall/signal_handler.h
 $(BUILDDIR)/dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
 
+# ── Native sample entry ─────────────────────────────────────────
+$(BUILDDIR)/native_main.o: samples/native_main.c | $(BUILDDIR)
+	@echo "  CC samples/native_main.c"
+	@$(CC) $(CFLAGS) -I src -I src/stubs -I src/loader -I include -c $< -o $@
+
+# Header deps
+$(BUILDDIR)/native_main.o: src/stubs/ntdll_priv.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
+
 # ── Convenience ─────────────────────────────────────────────────
 
-hello.exe: hello.c build_test.sh
-	bash build_test.sh
+samples: $(BUILDDIR)/native_main.o
+	@bash run_samples.sh build
 
 clean:
-	rm -rf $(BUILDDIR) my_wine hello.exe *.o
+	rm -rf $(BUILDDIR) my_wine *.o
 
-.PHONY: all clean test hello.exe $(BUILDDIR)
+.PHONY: all clean test samples $(BUILDDIR)
