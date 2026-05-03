@@ -46,6 +46,17 @@ static dispatcher_func_t g_dispatcher = NULL;
 /*  SIGSYS signal handler                                             */
 /* ------------------------------------------------------------------ */
 
+/*
+ * sigsys_handler — the SIGSYS handler for Wine syscall interception.
+ *
+ * Why 0xF000 offset?
+ *   Wine generates syscall thunks with numbers 0xF000 + NT_syscall_number.
+ *   This places all Wine syscalls in a range that does not overlap with
+ *   any real Linux syscall (Linux numbers are < 0x400 on x86_64).
+ *   The seccomp filter traps syscalls >= 0xF000 by sending SIGSYS.
+ *   The dispatcher subtracts 0xF000 to recover the actual NT syscall number.
+ *   Native Linux syscalls (< 0xF000) pass through the filter unchanged.
+ */
 static void sigsys_handler(int sig, siginfo_t *info, void *ucontext)
 {
     ucontext_t *uctx = (ucontext_t *)ucontext;

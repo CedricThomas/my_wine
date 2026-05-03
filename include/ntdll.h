@@ -3,6 +3,28 @@
 
 #include <stdint.h>
 
+/* ── Windows-type wrappers for readability ─────────────────── */
+typedef uint64_t        HANDLE;
+typedef uint64_t        PVOID;
+typedef uint64_t        ULONG_PTR;
+typedef uint64_t        ULONG;
+typedef uint64_t        NTSTATUS;
+typedef uint16_t        USHORT;
+typedef uint8_t         UCHAR;
+typedef uint64_t        DWORD64;
+typedef uint32_t        DWORD;
+typedef uint64_t        BOOL;
+
+/* ── Windows page protection constants ─────────────────────── */
+#define PAGE_NOACCESS          0x01
+#define PAGE_READONLY          0x02
+#define PAGE_READWRITE         0x04
+#define PAGE_WRITECOPY         0x08
+#define PAGE_EXECUTE           0x10
+#define PAGE_EXECUTE_READ      0x20
+#define PAGE_EXECUTE_READWRITE 0x40
+#define PAGE_EXECUTE_WRITECOPY 0x80
+
 // --- NT Status Codes ---
 
 #define STATUS_SUCCESS              0x00000000
@@ -17,54 +39,57 @@
 
 // --- NT Syscall Handler Signatures ---
 // x86_64 Windows calling convention: first 4 args in RCX, RDX, R8, R9;
-// additional args on the stack. All handlers return uint64_t (STATUS).
+// additional args on the stack. All handlers return NTSTATUS.
+// Note: internal implementations (ntdll_*.c) still use raw uint64_t/uint32_t
+// for pointer arithmetic — these typed declarations are header-only wrappers
+// for readability.
 
 // NtCallbackReturn (0x05) — no-op
-uint64_t handler_NtCallbackReturn(void);
+NTSTATUS handler_NtCallbackReturn(void);
 
 // NtQueryInformationProcess (0x07)
-uint64_t handler_NtQueryInformationProcess(uint64_t process_handle, uint64_t info_class, uint64_t buffer, uint64_t length, uint64_t return_length);
+NTSTATUS handler_NtQueryInformationProcess(HANDLE process_handle, ULONG info_class, PVOID buffer, ULONG length, PVOID return_length);
 
 // NtClose (0x0F)
-uint64_t handler_NtClose(uint64_t handle);
+NTSTATUS handler_NtClose(HANDLE handle);
 
 // NtAllocateVirtualMemory (0x18)
-uint64_t handler_NtAllocateVirtualMemory(uint64_t process, uint64_t *base_address, uint64_t zero_bits, uint64_t *region_size, uint64_t allocation_type, uint64_t protect);
+NTSTATUS handler_NtAllocateVirtualMemory(HANDLE process, PVOID *base_address, ULONG zero_bits, PVOID *region_size, ULONG allocation_type, ULONG protect);
 
 // NtFreeVirtualMemory (0x19)
-uint64_t handler_NtFreeVirtualMemory(uint64_t process, uint64_t *base_address, uint64_t *region_size, uint64_t free_type);
+NTSTATUS handler_NtFreeVirtualMemory(HANDLE process, PVOID *base_address, PVOID *region_size, ULONG free_type);
 
 // NtGetContextThread (0x24)
-uint64_t handler_NtGetContextThread(uint64_t thread_handle, uint64_t context);
+NTSTATUS handler_NtGetContextThread(HANDLE thread_handle, PVOID context);
 
 // NtSetContextThread (0x26)
-uint64_t handler_NtSetContextThread(uint64_t thread_handle, uint64_t context);
+NTSTATUS handler_NtSetContextThread(HANDLE thread_handle, PVOID context);
 
 // NtMapViewOfSection (0x28)
-uint64_t handler_NtMapViewOfSection(uint64_t section_handle, uint64_t process, uint64_t *base_address, uint64_t zero_bits, uint64_t commit_size, uint64_t *section_offset, uint64_t *view_size, uint64_t view_untyped, uint64_t allocation_type, uint64_t protect);
+NTSTATUS handler_NtMapViewOfSection(HANDLE section_handle, HANDLE process, PVOID *base_address, ULONG zero_bits, ULONG_PTR commit_size, PVOID *section_offset, PVOID *view_size, ULONG view_untyped, ULONG allocation_type, ULONG protect);
 
 // NtUnmapViewOfSection (0x29)
-uint64_t handler_NtUnmapViewOfSection(uint64_t process, uint64_t base_address);
+NTSTATUS handler_NtUnmapViewOfSection(HANDLE process, PVOID base_address);
 
 // NtTerminateProcess (0x2A)
-uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_status);
+NTSTATUS handler_NtTerminateProcess(HANDLE process_handle, NTSTATUS exit_status);
 
 // NtReadFile (0x3C)
-uint64_t handler_NtReadFile(uint64_t file_handle, uint64_t event, uint64_t apc, uint64_t context, uint64_t buffer, uint64_t length, uint64_t byte_offset, uint64_t bytes_read);
+NTSTATUS handler_NtReadFile(HANDLE file_handle, HANDLE event, PVOID apc, PVOID context, PVOID buffer, ULONG length, ULONG byte_offset, PVOID bytes_read);
 
 // NtWriteFile (0x3D)
-uint64_t handler_NtWriteFile(uint64_t file_handle, uint64_t event, uint64_t apc, uint64_t context, uint64_t buffer, uint64_t length, uint64_t byte_offset, uint64_t bytes_written);
+NTSTATUS handler_NtWriteFile(HANDLE file_handle, HANDLE event, PVOID apc, PVOID context, PVOID buffer, ULONG length, ULONG byte_offset, PVOID bytes_written);
 
 // NtCreateEvent (0x48)
-uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access, uint64_t object_attributes, uint64_t event_type, uint64_t initial_state);
+NTSTATUS handler_NtCreateEvent(PVOID *event_handle, ULONG desired_access, PVOID object_attributes, ULONG event_type, BOOL initial_state);
 
 // NtCreateSection (0x4A)
-uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_access, uint64_t object_attributes, uint64_t *max_size, uint64_t page_protection, uint64_t section_attributes, uint64_t file_handle);
+NTSTATUS handler_NtCreateSection(PVOID *section_handle, ULONG desired_access, PVOID object_attributes, PVOID *max_size, ULONG page_protection, ULONG section_attributes, HANDLE file_handle);
 
 // NtCreateThreadEx (0x4E)
-uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_access, uint64_t object_attributes, uint64_t process_handle, uint64_t start_routine, uint64_t argument, uint64_t create_flags, uint64_t stack_size, uint64_t commit_size, uint64_t attribute, uint64_t attr_list);
+NTSTATUS handler_NtCreateThreadEx(PVOID *thread_handle, ULONG desired_access, PVOID object_attributes, HANDLE process_handle, PVOID start_routine, PVOID argument, ULONG create_flags, ULONG_PTR stack_size, ULONG_PTR commit_size, PVOID attribute, PVOID attr_list);
 
 // NtOpenFile (0x4F)
-uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access, uint64_t object_attributes, uint64_t io_status_block, uint64_t share_access, uint64_t dispose);
+NTSTATUS handler_NtOpenFile(PVOID *file_handle, ULONG desired_access, PVOID object_attributes, PVOID io_status_block, ULONG share_access, ULONG dispose);
 
 #endif // MY_WINE_NTDLL_H

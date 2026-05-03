@@ -5,6 +5,16 @@
  * Decodes arguments from the ucontext using the x86_64 Windows
  * calling convention (RCX, RDX, R8, R9, ...) and dispatches
  * to the appropriate handler.
+ *
+ * ── 0xF000 Wine Syscall Offset Convention ─────────────────────
+ *
+ * Wine uses syscall numbers in the range 0xF000+ to avoid conflicts
+ * with real Linux syscalls. The seccomp filter traps every syscall
+ * with number >= 0xF000, sending SIGSYS to our handler. The dispatcher
+ * strips the 0xF000 offset (syscall_number - 0xF000) to obtain the
+ * actual NT syscall number (e.g., 0xF005 → 0x05 for NtCallbackReturn).
+ * Linux syscalls with number < 0xF000 pass through the seccomp filter
+ * unmodified and execute natively.
  */
 
 #ifndef SYSCALL_DISPATCHER_H

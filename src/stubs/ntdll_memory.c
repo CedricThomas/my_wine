@@ -26,11 +26,11 @@ int view_count = 0;
 int map_protect(uint64_t protect)
 {
     switch ((int)protect) {
-    case  2: return PROT_READ;                    /* PAGE_READONLY */
-    case  4: return PROT_READ | PROT_WRITE;       /* PAGE_READWRITE */
-    case 16: return PROT_EXEC;                    /* PAGE_EXECUTE */
-    case 32: return PROT_READ | PROT_EXEC;        /* PAGE_EXECUTE_READ */
-    case 64: return PROT_READ | PROT_WRITE | PROT_EXEC; /* PAGE_EXECUTE_READWRITE */
+    case PAGE_READONLY:          return PROT_READ;
+    case PAGE_READWRITE:         return PROT_READ | PROT_WRITE;
+    case PAGE_EXECUTE:           return PROT_EXEC;
+    case PAGE_EXECUTE_READ:      return PROT_READ | PROT_EXEC;
+    case PAGE_EXECUTE_READWRITE: return PROT_READ | PROT_WRITE | PROT_EXEC;
     default: return PROT_READ | PROT_WRITE;       /* fallback */
     }
 }
