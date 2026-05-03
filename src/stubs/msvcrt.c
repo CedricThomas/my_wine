@@ -547,6 +547,7 @@ void *__msvcrt_signal     = (void *)wine_signal;
 /* ── Patch CRT refptrs ─────────────────────────────────────── */
 #include <sys/mman.h>
 #include "include/pe.h"
+#include "include/pe_parser.h"
 
 /*
  * The PE's .rdata contains .refptr entries that the CRT startup code
@@ -554,64 +555,91 @@ void *__msvcrt_signal     = (void *)wine_signal;
  * _commode, etc. These entries are initialized by the linker with
  * placeholder values that may not be valid addresses.
  *
- * We need to patch them to point to our actual global variables.
+ * We dynamically locate each .refptr entry using the COFF symbol table
+ * when available, or fall back to known relative offsets within the
+ * .refptr section.
  */
 
 typedef struct {
-    uint64_t rva;        /* RVA of the refptr entry */
-    void    *target;     /* What it should point to */
-    const char *name;    /* For debugging */
-} refptr_patch_t;
+    const char *name;     /* Symbol name to look up in COFF table */
+    void       *target;   /* What the refptr should point to */
+    uint32_t    rel_offset; /* Fallback: offset from .refptr section base */
+} refptr_mapping_t;
 
-static const refptr_patch_t refptr_patches[] = {
-    { 0x4300, (void *)&ctor_list_stub,        "__CTOR_LIST__" },
-    { 0x4310, (void *)&dtor_list_stub,        "__DTOR_LIST__" },
-    { 0x4320, (void *)&xi_a_stub,             "__xi_a" },
-    { 0x4330, (void *)&dyn_tls_callback_stub, "__dyn_tls_init_callback" },
-    { 0x4340, (void *)&g_image_base_ref,      "__image_base__" },
-    { 0x4350, (void *)&__imp___initenv_stub,  "__imp___initenv" },
-    { 0x4390, (void *)&mingw_excpt_handler_stub, "__mingw_oldexcpt_handler" },
-    { 0x43a0, (void *)&native_startup_lock,   "__native_startup_lock" },
-    { 0x43b0, (void *)&native_startup_state,  "__native_startup_state" },
-    { 0x43c0, (void *)&xc_a_stub,             "__xc_a" },
-    { 0x43d0, (void *)&xc_z_stub,             "__xc_z" },
-    { 0x43e0, (void *)&xi_a_stub,             "__xi_a (dup)" },
-    { 0x43f0, (void *)&xi_z_stub,             "__xi_z" },
-    { 0x4400, (void *)&_commode,              "_commode" },
-    { 0x4410, (void *)&dowildcard_val,        "_dowildcard" },
-    { 0x4420, (void *)&_fmode,                "_fmode" },
-    { 0x4450, (void *)&newmode_val,           "_newmode" },
-    { 0x4460, (void *)&__msvcrt_app_type,     "mingw_app_type" },
-    { 0, NULL, NULL }  // terminator — target always non-NULL for real entries
+/*
+ * Name-to-target mappings for known CRT .refptr symbols.
+ * The rel_offset is the offset from the .refptr section VirtualAddress,
+ * derived from the original hardcoded RVAs (section base was 0x4300).
+ * These offsets are linker-dependent but far more portable than absolute RVAs
+ * since they work with any image base and section placement.
+ */
+static const refptr_mapping_t refptr_mappings[] = {
+    { "__CTOR_LIST__",              (void *)&ctor_list_stub,              0x000 },
+    { "__DTOR_LIST__",              (void *)&dtor_list_stub,              0x010 },
+    { "__xi_a",                     (void *)&xi_a_stub,                   0x020 },
+    { "__dyn_tls_init_callback",    (void *)&dyn_tls_callback_stub,       0x030 },
+    { "__image_base__",             (void *)&g_image_base_ref,            0x040 },
+    { "__imp___initenv",            (void *)&__imp___initenv_stub,        0x050 },
+    { "__mingw_oldexcpt_handler",   (void *)&mingw_excpt_handler_stub,    0x090 },
+    { "__native_startup_lock",      (void *)&native_startup_lock,         0x0a0 },
+    { "__native_startup_state",     (void *)&native_startup_state,        0x0b0 },
+    { "__xc_a",                     (void *)&xc_a_stub,                   0x0c0 },
+    { "__xc_z",                     (void *)&xc_z_stub,                   0x0d0 },
+    { "__xi_a (dup)",               (void *)&xi_a_stub,                   0x0e0 },
+    { "__xi_z",                     (void *)&xi_z_stub,                   0x0f0 },
+    { "_commode",                   (void *)&_commode,                    0x100 },
+    { "_dowildcard",                (void *)&dowildcard_val,              0x110 },
+    { "_fmode",                     (void *)&_fmode,                      0x120 },
+    { "_newmode",                   (void *)&newmode_val,                 0x150 },
+    { "mingw_app_type",             (void *)&__msvcrt_app_type,           0x160 },
+    { NULL, NULL, 0 }  /* terminator */
 };
-#define REF_PTR_COUNT (sizeof(refptr_patches) / sizeof(refptr_patches[0]) - 1) // minus terminator
+#define REF_MAP_COUNT (sizeof(refptr_mappings) / sizeof(refptr_mappings[0]) - 1)
 
-/* Forward declaration for find_section_by_name from pe_parser.c */
-extern IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS64 *nt_headers,
-                                                   const IMAGE_SECTION_HEADER *sections,
-                                                   const char *name);
+/* Helper: apply a single refptr patch with mprotect */
+static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
+                               const char *name, uint64_t image_size)
+{
+    if (rva >= image_size) {
+        fprintf(stderr, "patch_crt_refptrs: %s rva 0x%lx >= image_size 0x%lx, skip\n",
+                name, (unsigned long)rva, (unsigned long)image_size);
+        return;
+    }
+
+    uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
+    void *old_val = (void *)*refptr;
+
+    /* Make the containing page writable */
+    char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)4095);
+    if (mprotect(page_start, 4096, PROT_READ | PROT_WRITE) != 0) {
+        perror("patch_crt_refptrs: mprotect");
+        return;
+    }
+
+    *refptr = (uint64_t)(uintptr_t)target;
+    fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p (stub)\n",
+            name, (unsigned long)rva, (unsigned long)old_val, target);
+
+    /* Restore read-only */
+    mprotect(page_start, 4096, PROT_READ);
+}
 
 void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
 {
-    if (!image_base || !nt) return;
+    if (!image_base || !nt || !sections) return;
 
     /* Set g_image_base_ref to actual image base before applying patches */
     g_image_base_ref = (uint64_t)(uintptr_t)image_base;
 
     /* Dynamically find .bss section to set __imp___initenv_stub and g_bss_vaddr */
-    if (sections) {
-        IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
-        if (bss_sec) {
-            g_bss_vaddr = bss_sec->VirtualAddress;
-            /* Set __imp___initenv_stub to point to PE's envp in .bss
-             * (the PE writes envp through this pointer) */
-            __imp___initenv_stub = (void **)((char *)image_base + g_bss_vaddr + 0x018);
-        } else {
-            fprintf(stderr, "patch_crt_refptrs: WARNING: .bss section not found\n");
-            g_bss_vaddr = 0;
-        }
+    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    if (bss_sec) {
+        g_bss_vaddr = bss_sec->VirtualAddress;
+        /* Set __imp___initenv_stub to point to PE's envp in .bss
+         * (the PE writes envp through this pointer) */
+        __imp___initenv_stub = (void **)((char *)image_base + g_bss_vaddr + 0x018);
     } else {
-        /* Fallback: no sections available */
+        fprintf(stderr, "patch_crt_refptrs: WARNING: .bss section not found\n");
         g_bss_vaddr = 0;
     }
 
@@ -619,32 +647,66 @@ void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_H
      * (main.c:jump_to_entry) via find_text_thunk(). No need to patch here. */
 
     uint64_t image_size = nt->OptionalHeader.SizeOfImage;
-    fprintf(stderr, "patch_crt_refptrs: image_size=0x%lx\n", (unsigned long)image_size);
 
-    for (int i = 0; i < REF_PTR_COUNT; i++) {
-        uint64_t rva = refptr_patches[i].rva;
-        if (rva >= image_size) {
-            fprintf(stderr, "patch_crt_refptrs: %s rva 0x%lx >= image_size 0x%lx, skip\n",
-                    refptr_patches[i].name, (unsigned long)rva, (unsigned long)image_size);
+    /* Find .refptr section dynamically */
+    IMAGE_SECTION_HEADER *refptr_sec = find_section_by_name(nt, sections, ".refptr");
+    if (!refptr_sec) {
+        fprintf(stderr, "patch_crt_refptrs: WARNING: .refptr section not found, CRT refptr patching disabled\n");
+        return;
+    }
+
+    uint64_t refptr_base = refptr_sec->VirtualAddress;
+    uint64_t refptr_size = refptr_sec->Misc.VirtualSize;
+    if (refptr_size == 0)
+        refptr_size = refptr_sec->SizeOfRawData;
+
+    fprintf(stderr, "patch_crt_refptrs: .refptr section at VA=0x%lx, size=0x%lx\n",
+            (unsigned long)refptr_base, (unsigned long)refptr_size);
+
+    /* Try COFF symbol table for dynamic name-based discovery */
+    IMAGE_SYMBOL *symbols = NULL;
+    char *string_table = NULL;
+    int sym_count = parse_symbol_table_from_image(
+        image_base, nt, nt->OptionalHeader.SizeOfHeaders,
+        &symbols, &string_table);
+
+    int used_symbol_table = 0;
+
+    for (size_t i = 0; i < REF_MAP_COUNT; i++) {
+        const refptr_mapping_t *map = &refptr_mappings[i];
+        uint64_t target_rva;
+
+        if (sym_count > 0 && symbols && string_table) {
+            /* Try symbol table lookup first.
+             * .refptr symbols appear as .refptr.<name> in the COFF table,
+             * but the symbol name in the table is just <name> with
+             * SectionNumber pointing to .refptr and Value being the
+             * offset within the section. */
+            uint32_t sym_value = lookup_symbol_value(symbols, sym_count,
+                                                      string_table, map->name);
+            if (sym_value != 0) {
+                target_rva = refptr_base + sym_value;
+                if (!used_symbol_table) {
+                    fprintf(stderr, "patch_crt_refptrs: using COFF symbol table for discovery\n");
+                    used_symbol_table = 1;
+                }
+            } else {
+                /* Symbol not found in table — fall back to relative offset */
+                target_rva = refptr_base + map->rel_offset;
+            }
+        } else {
+            /* No symbol table — use fallback relative offsets */
+            target_rva = refptr_base + map->rel_offset;
+        }
+
+        /* Validate the computed RVA is within the .refptr section */
+        if (target_rva < refptr_base || target_rva + 8 > refptr_base + refptr_size) {
+            fprintf(stderr, "patch_crt_refptrs: %s computed rva 0x%lx outside .refptr section, skipping\n",
+                    map->name, (unsigned long)target_rva);
             continue;
         }
 
-        uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
-        void *old_val = (void *)*refptr;
-
-        /* Make the containing page writable */
-        char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)4095);
-        if (mprotect(page_start, 4096, PROT_READ | PROT_WRITE) != 0) {
-            perror("patch_crt_refptrs: mprotect");
-            continue;
-        }
-
-        *refptr = (uint64_t)(uintptr_t)refptr_patches[i].target;
-        fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p (stub)\n",
-                refptr_patches[i].name, (unsigned long)rva,
-                (unsigned long)old_val, refptr_patches[i].target);
-
-        /* Restore read-only */
-        mprotect(page_start, 4096, PROT_READ);
+        apply_refptr_patch(image_base, target_rva, map->target,
+                           map->name, image_size);
     }
 }

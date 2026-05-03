@@ -237,6 +237,107 @@ int parse_imports(const void *base, size_t file_size,
     return count;
 }
 
+/* ── COFF Symbol Table ───────────────────────────────────────────── */
+
+/*
+ * Parse the COFF symbol table from an already-loaded PE image.
+ * The symbol table lives at file offset PointerToSymbolTable.
+ * When headers are copied into the image (as is done in main.c), the symbol
+ * table is at image_base + PointerToSymbolTable — provided it falls within
+ * SizeOfHeaders. Otherwise it is not accessible and we return 0.
+ *
+ * Returns number of symbols parsed, or 0 if no symbol table / inaccessible.
+ * The symbols and string_table pointers point directly into the image memory
+ * (no allocation).
+ */
+int parse_symbol_table_from_image(void *image_base,
+                                   const IMAGE_NT_HEADERS64 *nt_headers,
+                                   size_t headers_size,
+                                   IMAGE_SYMBOL **out_symbols,
+                                   char **out_string_table)
+{
+    uint32_t ptr  = nt_headers->FileHeader.PointerToSymbolTable;
+    uint32_t count = nt_headers->FileHeader.NumberOfSymbols;
+
+    *out_symbols = NULL;
+    *out_string_table = NULL;
+
+    if (ptr == 0 || count == 0)
+        return 0;   /* no symbol table in this image */
+
+    size_t sym_table_size = (size_t)count * IMAGE_SIZEOF_SYMBOL;
+
+    /* Symbol table must be within the copied headers region */
+    if ((size_t)ptr + sym_table_size > headers_size)
+        return 0;   /* symbol table lives beyond SizeOfHeaders — not copied */
+
+    IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)((char *)image_base + ptr);
+
+    /* String table: 4 bytes length (not counting itself) followed by
+     * null-terminated strings. It follows immediately after the symbol table. */
+    size_t str_off = ptr + sym_table_size;
+    if (str_off + 4 <= headers_size) {
+        uint32_t str_size = *((const uint32_t *)((char *)image_base + str_off));
+        /* str_size is the size NOT counting the 4-byte length field */
+        if (str_off + 4 + str_size <= headers_size && str_size > 0) {
+            *out_string_table = (char *)image_base + str_off + 4;
+        }
+    }
+
+    *out_symbols = symbols;
+    return (int)count;
+}
+
+/*
+ * Get the name of a COFF symbol. Short names fit in 8 bytes;
+ * long names are stored in the string table with a 4-byte offset prefix.
+ */
+const char *get_symbol_name(const IMAGE_SYMBOL *sym, const char *string_table)
+{
+    if (sym->N.ShortName[0] != 0) {
+        /* Short name (up to 8 chars) — returned as-is (not null-terminated) */
+        return (const char *)sym->N.ShortName;
+    }
+    if (string_table) {
+        uint32_t offset = sym->N.Name.Long;
+        return (const char *)(string_table + offset);
+    }
+    return NULL;
+}
+
+/*
+ * Look up a symbol name in the COFF symbol table and return its Value.
+ * For .refptr-type symbols, SectionNumber > 0 and Value is the offset
+ * within that section. For absolute symbols (SectionNumber == 0), Value
+ * is the actual address/RVA.
+ *
+ * Returns 0 if not found.
+ */
+uint32_t lookup_symbol_value(const IMAGE_SYMBOL *symbols, int count,
+                             const char *string_table,
+                             const char *name)
+{
+    size_t name_len = strlen(name);
+    if (name_len == 0)
+        return 0;
+
+    for (int i = 0; i < count; i++) {
+        /* Skip aux symbols */
+        if (symbols[i].NumberOfAuxSymbols > 0) {
+            i += symbols[i].NumberOfAuxSymbols;
+            if (i >= count)
+                break;
+            continue;
+        }
+        const char *sym_name = get_symbol_name(&symbols[i], string_table);
+        if (!sym_name)
+            continue;
+        if (strncmp(sym_name, name, name_len) == 0 && sym_name[name_len] == '\0')
+            return symbols[i].Value;
+    }
+    return 0;
+}
+
 /* ── Dump headers (debug) ───────────────────────────────────────── */
 
 void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,

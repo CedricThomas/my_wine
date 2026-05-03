@@ -161,6 +161,34 @@ typedef union {
     uint64_t AddressOfData;
 } IMAGE_THUNK_DATA64;
 
+/* ── COFF Symbol Table ─────────────────────────────────────────── */
+
+#define IMAGE_SYM_UNDEFINED          0
+#define IMAGE_SIZEOF_SYMBOL          18
+#define IMAGE_SIZEOF_SHORT_NAME      8
+
+typedef struct {
+    union {
+        uint8_t  ShortName[IMAGE_SIZEOF_SHORT_NAME];
+        struct {
+            uint32_t Short;
+            uint32_t Long;  /* offset into string table */
+        } Name;
+    } N;
+    uint32_t Value;
+    int16_t  SectionNumber;
+    uint16_t Type;
+    uint8_t  StorageClass;
+    uint8_t  NumberOfAuxSymbols;
+} IMAGE_SYMBOL;
+
+/* Common storage classes */
+#define IMAGE_SYM_CLASS_EXTERNAL     2
+#define IMAGE_SYM_CLASS_STATIC       3
+
+/* Section types */
+#define IMAGE_SYM_CLASS_END_OF_FUNCTION ((uint8_t)-1)
+
 #pragma pack(pop)
 
 #endif /* MY_WINE_PE_H */

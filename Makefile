@@ -61,13 +61,13 @@ $(BUILDDIR)/run_guest.o: src/run_guest.S | $(BUILDDIR)
 
 # Header dependencies (for recompilation when headers change)
 $(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
-$(BUILDDIR)/pe_parser.o: include/pe.h
+$(BUILDDIR)/pe_parser.o: include/pe.h include/pe_parser.h
 $(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h
 $(BUILDDIR)/signal_handler.o: include/syscall/signal_handler.h
 $(BUILDDIR)/dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
 $(BUILDDIR)/ntdll.o: include/ntdll.h
 $(BUILDDIR)/kernel32.o: include/kernel32.h include/ntdll.h include/syscall/thunk_gen.h
-$(BUILDDIR)/msvcrt.o: include/msvcrt.h
+$(BUILDDIR)/msvcrt.o: include/msvcrt.h include/pe_parser.h
 
 hello.exe: hello.c build_test.sh
 	bash build_test.sh
