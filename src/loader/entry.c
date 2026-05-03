@@ -248,6 +248,16 @@ static __attribute__((noreturn)) void setup_child_and_run(
         _exit(1);
     }
 
+    /* Debug: verify __imp___initenv_stub in child */
+    {
+        extern void **__imp___initenv_stub;
+        char dbg_buf[128];
+        int dbg_n = snprintf(dbg_buf, sizeof(dbg_buf),
+            "DEBUG child: &__imp___initenv_stub=%p, *__imp___initenv_stub=%p\n",
+            (void *)&__imp___initenv_stub, (void *)__imp___initenv_stub);
+        syscall(SYS_write, 2, dbg_buf, dbg_n);
+    }
+
     /* Point TEB gs:[0x00] to our SEH frame */
     *(void **)((uint8_t *)teb) = (void *)child_seh_frame;
 

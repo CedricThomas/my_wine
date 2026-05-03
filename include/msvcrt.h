@@ -105,6 +105,6 @@ extern crt_context_t g_crt_ctx;
 
 /* Patch refptrs in the PE's .rdata to point to our globals */
 #include "pe.h"
-void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections);
+void patch_crt_refptrs(const char *file_path, void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections);
 
 #endif /* MY_WINE_MSVCRT_H */

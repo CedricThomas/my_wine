@@ -1,24 +1,26 @@
 /*
  * crt_refptrs.c — CRT refptr patching.
  *
- * Dynamically patches the PE's .refptr section entries to point to our
- * stub globals, so that CRT startup code doesn't crash on invalid
- * two-level indirection.
+ * Patches PE refptr entries so that CRT startup code doesn't crash
+ * on two-level indirection through unmapped addresses.
+ *
+ * Two strategies:
+ *   1. COFF symbol table (if available) — name-based discovery
+ *   2. .text instruction scanning — find rip-relative loads followed
+ *      by dereferences, then patch the target addresses
  */
 
 #define _GNU_SOURCE
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "msvcrt_priv.h"
 
-/*
- * Name-to-target mappings for known CRT .refptr symbols.
- * The rel_offset is the offset from the .refptr section VirtualAddress,
- * derived from the original hardcoded RVAs (section base was 0x4300).
- * These offsets are linker-dependent but far more portable than absolute RVAs
- * since they work with any image base and section placement.
- */
 const refptr_mapping_t refptr_mappings[] = {
     { "__CTOR_LIST__",              (void *)&ctor_list_stub,              0x000 },
     { "__DTOR_LIST__",              (void *)&dtor_list_stub,              0x010 },
@@ -38,23 +40,19 @@ const refptr_mapping_t refptr_mappings[] = {
     { "_fmode",                     (void *)&_fmode,                      0x120 },
     { "_newmode",                   (void *)&newmode_val,                 0x150 },
     { "mingw_app_type",             (void *)&__msvcrt_app_type,           0x160 },
-    { NULL, NULL, 0 }  /* terminator */
+    { NULL, NULL, 0 }
 };
 
-/* Helper: apply a single refptr patch with mprotect */
 static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
                                const char *name, uint64_t image_size)
 {
     if (rva >= image_size) {
-        fprintf(stderr, "patch_crt_refptrs: %s rva 0x%lx >= image_size 0x%lx, skip\n",
-                name, (unsigned long)rva, (unsigned long)image_size);
         return;
     }
 
     uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
     void *old_val = (void *)*refptr;
 
-    /* Make the containing page writable */
     char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)4095);
     if (mprotect(page_start, 4096, PROT_READ | PROT_WRITE) != 0) {
         perror("patch_crt_refptrs: mprotect");
@@ -62,129 +60,278 @@ static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     }
 
     *refptr = (uint64_t)(uintptr_t)target;
-    fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p (stub)\n",
+    fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p\n",
             name, (unsigned long)rva, (unsigned long)old_val, target);
 
-    /* Restore read-only.
-     * If this fails, log with perror but don't abort — the page is still
-     * writable which is suboptimal (leaves a writable page where we
-     * intended read-only) but not fatal. The patch was already applied
-     * successfully above. */
+    /* Best-effort restore */
     if (mprotect(page_start, 4096, PROT_READ) != 0) {
         perror("patch_crt_refptrs: mprotect restore");
     }
 }
 
-void patch_crt_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
+/*
+ * Scan .text for the pattern:
+ *   mov reg64, [rip + disp32]
+ *   mov reg64, [reg64]
+ *
+ * This two-level indirection is the signature of a .refptr usage.
+ * We collect all such target addresses and try to match them against
+ * known CRT symbols by checking their current values.
+ */
+static void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
+                                  IMAGE_SECTION_HEADER *sections,
+                                  uint64_t image_size)
 {
-    if (!image_base || !nt || !sections) return;
-
-    /* Set g_crt_ctx.image_base to actual image base before applying patches */
-    g_crt_ctx.image_base = (uint64_t)(uintptr_t)image_base;
-
-    /* Dynamically find .bss section to set __imp___initenv_stub and g_crt_ctx.bss_vaddr */
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
-    if (bss_sec) {
-        g_crt_ctx.bss_vaddr = bss_sec->VirtualAddress;
-        /* Set __imp___initenv_stub to point to PE's envp in .bss
-         * (the PE writes envp through this pointer) */
-        __imp___initenv_stub = (void **)((char *)image_base + g_crt_ctx.bss_vaddr + 0x018);
-    } else {
-        fprintf(stderr, "patch_crt_refptrs: WARNING: .bss section not found\n");
-        g_crt_ctx.bss_vaddr = 0;
-    }
-
-    /* __acrt_iob_func patching is done dynamically in the child process
-     * (main.c:jump_to_entry) via find_text_thunk(). No need to patch here. */
-
-    uint64_t image_size = nt->OptionalHeader.SizeOfImage;
-
-    /* Find .refptr section dynamically */
-    IMAGE_SECTION_HEADER *refptr_sec = find_section_by_name(nt, sections, ".refptr");
-    if (!refptr_sec) {
-        fprintf(stderr, "patch_crt_refptrs: WARNING: .refptr section not found, CRT refptr patching disabled\n");
+    IMAGE_SECTION_HEADER *text_sec = find_section_by_name(nt, sections, ".text");
+    if (!text_sec) {
+        fprintf(stderr, "patch_crt_refptrs: no .text section\n");
         return;
     }
 
-    uint64_t refptr_base = refptr_sec->VirtualAddress;
-    uint64_t refptr_size = refptr_sec->Misc.VirtualSize;
-    if (refptr_size == 0)
-        refptr_size = refptr_sec->SizeOfRawData;
+    uint64_t text_vaddr = text_sec->VirtualAddress;
+    uint64_t text_size = text_sec->Misc.VirtualSize;
+    if (text_size == 0) text_size = text_sec->SizeOfRawData;
+    uint8_t *text_base = (uint8_t *)image_base + text_vaddr;
 
-    fprintf(stderr, "patch_crt_refptrs: .refptr section at VA=0x%lx, size=0x%lx\n",
-            (unsigned long)refptr_base, (unsigned long)refptr_size);
+    int found = 0;
+    for (uint64_t off = 0; off + 7 < text_size; off++) {
+        uint8_t *p = text_base + off;
 
-    /*
-     * ── Data-driven refptr patching from the PE symbol table ──
-     *
-     * Instead of hardcoding every refptr offset, this code uses the PE's
-     * own COFF symbol table to discover the runtime addresses of known
-     * CRT symbols (e.g. __CTOR_LIST__, __initenv, _fmode).  The
-     * refptr_mappings[] array provides the *names* and *target stub
-     * addresses*; the symbol table supplies the *offset within .refptr*.
-     *
-     * Two discovery strategies (primary -> fallback):
-     *
-     *   1. COFF symbol table lookup  (data-driven, name-based)
-     *      parse_symbol_table_from_image() reads the symbols embedded in
-     *      the PE's header region.  lookup_symbol_value() matches names
-     *      and returns the section-relative offset.  When the symbol table
-     *      is present this path resolves every refptr automatically.
-     *
-     *   2. Section-relative offset   (hardcoded fallback)
-     *      If the symbol table is absent (stripped binaries, etc.) the
-     *      pre-computed rel_offset in refptr_mappings[] is used.  These
-     *      offsets are linker-dependent but more portable than absolute
-     *      RVAs because they work with any image base and section layout.
-     *
-     * This approach is "data-driven" because the symbol table acts as the
-     * source of truth — adding a new refptr mapping only requires appending
-     * an entry to refptr_mappings[] (no offset computation needed when
-     * the symbol table is available).
-     */
-    IMAGE_SYMBOL *symbols = NULL;
+        /* 48 8B 05 disp32 = mov rax, [rip+disp32] */
+        if (p[0] != 0x48 || p[1] != 0x8B || p[2] != 0x05) continue;
+
+        int32_t disp = (int32_t)*((int32_t *)(p + 3));
+        uint64_t instr_rva = text_vaddr + off;
+        uint64_t target_rva = instr_rva + 7 + disp;
+
+        if (target_rva >= image_size) continue;
+        if (target_rva >= text_vaddr && target_rva < text_vaddr + text_size) continue;
+
+        /* Look forward up to 40 bytes for deref+write pattern:
+         *   48 8B 00 (mov rax, [rax])
+         *   XX 89 00 or XX C7 00 (write to [rax])
+         * This distinguishes __imp___initenv (deref+write) from callbacks (deref+test+call). */
+        int has_write_deref = 0;
+        for (uint64_t d = 7; d + 4 < 40 && d + 4 < text_size - off; d++) {
+            if (p[d] == 0x48 && p[d+1] == 0x8B && p[d+2] == 0x00) {
+                /* Found deref. Check if next is a store to [rax].
+                 * Store patterns: 89 XX, C7 XX, 48 89 XX, 4C 89 XX where XX has mod=00,rm=00 */
+                uint64_t nd = d + 3;
+                if (nd + 2 < 40 && nd + 2 < text_size - off) {
+                    /* Check for store to [rax] after deref.
+                     * Patterns: 89 00, C7 00, or with REX prefix: 48/4C/4D/49 89 00 */
+                    uint8_t a = p[nd], b = p[nd+1], c = p[nd+2];
+                    int is_store = 0;
+                    if (a == 0x89 && b == 0x00) is_store = 1;           /* 89 00 */
+                    if (a == 0xC7 && b == 0x00) is_store = 1;           /* C7 00 */
+                    if ((a & 0xF0) == 0x40 && b == 0x89 && c == 0x00)   /* REX 89 00 */
+                        is_store = 1;
+                    if ((a & 0xF0) == 0x40 && b == 0xC7 && c == 0x00)   /* REX C7 00 */
+                        is_store = 1;
+                    /* Also: C7 00 XX XX XX XX (mov [rax], imm32) */
+                    if (!is_store && a == 0xC7 && b == 0x00) is_store = 1;
+                    if (is_store) {
+                        has_write_deref = 1;
+                        break;
+                    }
+                }
+                break;  /* No write after deref — not __imp___initenv */
+            }
+        }
+
+        if (!has_write_deref) continue;
+
+        /* Also check for direct write pattern (no dereference):
+         * 48 8B 05 disp (load refptr into RAX)
+         * followed by C7 00 imm32 (write imm32 to [rax])
+         * This is used by mingw_app_type and similar. */
+        if (!has_write_deref) {
+            for (uint64_t d = 7; d + 6 < 20 && d + 6 < text_size - off; d++) {
+                if (p[d] == 0xC7 && p[d+1] == 0x00) {
+                    /* mov [rax], imm32 */
+                    has_write_deref = 1;
+                    break;
+                }
+                if (p[d] == 0xE8 || p[d] == 0xE9) break;
+            }
+        }
+
+        if (!has_write_deref) continue;
+
+        /* Found refptr target at target_rva. Check if in a data section. */
+        uint64_t *target_ptr = (uint64_t *)((char *)image_base + target_rva);
+        uint64_t current = *target_ptr;
+        int in_data_section = 0;
+        const char *sec_name = "unknown";
+        for (uint16_t si = 0; si < nt->FileHeader.NumberOfSections; si++) {
+            IMAGE_SECTION_HEADER *sec = &sections[si];
+            if (sec == text_sec) continue;
+            uint64_t sec_end = sec->VirtualAddress +
+                (sec->Misc.VirtualSize > 0 ? sec->Misc.VirtualSize : sec->SizeOfRawData);
+            if (target_rva >= sec->VirtualAddress && target_rva < sec_end) {
+                sec_name = (const char *)sec->Name;
+                if ((target_rva - sec->VirtualAddress) % 8 == 0) {
+                    in_data_section = 1;
+                }
+                break;
+            }
+        }
+        fprintf(stderr, "patch_crt_refptrs: text-scan refptr at rva 0x%lx val=0x%lx in '%s' data=%d\n",
+                (unsigned long)target_rva, current, sec_name, in_data_section);
+
+        if (!in_data_section) continue;
+
+        /* Patch refptr targets that point to PE-internal addresses
+         * (they likely point to IAT entries or other host-addr data) */
+        if (__imp___initenv_stub != NULL) {
+            /* Patch to our stub — the CRT will deref to get .bss+0x18 */
+            apply_refptr_patch(image_base, target_rva,
+                               (void *)&__imp___initenv_stub,
+                               "__imp___initenv (text-scan)", image_size);
+            found = 1;
+        }
+    }
+
+    if (!found)
+        fprintf(stderr, "patch_crt_refptrs: text-scan found no refptr targets\n");
+}
+
+/*
+ * Read the COFF symbol table from the PE file to find symbol addresses.
+ * Returns the RVA (relative virtual address) of the symbol, or 0 if not found.
+ */
+static uint64_t find_symbol_rva_from_file(const char *file_path,
+                                          IMAGE_NT_HEADERS64 *nt,
+                                          IMAGE_SECTION_HEADER *sections,
+                                          const char *name)
+{
+    uint32_t sym_ptr = nt->FileHeader.PointerToSymbolTable;
+    uint32_t sym_count = nt->FileHeader.NumberOfSymbols;
+
+    if (sym_ptr == 0 || sym_count == 0)
+        return 0;
+
+    int fd = open(file_path, O_RDONLY);
+    if (fd < 0) return 0;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) { close(fd); return 0; }
+
+    void *file_map = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (file_map == MAP_FAILED) return 0;
+
+    IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)((char *)file_map + sym_ptr);
+    size_t sym_table_size = (size_t)sym_count * IMAGE_SIZEOF_SYMBOL;
+
     char *string_table = NULL;
-    int sym_count = parse_symbol_table_from_image(
-        image_base, nt, nt->OptionalHeader.SizeOfHeaders,
-        &symbols, &string_table);
+    size_t str_off = sym_ptr + sym_table_size;
+    if (str_off + 4 <= (size_t)st.st_size) {
+        uint32_t str_size = *((const uint32_t *)((char *)file_map + str_off));
+        if (str_off + 4 + str_size <= (size_t)st.st_size && str_size > 0) {
+            string_table = (char *)file_map + str_off + 4;
+        }
+    }
 
-    int used_symbol_table = 0;
+    for (uint32_t i = 0; i < sym_count; i++) {
+        const IMAGE_SYMBOL *sym = &symbols[i];
+        const char *sym_name = NULL;
+        size_t sym_name_len = 0;
 
+        if (sym->N.ShortName[0] != 0) {
+            sym_name = (const char *)sym->N.ShortName;
+            sym_name_len = strlen(sym_name);
+        } else if (string_table) {
+            uint32_t offset = sym->N.Name.Short;
+            if (offset > 0) {
+                sym_name = string_table + offset;
+                sym_name_len = strlen(sym_name);
+            }
+        }
+
+        if (sym_name) {
+            int matched = 0;
+            if (strncmp(sym_name, name, sym_name_len) == 0 &&
+                name[sym_name_len] == '\0') {
+                matched = 1;
+            }
+            if (!matched) {
+                const char *prefix = ".rdata$.refptr.";
+                size_t plen = strlen(prefix);
+                if (sym_name_len > plen &&
+                    strncmp(sym_name, prefix, plen) == 0 &&
+                    strncmp(sym_name + plen, name, sym_name_len - plen) == 0 &&
+                    name[sym_name_len - plen] == '\0') {
+                    matched = 1;
+                }
+            }
+
+            if (matched) {
+                int32_t section_num = sym->SectionNumber;
+                if (section_num == 0) {
+                    munmap(file_map, st.st_size);
+                    return sym->Value;
+                }
+                if (section_num > 0 && (size_t)section_num <=
+                    nt->FileHeader.NumberOfSections) {
+                    IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
+                    uint64_t rva = sec->VirtualAddress + sym->Value;
+                    munmap(file_map, st.st_size);
+                    return rva;
+                }
+            }
+        }
+    }
+
+    munmap(file_map, st.st_size);
+    return 0;
+}
+
+void patch_crt_refptrs(const char *file_path, void *image_base,
+                       IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
+{
+    if (!image_base || !nt || !sections) return;
+
+    g_crt_ctx.image_base = (uint64_t)(uintptr_t)image_base;
+
+    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    if (bss_sec) {
+        g_crt_ctx.bss_vaddr = bss_sec->VirtualAddress;
+        __imp___initenv_stub = (void **)((char *)image_base +
+                                          g_crt_ctx.bss_vaddr + 0x018);
+        fprintf(stderr, "patch_crt_refptrs: .bss at VA=0x%lx, __imp___initenv_stub=%p\n",
+                (unsigned long)g_crt_ctx.bss_vaddr, (void *)__imp___initenv_stub);
+    } else {
+        g_crt_ctx.bss_vaddr = 0;
+    }
+
+    uint64_t image_size = nt->OptionalHeader.SizeOfImage;
+    int patched_any = 0;
+    int patched_initenv = 0;
+
+    /* ── Primary: COFF symbol table ── */
     for (size_t i = 0; i < REF_MAP_COUNT; i++) {
         const refptr_mapping_t *map = &refptr_mappings[i];
-        uint64_t target_rva;
+        uint64_t target_rva = 0;
 
-        if (sym_count > 0 && symbols && string_table) {
-            /* Try symbol table lookup first.
-             * .refptr symbols appear as .refptr.<name> in the COFF table,
-             * but the symbol name in the table is just <name> with
-             * SectionNumber pointing to .refptr and Value being the
-             * offset within the section. */
-            uint32_t sym_value = lookup_symbol_value(symbols, sym_count,
-                                                      string_table, map->name);
-            if (sym_value != 0) {
-                target_rva = refptr_base + sym_value;
-                if (!used_symbol_table) {
-                    fprintf(stderr, "patch_crt_refptrs: using COFF symbol table for discovery\n");
-                    used_symbol_table = 1;
-                }
-            } else {
-                /* Symbol not found in table — fall back to relative offset */
-                target_rva = refptr_base + map->rel_offset;
-            }
-        } else {
-            /* No symbol table — use fallback relative offsets */
-            target_rva = refptr_base + map->rel_offset;
+        if (file_path) {
+            target_rva = find_symbol_rva_from_file(file_path,
+                                                    nt, sections, map->name);
         }
 
-        /* Validate the computed RVA is within the .refptr section */
-        if (target_rva < refptr_base || target_rva + 8 > refptr_base + refptr_size) {
-            fprintf(stderr, "patch_crt_refptrs: %s computed rva 0x%lx outside .refptr section, skipping\n",
-                    map->name, (unsigned long)target_rva);
-            continue;
+        if (target_rva != 0) {
+            if (!patched_any)
+                fprintf(stderr, "patch_crt_refptrs: using COFF symbol table\n");
+            apply_refptr_patch(image_base, target_rva, map->target,
+                               map->name, image_size);
+            patched_any = 1;
+            if (strstr(map->name, "initenv")) patched_initenv = 1;
         }
+    }
 
-        apply_refptr_patch(image_base, target_rva, map->target,
-                           map->name, image_size);
+    /* ── Always supplement with .text scanning ── */
+    if (!patched_initenv) {
+        fprintf(stderr, "patch_crt_refptrs: __imp___initenv not in COFF, scanning .text\n");
+        scan_text_for_refptrs(image_base, nt, sections, image_size);
     }
 }

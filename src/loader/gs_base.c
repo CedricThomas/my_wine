@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
 
 /**
  * set_gs_base — set the GS segment base to addr.

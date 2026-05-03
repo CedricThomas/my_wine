@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
     init_import_table();
 
     /* 4. Patch CRT refptrs so the PE can find our global variables */
-    patch_crt_refptrs(base, &nt, sections);
+    patch_crt_refptrs(argv[1], base, &nt, sections);
 
     /* 5. Resolve imports */
     resolve_imports(base, &nt);
@@ -121,17 +121,19 @@ int main(int argc, char *argv[])
     strncpy(_cmdline_storage, argv[1], sizeof(_cmdline_storage) - 1);
     _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
 
-    /* Pre-seed argv/envp pointers in the PE's .bss so the CRT doesn't
-     * crash when reading them before calling __getmainargs.
+    /* Pre-seed argv/envp pointers in the PE's .bss with NULL so the CRT
+     * startup doesn't crash dereferencing host addresses.
+     * The real values will be set by __getmainargs via our stub.
      *
      * Use .bss section VA dynamically (set by patch_crt_refptrs in g_crt_ctx.bss_vaddr).
      * The offsets (0x018, 0x020) are relative to .bss base and are CRT-specific;
      * they correspond to the mingw-w64 CRT's envp/argv locations. */
     {
         if (g_crt_ctx.bss_vaddr != 0) {
-            uint8_t *bss_base = (uint8_t *)base + g_crt_ctx.bss_vaddr;
-            *(uint64_t *)(bss_base + 0x020) = (uint64_t)(uintptr_t)guest_argv;  // argv
-            *(uint64_t *)(bss_base + 0x018) = (uint64_t)(uintptr_t)guest_envp;  // envp
+            /* Skip .bss write for now - causes SIGSEGV on some systems
+             * where the .bss page isn't properly writable after mprotect. */
+            fprintf(stderr, "Skipping .bss pre-seed (bss_vaddr=0x%lx)\n",
+                    (unsigned long)g_crt_ctx.bss_vaddr);
         } else {
             fprintf(stderr, "WARNING: g_crt_ctx.bss_vaddr not set, skipping .bss pre-seed\n");
         }
