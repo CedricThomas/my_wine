@@ -295,8 +295,24 @@ int parse_symbol_table_from_image(void *image_base,
 const char *get_symbol_name(const IMAGE_SYMBOL *sym, const char *string_table)
 {
     if (sym->N.ShortName[0] != 0) {
-        /* Short name (up to 8 chars) — returned as-is (not null-terminated) */
-        return (const char *)sym->N.ShortName;
+        /* Short name (up to 8 chars). Check if it's null-terminated within
+         * the 8-byte field. If not, copy to a static buffer to avoid
+         * reading past the buffer during string operations. */
+        int has_null = 0;
+        for (int j = 0; j < 8; j++) {
+            if (sym->N.ShortName[j] == '\0') {
+                has_null = 1;
+                break;
+            }
+        }
+        if (has_null) {
+            return (const char *)sym->N.ShortName;
+        }
+        /* 8-byte name with no null — copy to static buffer for safety */
+        static char short_name_buf[9];
+        memcpy(short_name_buf, sym->N.ShortName, 8);
+        short_name_buf[8] = '\0';
+        return short_name_buf;
     }
     if (string_table) {
         uint32_t offset = sym->N.Name.Long;
