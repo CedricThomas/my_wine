@@ -1,0 +1,87 @@
+/*
+ * ntdll_priv.h — Private declarations shared across ntdll split files
+ *
+ * All files in src/stubs/ntdll_*.c include this header. It re-exports the
+ * public ntdll.h and declares the internal globals, types, and helpers.
+ */
+
+#ifndef MY_WINE_NTDLL_PRIV_H
+#define MY_WINE_NTDLL_PRIV_H
+
+#include "include/ntdll.h"
+#include "include/pe.h"
+
+/* ── Handle Table ──────────────────────────────────────────────── */
+
+#define HANDLE_TABLE_SIZE    256
+#define STDIN_HANDLE         0x7FFFFFFF
+#define STDOUT_HANDLE        0x7FFFFFFE
+#define STDERR_HANDLE        0x7FFFFFFD
+
+typedef struct {
+    int        fd;
+    uint8_t    used;
+} handle_entry_t;
+
+extern handle_entry_t handle_table[HANDLE_TABLE_SIZE];
+
+void init_handle_table(void);
+int handle_to_fd(uint64_t handle);
+uint64_t fd_to_handle(int fd);
+void free_handle(uint64_t handle);
+
+/* ── Section Tracking ──────────────────────────────────────────── */
+
+#define MAX_SECTIONS 64
+
+typedef struct {
+    void     *base;
+    size_t    size;
+    int       fd;
+    uint64_t  max_size;
+} wine_section_t;
+
+extern wine_section_t sections[MAX_SECTIONS];
+extern int section_count;
+
+/* ── View Tracking ─────────────────────────────────────────────── */
+
+typedef struct {
+    void  *base;
+    size_t size;
+} wine_view_t;
+
+extern wine_view_t views[MAX_SECTIONS];
+extern int view_count;
+
+/* ── Event Tracking ────────────────────────────────────────────── */
+
+#define MAX_EVENTS 64
+
+typedef struct {
+    int handle;
+    int signaled;
+    int event_type; // 0 = Notification, 1 = Synchronization
+} wine_event_t;
+
+extern wine_event_t events[MAX_EVENTS];
+extern int event_count;
+
+/* ── Thread Tracking ───────────────────────────────────────────── */
+
+#define MAX_THREADS 32
+
+typedef struct {
+    pthread_t tid;
+    int suspended;
+} wine_thread_t;
+
+extern wine_thread_t threads[MAX_THREADS];
+extern int thread_count;
+
+/* ── Helpers ───────────────────────────────────────────────────── */
+
+int map_protect(uint64_t protect);
+int find_view(void *base);
+
+#endif /* MY_WINE_NTDLL_PRIV_H */

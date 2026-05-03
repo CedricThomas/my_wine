@@ -5,7 +5,9 @@ LDFLAGS = -lrt -lpthread -lseccomp
 BUILDDIR = build
 OBJS = $(BUILDDIR)/my_wine.o $(BUILDDIR)/pe_parser.o $(BUILDDIR)/thunk_gen.o \
        $(BUILDDIR)/signal_handler.o $(BUILDDIR)/dispatcher.o \
-       $(BUILDDIR)/ntdll.o $(BUILDDIR)/kernel32.o $(BUILDDIR)/msvcrt.o \
+       $(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
+       $(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
+       $(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o $(BUILDDIR)/msvcrt.o \
        $(BUILDDIR)/run_guest.o
 
 all: my_wine
@@ -45,7 +47,20 @@ $(BUILDDIR)/signal_handler.o: src/syscall/signal_handler.c | $(BUILDDIR)
 $(BUILDDIR)/dispatcher.o: src/syscall/dispatcher.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILDDIR)/ntdll.o: src/stubs/ntdll.c | $(BUILDDIR)
+# ── ntdll split files ────────────────────────────────────────────
+$(BUILDDIR)/ntdll_handle.o: src/stubs/ntdll_handle.c src/stubs/ntdll_priv.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/ntdll_io.o: src/stubs/ntdll_io.c src/stubs/ntdll_priv.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/ntdll_memory.o: src/stubs/ntdll_memory.c src/stubs/ntdll_priv.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/ntdll_process.o: src/stubs/ntdll_process.c src/stubs/ntdll_priv.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/ntdll_objects.o: src/stubs/ntdll_objects.c src/stubs/ntdll_priv.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 STUB_CFLAGS = $(CFLAGS) -mno-red-zone
@@ -65,7 +80,12 @@ $(BUILDDIR)/pe_parser.o: include/pe.h include/pe_parser.h
 $(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h
 $(BUILDDIR)/signal_handler.o: include/syscall/signal_handler.h
 $(BUILDDIR)/dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
-$(BUILDDIR)/ntdll.o: include/ntdll.h
+# Header dependencies for ntdll split files
+$(BUILDDIR)/ntdll_handle.o: include/ntdll.h
+$(BUILDDIR)/ntdll_io.o: include/ntdll.h
+$(BUILDDIR)/ntdll_memory.o: include/ntdll.h include/pe.h
+$(BUILDDIR)/ntdll_process.o: include/ntdll.h
+$(BUILDDIR)/ntdll_objects.o: include/ntdll.h
 $(BUILDDIR)/kernel32.o: include/kernel32.h include/ntdll.h include/syscall/thunk_gen.h
 $(BUILDDIR)/msvcrt.o: include/msvcrt.h include/pe_parser.h
 
