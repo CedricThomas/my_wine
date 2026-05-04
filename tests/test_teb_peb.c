@@ -19,7 +19,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <signal.h>
 #include <sys/mman.h>
 
 #include "pe.h"
@@ -51,27 +50,6 @@ static void check(const char *label, int condition)
         printf("  FAIL: %s\n", label);
         failed_tests++;
     }
-}
-
-/* ── Crash safety: install SIGSEGV handler ───────────────────
- *
- * signal_handler.o installs a SIGSYS handler that raises SIGSEGV
- * when g_dispatcher is NULL. Since we don't call setup_sigsys_handler()
- * in this test, any accidental SIGSYS would crash us. Install a
- * no-op SIGSEGV handler to prevent that.
- */
-static void noop_signal_handler(int sig) { (void)sig; }
-
-static void install_crash_safety(void)
-{
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = noop_signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
 }
 
 /* ── Helpers ────────────────────────────────────────────────── */
@@ -219,10 +197,7 @@ static void test_stack_setup(void)
 
 int main(void)
 {
-    /* Install crash safety: prevent SIGSYS→SIGSEGV from killing us */
-    install_crash_safety();
-
-    printf("=== TEB/PEB Tests (t7.4) ===\n");
+    printf("=== TEB/PEB Tests ===\n");
 
     test_teb_peb_setup();
     test_stack_setup();
