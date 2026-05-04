@@ -69,7 +69,7 @@ __wine_dispatcher:
 
     mov __wine_guest_regs+RSP_OFF(%rip), %rsp
 
-    /* ── Restore guest registers ── */
+    /* Restore guest registers ── */
 
     mov __wine_guest_regs+RCX_OFF(%rip), %rcx
     mov __wine_guest_regs+RDX_OFF(%rip), %rdx
@@ -77,6 +77,12 @@ __wine_dispatcher:
     mov __wine_guest_regs+R9_OFF(%rip), %r9
     mov __wine_guest_regs+RAX_OFF(%rip), %rax
 
-    /* ── Return to thunk (pops ret_addr from guest stack) ── */
+    /* Pop the thunk's return address from guest stack (pushed by thunk's `call`).
+     * After this, the guest caller's original return address is at [RSP],
+     * so the subsequent `ret` returns directly to the guest caller.
+     */
+    add $8, %rsp
+
+    /* Return to guest caller */
 
     ret
