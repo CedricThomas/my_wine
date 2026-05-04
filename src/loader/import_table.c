@@ -5,8 +5,17 @@
  * to our stub implementations.
  */
 
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <search.h>
+
+#include "include/ntdll.h"
+#include "include/kernel32.h"
+#include "include/msvcrt.h"
 
 #include "loader_priv.h"
 
