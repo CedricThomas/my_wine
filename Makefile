@@ -157,7 +157,8 @@ $(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c \
 	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/abi_wrappers.o
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/abi_wrappers.o \
+	$(BUILDDIR)/common.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
