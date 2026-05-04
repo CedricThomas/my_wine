@@ -52,8 +52,17 @@ $(BUILDDIR)/main.o: src/main.c | $(BUILDDIR)
 	@echo "  CC $<"
 	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
-# src/pe_parser.c → CFLAGS only (no -mno-red-zone)
-$(BUILDDIR)/pe_parser.o: src/pe_parser.c | $(BUILDDIR)
+# PE parser split files → CFLAGS only (no -mno-red-zone)
+$(BUILDDIR)/pe_headers.o: src/pe_headers.c | $(BUILDDIR)
+	@echo "  CC $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+$(BUILDDIR)/pe_imports.o: src/pe_imports.c | $(BUILDDIR)
+	@echo "  CC $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+$(BUILDDIR)/pe_symbols.o: src/pe_symbols.c | $(BUILDDIR)
+	@echo "  CC $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+$(BUILDDIR)/pe_rip_scan.o: src/pe_rip_scan.c | $(BUILDDIR)
 	@echo "  CC $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -118,12 +127,12 @@ test: all $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution
 	timeout 5 ./$(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Tests completed ==="
 
-$(BUILDDIR)/test_parse: tests/test_parse.c $(BUILDDIR)/pe_parser.o
+$(BUILDDIR)/test_parse: tests/test_parse.c $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o
 	@echo "  LD $@"
-	@$(CC) $(CFLAGS) -I include -o $@ $< $(BUILDDIR)/pe_parser.o
+	@$(CC) $(CFLAGS) -I include -o $@ $< $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o
 
 $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
-	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/image_mapper.o \
+	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o $(BUILDDIR)/image_mapper.o \
 	$(BUILDDIR)/import_resolver.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
@@ -138,7 +147,7 @@ $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
 $(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
-	$(BUILDDIR)/pe_parser.o $(BUILDDIR)/image_mapper.o \
+	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o $(BUILDDIR)/image_mapper.o \
 	$(BUILDDIR)/import_resolver.o $(BUILDDIR)/teb_peb.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
@@ -166,7 +175,10 @@ $(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c \
 
 # Root
 $(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
-$(BUILDDIR)/pe_parser.o: include/pe.h include/pe_parser.h
+$(BUILDDIR)/pe_headers.o: include/pe.h include/pe_parser.h src/pe_priv.h
+$(BUILDDIR)/pe_imports.o: include/pe.h include/pe_parser.h src/pe_priv.h
+$(BUILDDIR)/pe_symbols.o: include/pe.h include/pe_parser.h
+$(BUILDDIR)/pe_rip_scan.o: include/pe.h include/pe_parser.h include/common.h src/pe_priv.h
 
 # Stubs
 $(BUILDDIR)/ntdll_handle.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
