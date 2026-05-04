@@ -16,6 +16,7 @@
 #include "include/pe_parser.h"
 #include "include/common.h"
 #include "loader_priv.h"
+#include "include/debug.h"
 
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
@@ -63,20 +64,19 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
     IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
 
     if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
-        printf("No imports to resolve\n");
+        DEBUG("No imports to resolve");
         return 0;
     }
 
     uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
     IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
 
-    printf("Resolving imports:\n");
-    fflush(stdout);
+    DEBUG("Resolving imports:");
 
     while (desc->Name != 0) {
         const char *dll_name = (const char *)((char *)base + desc->Name);
 
-        printf("  DLL: %s\n", dll_name);
+        DEBUG("  DLL: %s", dll_name);
 
         IMAGE_THUNK_DATA64 *orig_thunks = (IMAGE_THUNK_DATA64 *)((char *)base + desc->u1.OriginalFirstThunk);
         IMAGE_THUNK_DATA64 *iath = (IMAGE_THUNK_DATA64 *)((char *)base + desc->FirstThunk);
@@ -90,8 +90,8 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
                 const char *func_name = ordinal_lookup(dll_name, ordinal);
                 if (func_name != NULL) {
                     addr = resolve_import(dll_name, func_name);
-                    printf("    Resolved ordinal %s!%d -> %s -> %p\n",
-                           dll_name, ordinal, func_name, addr);
+                    DEBUG("    Resolved ordinal %s!%d -> %s -> %p",
+                          dll_name, ordinal, func_name, addr);
                 } else {
                     fprintf(stderr, "  WARNING: ordinal import %s!%d not in lookup table\n",
                             dll_name, ordinal);
@@ -103,11 +103,11 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
             }
 
             if (addr != NULL) {
-                printf("    Resolved %s -> %p\n",
-                       orig_thunks[i].AddressOfData & 0x8000000000000000ULL ?
-                       "<ordinal>" :
-                       ((IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData))->Name,
-                       addr);
+                DEBUG("    Resolved %s -> %p",
+                      orig_thunks[i].AddressOfData & 0x8000000000000000ULL ?
+                      "<ordinal>" :
+                      ((IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData))->Name,
+                      addr);
                 iath[i].AddressOfData = (uint64_t)(uintptr_t)addr;
             } else {
                 fprintf(stderr, "    FAILED to resolve import at index %d\n", i);
@@ -189,19 +189,19 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
     if (num_targets == 0)
         return 0;
 
-    printf("  Found %d thunk targets in .text (range 0x%lx-0x%lx)\n",
-           num_targets,
-           (unsigned long)thunk_targets[0],
-           (unsigned long)thunk_targets[num_targets - 1] + 7);
+    DEBUG("  Found %d thunk targets in .text (range 0x%lx-0x%lx)",
+          num_targets,
+          (unsigned long)thunk_targets[0],
+          (unsigned long)thunk_targets[num_targets - 1] + 7);
 
     struct import_flat flat[MAX_FLAT_IMPORTS];
     int num_flat = build_flat_import_array(base, nt, flat);
 
-    printf("  Flat import array: %d entries\n", num_flat);
+    DEBUG("  Flat import array: %d entries", num_flat);
 
     int matched = patch_thunk_targets(base, nt, thunk_targets, num_targets, flat, num_flat);
 
-    printf("  Thunk IAT patched: %d/%d targets resolved\n", matched, num_targets);
+    DEBUG("  Thunk IAT patched: %d/%d targets resolved", matched, num_targets);
 
     return 0;
 }
