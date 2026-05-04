@@ -6,6 +6,11 @@ LDFLAGS  = -lrt -lpthread -lseccomp
 # Special flags for entry points, loader core, stubs, syscall infra
 SPECIAL_CFLAGS = $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions
 
+# Add generated CRT offsets if the header exists
+ifneq ($(wildcard include/crt_offsets_generated.h),)
+CFLAGS += -DHAVE_GENERATED_CRT_OFFSETS
+endif
+
 # ── Build ───────────────────────────────────────────────────────
 BUILDDIR = build
 
@@ -155,5 +160,10 @@ run-sample:
 clean:
 	rm -rf $(BUILDDIR) my_wine *.o
 	find samples/ -name '*.exe' -delete 2>/dev/null || true
+	rm -f include/crt_offsets_generated.h
 
-.PHONY: all clean test samples run-sample $(BUILDDIR)
+.PHONY: all clean test samples run-sample gen-crt-offsets $(BUILDDIR)
+
+gen-crt-offsets:
+	@echo "Generating CRT offsets from current mingw-w64 toolchain..."
+	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed, using hardcoded fallback"; exit 0; }

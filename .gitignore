@@ -9,3 +9,6 @@ build/
 
 # Main binary
 my_wine
+
+# Auto-generated files
+include/crt_offsets_generated.h
