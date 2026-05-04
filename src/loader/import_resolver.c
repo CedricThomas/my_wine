@@ -20,6 +20,7 @@
 #include "include/ntdll.h"
 #include "include/kernel32.h"
 #include "include/msvcrt.h"
+#include "include/common.h"
 #include "loader_priv.h"
 
 /* Flat import entry used in pass 2 thunk patching */
@@ -182,7 +183,7 @@ void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
     uint64_t target_val = (uint64_t)(uintptr_t)target_addr;
 
     for (uint64_t off = 0; off + 6 <= text_size; off++) {
-        if (text_base[off] == 0xff && text_base[off + 1] == 0x25) {
+        if (text_base[off] == X86_JMP_RIP && text_base[off + 1] == X86_MOD_RIP) {
             int32_t disp = *(int32_t *)(text_base + off + 2);
             uint64_t instr_addr = text_start + off;
             uint64_t target_rva = instr_addr + 6 + disp;
@@ -282,7 +283,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
  * Returns the number of targets collected.
  */
 static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
-                                 uint64_t targets[256])
+                                 uint64_t targets[MAX_THUNK_TARGETS])
 {
     /* Find .text section */
     const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
@@ -312,7 +313,7 @@ static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
     int num_targets = 0;
 
     for (uint64_t off = 0; off + 6 <= text_size; off++) {
-        if (text_base[off] == 0xff && text_base[off + 1] == 0x25) {
+        if (text_base[off] == X86_JMP_RIP && text_base[off + 1] == X86_MOD_RIP) {
             int32_t disp = *(int32_t *)(text_base + off + 2);
             uint64_t instr_addr = text_start + off;
             uint64_t target = instr_addr + 6 + disp;
@@ -322,7 +323,7 @@ static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
             for (int t = 0; t < num_targets; t++) {
                 if (targets[t] == target) { dup = 1; break; }
             }
-            if (!dup && num_targets < 256) {
+            if (!dup && num_targets < MAX_THUNK_TARGETS) {
                 targets[num_targets++] = target;
             }
         }
@@ -348,7 +349,7 @@ static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
  * Returns the number of flat entries created.
  */
 static int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
-                                   struct import_flat flat[256])
+                                   struct import_flat flat[MAX_FLAT_IMPORTS])
 {
     IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
     uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
@@ -356,12 +357,12 @@ static int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
 
     int num_flat = 0;
     IMAGE_IMPORT_DESCRIPTOR *desc = desc_start;
-    while (desc->Name != 0 && num_flat < 256) {
+    while (desc->Name != 0 && num_flat < MAX_FLAT_IMPORTS) {
         const char *dll_name = (const char *)((char *)base + desc->Name);
         IMAGE_THUNK_DATA64 *orig_thunks = (IMAGE_THUNK_DATA64 *)((char *)base + desc->u1.OriginalFirstThunk);
         IMAGE_THUNK_DATA64 *iath = (IMAGE_THUNK_DATA64 *)((char *)base + desc->FirstThunk);
 
-        for (int i = 0; orig_thunks[i].AddressOfData != 0 && num_flat < 256; i++) {
+        for (int i = 0; orig_thunks[i].AddressOfData != 0 && num_flat < MAX_FLAT_IMPORTS; i++) {
             flat[num_flat].ilt_value = orig_thunks[i].AddressOfData;
             flat[num_flat].resolved_addr = iath[i].AddressOfData;
             flat[num_flat].dll_name = dll_name;
@@ -468,7 +469,7 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
         return 0;
     }
 
-    uint64_t thunk_targets[256];
+    uint64_t thunk_targets[MAX_THUNK_TARGETS];
     int num_targets = collect_thunk_targets(base, nt, thunk_targets);
 
     if (num_targets == 0)
@@ -479,7 +480,7 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
            (unsigned long)thunk_targets[0],
            (unsigned long)thunk_targets[num_targets - 1] + 7);
 
-    struct import_flat flat[256];
+    struct import_flat flat[MAX_FLAT_IMPORTS];
     int num_flat = build_flat_import_array(base, nt, flat);
 
     printf("  Flat import array: %d entries\n", num_flat);

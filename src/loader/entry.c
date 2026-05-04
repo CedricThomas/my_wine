@@ -27,9 +27,10 @@
 #include <signal.h>
 #include <ucontext.h>
 #include <sys/syscall.h>
-#include <sys/user.h>  // for REG_RIP, REG_RSP, etc.
 #include <stdbool.h>
 
+#include "include/common.h"
+#include <sys/user.h>  // for REG_RIP, REG_RSP, etc.
 #include "include/pe.h"
 #include "include/msvcrt.h"
 #include "include/syscall/thunk_gen.h"
@@ -164,11 +165,11 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
     } else {
         uint8_t *code = (uint8_t *)thunk;
         uintptr_t thunk_abs = (uintptr_t)thunk;
-        uintptr_t page_addr = thunk_abs & ~(uintptr_t)4095;
+        uintptr_t page_addr = thunk_abs & ~(uintptr_t)PAGE_MASK;
         void *page = (void *)page_addr;
 
         /* Validate: first two bytes should be ff 25 (jmp *disp32(%rip)) */
-        bool is_jmp_thunk = (code[0] == 0xff && code[1] == 0x25);
+        bool is_jmp_thunk = (code[0] == X86_JMP_RIP && code[1] == X86_MOD_RIP);
         if (!is_jmp_thunk) {
             fprintf(stderr, "WARNING: __acrt_iob_func at 0x%lx has unexpected opcode 0x%02x 0x%02x, skipping patch\n",
                     thunk_abs, code[0], code[1]);
@@ -179,21 +180,21 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
                 fprintf(stderr, "WARNING: __acrt_iob_func thunk at 0x%lx is too close to .text end (need 15 bytes, have %ld), skipping patch\n",
                         (unsigned long)thunk_off, (long)(text_end > thunk_off ? text_end - thunk_off : 0));
             } else {
-                if (mprotect(page, 4096, PROT_READ|PROT_WRITE|PROT_EXEC) == 0) {
+                if (mprotect(page, PAGE_SIZE, PROT_READ|PROT_WRITE|PROT_EXEC) == 0) {
                     /* movabs $imm64, %rax */
-                    code[0] = 0x48;                /* REX.W */
-                    code[1] = 0xb8;                /* movabs rax, imm64 */
+                    code[0] = X86_REX_W;                /* REX.W */
+                    code[1] = X86_MOV_ABS;                /* movabs rax, imm64 */
                     *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
                     /* ret */
-                    code[10] = 0xc3;
+                    code[10] = X86_RET;
                     /* NOP padding to fill 15 bytes */
-                    for (int k = 11; k < 15; k++) code[k] = 0x90;
+                    for (int k = 11; k < 15; k++) code[k] = X86_NOP;
 
                     /* Restore RX permissions.
                      * This runs in the child process; if restore fails, the
                      * page remains RWX which is suboptimal but the patch
                      * was applied. Non-fatal in child context. */
-                    if (mprotect(page, 4096, PROT_READ|PROT_EXEC) != 0) {
+                    if (mprotect(page, PAGE_SIZE, PROT_READ|PROT_EXEC) != 0) {
                         perror("mprotect restore __acrt_iob_func");
                     }
                     fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",
@@ -250,12 +251,12 @@ static __attribute__((noreturn)) void setup_child_and_run(
 
     /* Set up signal stack for reliable signal handling */
     {
-        void *sigstack_mem = mmap(NULL, 65536, PROT_READ|PROT_WRITE,
+        void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
                                   MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
         if (sigstack_mem != MAP_FAILED) {
             stack_t ss;
             ss.ss_sp = sigstack_mem;
-            ss.ss_size = 65536;
+            ss.ss_size = SIG_STACK_SIZE;
             ss.ss_flags = 0;
             sigaltstack(&ss, NULL);
         }
@@ -312,7 +313,7 @@ static __attribute__((noreturn)) void setup_child_and_run(
             size_t sz = sections[i].Misc.VirtualSize;
             if (sz == 0) sz = sections[i].SizeOfRawData;
             if (sz == 0) continue;
-            sz = (sz + 4095) & ~(size_t)4095;
+            sz = (sz + PAGE_MASK) & ~(size_t)PAGE_MASK;
             uintptr_t addr = (uintptr_t)base + sections[i].VirtualAddress;
             if (mprotect((void *)addr, sz, PROT_READ|PROT_WRITE) != 0) {
                 fprintf(stderr, "WARNING: mprotect write section '%.8s' at 0x%lx failed\n",
@@ -325,7 +326,7 @@ static __attribute__((noreturn)) void setup_child_and_run(
     /* Watchdog: 60s timeout to allow full CRT startup */
     { struct sigaction w; memset(&w,0,sizeof(w));
       w.sa_sigaction=wd_handler; w.sa_flags=SA_SIGINFO; sigemptyset(&w.sa_mask);
-      sigaction(SIGALRM,&w,NULL); struct itimerval t={.it_interval={0,0},.it_value={60,0}};
+      sigaction(SIGALRM,&w,NULL); struct itimerval t={.it_interval={0,0},.it_value={WATCHDOG_TIMEOUT,0}};
       setitimer(ITIMER_REAL,&t,NULL); }
     {
         void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
@@ -369,12 +370,12 @@ static void cleanup_guest(void *teb, void *stack_base)
         /* Unmap PEB first (it's separate from TEB, stored at teb+0x60) */
         void *peb = *(void **)((char *)teb + TEB_PEB_PTR);
         if (peb) {
-            if (munmap(peb, 4096) != 0) {
+            if (munmap(peb, PAGE_SIZE) != 0) {
                 perror("cleanup_guest: munmap PEB");
             }
         }
         /* Unmap TEB */
-        if (munmap(teb, 4096) != 0) {
+        if (munmap(teb, PAGE_SIZE) != 0) {
             perror("cleanup_guest: munmap TEB");
         }
     }

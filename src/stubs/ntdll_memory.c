@@ -13,6 +13,7 @@
 #include "handler_abi.h"
 #include "ntdll_priv.h"
 #include "include/abi_wrappers.h"
+#include "include/common.h"
 
 /* ── Section / View storage ────────────────────────────────────── */
 
@@ -43,7 +44,7 @@ uint64_t handler_NtAllocateVirtualMemory(uint64_t process, uint64_t *base_addres
     (void)zero_bits;
     (void)allocation_type;
 
-    if (process != 0xFFFFFFFF)
+    if (process != HANDLE_CURRENT_PROCESS)
         return STATUS_ACCESS_DENIED;
 
     int prot = map_protect(protect);
@@ -72,7 +73,7 @@ uint64_t handler_NtFreeVirtualMemory(uint64_t process, uint64_t *base_address,
 {
     (void)free_type;
 
-    if (process != 0xFFFFFFFF)
+    if (process != HANDLE_CURRENT_PROCESS)
         return STATUS_ACCESS_DENIED;
 
     if (base_address == 0 || *base_address == 0)

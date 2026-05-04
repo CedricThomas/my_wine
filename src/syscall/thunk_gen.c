@@ -8,6 +8,7 @@
 #include "include/syscall/thunk_gen.h"
 #include "include/syscall/signal_handler.h"
 #include "include/nt_constants.h"
+#include "include/common.h"
 
 /*
  * syscall_gen.c — Syscall thunk generator
@@ -67,7 +68,7 @@ void *generate_thunk(uint16_t syscall_number)
         (uint8_t)((actual_nr >> 8) & 0xFF),
         (uint8_t)((actual_nr >> 16) & 0xFF),
         (uint8_t)((actual_nr >> 24) & 0xFF),
-        0x0F, 0x05,                              /* syscall */
+        X86_SYSCALL_BYTE1, X86_SYSCALL_BYTE2,                              /* syscall */
         0xC3                                     /* ret */
     };
 

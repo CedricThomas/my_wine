@@ -40,4 +40,10 @@
 #define MAX_THUNK_TARGETS   256
 #define MAX_FLAT_IMPORTS    256
 
+// Signal stack size
+#define SIG_STACK_SIZE      (16 * 1024)
+
+// Watchdog timeout (seconds)
+#define WATCHDOG_TIMEOUT    60
+
 #endif // MY_WINE_COMMON_H

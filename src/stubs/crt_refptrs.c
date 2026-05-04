@@ -20,6 +20,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "include/common.h"
 #include "msvcrt_priv.h"
 
 const refptr_mapping_t refptr_mappings[] = {
@@ -55,8 +56,8 @@ static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
     void *old_val = (void *)*refptr;
 
-    char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)4095);
-    if (mprotect(page_start, 4096, PROT_READ | PROT_WRITE) != 0) {
+    char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)PAGE_MASK);
+    if (mprotect(page_start, PAGE_SIZE, PROT_READ | PROT_WRITE) != 0) {
         perror("patch_crt_refptrs: mprotect");
         return;
     }
@@ -66,7 +67,7 @@ static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
             name, (unsigned long)rva, (unsigned long)old_val, target);
 
     /* Best-effort restore */
-    if (mprotect(page_start, 4096, PROT_READ) != 0) {
+    if (mprotect(page_start, PAGE_SIZE, PROT_READ) != 0) {
         perror("patch_crt_refptrs: mprotect restore");
     }
 }
@@ -100,7 +101,7 @@ static void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
         uint8_t *p = text_base + off;
 
         /* 48 8B 05 disp32 = mov rax, [rip+disp32] */
-        if (p[0] != 0x48 || p[1] != 0x8B || p[2] != 0x05) continue;
+        if (p[0] != X86_REX_W || p[1] != X86_MOV_R64_RIP || p[2] != X86_MOV_RIP) continue;
 
         int32_t disp = (int32_t)*((int32_t *)(p + 3));
         uint64_t instr_rva = text_vaddr + off;
@@ -115,7 +116,7 @@ static void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
          * This distinguishes __imp___initenv (deref+write) from callbacks (deref+test+call). */
         int has_write_deref = 0;
         for (uint64_t d = 7; d + 4 < 40 && d + 4 < text_size - off; d++) {
-            if (p[d] == 0x48 && p[d+1] == 0x8B && p[d+2] == 0x00) {
+            if (p[d] == X86_REX_W && p[d+1] == X86_MOV_R64_RIP && p[d+2] == X86_MOV_RAX_RAX) {
                 /* Found deref. Check if next is a store to [rax].
                  * Store patterns: 89 XX, C7 XX, 48 89 XX, 4C 89 XX where XX has mod=00,rm=00 */
                 uint64_t nd = d + 3;
@@ -124,11 +125,11 @@ static void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
                      * Patterns: 89 00, C7 00, or with REX prefix: 48/4C/4D/49 89 00 */
                     uint8_t a = p[nd], b = p[nd+1], c = p[nd+2];
                     int is_store = 0;
-                    if (a == 0x89 && b == 0x00) is_store = 1;           /* 89 00 */
-                    if (a == 0xC7 && b == 0x00) is_store = 1;           /* C7 00 */
-                    if ((a & 0xF0) == 0x40 && b == 0x89 && c == 0x00)   /* REX 89 00 */
+                    if (a == X86_MOV_RM_R64 && b == X86_MOV_RAX_RAX) is_store = 1;           /* 89 00 */
+                    if (a == X86_MOV_RM_IMM && b == X86_MOV_RAX_RAX) is_store = 1;           /* C7 00 */
+                    if ((a & 0xF0) == 0x40 && b == X86_MOV_RM_R64 && c == X86_MOV_RAX_RAX)   /* REX 89 00 */
                         is_store = 1;
-                    if ((a & 0xF0) == 0x40 && b == 0xC7 && c == 0x00)   /* REX C7 00 */
+                    if ((a & 0xF0) == 0x40 && b == X86_MOV_RM_IMM && c == X86_MOV_RAX_RAX)   /* REX C7 00 */
                         is_store = 1;
                     if (is_store) {
                         has_write_deref = 1;
@@ -305,7 +306,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
     if (bss_sec) {
         g_crt_ctx.bss_vaddr = bss_sec->VirtualAddress;
         __imp___initenv_stub = (void **)((char *)image_base +
-                                          g_crt_ctx.bss_vaddr + 0x018);
+                                          g_crt_ctx.bss_vaddr + CRT_BSS_INITENV);
         fprintf(stderr, "patch_crt_refptrs: .bss at VA=0x%lx, __imp___initenv_stub=%p\n",
                 (unsigned long)g_crt_ctx.bss_vaddr, (void *)__imp___initenv_stub);
     } else {
@@ -341,10 +342,10 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 
     /* Fallback: if COFF lookup failed, use hardcoded mingw-w64 defaults */
     if (g_crt_ctx.argc_bss_offset == 0 || g_crt_ctx.argv_bss_offset == 0 || g_crt_ctx.envp_bss_offset == 0) {
-        fprintf(stderr, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, using hardcoded CRT offsets (0x018/0x020/0x028)\n");
-        if (g_crt_ctx.argc_bss_offset == 0) g_crt_ctx.argc_bss_offset = 0x028;
-        if (g_crt_ctx.argv_bss_offset == 0) g_crt_ctx.argv_bss_offset = 0x020;
-        if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = 0x018;
+        fprintf(stderr, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, using hardcoded CRT offsets (0x%x/0x%x/0x%x)\n", CRT_BSS_INITENV, CRT_BSS_ARGV, CRT_BSS_ARGC);
+        if (g_crt_ctx.argc_bss_offset == 0) g_crt_ctx.argc_bss_offset = CRT_BSS_ARGC;
+        if (g_crt_ctx.argv_bss_offset == 0) g_crt_ctx.argv_bss_offset = CRT_BSS_ARGV;
+        if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = CRT_BSS_INITENV;
     }
 
     fprintf(stderr, "patch_crt_refptrs: CRT offsets argc=0x%x argv=0x%x envp=0x%x\n",

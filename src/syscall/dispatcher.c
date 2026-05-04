@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <sys/ucontext.h>
 
+#include "include/common.h"
 #include "include/nt_constants.h"
 #include "include/ntdll.h"
 #include "include/syscall/dispatcher.h"

@@ -13,6 +13,7 @@
 #include "include/syscall/thunk_gen.h"
 #include "include/wine_abi.h"
 #include "include/abi_wrappers.h"
+#include "include/common.h"
 #include "ntdll_priv.h"
 
 /* Helper: write a static message to stderr via direct syscall */
@@ -45,9 +46,9 @@ WINE_STUB
 void *GetStdHandle(int nStdHandle)
 {
     switch (nStdHandle) {
-    case STD_INPUT_HANDLE:  return (void *)(uintptr_t)0x7FFFFFFFUL;
-    case STD_OUTPUT_HANDLE: return (void *)(uintptr_t)0x7FFFFFFEUL;
-    case STD_ERROR_HANDLE:  return (void *)(uintptr_t)0x7FFFFFFDUL;
+    case STD_INPUT_HANDLE:  return (void *)(uintptr_t)STD_INPUT_HANDLE_VALUE;
+    case STD_OUTPUT_HANDLE: return (void *)(uintptr_t)STD_OUTPUT_HANDLE_VALUE;
+    case STD_ERROR_HANDLE:  return (void *)(uintptr_t)STD_ERROR_HANDLE_VALUE;
     default:                return NULL;
     }
 }
@@ -146,7 +147,7 @@ void ExitProcess(uint32_t uExitCode)
      *   0xFFFFFFFF → process_handle (pseudo-handle = current process)
      *   uExitCode  → exit_status
      */
-    handler_NtTerminateProcess(0xFFFFFFFF, (uint64_t)uExitCode);
+    handler_NtTerminateProcess(HANDLE_CURRENT_PROCESS, (uint64_t)uExitCode);
     __builtin_unreachable();
 }
 
@@ -283,7 +284,7 @@ int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint
     }
 
     /* mprotect requires page-aligned addresses */
-    size_t page_size = 4096; /* constant instead of sysconf(_SC_PAGESIZE) to avoid libc */
+    size_t page_size = PAGE_SIZE; /* constant instead of sysconf(_SC_PAGESIZE) to avoid libc */
     void *page_start = (void *)((uintptr_t)lpAddress & ~(page_size - 1));
     uintptr_t offset = (uintptr_t)lpAddress - (uintptr_t)page_start;
     size_t total_size = offset + dwSize;
@@ -328,7 +329,7 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
     mbi->BaseAddress = lpAddress;
     mbi->AllocationBase = lpAddress;
     mbi->AllocationProtect = PAGE_READWRITE;
-    mbi->RegionSize = 4096;
+    mbi->RegionSize = PAGE_SIZE;
     mbi->State = MEM_COMMIT;
     mbi->Protect = PAGE_READWRITE;
     mbi->Type = MEM_PRIVATE;
