@@ -141,7 +141,6 @@ extern void *__msvcrt_signal;
 typedef struct {
     const char *name;
     void       *target;
-    uint32_t    rel_offset;
 } refptr_mapping_t;
 
 extern const refptr_mapping_t refptr_mappings[];
