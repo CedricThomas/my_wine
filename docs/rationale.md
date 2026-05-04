@@ -286,8 +286,9 @@ We fix this with a 15-byte overwrite at the function's entry point:
 
 ```asm
 ; Replace the buggy wrapper with a direct return of our iob array
-movabs rax, <__wine_iob_data()>   ; 48 B8 xx xx xx xx xx xx xx xx
-ret                               ; C3
+movabs rax, <__wine_iob_data()>   ; 48 B8 xx xx xx xx xx xx xx xx  (10 bytes)
+ret                               ; C3                              (1 byte)
+; + 4 NOPs for alignment padding  ; 90 90 90 90                    (4 bytes)
 ```
 
 This must be done in the **child** process because
@@ -306,8 +307,48 @@ See [CRT refptr Patching](refptr.md) for full implementation details.
 
 ---
 
+## 4. Requirements
+
+| Requirement | Why |
+|---|---|
+| Linux x86_64 | We use the GS segment for TEB access, seccomp-BPF for syscall filtering, and the x86_64 syscall ABI. No other architecture is supported. |
+| GCC | We need GCC-specific attributes: `__attribute__((ms_abi))` for Windows x64 calling convention, `__attribute__((force_align_arg_pointer))` for stack alignment, `__attribute__((naked))` for trampoline assembly. |
+| libseccomp-dev | Provides `libseccomp` for constructing the seccomp-BPF filter that traps NT syscalls. Linked via `-lseccomp`. |
+| Docker + mingw-w64 | Cross-compilation to PE format via `x86_64-w64-mingw32-gcc`. Used for building sample Windows binaries, not for the loader itself. |
+| `-mno-red-zone` | The Windows x64 ABI has no red zone. Without this flag, GCC assumes a 128-byte red zone below RSP, which conflicts with signal handlers and guest stack operations. |
+| `-fno-stack-protector` | Stack canaries require `__stack_chk_fail` from glibc, which the guest process can't call. Disabling them prevents crashes from missing glibc symbols. |
+| `-fno-exceptions` | No C++ exception handling is needed. Disabling avoids generating unwind tables and reducing code size. |
+| `arch_prctl(ARCH_SET_GS)` | We set the GS base to point to the TEB. This requires `arch_prctl` syscall (not FSGSBASE instructions). |
+
+The compiler flags (`-mno-red-zone`, `-fno-stack-protector`, `-fno-exceptions`) are applied via `SPECIAL_CFLAGS` in the Makefile to `loader/`, `stubs/`, and `syscall/` files.
+
+---
+
+## 5. Limitations
+
+| Limitation | Rationale |
+|---|---|
+| **No relocation support** | We don't implement relocation processing. A `MAP_STACK` fallback exists but relocations are never applied. |
+| **No dynamic loading** | `LoadLibraryA` returns `NULL`. Runtime DLL loading would require a full PE loading path at runtime. |
+| **No TLS support** | `TlsGetValue` returns `NULL`; `__dyn_tls_init_callback` is stubbed. Per-thread slot management and callback invocation add complexity for minimal gain in single-threaded targets. |
+| **Stubbed synchronization** | CriticalSection ops are no-ops. Full sync support adds significant complexity for minimal gain in single-threaded targets. |
+| **Only mingw-w64 executables** | We assume mingw-w64 CRT layout and import patterns. MSVC binaries have different CRT structures and import conventions. |
+| **Limited syscall handlers** | Only NT syscalls we explicitly implement work. Unsupported syscalls cause `STATUS_NOT_IMPLEMENTED` in the dispatcher. |
+| **No heap management** | No `HeapAlloc`/`HeapFree` — only limited virtual memory via `mmap`. A full Windows-compatible allocator is out of scope. |
+| **No filesystem I/O** | Only console I/O via `NtWriteFile`/`NtReadFile`. File I/O requires Windows-to-Linux path mapping and Windows file semantics. |
+| **Hardcoded CRT fallback offsets** | Offsets 0x018/0x020/0x028 when symbols are stripped. Different CRT versions may change these offsets. |
+| **No ordinal imports** | Ordinal imports (high-bit set in thunks) are not resolved. Only name-based imports via `IMAGE_IMPORT_BY_NAME` are supported. Ordinal imports are skipped with a warning. |
+| **60s watchdog** | Child process has a 60-second timeout. Prevents indefinite hangs from blocking the parent's `waitpid()`. |
+| **Single-thread SEH** | The SEH chain is global; no per-thread cleanup. Per-thread SEH requires thread-aware exception chain management. |
+
+---
+
 ## Related Documents
 
+- [Onboarding](onboarding.md) — Getting started guide and reading order
 - [PE Format Primer](pe_format.md) — PE structure basics
-- [Architecture](architecture.md) — how it works
+- [Architecture](architecture.md) — How it works: data flow, fork model, syscall interception
 - [CRT refptr Patching](refptr.md) — .refptr details
+- [README](../README.md) — Build, run, quick start
+
+This document covers the **WHY**. See [Architecture](architecture.md) for the **HOW** and [PE Format Primer](pe_format.md) for the **WHAT**.
