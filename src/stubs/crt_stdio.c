@@ -12,8 +12,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
-#include <asm/unistd_64.h>
 #include "msvcrt_priv.h"
+#include "../syscalls_inline.h"
 
 /* ── Internal implementations ──────────────────────────────── */
 
@@ -34,11 +34,7 @@ int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap)
     while (len < 4095 && format[len]) len++;
     if (len == 0) return 0;
 
-    long res;
-    __asm__ volatile("syscall"
-                     : "=a"(res)
-                     : "a"(__NR_write), "D"(fd), "S"(format), "d"(len)
-                     : "rcx", "r11", "memory", "cc");
+    long res = INLINE_SYSCALL_WRITE(fd, format, len);
     (void)res;
     return (int)len;
 }
@@ -65,11 +61,7 @@ size_t wine_fwrite(const void *ptr, size_t size, size_t nmemb, wine_FILE *stream
 
     size_t total = size * nmemb;
     /* Use syscall directly to avoid callee-save SSE spills */
-    long res;
-    __asm__ volatile("syscall"
-                     : "=a"(res)
-                     : "a"(__NR_write), "D"(fd), "S"(ptr), "d"(total)
-                     : "rcx", "r11", "memory", "cc");
+    long res = INLINE_SYSCALL_WRITE(fd, ptr, total);
     if (res < 0) return 0;
     return (size_t)res / size;
 }

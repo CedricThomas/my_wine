@@ -21,7 +21,6 @@
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <sys/time.h>
-#include <asm/unistd_64.h>
 #include "include/nt_constants.h"
 #include <fcntl.h>
 #include <signal.h>
@@ -37,6 +36,7 @@
 #include "include/syscall/signal_handler.h"
 #include "include/syscall/dispatcher.h"
 #include "loader_priv.h"
+#include "../syscalls_inline.h"
 
 /* Guest entry trampoline (implemented in run_guest.S) */
 extern void run_guest(void (*entry)(void), void *stack_top, void *peb,
@@ -95,8 +95,7 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
     else if (sig == SIGBUS) { sig_name = sig_bus; sig_len = 12; }
     else if (sig == SIGTRAP) { sig_name = sig_trap; sig_len = 13; }
 
-    long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(sig_name), "d"((size_t)sig_len) : "rcx","r11","memory","cc");
+    INLINE_SYSCALL_WRITE_ERR(sig_name, (size_t)sig_len);
 
     ucontext_t *uc = (ucontext_t *)ucontext;
     if (uc) {
@@ -113,7 +112,7 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         }
         hex_buf[off++] = '\n';
         hex_buf[off] = '\0';
-        __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(hex_buf), "d"((size_t)off) : "rcx","r11","memory","cc");
+        INLINE_SYSCALL_WRITE_ERR(hex_buf, (size_t)off);
     }
 
     _exit(139);
@@ -329,8 +328,8 @@ static void wd_handler(int sig, siginfo_t *info, void *uc_ptr) { (void)sig; (voi
    val = (uint64_t)r[REG_RAX];
    format_hex(b + off, sizeof(b) - off, val); off += 16;
    b[off++] = '\n'; b[off] = '\0';
-   long ret; __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(b), "d"((size_t)off) : "rcx","r11","memory","cc");
-   __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit), "D"(0xFF) : "rcx","r11","cc"); }
+   INLINE_SYSCALL_WRITE_ERR(b, (size_t)off);
+   INLINE_SYSCALL_EXIT(0xFF); }
 
 /* ── Step 5: Watchdog + jump to guest (noreturn) ─────────── */
 static void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,

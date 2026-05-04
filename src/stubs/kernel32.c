@@ -6,7 +6,6 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/mman.h>
-#include <asm/unistd_64.h>
 #include "include/kernel32.h"
 #include "include/nt_constants.h"
 #include "include/ntdll.h"
@@ -15,13 +14,12 @@
 #include "include/abi_wrappers.h"
 #include "include/common.h"
 #include "ntdll_priv.h"
+#include "../syscalls_inline.h"
 
 /* Helper: write a static message to stderr via direct syscall */
 static inline void write_to_stderr(const char *msg)
 {
-    long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(msg), "d"((size_t)__builtin_strlen(msg)) : "rcx", "r11", "memory", "cc");
-    (void)ret;
+    INLINE_SYSCALL_WRITE_ERR(msg, (size_t)__builtin_strlen(msg));
 }
 
 
@@ -138,8 +136,7 @@ void ExitProcess(uint32_t uExitCode)
     void *thunk = lookup_thunk(NT_SYSCALL_TERMINATE_PROCESS);
     if (thunk == NULL) {
         write_to_stderr("my_wine: ExitProcess: thunk not found\n");
-        long ret;
-        __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit_group), "D"(1) : "rcx", "r11", "cc");
+        INLINE_SYSCALL_EXIT_GROUP(1);
     }
 
     /*
@@ -249,17 +246,14 @@ WINE_STUB
 void Sleep(uint32_t dwMilliseconds)
 {
     char buf[64];
-    long ret;
     int len = sprintf(buf, "TRACE: Sleep(%u)\n", dwMilliseconds);
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(buf), "d"((size_t)len) : "rcx", "r11", "memory", "cc");
-    (void)ret;
+    INLINE_SYSCALL_WRITE_ERR(buf, (size_t)len);
 
     struct timespec ts;
     ts.tv_sec  = dwMilliseconds / 1000;
     ts.tv_nsec = (dwMilliseconds % 1000) * 1000000L;
     /* Call nanosleep syscall directly (avoids ABI mismatch with libc wrapper) */
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_nanosleep), "D"(&ts), "S"((const void *)0) : "rcx", "r11", "memory", "cc");
-    (void)ret;
+    (void)INLINE_SYSCALL_NANOSLEEP(&ts, (const void *)0);
 }
 
 /* ── TlsGetValue ───────────────────────────────────────────── */
