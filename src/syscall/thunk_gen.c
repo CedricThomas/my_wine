@@ -7,6 +7,7 @@
 
 #include "include/syscall/thunk_gen.h"
 #include "include/syscall/signal_handler.h"
+#include "include/nt_constants.h"
 
 /*
  * syscall_gen.c — Syscall thunk generator
@@ -14,7 +15,7 @@
  * Generates machine code for syscall thunks at runtime. Each thunk encodes:
  *   mov r10, rcx       — Windows x64 calling convention puts 1st arg in RCX,
  *                        Linux syscall uses R10
- *   mov eax, NR + 0xF000 — syscall number with Wine's 0xF000 offset
+ *   mov eax, NR + WINE_SYSCALL_OFFSET — syscall number with Wine's syscall offset
  *   syscall            — the syscall instruction
  *   ret                — return
  */
@@ -36,8 +37,14 @@ static thunk_fn thunk_array[0x50] = { 0 };
 
 /* List of NT syscall numbers we support. */
 static const uint16_t nt_syscall_list[] = {
-    0x05, 0x07, 0x0F, 0x18, 0x19, 0x24, 0x26, 0x28,
-    0x29, 0x2A, 0x3C, 0x3D, 0x48, 0x4A, 0x4E, 0x4F
+    NT_SYSCALL_CALLBACK_RETURN, NT_SYSCALL_QUERY_INFO_PROCESS,
+    NT_SYSCALL_CLOSE, NT_SYSCALL_ALLOC_VM, NT_SYSCALL_FREE_VM,
+    NT_SYSCALL_GET_CTX_THREAD, NT_SYSCALL_SET_CTX_THREAD,
+    NT_SYSCALL_MAP_VIEW, NT_SYSCALL_UNMAP_VIEW,
+    NT_SYSCALL_TERMINATE_PROCESS,
+    NT_SYSCALL_READ_FILE, NT_SYSCALL_WRITE_FILE,
+    NT_SYSCALL_CREATE_EVENT, NT_SYSCALL_CREATE_SECTION,
+    NT_SYSCALL_CREATE_THREAD_EX, NT_SYSCALL_OPEN_FILE
 };
 
 /* signal_handler.h provides the thunk registration function */
@@ -46,13 +53,13 @@ static const uint16_t nt_syscall_list[] = {
  * generate_thunk — allocate and write a syscall thunk
  *
  * @syscall_number: Windows NT syscall number (e.g. 0x3D for NtWriteFile).
- *                  The actual syscall number emitted is syscall_number + 0xF000.
+ *                  The actual syscall number emitted is syscall_number + WINE_SYSCALL_OFFSET.
  *
  * Returns a void* to the executable memory, or NULL on failure.
  */
 void *generate_thunk(uint16_t syscall_number)
 {
-    uint32_t actual_nr = (uint32_t)(syscall_number + 0xF000);
+    uint32_t actual_nr = (uint32_t)(syscall_number + WINE_SYSCALL_OFFSET);
     uint8_t code[THUNK_SIZE] = {
         0x41, 0x89, 0xCF,                       /* mov r10, rcx */
         0xB8,

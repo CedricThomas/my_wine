@@ -13,6 +13,7 @@
 #include <linux/filter.h>
 
 #include "include/syscall/signal_handler.h"
+#include "include/nt_constants.h"
 
 #define THUNK_PAGE 4096  /* from thunk_gen.c: each thunk occupies one page */
 
@@ -152,8 +153,8 @@ void cleanup_thunk_pages(void)
 
 /*
  * Install a raw seccomp-BPF filter that:
- *   - ALLOWs every syscall with number < 0xF000 (native Linux syscalls)
- *   - TRAPs  (sends SIGSYS) every syscall with number >= 0xF000
+ *   - ALLOWs every syscall with number < WINE_SYSCALL_OFFSET (native Linux syscalls)
+ *   - TRAPs  (sends SIGSYS) every syscall with number >= WINE_SYSCALL_OFFSET
  *
  * CRITICAL:  The SIGSYS handler must be installed via
  * setup_sigsys_handler() BEFORE calling this function.
@@ -165,15 +166,15 @@ int setup_seccomp(void)
          * seccomp data structure).                                       */
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS, 0),
 
-        /* If syscall >= 0xF000 → jump to TRAP (skip 1 instruction)
-         *   JGE true (>= 0xF000): jt=1 → skip ALLOW → hit TRAP
-         *   JGE false (<  0xF000): jf=0 → no skip → hit ALLOW    */
-        BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0xF000, 1, 0),
+        /* If syscall >= WINE_SYSCALL_OFFSET → jump to TRAP (skip 1 instruction)
+         *   JGE true (>= WINE_SYSCALL_OFFSET): jt=1 → skip ALLOW → hit TRAP
+         *   JGE false (<  WINE_SYSCALL_OFFSET): jf=0 → no skip → hit ALLOW    */
+        BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, WINE_SYSCALL_OFFSET, 1, 0),
 
-        /* syscall < 0xF000 → ALLOW */
+        /* syscall < WINE_SYSCALL_OFFSET → ALLOW */
         BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 
-        /* syscall >= 0xF000 → TRAP (sends SIGSYS) */
+        /* syscall >= WINE_SYSCALL_OFFSET → TRAP (sends SIGSYS) */
         BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP),
     };
 

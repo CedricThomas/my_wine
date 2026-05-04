@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 
 #include "include/pe.h"
+#include "include/nt_constants.h"
 #include "loader_priv.h"
 
 void *g_stack_base = NULL;
@@ -49,8 +50,8 @@ void *setup_teb_peb(void)
      *   mov rax, gs:[0x30]  →  rax must be TEB
      *   mov rsi, [rax+8]    →  teb[0x08] must be TEB (self-ref)
      * so the loop that checks rsi==rax can exit. */
-    *(void **)((uint8_t *)teb + 0x08) = teb;  // TEB self-referential
-    *(void **)((uint8_t *)teb + 0x30) = teb;  // fake thread pointer (self-ref)
+    *(void **)((uint8_t *)teb + TEB_TEB_SELF_REF) = teb;  // TEB self-referential
+    *(void **)((uint8_t *)teb + TEB_THREAD_PTR) = teb;  // fake thread pointer (self-ref)
 
     /* Allocate PEB (Process Environment Block) */
     size_t peb_size = 4096;
@@ -64,14 +65,14 @@ void *setup_teb_peb(void)
 
     memset(peb, 0, peb_size);
 
-    /* Set PEB pointer in TEB at offset 0x60 */
-    *(void **)((char *)teb + 0x60) = peb;
+    /* Set PEB pointer in TEB at offset TEB_PEB_PTR */
+    *(void **)((char *)teb + TEB_PEB_PTR) = peb;
 
-    /* Set image base pointer in PEB at offset 0x008 (ImageBaseAddress) */
-    *(void **)((char *)peb + 0x008) = g_image_base;
+    /* Set image base pointer in PEB at offset PEB_IMAGE_BASE (ImageBaseAddress) */
+    *(void **)((char *)peb + PEB_IMAGE_BASE) = g_image_base;
 
-    /* Set BeingDebugged = 0 in PEB at offset 0x002 */
-    *(uint8_t *)((char *)peb + 0x002) = 0;
+    /* Set BeingDebugged = 0 in PEB at offset PEB_BEING_DEBUGGED */
+    *(uint8_t *)((char *)peb + PEB_BEING_DEBUGGED) = 0;
 
     /* Set GS segment to point to TEB */
     if (set_gs_base(teb) != 0) {
