@@ -67,17 +67,18 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
 
     /* Also write to the PE's .bss section so the CRT can find them.
      * The .bss section VA is found dynamically via g_crt_ctx.bss_vaddr (set in patch_crt_refptrs).
-     *   argc at +0x028 (4 bytes), argv at +0x020 (8 bytes), envp at +0x018 (8 bytes)
-     * These relative offsets are mingw-w64 CRT-specific and ideally would come from
-     * the symbol table, but they are linker-defined for the CRT startup layout.
+     * The offsets come from COFF symbol lookup (with hardcoded fallback) in g_crt_ctx.
      * The CRT reads argv from this location and does two-level indirection: mov (%r13),%rcx
      * If argv is NULL there, dereferencing 0 → SIGSEGV. */
     uint64_t image_base = g_crt_ctx.image_base;
     if (image_base && g_crt_ctx.bss_vaddr != 0) {
         char *bss = (char *)image_base + g_crt_ctx.bss_vaddr;
-        *(uint32_t *)(bss + 0x028) = 1;            // argc = 1
-        *(uint64_t *)(bss + 0x020) = (uint64_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);  // argv
-        *(uint64_t *)(bss + 0x018) = (uint64_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);  // envp
+        if (g_crt_ctx.argc_bss_offset)
+            *(uint32_t *)(bss + g_crt_ctx.argc_bss_offset) = 1;
+        if (g_crt_ctx.argv_bss_offset)
+            *(uint64_t *)(bss + g_crt_ctx.argv_bss_offset) = (uint64_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);
+        if (g_crt_ctx.envp_bss_offset)
+            *(uint64_t *)(bss + g_crt_ctx.envp_bss_offset) = (uint64_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);
     }
 
     (void)expand_env;

@@ -97,8 +97,11 @@ extern void *__msvcrt_signal;
 
 /* CRT context — image base and .bss VA */
 typedef struct {
-    uint64_t image_base;    /* Base address of the loaded PE image */
-    uint32_t bss_vaddr;     /* VirtualAddress of the .bss section */
+    uint64_t image_base;       /* Base address of the loaded PE image */
+    uint64_t bss_vaddr;        /* VirtualAddress of the .bss section */
+    uint32_t argc_bss_offset;  /* offset within .bss for argc (default 0x028) */
+    uint32_t argv_bss_offset;  /* offset within .bss for argv (default 0x020) */
+    uint32_t envp_bss_offset;  /* offset within .bss for envp (default 0x018) */
 } crt_context_t;
 
 extern crt_context_t g_crt_ctx;

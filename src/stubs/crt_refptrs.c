@@ -331,6 +331,44 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
         g_crt_ctx.bss_vaddr = 0;
     }
 
+    /* Discover CRT offsets (argc/argv/envp) from COFF symbol table */
+    g_crt_ctx.argc_bss_offset = 0;
+    g_crt_ctx.argv_bss_offset = 0;
+    g_crt_ctx.envp_bss_offset = 0;
+
+    const char *crt_sym_names[][2] = {
+        { "_argc", "__argc" },
+        { "_argv", "__argv" },
+        { "_environ", "__envp" },
+    };
+    uint32_t *offset_targets[3] = {
+        &g_crt_ctx.argc_bss_offset,
+        &g_crt_ctx.argv_bss_offset,
+        &g_crt_ctx.envp_bss_offset,
+    };
+
+    for (int ci = 0; ci < 3; ci++) {
+        for (int ni = 0; ni < 2; ni++) {
+            uint64_t rva = find_symbol_rva_from_file(file_path, nt, sections, crt_sym_names[ci][ni]);
+            if (rva != 0) {
+                uint32_t off = (uint32_t)(rva - g_crt_ctx.bss_vaddr);
+                *offset_targets[ci] = off;
+                break;
+            }
+        }
+    }
+
+    /* Fallback: if COFF lookup failed, use hardcoded mingw-w64 defaults */
+    if (g_crt_ctx.argc_bss_offset == 0 || g_crt_ctx.argv_bss_offset == 0 || g_crt_ctx.envp_bss_offset == 0) {
+        fprintf(stderr, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, using hardcoded CRT offsets (0x018/0x020/0x028)\n");
+        if (g_crt_ctx.argc_bss_offset == 0) g_crt_ctx.argc_bss_offset = 0x028;
+        if (g_crt_ctx.argv_bss_offset == 0) g_crt_ctx.argv_bss_offset = 0x020;
+        if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = 0x018;
+    }
+
+    fprintf(stderr, "patch_crt_refptrs: CRT offsets argc=0x%x argv=0x%x envp=0x%x\n",
+            g_crt_ctx.argc_bss_offset, g_crt_ctx.argv_bss_offset, g_crt_ctx.envp_bss_offset);
+
     uint64_t image_size = nt->OptionalHeader.SizeOfImage;
     int patched_any = 0;
     int patched_initenv = 0;
