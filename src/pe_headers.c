@@ -17,6 +17,7 @@
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
+#include "include/debug.h"
 #include "pe_priv.h"
 
 /* ── DOS Header ────────────────────────────────────────────────── */
@@ -137,14 +138,14 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
 {
     (void)dos;
 
-    fprintf(stderr, "=== PE Header Dump ===\n");
-    fprintf(stderr, "Machine:           0x%04x (%s)\n",
+    DEBUG(fprintf(stderr, "=== PE Header Dump ===\n"));
+    DEBUG(fprintf(stderr, "Machine:           0x%04x (%s)\n",
             nt->FileHeader.Machine,
-            nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "unknown");
-    fprintf(stderr, "Entry point:       0x%08x\n", nt->OptionalHeader.AddressOfEntryPoint);
-    fprintf(stderr, "Image base:        0x%016" PRIx64 "\n", nt->OptionalHeader.ImageBase);
-    fprintf(stderr, "Section count:     %u\n", nt->FileHeader.NumberOfSections);
-    fprintf(stderr, "\n");
+            nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "unknown"));
+    DEBUG(fprintf(stderr, "Entry point:       0x%08x\n", nt->OptionalHeader.AddressOfEntryPoint));
+    DEBUG(fprintf(stderr, "Image base:        0x%016" PRIx64 "\n", nt->OptionalHeader.ImageBase));
+    DEBUG(fprintf(stderr, "Section count:     %u\n", nt->FileHeader.NumberOfSections));
+    DEBUG(fprintf(stderr, "\n"));
 
     for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
         const IMAGE_SECTION_HEADER *s = &sections[i];
@@ -152,13 +153,13 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
         memcpy(name, s->Name, 8);
         name[8] = '\0';
 
-        fprintf(stderr, "Section %u:\n", i);
-        fprintf(stderr, "  Name:             %s\n", name);
-        fprintf(stderr, "  VirtualAddress:   0x%08x\n", s->VirtualAddress);
-        fprintf(stderr, "  VirtualSize:      0x%08x\n", s->Misc.VirtualSize);
-        fprintf(stderr, "  SizeOfRawData:    0x%08x\n", s->SizeOfRawData);
-        fprintf(stderr, "  PointerToRawData: 0x%08x\n", s->PointerToRawData);
-        fprintf(stderr, "  Characteristics:  0x%08x", s->Characteristics);
+        DEBUG(fprintf(stderr, "Section %u:\n", i));
+        DEBUG(fprintf(stderr, "  Name:             %s\n", name));
+        DEBUG(fprintf(stderr, "  VirtualAddress:   0x%08x\n", s->VirtualAddress));
+        DEBUG(fprintf(stderr, "  VirtualSize:      0x%08x\n", s->Misc.VirtualSize));
+        DEBUG(fprintf(stderr, "  SizeOfRawData:    0x%08x\n", s->SizeOfRawData));
+        DEBUG(fprintf(stderr, "  PointerToRawData: 0x%08x\n", s->PointerToRawData));
+        DEBUG(fprintf(stderr, "  Characteristics:  0x%08x", s->Characteristics));
 
         /* Decode common characteristic flags */
         char flags[128] = "";
@@ -168,9 +169,9 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
             strcat(flags, " W");
         if (s->Characteristics & IMAGE_SCN_MEM_EXECUTE)
             strcat(flags, " X");
-        fprintf(stderr, "%s\n", flags);
-        fprintf(stderr, "\n");
+        DEBUG(fprintf(stderr, "%s\n", flags));
+        DEBUG(fprintf(stderr, "\n"));
     }
 
-    fprintf(stderr, "=====================\n");
+    DEBUG(fprintf(stderr, "=====================\n"));
 }
