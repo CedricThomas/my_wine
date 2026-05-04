@@ -108,10 +108,8 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         for (int j = 0; j < 3; j++) {
             for (int k = 0; labels[j][k]; k++) hex_buf[off++] = labels[j][k];
             uint64_t val = (uint64_t)regs[reg_indices[j]];
-            for (int i = 15; i >= 0; i--) {
-                uint8_t nib = (val >> (4*i)) & 0xf;
-                hex_buf[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a');
-            }
+            format_hex(hex_buf + off, sizeof(hex_buf) - off, val);
+            off += 16;
         }
         hex_buf[off++] = '\n';
         hex_buf[off] = '\0';
@@ -139,6 +137,17 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
  * Patch: movabs $<addr>,%rax; ret; 4x NOP (15 bytes total)
  * This replaces the jmp thunk or wrapper with a direct return.
  */
+/* Callback for with_mprotect_rw in patch_acrt_iob */
+static void acrt_iob_patch_cb(void *arg)
+{
+    uint8_t *code = (uint8_t *)arg;
+    code[0] = X86_REX_W;                /* REX.W */
+    code[1] = X86_MOV_ABS;                /* movabs rax, imm64 */
+    *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
+    code[10] = X86_RET;
+    for (int k = 11; k < 15; k++) code[k] = X86_NOP;
+}
+
 static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
                            IMAGE_SECTION_HEADER *sections)
 {
@@ -166,8 +175,6 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
     } else {
         uint8_t *code = (uint8_t *)thunk;
         uintptr_t thunk_abs = (uintptr_t)thunk;
-        uintptr_t page_addr = thunk_abs & ~(uintptr_t)PAGE_MASK;
-        void *page = (void *)page_addr;
 
         /* Validate: first two bytes should be ff 25 (jmp *disp32(%rip)) */
         bool is_jmp_thunk = (code[0] == X86_JMP_RIP && code[1] == X86_MOD_RIP);
@@ -181,27 +188,11 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
                 fprintf(stderr, "WARNING: __acrt_iob_func thunk at 0x%lx is too close to .text end (need 15 bytes, have %ld), skipping patch\n",
                         (unsigned long)thunk_off, (long)(text_end > thunk_off ? text_end - thunk_off : 0));
             } else {
-                if (mprotect(page, PAGE_SIZE, PROT_READ|PROT_WRITE|PROT_EXEC) == 0) {
-                    /* movabs $imm64, %rax */
-                    code[0] = X86_REX_W;                /* REX.W */
-                    code[1] = X86_MOV_ABS;                /* movabs rax, imm64 */
-                    *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
-                    /* ret */
-                    code[10] = X86_RET;
-                    /* NOP padding to fill 15 bytes */
-                    for (int k = 11; k < 15; k++) code[k] = X86_NOP;
-
-                    /* Restore RX permissions.
-                     * This runs in the child process; if restore fails, the
-                     * page remains RWX which is suboptimal but the patch
-                     * was applied. Non-fatal in child context. */
-                    if (mprotect(page, PAGE_SIZE, PROT_READ|PROT_EXEC) != 0) {
-                        perror("mprotect restore __acrt_iob_func");
-                    }
+                if (with_mprotect_rw(thunk, 15, acrt_iob_patch_cb, thunk) != 0) {
+                    perror("mprotect __acrt_iob_func");
+                } else {
                     fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",
                             thunk_abs);
-                } else {
-                    perror("mprotect __acrt_iob_func");
                 }
             }
         }
@@ -219,15 +210,15 @@ static void wd_handler(int sig, siginfo_t *info, void *uc_ptr) { (void)sig; (voi
    const char hdr[] = "WD:RIP=0x";
    for (int i = 0; hdr[i]; i++) b[off++] = hdr[i];
    uint64_t val = (uint64_t)r[REG_RIP];
-   for (int i = 15; i >= 0; i--) { uint8_t nib = (val >> (4*i)) & 0xf; b[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a'); }
+   format_hex(b + off, sizeof(b) - off, val); off += 16;
    const char hdr2[] = " RSP=0x";
    for (int i = 0; hdr2[i]; i++) b[off++] = hdr2[i];
    val = (uint64_t)r[REG_RSP];
-   for (int i = 15; i >= 0; i--) { uint8_t nib = (val >> (4*i)) & 0xf; b[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a'); }
+   format_hex(b + off, sizeof(b) - off, val); off += 16;
    const char hdr3[] = " RAX=0x";
    for (int i = 0; hdr3[i]; i++) b[off++] = hdr3[i];
    val = (uint64_t)r[REG_RAX];
-   for (int i = 15; i >= 0; i--) { uint8_t nib = (val >> (4*i)) & 0xf; b[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a'); }
+   format_hex(b + off, sizeof(b) - off, val); off += 16;
    b[off++] = '\n'; b[off] = '\0';
    long ret; __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(b), "d"((size_t)off) : "rcx","r11","memory","cc");
    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit), "D"(0xFF) : "rcx","r11","cc"); }
