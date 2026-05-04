@@ -53,7 +53,7 @@ __wine_dispatcher:
 
     /* ── Call C dispatcher (RDI already = syscall_nr) ── */
 
-    call c_dispatch_syscall(%rip)
+    call *c_dispatch_syscall(%rip)
 
     /* ── Save result ── */
 
