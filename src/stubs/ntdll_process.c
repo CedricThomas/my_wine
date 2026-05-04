@@ -10,9 +10,11 @@
 #include "ntdll_priv.h"
 #include "../syscalls_inline.h"
 
-/* Cleanup functions — declared as weak externs so test builds (which don't
- * link the loader/syscall modules) don't get undefined reference errors.
- * Weak symbols resolve to NULL when not defined, so we check before calling. */
+/* Cleanup functions — no longer called in handler_NtTerminateProcess.
+ * INLINE_SYSCALL_EXIT terminates the process immediately, so cleanup
+ * is deferred to the OS. These externs are kept for potential future use.
+ * __attribute__((weak)) so test builds (which don't link loader/syscall modules)
+ * don't get undefined reference errors. */
 __attribute__((weak)) extern void cleanup_unix_stack(void);
 __attribute__((weak)) extern void cleanup_thunk_pages(void);
 __attribute__((weak)) extern void *get_gs_base(void);
@@ -25,14 +27,12 @@ uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_statu
     if (process_handle != 0xFFFFFFFF)
         return STATUS_SUCCESS;
 
-    /* Clean up guest resources before exiting (only when symbols are linked) */
-    if (cleanup_unix_stack) cleanup_unix_stack();
-    if (cleanup_thunk_pages) cleanup_thunk_pages();
-    if (get_gs_base && cleanup_guest) {
-        void *teb = get_gs_base();
-        cleanup_guest(teb, g_stack_base);
-    }
-
+    /* Exit immediately — INLINE_SYSCALL_EXIT never returns.
+     * We cannot call cleanup_unix_stack() or cleanup_thunk_pages() first:
+     * cleanup_unix_stack() unmaps the UNIX stack we're currently executing on,
+     * and cleanup_thunk_pages() unmaps the thunk code the dispatcher returns to.
+     * All cleanup is deferred to the OS (the process dies and everything is freed).
+     */
     INLINE_SYSCALL_EXIT((unsigned long)exit_status);
 }
 

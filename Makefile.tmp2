@@ -1,4 +1,6 @@
 # ── Toolchain ───────────────────────────────────────────────────
+OBJS += 
+# ── Toolchain ───────────────────────────────────────────────────
 CC       = gcc
 CFLAGS   = -Wall -Wextra -O2 -g -I. -MMD -MP
 LDFLAGS  = -lrt -lpthread -ldl
@@ -68,6 +70,11 @@ CFLAGS_gs_base.o = $(SPECIAL_CFLAGS)
 CFLAGS_thunk_gen.o = $(SPECIAL_CFLAGS)
 CFLAGS_dispatcher.o = $(SPECIAL_CFLAGS)
 CFLAGS_dispatcher_entry_asm.o = $(SPECIAL_CFLAGS)
+
+# Explicit rule: dispatcher_entry_asm.o comes from .S assembly
+$(BUILDDIR)/dispatcher_entry_asm.o: src/syscall/dispatcher_entry_asm.S | $(BUILDDIR)
+	@echo "  AS $<"
+	@$(CC) $(CFLAGS_dispatcher_entry_asm.o) -c $< -o $@
 
 # Stubs (auto-generated from discovered STUBS_OBJS)
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
