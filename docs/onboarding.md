@@ -59,3 +59,57 @@ High-level directory layout (not the full tree from README):
 Two files worth exploring early: `run_guest.S` (naked assembly trampoline) and `syscalls_inline.h` (inline syscall helpers).
 
 For the full tree, see the [README](../README.md) Project Structure section.
+
+---
+
+## Tracing a PE Execution
+
+Step-by-step source code walkthrough showing the execution flow.
+
+**Parent process (before fork):**
+
+1. **`main()` in `src/main.c`** — Entry point. Opens the PE file, orchestrates the loading process.
+2. **`map_image()` in `src/loader/image_mapper.c`** — Opens the PE file, maps it read-only, parses DOS/NT headers, maps the image at the preferred base, copies section data, sets per-section protections via `mprotect`.
+3. **`patch_crt_refptrs()` in `src/stubs/crt_refptrs.c`** — Fixes CRT `.refptr` pointers to point at our Linux-side stubs.
+4. **`resolve_imports()` in `src/loader/import_resolve.c`** — Walks the import descriptor chain and patches IAT entries to point at our stub functions.
+5. **`setup_teb_peb()` in `src/loader/teb_peb.c`** — Allocates and populates the TEB and PEB, sets the GS base via `arch_prctl(ARCH_SET_GS)`.
+6. **`jump_to_entry()` in `src/loader/entry.c`** — Calls `fork()`.
+
+**Child process (after fork):**
+
+1. **`child_setup.c`** — Child-specific initialization: installs signal handlers, applies seccomp filter.
+2. **`thunk_gen.c`** — Generates syscall thunks in PROT_EXEC pages.
+3. **`signal_handler.c`** — Sets up the SIGSYS handler that validates thunk addresses and dispatches to handlers.
+4. **`run_guest.S`** — Naked assembly trampoline that switches to the guest stack and jumps to the PE entry point. No prologue/epilogue.
+
+**Syscall interception (when guest calls NT syscall):**
+
+1. Guest code → thunk (`mov r10,rcx; mov eax,NR+0xF000; syscall; ret`)
+2. `syscall >= 0xF000` → seccomp TRAP → SIGSYS delivered
+3. `sigsys_handler()` validates thunk address (±4096 of registered thunks)
+4. **`dispatcher.c`** — Looks up the syscall number, dispatches to the appropriate handler function
+
+For the full flow diagram, see [Architecture](architecture.md) §1.
+
+---
+
+## Contributing Tips
+
+Practical advice for new contributors:
+
+- **Build a sample** with `make samples SAMPLE=hello_world` to get a test binary.
+- **Run with** `./my_wine samples/hello_world/hello_world.exe` to see it working.
+- **Add a new stub:** Create `src/stubs/ntdll_new.c` with a `WINE_STUB` function (defined in `include/wine_abi.h`), register it in `src/loader/import_table.c`, and add a handler case in `src/syscall/dispatcher.c`.
+- **Note:** All stubs use `ms_abi` (Windows x64 calling convention: RCX, RDX, R8, R9 for the first four args), not the Linux System V ABI.
+- **Run tests** with `make test` after any changes.
+- **Debug tip:** Start with `make samples SAMPLE=hello_world` as your test case — it's the simplest PE and exercises the core flow.
+
+---
+
+## Related Documents
+
+- [README](../README.md) — Build, run, project structure
+- [PE Format Primer](pe_format.md) — PE format primer
+- [Rationale](rationale.md) — Design decisions, requirements, limitations
+- [Architecture](architecture.md) — Deep-dive architecture
+- [CRT refptr Patching](refptr.md) — CRT .refptr patching deep-dive
