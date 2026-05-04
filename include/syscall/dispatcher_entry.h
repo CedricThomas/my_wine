@@ -1,7 +1,7 @@
 /*
  * dispatcher_entry.h
  *
- * Interface between the assembly dispatcher entry (dispatcher_entry.S) and
+ * Interface between the assembly dispatcher entry (dispatcher_entry_asm.S) and
  * the C dispatcher (dispatcher.c) for Wine-style single-process syscall
  * dispatching.
  *

@@ -25,7 +25,7 @@ STUBS_OBJS   = $(patsubst src/stubs/%.c,$(BUILDDIR)/%.o,$(STUBS_SRC))
 LOADER_OBJS  = $(patsubst src/loader/%.c,$(BUILDDIR)/%.o,$(LOADER_SRC))
 SYSCALL_OBJS = $(patsubst src/syscall/%.c,$(BUILDDIR)/%.o,$(SYSCALL_SRC))
 
-OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(BUILDDIR)/run_guest.o
+OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o
 
 # ── Named object groups for test targets ────────────────────────
 PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
@@ -47,7 +47,7 @@ TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_NO_CRT_OBJS) $(BUILDDIR)/common.o
 
 # ── vpath ───────────────────────────────────────────────────────
 vpath %.c src src/stubs src/loader src/syscall
-vpath %.S src
+vpath %.S src src/syscall
 
 # ── Per-target CFLAGS overrides ─────────────────────────────────
 # Pattern rule uses $(CFLAGS) as default. Override for files needing
@@ -68,6 +68,12 @@ CFLAGS_gs_base.o = $(SPECIAL_CFLAGS)
 CFLAGS_signal_handler.o = $(SPECIAL_CFLAGS)
 CFLAGS_thunk_gen.o = $(SPECIAL_CFLAGS)
 CFLAGS_dispatcher.o = $(SPECIAL_CFLAGS)
+CFLAGS_dispatcher_entry_asm.o = $(SPECIAL_CFLAGS)
+
+# Explicit rule: dispatcher_entry_asm.o comes from .S assembly
+$(BUILDDIR)/dispatcher_entry_asm.o: src/syscall/dispatcher_entry_asm.S | $(BUILDDIR)
+	@echo "  AS $<"
+	@$(CC) $(CFLAGS_dispatcher_entry_asm.o) -c $< -o $@
 
 # Stubs (auto-generated from discovered STUBS_OBJS)
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
@@ -90,10 +96,10 @@ $(BUILDDIR)/%.o: %.c | $(BUILDDIR)
 	@echo "  CC $<"
 	@$(CC) $(if $(CFLAGS_$(notdir $@)),$(CFLAGS_$(notdir $@)),$(CFLAGS)) -c $< -o $@
 
-# Assembly sources: always plain CFLAGS
+# Assembly sources: look up CFLAGS_<basename>.o; fall back to CFLAGS
 $(BUILDDIR)/%.o: %.S | $(BUILDDIR)
 	@echo "  AS $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(if $(CFLAGS_$(notdir $@)),$(CFLAGS_$(notdir $@)),$(CFLAGS)) -c $< -o $@
 
 # ── Test targets ────────────────────────────────────────────────
 # Test binaries (native ELF) + the hello_world sample .exe they exercise.

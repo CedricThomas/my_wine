@@ -4,39 +4,31 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-
 #include "include/syscall/thunk_gen.h"
-#include "include/syscall/signal_handler.h"
 #include "include/nt_constants.h"
 #include "include/common.h"
 #include "../syscalls_inline.h"
 
 /*
- * syscall_gen.c — Syscall thunk generator
+ * thunk_gen.c — Direct-call thunk generator
  *
- * Generates machine code for syscall thunks at runtime. Each thunk encodes:
- *   mov r10, rcx       — Windows x64 calling convention puts 1st arg in RCX,
- *                        Linux syscall uses R10
- *   mov eax, NR + WINE_SYSCALL_OFFSET — syscall number with Wine's syscall offset
- *   syscall            — the syscall instruction
- *   ret                — return
+ * Generates machine code for thunks that call __wine_dispatcher directly.
+ * Each thunk encodes:
+ *   mov rdi, imm32(NT_NR)  — put the NT syscall number in RDI (7 bytes)
+ *   call __wine_dispatcher — jump to dispatcher (5 bytes)
+ *
+ * All thunks live in a single mmap'd executable blob.
  */
 
-#define THUNK_SIZE 11
-
+#define THUNK_SIZE 12        /* 7 bytes mov rdi,imm32 + 5 bytes call */
 #define NUM_NT_SYSCALLS 16
 
-/*
- * Function pointer type for a thunk.
- * Thunks are called via the Linux syscall calling convention (RDI, RSI, RDX, R10/RAX).
- * The return value is stored in RAX (long on x86_64).
- */
-typedef long (*thunk_fn)(void);
+static void *thunk_blob = NULL;    /* single mmap'd executable region */
+static size_t thunk_blob_size = 0;
 
-/* Global array indexed by Windows syscall number. */
+typedef void (*thunk_fn)(void);
 static thunk_fn thunk_array[0x50] = { 0 };
 
-/* List of NT syscall numbers we support. */
 static const uint16_t nt_syscall_list[] = {
     NT_SYSCALL_CALLBACK_RETURN, NT_SYSCALL_QUERY_INFO_PROCESS,
     NT_SYSCALL_CLOSE, NT_SYSCALL_ALLOC_VM, NT_SYSCALL_FREE_VM,
@@ -48,85 +40,77 @@ static const uint16_t nt_syscall_list[] = {
     NT_SYSCALL_CREATE_THREAD_EX, NT_SYSCALL_OPEN_FILE
 };
 
-/* signal_handler.h provides the thunk registration function */
-
 /*
- * generate_thunk — allocate and write a syscall thunk
- *
- * @syscall_number: Windows NT syscall number (e.g. 0x3D for NtWriteFile).
- *                  The actual syscall number emitted is syscall_number + WINE_SYSCALL_OFFSET.
- *
- * Returns a void* to the executable memory, or NULL on failure.
+ * write_thunk_at — encode a 12-byte thunk at the given location.
  */
-void *generate_thunk(uint16_t syscall_number)
+static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatcher_addr)
 {
-    uint32_t actual_nr = (uint32_t)(syscall_number + WINE_SYSCALL_OFFSET);
-    uint8_t code[THUNK_SIZE] = {
-        0x41, 0x89, 0xCF,                       /* mov r10, rcx */
-        X86_MOV_ABS,
-        (uint8_t)(actual_nr & 0xFF),            /* mov eax, actual_nr */
-        (uint8_t)((actual_nr >> 8) & 0xFF),
-        (uint8_t)((actual_nr >> 16) & 0xFF),
-        (uint8_t)((actual_nr >> 24) & 0xFF),
-        X86_SYSCALL_BYTE1, X86_SYSCALL_BYTE2,                              /* syscall */
-        X86_RET                                      /* ret */
-    };
+    /* mov rdi, imm32(NT_NR) — 7 bytes: 48 C7 C7 XX XX XX XX */
+    loc[0] = 0x48;        /* REX.W */
+    loc[1] = 0xC7;        /* mov rdi, imm32 */
+    loc[2] = 0xC7;
+    loc[3] = (uint8_t)(syscall_number & 0xFF);
+    loc[4] = (uint8_t)((syscall_number >> 8) & 0xFF);
+    loc[5] = (uint8_t)((syscall_number >> 16) & 0xFF);
+    loc[6] = (uint8_t)((syscall_number >> 24) & 0xFF);
 
-    void *mem = mmap(NULL, PAGE_SIZE,
-                     PROT_READ | PROT_WRITE | PROT_EXEC,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mem == MAP_FAILED) {
-        perror("mmap");
-        return NULL;
-    }
-
-    memcpy(mem, code, THUNK_SIZE);
-
-    register_thunk_addr(mem);
-
-    return mem;
+    /* call __wine_dispatcher — 5 bytes: E8 XX XX XX XX */
+    loc[7] = 0xE8;
+    int32_t disp = (uint8_t *)dispatcher_addr - (loc + 12);
+    loc[8] = (uint8_t)(disp & 0xFF);
+    loc[9] = (uint8_t)((disp >> 8) & 0xFF);
+    loc[10] = (uint8_t)((disp >> 16) & 0xFF);
+    loc[11] = (uint8_t)((disp >> 24) & 0xFF);
 }
 
 /*
- * generate_all_thunks — generates thunks for all 16 NT syscalls.
- *
- * Populates thunk_array indexed by syscall number.
- * Returns the thunk_array pointer (or NULL on failure).
+ * generate_all_thunks — allocate one executable blob, write all thunks, return array.
  */
 void **generate_all_thunks(void)
 {
+    size_t needed = (size_t)NUM_NT_SYSCALLS * THUNK_SIZE;
+    size_t alloc = (needed + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
+    if (alloc < PAGE_SIZE) alloc = PAGE_SIZE;
+
+    thunk_blob = mmap(NULL, alloc, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (thunk_blob == MAP_FAILED) {
+        perror("mmap thunk_blob");
+        return NULL;
+    }
+    thunk_blob_size = alloc;
+
+    extern void __wine_dispatcher(void);
+    void *dispatcher = (void *)&__wine_dispatcher;
+
     for (int i = 0; i < NUM_NT_SYSCALLS; i++) {
         uint16_t nr = nt_syscall_list[i];
-        void *thunk = generate_thunk(nr);
-        if (thunk == NULL) {
-            fprintf(stderr, "generate_all_thunks: failed for syscall 0x%02X\n", nr);
-            return NULL;
-        }
-        thunk_array[nr] = (thunk_fn)thunk;
+        uint8_t *loc = (uint8_t *)thunk_blob + ((size_t)i * THUNK_SIZE);
+        write_thunk_at(loc, nr, dispatcher);
+        thunk_array[nr] = (thunk_fn)loc;
     }
+
     return (void **)thunk_array;
 }
 
 /*
- * lookup_thunk — returns the thunk for a given syscall number.
- * Generates on first use if not yet cached.
- *
- * Returns the thunk address, or NULL if syscall is not supported or generation failed.
+ * lookup_thunk — return the thunk for a given syscall number, or NULL.
  */
 void *lookup_thunk(uint16_t syscall_number)
 {
     if (syscall_number >= sizeof(thunk_array) / sizeof(thunk_array[0]))
         return NULL;
+    return (void *)thunk_array[syscall_number];
+}
 
-    /* Return cached thunk if already generated. */
-    if (thunk_array[syscall_number] != NULL)
-        return (void *)thunk_array[syscall_number];
-
-    /* Generate on first use. */
-    void *thunk = generate_thunk(syscall_number);
-    if (thunk == NULL)
-        return NULL;
-
-    thunk_array[syscall_number] = (thunk_fn)thunk;
-    return thunk;
+/*
+ * cleanup_thunk_pages — unmap the single thunk blob.
+ */
+void cleanup_thunk_pages(void)
+{
+    if (thunk_blob != NULL) {
+        munmap(thunk_blob, thunk_blob_size);
+        thunk_blob = NULL;
+        thunk_blob_size = 0;
+    }
 }

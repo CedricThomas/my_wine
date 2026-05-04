@@ -2,7 +2,7 @@
  * dispatcher_entry.c
  *
  * Manages the pre-allocated UNIX stack used during syscall dispatch.
- * The assembly dispatcher entry (dispatcher_entry.S) switches to this
+ * The assembly dispatcher entry (dispatcher_entry_asm.S) switches to this
  * stack before calling the C dispatcher, ensuring we do not clobber
  * the guest stack while handling the syscall.
  */
@@ -15,6 +15,13 @@
 
 struct guest_regs __wine_guest_regs = {0};
 void *unix_stack_ptr_val = NULL;
+
+/* Stub for c_dispatch_syscall — fully implemented in Phase 3 (dispatcher.c rewrite) */
+uint64_t c_dispatch_syscall(uint64_t nr)
+{
+    (void)nr;
+    return 0;
+}
 
 int setup_unix_stack(void)
 {
