@@ -143,23 +143,6 @@ static void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
 
         if (!has_write_deref) continue;
 
-        /* Also check for direct write pattern (no dereference):
-         * 48 8B 05 disp (load refptr into RAX)
-         * followed by C7 00 imm32 (write imm32 to [rax])
-         * This is used by mingw_app_type and similar. */
-        if (!has_write_deref) {
-            for (uint64_t d = 7; d + 6 < 20 && d + 6 < text_size - off; d++) {
-                if (p[d] == 0xC7 && p[d+1] == 0x00) {
-                    /* mov [rax], imm32 */
-                    has_write_deref = 1;
-                    break;
-                }
-                if (p[d] == 0xE8 || p[d] == 0xE9) break;
-            }
-        }
-
-        if (!has_write_deref) continue;
-
         /* Found refptr target at target_rva. Check if in a data section. */
         uint64_t *target_ptr = (uint64_t *)((char *)image_base + target_rva);
         uint64_t current = *target_ptr;

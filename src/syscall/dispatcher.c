@@ -80,14 +80,6 @@ static inline uint64_t read_guest_stack(ucontext_t *ctx, int index)
 
 /* ── Dispatcher ───────────────────────────────────────────────── */
 
-/* Helper: write a static message to stderr via direct inline syscall */
-static inline void disp_write_stderr(const char *msg)
-{
-    long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(msg), "d"((size_t)__builtin_strlen(msg)) : "rcx", "r11", "memory", "cc");
-    (void)ret;
-}
-
 /*
  * handle_syscall — dispatch a Windows NT syscall to its handler.
  *
@@ -448,7 +440,6 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         fprintf(stderr, "my_wine: unhandled syscall 0x%lX\n",
                 (unsigned long)syscall_number);
         raise(SIGSEGV);
-        return -1;
     }
 
     ctx->uc_mcontext.gregs[REG_RAX] = (greg_t)result;
