@@ -1,7 +1,7 @@
 # ── Toolchain ───────────────────────────────────────────────────
 CC       = gcc
 CFLAGS   = -Wall -Wextra -O2 -g -I. -MMD -MP
-LDFLAGS  = -lrt -lpthread -lseccomp -ldl
+LDFLAGS  = -lrt -lpthread -ldl
 
 # Special flags for entry points, loader core, stubs, syscall infra
 SPECIAL_CFLAGS = $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions
@@ -36,7 +36,7 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 
 # Shared objects used by import-resolution and teb_peb tests
 TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o $(BUILDDIR)/dispatcher_entry.o \
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o
 
 # Non-crt stubs (syscall dispatch test doesn't need the CRT stubs)
@@ -65,7 +65,6 @@ CFLAGS_crash_handlers.o = $(SPECIAL_CFLAGS)
 CFLAGS_gs_base.o = $(SPECIAL_CFLAGS)
 
 # Syscall src/syscall/*.c
-CFLAGS_signal_handler.o = $(SPECIAL_CFLAGS)
 CFLAGS_thunk_gen.o = $(SPECIAL_CFLAGS)
 CFLAGS_dispatcher.o = $(SPECIAL_CFLAGS)
 CFLAGS_dispatcher_entry_asm.o = $(SPECIAL_CFLAGS)

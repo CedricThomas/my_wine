@@ -9,7 +9,7 @@
  * Tests safe syscalls that do not call exit() or dereference
  * guest pointers that would segfault.
  *
- * Build: linked against dispatcher.o, signal_handler.o, and all
+ * Build: linked against dispatcher.o and all
  *   ntdll handler .o files.
  */
 
@@ -48,9 +48,8 @@ static void check(const char *label, int condition)
 
 /* ── Crash safety ─────────────────────────────────────────────
  *
- * signal_handler.o installs a SIGSYS handler that raises SIGSEGV
- * on errors. Since we link it but don't call setup_sigsys_handler(),
- * any stray SIGSYS would crash us. Install no-op handlers.
+ * Install no-op handlers for crash safety in case any handler
+ * raises SIGSEGV during testing.
  */
 static void noop_signal_handler(int sig) { (void)sig; }
 
@@ -101,7 +100,7 @@ static void test_nt_callback_return(void)
 
     ucontext_t ctx = create_mock_context();
     /* NtCallbackReturn takes no arguments; registers don't matter */
-    test_syscall_one(0xF005, "NtCallbackReturn", &ctx, STATUS_SUCCESS);
+    test_syscall_one(0x05, "NtCallbackReturn", &ctx, STATUS_SUCCESS);
 }
 
 /* ── Test: NtClose (0x0F) ──────────────────────────────────── */
@@ -114,12 +113,12 @@ static void test_nt_close(void)
      * (special-cased in handler — not actually closed) */
     ucontext_t ctx = create_mock_context();
     ctx.uc_mcontext.gregs[REG_RCX] = 0x7FFFFFFFUL;  /* STDIN_HANDLE */
-    test_syscall_one(0xF00F, "NtClose (stdin)", &ctx, STATUS_SUCCESS);
+    test_syscall_one(0x0F, "NtClose (stdin)", &ctx, STATUS_SUCCESS);
 
     /* Test with invalid handle */
     ctx = create_mock_context();
     ctx.uc_mcontext.gregs[REG_RCX] = 0xDEAD;  /* not in handle table */
-    int rc = handle_syscall(0xF00F, &ctx);
+    int rc = handle_syscall(0x0F, &ctx);
     check("NtClose(invalid) returns STATUS_INVALID_HANDLE",
           rc == 0 && (uint64_t)ctx.uc_mcontext.gregs[REG_RAX] == STATUS_INVALID_HANDLE);
 }
@@ -134,7 +133,7 @@ static void test_nt_terminate_process(void)
     /* handle != 0xFFFFFFFF → returns STATUS_SUCCESS without calling exit() */
     ctx.uc_mcontext.gregs[REG_RCX] = 0;
     ctx.uc_mcontext.gregs[REG_RDX] = 0;
-    test_syscall_one(0xF02A, "NtTerminateProcess", &ctx, STATUS_SUCCESS);
+    test_syscall_one(0x2A, "NtTerminateProcess", &ctx, STATUS_SUCCESS);
 }
 
 /* ── Test: NtGetContextThread (0x24) ───────────────────────── */
@@ -146,7 +145,7 @@ static void test_nt_get_context_thread(void)
     ucontext_t ctx = create_mock_context();
     ctx.uc_mcontext.gregs[REG_RCX] = 0;  /* thread handle */
     ctx.uc_mcontext.gregs[REG_RDX] = 0;  /* context = NULL */
-    test_syscall_one(0xF024, "NtGetContextThread", &ctx, STATUS_SUCCESS);
+    test_syscall_one(0x24, "NtGetContextThread", &ctx, STATUS_SUCCESS);
 }
 
 /* ── Test: NtSetContextThread (0x26) ───────────────────────── */
@@ -158,7 +157,7 @@ static void test_nt_set_context_thread(void)
     ucontext_t ctx = create_mock_context();
     ctx.uc_mcontext.gregs[REG_RCX] = 0;  /* thread handle */
     ctx.uc_mcontext.gregs[REG_RDX] = 0;  /* context = NULL */
-    test_syscall_one(0xF026, "NtSetContextThread", &ctx, STATUS_SUCCESS);
+    test_syscall_one(0x26, "NtSetContextThread", &ctx, STATUS_SUCCESS);
 }
 
 /* ── Test: NtAllocateVirtualMemory with NULL base/size (0x18) ─*/
@@ -176,7 +175,7 @@ static void test_nt_allocate_virtual_memory(void)
     ctx.uc_mcontext.gregs[REG_R9]  = 0;  /* region_size = NULL */
 
     /* With NULL base and NULL region_size, mmap(NULL, 0) → MAP_FAILED */
-    int rc = handle_syscall(0xF018, &ctx);
+    int rc = handle_syscall(0x18, &ctx);
     check("handle_syscall dispatches NtAllocateVirtualMemory", rc == 0);
     check("NtAllocateVirtualMemory(NULL,NULL) -> STATUS_MEMORY_NOT_AVAILABLE",
           (uint64_t)ctx.uc_mcontext.gregs[REG_RAX] == STATUS_MEMORY_NOT_AVAILABLE);
@@ -197,7 +196,7 @@ static void test_nt_free_virtual_memory(void)
     ctx.uc_mcontext.gregs[REG_R9]  = 0;  /* free_type */
 
     /* base_address == 0 -> handler returns STATUS_INVALID_PARAMETER */
-    int rc = handle_syscall(0xF019, &ctx);
+    int rc = handle_syscall(0x19, &ctx);
     check("handle_syscall dispatches NtFreeVirtualMemory", rc == 0);
     check("NtFreeVirtualMemory(NULL) -> STATUS_INVALID_PARAMETER",
           (uint64_t)ctx.uc_mcontext.gregs[REG_RAX] == STATUS_INVALID_PARAMETER);
@@ -215,7 +214,7 @@ static void test_nt_create_event(void)
     ctx.uc_mcontext.gregs[REG_RDX] = 0x10000000;  /* desired_access */
     ctx.uc_mcontext.gregs[REG_R8]  = 0;  /* object_attributes = NULL */
     ctx.uc_mcontext.gregs[REG_R9]  = 0;  /* event_type */
-    test_syscall_one(0xF048, "NtCreateEvent", &ctx, STATUS_SUCCESS);
+    test_syscall_one(0x48, "NtCreateEvent", &ctx, STATUS_SUCCESS);
 }
 
 /* ── Test: argument decoding from registers ─────────────────── */
@@ -231,7 +230,7 @@ static void test_argument_decoding(void)
     ctx.uc_mcontext.gregs[REG_RCX] = 0x7FFFFFFFUL;
     ctx.uc_mcontext.gregs[REG_RAX] = 0;
 
-    int rc = handle_syscall(0xF00F, &ctx);
+    int rc = handle_syscall(0x0F, &ctx);
     uint64_t rax = (uint64_t)ctx.uc_mcontext.gregs[REG_RAX];
     check("NtClose reads RCX as handle (returns STATUS_SUCCESS)",
           rc == 0 && rax == STATUS_SUCCESS);
@@ -246,18 +245,18 @@ static void test_sequential_dispatch(void)
     ucontext_t ctx = create_mock_context();
 
     /* NtCallbackReturn (0x05) -> STATUS_SUCCESS */
-    handle_syscall(0xF005, &ctx);
+    handle_syscall(0x05, &ctx);
     check("1st: NtCallbackReturn -> STATUS_SUCCESS",
           (uint64_t)ctx.uc_mcontext.gregs[REG_RAX] == STATUS_SUCCESS);
 
     /* NtClose (0x0F) with STDIN_HANDLE -> STATUS_SUCCESS */
     ctx.uc_mcontext.gregs[REG_RCX] = 0x7FFFFFFFUL;
-    handle_syscall(0xF00F, &ctx);
+    handle_syscall(0x0F, &ctx);
     check("2nd: NtClose(stdin) -> STATUS_SUCCESS",
           (uint64_t)ctx.uc_mcontext.gregs[REG_RAX] == STATUS_SUCCESS);
 
     /* NtCallbackReturn (0x05) again -> STATUS_SUCCESS */
-    handle_syscall(0xF005, &ctx);
+    handle_syscall(0x05, &ctx);
     check("3rd: NtCallbackReturn again -> STATUS_SUCCESS",
           (uint64_t)ctx.uc_mcontext.gregs[REG_RAX] == STATUS_SUCCESS);
 }

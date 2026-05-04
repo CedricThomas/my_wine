@@ -20,7 +20,6 @@
 #include "include/msvcrt.h"
 #include "include/nt_constants.h"
 #include "include/syscall/thunk_gen.h"
-#include "include/syscall/signal_handler.h"
 #include "include/syscall/dispatcher.h"
 #include "include/common.h"
 #include <stdio.h>
@@ -167,8 +166,6 @@ static void *setup_seh_and_thunks(void)
     child_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
 
     generate_all_thunks();
-    setup_sigsys_handler(handle_syscall);
-    setup_seccomp();
 
     return child_seh_frame;
 }

@@ -134,9 +134,9 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)syscall_number);
     INLINE_SYSCALL_WRITE_ERR(trace_buf, (size_t)trace_len);
 
-    /* syscall_number comes from si_syscall which includes the 0xF000
-     * Wine offset. Strip it to get the base NT syscall number.       */
-    uint64_t nt_nr = syscall_number - WINE_SYSCALL_OFFSET;
+    /* syscall_number is the raw NT syscall number (passed directly
+     * by the thunks — no Wine offset).                               */
+    uint64_t nt_nr = syscall_number;
 
     uint64_t arg1 = ctx->uc_mcontext.gregs[REG_RCX];
     uint64_t arg2 = ctx->uc_mcontext.gregs[REG_RDX];

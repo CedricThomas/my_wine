@@ -9,15 +9,6 @@
  * and Wine thunk generation code.
  */
 
-/* ── Wine syscall offset ──────────────────────────────────────── */
-
-/*
- * Wine generates syscall thunks with numbers 0xF000 + NT_syscall_number.
- * This places all Wine syscalls above any real Linux syscall number
- * (Linux numbers are < 0x400 on x86_64).
- */
-#define WINE_SYSCALL_OFFSET  0xF000
-
 /* ── NT syscall numbers (x86_64) ──────────────────────────────── */
 
 #define NT_SYSCALL_CALLBACK_RETURN       0x05  /* NtCallbackReturn */

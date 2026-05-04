@@ -24,11 +24,8 @@
 
 #include "include/common.h"
 #include "include/syscall/thunk_gen.h"
-#include "include/syscall/signal_handler.h"
 #include "include/syscall/dispatcher.h"
 #include <sys/user.h>
-#include "include/syscall/signal_handler.h"
-#include "include/syscall/dispatcher.h"
 
 /**
  * SEH handler — called when an exception occurs in guest code.

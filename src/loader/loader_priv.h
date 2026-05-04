@@ -11,7 +11,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <sys/ucontext.h>
 #include "include/pe.h"
 #include "include/pe_parser.h"
 
