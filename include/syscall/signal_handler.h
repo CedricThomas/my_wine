@@ -27,13 +27,6 @@ typedef int (*dispatcher_func_t)(uint64_t syscall_num, ucontext_t *ctx);
 void register_thunk_addr(void *addr);
 
 /**
- * Unmap all registered thunk pages.
- * Called from entry.c after the child process exits to free
- * the mmap'd thunk memory before the parent exits.
- */
-void cleanup_thunk_pages(void);
-
-/**
  * Install the SIGSYS handler with the given dispatcher function.
  * The handler validates the call address and forwards to the
  * dispatcher. Returns 0 on success, -1 on failure.

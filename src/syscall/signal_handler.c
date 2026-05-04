@@ -137,7 +137,7 @@ int setup_sigsys_handler(dispatcher_func_t dispatcher)
  * Called after the guest child exits (in the parent after waitpid)
  * to reclaim the mmap'd memory used for syscall thunks.
  */
-void cleanup_thunk_pages(void)
+static void cleanup_thunk_pages(void)
 {
     for (int i = 0; i < thunk_count; i++) {
         if (thunk_addrs[i] != NULL) {

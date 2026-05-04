@@ -23,4 +23,10 @@ void **generate_all_thunks(void);
  */
 void *lookup_thunk(uint16_t syscall_number);
 
+/**
+ * Unmap the thunk memory. Called after the guest child exits
+ * to reclaim the mmap'd memory used for syscall thunks.
+ */
+void cleanup_thunk_pages(void);
+
 #endif /* SYSCALL_THUNK_GEN_H */
