@@ -17,13 +17,12 @@ New to the project? Here's everything you need to get up and running.
 ### Prerequisites
 
 - **gcc** — the C compiler
-- **libseccomp-dev** — provides the seccomp filter library (`-lseccomp`)
 - **Docker** — required to cross-compile sample Windows binaries with mingw-w64
 
 Install the system dependencies (Debian/Ubuntu):
 
 ```bash
-sudo apt install gcc libseccomp-dev docker.io
+sudo apt install gcc docker.io
 ```
 
 ### Build the Loader

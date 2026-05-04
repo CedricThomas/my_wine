@@ -141,37 +141,48 @@ this work. Wine doesn't — it just provides the DLL the PE imports.
 
 ## 4. Syscall Interception
 
-### 4.1 Wine: Syscall User Dispatch (SUD)
+### 4.1 Wine: Single Process with Stack Switching
 
-Wine uses a **kernel module** or **userspace library** to intercept
-syscalls at a lower level:
+Wine runs everything in a **single process**. Windows code executes on its
+own stack, and when it needs kernel services, it calls through Wine's
+dispatcher which either handles the call in-process or communicates with
+`wineserver` (a separate process) for cross-process operations:
 
 ```
-Windows app → Wine DLL → Wineserver (IPC) → Linux kernel
+Windows app → Wine DLL → dispatcher → (in-process handler or wineserver IPC) → Linux kernel
 ```
 
-- Wine's user-space libraries implement the Windows API
-- For kernel operations, Wine communicates with `wineserver` (a separate
-  process) via shared memory + signals
+- A single process runs both the PE code and the Wine library code
+- Each Windows thread has its own stack managed by Wine
+- The dispatcher switches between Windows stacks and Wine stacks as needed
+- `wineserver` (separate process) handles inter-process coordination via
+  shared memory + signals
 - This gives Wine full control over file handles, processes, memory, etc.
 
-### 4.2 my_wine: seccomp + SIGSYS + Thunks
+### 4.2 my_wine: Direct Dispatch via `__wine_dispatcher`
 
-my_wine uses a **three-layer approach** that intercepts only NT syscalls:
+my_wine uses a **single process** approach similar to Wine: the PE runs
+inline, and NT syscalls are intercepted through a direct C dispatcher
+rather than kernel-level traps:
 
 ```
-Windows app → thunk (syscall 0xF000+) → seccomp TRAP → SIGSYS → dispatcher → handler
-Linux syscall (< 0x400) → passes through seccomp → Linux kernel directly
+Windows app → __wine_dispatcher() → C handler → Linux kernel
+Linux syscall → passes through directly → Linux kernel
 ```
 
-- Only syscalls ≥ `0xF000` are intercepted
-- Linux syscalls pass through unchanged
-- Each NT syscall has a 11-byte dynamically generated thunk
-- The SIGSYS handler validates the call site and dispatches to a C handler
+- The PE runs in the same process — no fork, no separate child
+- Each Windows thread has its own stack, managed by the loader
+- NT syscalls from the PE land in `__wine_dispatcher()` via the IAT or
+  inline redirection, which dispatches directly to C handlers
+- Linux syscalls pass through unchanged (not intercepted)
+- No seccomp, no SIGSYS, no kernel module — just function calls
 
-**Trade-off:** Wine's approach gives full control but is massive (2M+
-lines). my_wine's approach is minimal but only works for syscalls we
-explicitly implement.
+**Similarities to Wine:** single process, stack switching, direct call to
+dispatcher. The control flow is now much closer to Wine's model.
+
+**Differences from Wine:** my_wine has no `wineserver` (no separate IPC
+process), no SUD (Syscall User Dispatch), and no full syscall table — only
+the handful of NT syscalls we explicitly implement.
 
 ---
 
@@ -229,7 +240,10 @@ Stubbed threading:
 | | Wine | my_wine |
 |---|------|---------|
 | **Philosophy** | "Implement everything the PE might need" | "Implement the minimum to make this PE run" |
-| **Approach** | Full API reimplementation per DLL | Static stub table + syscall interception |
+| **Process model** | Single process + wineserver (IPC) | Single process (no separate IPC process) |
+| **Dispatch** | Stack switching + dispatcher + wineserver | Stack switching + direct dispatcher (no wineserver) |
+| **Approach** | Full API reimplementation per DLL | Static stub table + direct dispatch |
+| **Syscall table** | Full — every NT syscall has a handler | Minimal — only the NT syscalls we implement |
 | **Toolchain support** | Automatic (implements the DLL, not the toolchain) | Manual (add DLL names to the table) |
 | **Code per feature** | Thousands of lines per DLL | Dozens of lines per stub |
 | **Maintenance burden** | High (many features, many edge cases) | Low (small surface area) |

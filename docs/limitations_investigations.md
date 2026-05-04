@@ -26,7 +26,7 @@ Each section contains:
 | [8](#8-no-filesystem-io) | No Filesystem I/O | High | Syscall handlers (§6) |
 | [9](#9-hardcoded-crt-fallback-offsets) | ✅ Hardcoded CRT Fallback Offsets — **RESOLVED** | Low | None |
 | [10](#10-no-ordinal-imports) | ✅ No Ordinal Imports — **RESOLVED** | Low | None |
-| [11](#11-60s-watchdog) | ✅ 60s Watchdog — **RESOLVED** | Low | None |
+| [11](#11-60s-watchdog) | ✅ 60s Watchdog — **RESOLVED (architectural change)** | Low | None |
 | [12](#12-single-thread-seh) | Single-thread SEH | High | Threading (§3, §4) |
 
 ### Recommended Implementation Order
@@ -34,7 +34,7 @@ Each section contains:
 By dependency graph (leaf nodes first):
 
 ```
-✅ Done:  §11, §10, §9
+✅ Done:  §10, §9
 Phase 1 (remaining):  §1
 Phase 2 (need §1 or nothing): §6 → §3
 Phase 3 (need §6):  §4 → §8
@@ -675,29 +675,25 @@ support mingw-w64.
 
 ## 11. 60s Watchdog
 
-### Current State
+**Status: ✅ Resolved by architectural change (fork → single process).**
 
-Hardcoded 60-second timeout in `child_setup.c`. Arbitrary — CRT init on slow
-machines can approach this limit; too long for debugging hangs.
+The watchdog timer was necessary because the fork model spawned a separate child
+process whose lifetime needed to be bounded — a hung child could leave the parent
+waiting on `waitpid()` indefinitely. The 60-second timeout in `child_setup.c`
+was a safety net for that fork-based child process.
 
-### Approach
+The architectural change to a **single-process, stack-switching model** eliminates
+the fork entirely. Guest code runs in the same process as the loader, so there is
+no child process to time out. The watchdog is no longer needed.
 
-**Option A (Recommended): Configurable timeout.**
-`MY_WINE_WATCHDOG` env var or `--watchdog=N` CLI arg. Validate range
-(1-3600s, default 60).
+### Historical Context
 
-**Option B: Self-disabling after entry.** Cancel watchdog after guest `main()`
-begins (covers only CRT init phase, ~5s).
+The previous approach explored:
+- **Option A:** Configurable timeout via `MY_WINE_WATCHDOG` env var or `--watchdog=N` CLI arg
+- **Option B:** Self-disabling after guest `main()` entry
+- **Option C:** Heartbeat timer reset on each syscall dispatch
 
-**Option C: Heartbeat.** Timer reset on each syscall dispatch.
-
-### Complexity: Low (5-10 lines for Option A)
-
-### Prerequisites
-
-None.
-
-**Status: ✅ Resolved** — `--watchdog=N` CLI arg (1-3600s range) + `MY_WINE_WATCHDOG` env var override. Default remains 60s.
+All options are now moot — the fork-based child process no longer exists.
 
 ---
 
@@ -759,12 +755,11 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 | §3 TLS | §12 SEH | None |
 | §4 Sync | §7 Heap, §8 File I/O | Syscall handlers |
 | §5 Toolchain | — | §7 Heap |
-| §6 Syscall | §4 Sync, §8 File I/O, §11 Watchdog | None |
+| §6 Syscall | §4 Sync, §8 File I/O | None |
 | §7 Heap | §5 Toolchain | §4 Sync |
 | §8 File I/O | Real applications | §6 Syscall |
 | §9 CRT Offsets | Robustness | None |
 | §10 Ordinal Imports | More PEs | None |
-| §11 Watchdog | DX | None |
 | §12 SEH | Exception safety | §3, §4 |
 
 ---

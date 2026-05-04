@@ -10,34 +10,50 @@ Deep-dive into how my_wine loads and runs a PE binary on Linux.
   PE file (hello.exe)
        │
        ▼
-  ┌─────────────────────────────┐
-  │  main() — src/main.c        │
-  │                             │
-  │  1. map_image(path)         │
-  │     open → mmap(file) →     │
-  │     parse DOS/NT headers    │
-  │     mmap(image_base)        │
-  │     copy sections           │
-  │     mprotect per-section    │
-  │                             │
-  │  2. patch_crt_refptrs()     │
-  │     .refptr → our stubs     │
-  │                             │
-  │  3. resolve_imports()       │
-  │     IAT → our functions     │
-  │                             │
-  │  4. setup_teb_peb()         │
-  │     TEB + PEB + GS base     │
-  │                             │
-  │  5. setup_stack()           │
-  │     mmap guest stack        │
-  │                             │
-  │  6. jump_to_entry()         │
-  │     fork()                  │
-  │                             │
-  │     parent ──► waitpid()    │
-  │     child  ──► run_guest()  │
-  └─────────────────────────────┘
+  ┌──────────────────────────────────────┐
+  │  main() — src/main.c                  │
+  │                                       │
+  │  1. map_image(path)                   │
+  │     open → mmap(file) →              │
+  │     parse DOS/NT headers             │
+  │     mmap(image_base)                 │
+  │     copy sections                    │
+  │     mprotect per-section             │
+  │                                       │
+  │  2. patch_crt_refptrs()              │
+  │     .refptr → our stubs              │
+  │                                       │
+  │  3. resolve_imports()                │
+  │     IAT → our functions              │
+  │                                       │
+  │  4. setup_unix_stack()               │
+  │     mmap 128KB UNIX stack            │
+  │                                       │
+  │  5. setup_teb_peb()                  │
+  │     TEB + PEB + GS base              │
+  │                                       │
+  │  6. setup_stack()                    │
+  │     mmap guest stack                 │
+  │                                       │
+  │  7. setup_seh()                      │
+  │     SEH chain in TEB                 │
+  │                                       │
+  │  8. generate_thunks()                │
+  │     12-byte thunks → __wine_dispatch │
+  │                                       │
+  │  9. setup_signal_handlers()          │
+  │     SIGSEGV/SIGBUS for crash handler │
+  │                                       │
+  │  10. run_guest() → entry point       │
+  │      guest code runs in same process │
+  │                                       │
+  │  NT syscall flow:                    │
+  │    thunk → __wine_dispatcher         │
+  │      → stack switch to UNIX stack    │
+  │      → c_dispatch_syscall() (C)     │
+  │      → stack switch back to guest    │
+  │      → ret to guest code            │
+  └──────────────────────────────────────┘
 ```
 
 ### 1.1 PE File → Mapped Image
@@ -104,126 +120,135 @@ the x86_64 ABI (`rsp % 16 == 8` before `call`).
 
 ---
 
-## 2. The fork() Model
+## 2. Single-Process Model
 
-`main()` runs entirely in the **parent** process. The heavy lifting
-(mapping, import resolution, TEB/PEB) happens before `fork()`.
+`main()` runs entirely in a **single process**. There is no `fork()` —
+the guest PE loads and executes in the same process that orchestrated
+the loading.
 
 ```
                      ┌──── main() ────┐
                      │ map, resolve,   │
                      │ setup TEB/PEB   │
+                     │ setup UNIX stack│
+                     │ generate thunks │
+                     │ setup signals   │
+                     │ set GS base     │
+                     │ patch __acrt_iob│
                      └────────┬────────┘
                               │
-                          fork()
-                         ┌────┴────┐
-                         │         │
-                     parent    child
-                         │         │
-                waitpid() │         │ install signals
-                         │         │ generate thunks
-                         │         │ setup sigsys
-                         │         │ set GS base (child)
-                         │         │ patch __acrt_iob
-                         │         │ run_guest() → entry
-                         │         │   │
-                         │         │   ▼
-                         │     guest code runs
-                         │     (syscalls intercepted)
-                         │         │
-                         │    _exit(code)
-                         │         │
-                     child         │
-                     exits         │
-                         │         │
-                 WEXITSTATUS() ────┘
-                         │
+                        run_guest()
+                              │
+                              ▼
+                       guest code runs
+                       (same process)
+                              │
+                       NT syscalls:
+                       thunk → __wine_dispatcher
+                         → stack switch
+                         → c_dispatch_syscall()
+                         → stack switch back
+                         → ret to guest
+                              │
+                       guest returns
+                              │
                      cleanup_guest()
                      (munmap TEB, PEB, stack, thunks)
 ```
 
-**Why fork?** The parent needs a clean Linux environment to manage
-the guest. The child runs the guest PE with intercepted syscalls.
-If the child crashes, the parent survives and returns the exit code.
-The `MAP_FIXED` image mapping is inherited by the child via
-`fork()` (the child gets a private copy via copy-on-write).
+**Why single process?** The guest PE runs directly in the same
+address space that loaded it. The `MAP_FIXED` image mapping is the
+live mapping — no copy-on-write duplication. NT syscalls are
+intercepted via dynamically generated thunks that call
+`__wine_dispatcher` (not via seccomp/SIGSYS). The dispatcher switches
+from the guest stack to a dedicated 128KB UNIX stack, calls the C
+handler, switches back, and returns to guest code. This is closer to
+how Wine itself works — no signal trampolining, no fork overhead.
+
+If the guest crashes (e.g. SIGSEGV), a signal handler catches it and
+returns an exit code from the same process.
 
 ---
 
-## 3. Syscall Interception Chain
+## 3. Direct Syscall Dispatch
 
-### 3.1 The 0xF000 Offset Scheme
+### 3.1 The 12-Byte Thunk
 
-Wine uses syscall numbers in the range `WINE_SYSCALL_OFFSET+` (0xF000+) for
-NT syscalls. The offset is defined as `WINE_SYSCALL_OFFSET` in
-`include/nt_constants.h`. Linux syscall numbers are all `< 0x400`. A
-seccomp-BPF filter distinguishes them:
+Each NT syscall has a dynamically generated **12-byte thunk**:
 
 ```
-BPF: LOAD syscall_number
-BPF: JGE WINE_SYSCALL_OFFSET → TRAP (send SIGSYS)
-BPF: ALLOW (native Linux syscall, pass through)
-```
-
-This means:
-- **syscall < WINE_SYSCALL_OFFSET** → executed directly by the Linux kernel
-- **syscall >= WINE_SYSCALL_OFFSET (0xF000)** → trapped by seccomp, delivers
-  `SIGSYS` to our handler
-
-### 3.2 Thunk Generation
-
-Each NT syscall has a dynamically generated thunk (11 bytes):
-
-```asm
 ; generated at runtime by thunk_gen.c
-mov  r10, rcx          ; 41 89 CF  (Windows: arg1 in RCX; Linux: in R10)
-mov  eax, NR + 0xF000  ; B8 XX XX XX XX
-syscall                ; 0F 05
-ret                    ; C3
+; 12 bytes total — compact, no page per thunk
+
+mov  rdi, imm32(NT_NR)   ; 48 C7 C7 XX XX XX XX  (7 bytes)
+call __wine_dispatcher   ; E8 XX XX XX XX         (5 bytes)
 ```
 
-Each thunk occupies one page (4096 bytes, `PROT_READ|PROT_WRITE|PROT_EXEC`).
-The IAT entries in the PE point to these thunks so that when guest code
-calls `NtWriteFile`, it jumps to the thunk, which executes `syscall`
-with a `0xF000+` number, triggering `SIGSYS`.
+`NT_NR` is the raw NT syscall number (e.g. 0x3D for `NtWriteFile`),
+**without** any offset. The thunk loads the syscall number into `RDI`
+and jumps directly to `__wine_dispatcher` via a relative `call`.
 
-### 3.3 SIGSYS Handler → Dispatcher → Handler
+The IAT entries in the PE point to these thunks so that when guest
+code calls `NtWriteFile`, it jumps to the thunk, which loads the NT
+syscall number and transfers to the dispatcher.
+
+### 3.2 `__wine_dispatcher` Assembly Trampoline
+
+`__wine_dispatcher` is a small assembly function (in
+`src/syscall/dispatcher.S` or equivalent) that bridges the guest
+code running on the guest stack to our C handler running on the
+UNIX stack:
+
+```
+__wine_dispatcher:
+    ; 1. Save guest registers (RAX, RCX, RDX, R8, R9, R10, R11, RDI)
+    ;    and guest RSP onto the guest stack frame
+    ;
+    ; 2. Switch to UNIX stack:
+    ;    mov  rsp, unix_stack_top
+    ;
+    ; 3. Call C dispatcher:
+    ;    mov  rdi, NT_NR           (already in RDI from thunk)
+    ;    mov  rsi, &saved_regs     (pointer to saved guest state)
+    ;    call c_dispatch_syscall
+    ;
+    ; 4. Result is in RAX (set by C handler)
+    ;
+    ; 5. Switch back to guest stack:
+    ;    mov  rsp, saved_rsp
+    ;
+    ; 6. Restore guest registers
+    ;
+    ; 7. ret — returns to the instruction after the thunk's `call`
+```
+
+The dispatcher is position-independent and called via relative
+`call`, so no absolute addresses are baked into the thunk.
+
+### 3.3 `c_dispatch_syscall` C Handler
 
 ```
   Guest code: call NtWriteFile
         │
         ▼
-  Thunk: syscall 0xF03D
+  Thunk: mov rdi, 0x3D; call __wine_dispatcher
         │
         ▼
-  seccomp filter: syscall >= 0xF000 → TRAP
+  __wine_dispatcher: save regs, switch to UNIX stack
         │
         ▼
-  SIGSYS delivered
-        │
-        ▼
-  sigsys_handler() (src/syscall/signal_handler.c)
+  c_dispatch_syscall(nt_nr, saved_regs)
     │
-    ├── validate: call_addr is within ±4096 of a registered thunk
-    │     │
-    │     └── if not: raise(SIGSEGV) — fatal
-    │
-    └── g_dispatcher(syscall_num, ucontext)
-            │
-            ▼
-    handle_syscall() (src/syscall/dispatcher.c)
-      │
-      ├── nt_nr = syscall_num - WINE_SYSCALL_OFFSET
-      ├── read args from RCX/RDX/R8/R9 (Windows x64 ABI)
-      ├── switch(nt_nr):
-      │     case NT_SYSCALL_WRITE_FILE (0x3D) → handler_NtWriteFile(...)
-      │     case NT_SYSCALL_TERMINATE_PROCESS (0x2A) → handler_NtTerminateProcess(...)
-      │     case NT_SYSCALL_ALLOC_VM (0x18) → handler_NtAllocateVirtualMemory(...)
-      │     ...
-      └── write result to RAX
-            │
-            ▼
-  Advance RIP past `syscall` (2 bytes: 0x0F 0x05)
+    ├── read args from RCX/RDX/R8/R9 (Windows x64 ABI)
+    ├── switch(nt_nr):
+    │     case 0x3D → handler_NtWriteFile(...)
+    │     case 0x2A → handler_NtTerminateProcess(...)
+    │     case 0x18 → handler_NtAllocateVirtualMemory(...)
+    │     ...
+    └── write result to RAX
+        │
+        ▼
+  __wine_dispatcher: switch back to guest stack, restore regs, ret
   → guest code continues with result in RAX
 ```
 
@@ -250,7 +275,75 @@ maps to Linux fd 1, `STD_ERROR_HANDLE` (0x7FFFFFFD) to fd 2.
 
 ---
 
-## 4. force_align_arg_pointer and WINE_STUB
+## 4. Stack Switching
+
+The guest PE runs on its own stack (allocated from the PE's
+`SizeOfStackReserve`/`SizeOfStackCommit`). The C dispatcher handlers
+run on a separate **128KB UNIX stack**.
+
+### UNIX Stack
+
+- **Size**: 128 KB, allocated via `mmap` with `MAP_STACK`.
+- **Alignment**: top-of-stack is 16-byte-aligned (`rsp % 16 == 0`),
+  satisfying the System V ABI requirement.
+- **Ownership**: allocated during `setup_unix_stack()` in `main()`,
+  pointed to by a global `unix_stack_top` pointer.
+- **Lifetime**: munmap'd during `cleanup_guest()` after the guest exits.
+
+### Switching Mechanism
+
+When `__wine_dispatcher` is called from a thunk:
+
+1. **Save state** — guest RSP, RAX, RCX, RDX, R8, R9, R10, R11,
+   and RDI are saved onto the **guest stack** (the RSP at the time
+   of the thunk call).
+2. **Switch to UNIX stack** — `rsp` is set to `unix_stack_top`.
+3. **Call C handler** — `c_dispatch_syscall(nt_nr, &saved_regs)`
+   executes on the UNIX stack with full System V ABI semantics.
+4. **Restore guest RSP** — `rsp` is restored from the saved value.
+5. **Restore guest regs** — RAX, RCX, RDX, R8, R9, R10, R11, RDI
+   are restored from the saved state.
+6. **Return** — `ret` returns to the instruction after the thunk's
+   `call`, resuming guest code on the guest stack.
+
+### Why Two Stacks?
+
+Guest code runs with the Windows x64 ABI. C handlers use the System V
+ABI with assumptions about stack layout, red zone (when applicable),
+and frame pointers. Using a separate UNIX stack:
+
+- Prevents C handlers from corrupting guest stack data
+- Ensures the UNIX stack is large enough for deep C call chains
+- Avoids alignment mismatches (guest stack follows Windows convention;
+  UNIX stack follows System V)
+- Keeps the switch atomic — `rsp` is the only thing that changes
+  between guest and UNIX contexts during the switch
+
+### Saved Register Layout
+
+```
+struct saved_regs {
+    uint64_t rsp;   // guest RSP at time of thunk entry
+    uint64_t rax;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t r8;
+    uint64_t r9;
+    uint64_t r10;
+    uint64_t r11;
+    uint64_t rdi;
+};
+```
+
+`c_dispatch_syscall` reads the NT syscall number from `RDI` (loaded by
+the thunk) and the Windows ABI arguments from `RCX`, `RDX`, `R8`, `R9`
+in the saved registers. The result is written back to `RAX` in the
+saved struct, which the assembly trampoline copies to the real `RAX`
+before returning to guest code.
+
+---
+
+## 5. force_align_arg_pointer and WINE_STUB
 
 ### What `force_align_arg_pointer` Does
 
