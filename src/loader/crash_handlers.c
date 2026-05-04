@@ -95,7 +95,14 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         INLINE_SYSCALL_WRITE_ERR(hex_buf, (size_t)off);
     }
 
-    _exit(139);
+    /*
+     * Use INLINE_SYSCALL_EXIT (direct syscall) instead of _exit().
+     * In the signal handler context, the guest stack may be corrupted
+     * and GS base points to the TEB — glibc's _exit needs TLS and other
+     * internal state that can segfault in this context.
+     * A direct syscall is fully async-signal-safe and avoids this.
+     */
+    INLINE_SYSCALL_EXIT(139);
 }
 
 /**
@@ -103,6 +110,25 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
  */
 void setup_signal_handlers(void)
 {
+    /*
+     * Set up the signal stack BEFORE installing handlers.
+     * This ensures that if a SIGSEGV occurs during sigaction
+     * (e.g., due to glibc TLS access hitting the wrong GS base),
+     * the handler runs on the safe signal stack instead of the
+     * potentially-corrupted current stack.
+     */
+    void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
+                              MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    if (sigstack_mem == MAP_FAILED) {
+        /* Fallback: handlers will run on the current stack */
+    } else {
+        stack_t ss;
+        ss.ss_sp = sigstack_mem;
+        ss.ss_size = SIG_STACK_SIZE;
+        ss.ss_flags = 0;
+        sigaltstack(&ss, NULL);
+    }
+
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = crash_handler;
@@ -116,17 +142,4 @@ void setup_signal_handlers(void)
     sigaction(SIGTRAP, &sa, NULL);
     { const char t[] = "GUEST: all handlers set\n";
       syscall(__NR_write, 2, t, sizeof(t)-1); }
-
-    /* Set up signal stack for reliable signal handling */
-    {
-        void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
-                                  MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-        if (sigstack_mem != MAP_FAILED) {
-            stack_t ss;
-            ss.ss_sp = sigstack_mem;
-            ss.ss_size = SIG_STACK_SIZE;
-            ss.ss_flags = 0;
-            sigaltstack(&ss, NULL);
-        }
-    }
 }

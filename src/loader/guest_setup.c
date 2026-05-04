@@ -119,8 +119,6 @@ static int apply_iob_patch(void *thunk, uint8_t *code, uint64_t thunk_off,
         perror("mprotect __acrt_iob_func");
         return -1;
     }
-    DEBUG("patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data",
-          (unsigned long)(uintptr_t)thunk);
     return 0;
 }
 
@@ -185,11 +183,6 @@ static void setup_guest_state(void *teb, uint64_t entry_abs, void *seh_frame,
         _exit(1);
     }
 
-    /* Debug: verify __imp___initenv_stub */
-    extern void **__imp___initenv_stub;
-    DEBUG("DEBUG guest: &__imp___initenv_stub=%p, *__imp___initenv_stub=%p",
-          (void *)&__imp___initenv_stub, (void *)__imp___initenv_stub);
-
     /* Point TEB gs:[0x00] to our SEH frame */
     *(void **)((uint8_t *)teb + TEB_SEH_CHAIN) = seh_frame;
 
@@ -250,11 +243,11 @@ static __attribute__((noreturn)) void jump_to_guest(uint64_t entry_abs, void *st
         fprintf(stderr, "ERROR: ExitProcess not found in import table\n");
         _exit(1);
     }
-    DEBUG("my_wine: ExitProcess at %p", (void *)exit_fn);
+    /* ExitProcess found */
 
     run_guest(entry, stack_top, NULL, guest_argv, guest_envp, exit_fn);
 
-    DEBUG("my_wine: inline jump returned");
+    /* run_guest should not return (ExitProcess exits) */
     _exit(1);
 }
 

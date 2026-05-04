@@ -75,16 +75,15 @@ void *setup_teb_peb(void)
     /* Set BeingDebugged = 0 in PEB at offset PEB_BEING_DEBUGGED */
     *(uint8_t *)((char *)peb + PEB_BEING_DEBUGGED) = 0;
 
-    /* Set GS segment to point to TEB */
-    if (set_gs_base(teb) != 0) {
-        DEBUG("my_wine: cannot set GS base, guest execution will fail");
-        munmap(peb, peb_size);
-        munmap(teb, teb_size);
-        return NULL;
-    }
+    /*
+     * Do NOT set GS base here. The GS base should remain pointing to
+     * Linux TLS for all glibc calls during setup. GS base is set to the
+     * TEB in setup_guest_state() right before jumping to guest code.
+     * Setting it here would corrupt glibc TLS access (sigaction, mmap,
+     * etc.) because glibc reads TLS via GS-relative accesses.
+     */
 
     DEBUG("TEB at %p, PEB at %p", teb, peb);
-    DEBUG("GS base: %p (verify via get_gs_base)", get_gs_base());
 
     return teb;
 }

@@ -69,7 +69,6 @@ build_sample() {
     fi
 
     if [ "$need_build" -eq 0 ]; then
-        echo "  OK  $name (up to date)"
         return
     fi
 
