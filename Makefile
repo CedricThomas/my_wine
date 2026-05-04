@@ -1,8 +1,10 @@
 # ── Toolchain ───────────────────────────────────────────────────
 CC       = gcc
-CFLAGS   = -Wall -Wextra -O2 -g -I.
+CFLAGS   = -Wall -Wextra -O2 -g -I. -MMD -MP
 LDFLAGS  = -lrt -lpthread -lseccomp
-STUB_CFLAGS = $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions
+
+# Special flags for entry points, loader core, stubs, syscall infra
+SPECIAL_CFLAGS = $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions
 
 # ── Build ───────────────────────────────────────────────────────
 BUILDDIR = build
@@ -20,9 +22,50 @@ SYSCALL_OBJS = $(patsubst src/syscall/%.c,$(BUILDDIR)/%.o,$(SYSCALL_SRC))
 
 OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(BUILDDIR)/run_guest.o
 
-# vpath: let make find %.c inside subdirectories
+# ── Named object groups for test targets ────────────────────────
+PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
+	$(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o
+
+IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
+	$(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o
+
+# Shared objects used by import-resolution and teb_peb tests
+TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) \
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
+	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o
+
+# Non-crt stubs (syscall dispatch test doesn't need the CRT stubs)
+STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o, $(STUBS_OBJS))
+
+# Shared objects used by syscall dispatch test
+TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_NO_CRT_OBJS) $(BUILDDIR)/common.o
+
+# ── vpath ───────────────────────────────────────────────────────
 vpath %.c src src/stubs src/loader src/syscall
 vpath %.S src
+
+# ── Per-target CFLAGS overrides ─────────────────────────────────
+# Pattern rule uses $(CFLAGS) as default. Override for files needing
+# $(SPECIAL_CFLAGS) (entry points, loader core, stubs, syscall infra).
+
+# Root src/*.c
+CFLAGS_main.o = $(SPECIAL_CFLAGS)
+CFLAGS_common.o = $(SPECIAL_CFLAGS)
+
+# Loader src/loader/*.c
+CFLAGS_entry.o = $(SPECIAL_CFLAGS)
+CFLAGS_teb_peb.o = $(SPECIAL_CFLAGS)
+CFLAGS_child_setup.o = $(SPECIAL_CFLAGS)
+CFLAGS_crash_handlers.o = $(SPECIAL_CFLAGS)
+CFLAGS_gs_base.o = $(SPECIAL_CFLAGS)
+
+# Syscall src/syscall/*.c
+CFLAGS_signal_handler.o = $(SPECIAL_CFLAGS)
+CFLAGS_thunk_gen.o = $(SPECIAL_CFLAGS)
+CFLAGS_dispatcher.o = $(SPECIAL_CFLAGS)
+
+# Stubs (auto-generated from discovered STUBS_OBJS)
+$(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
 # ── Targets ─────────────────────────────────────────────────────
 
@@ -36,88 +79,16 @@ my_wine: $(OBJS)
 $(BUILDDIR):
 	@mkdir -p $(BUILDDIR)
 
-# ── Pattern rule ────────────────────────────────────────────────
-# Primary rule: handles src/stubs/*.c (STUB_CFLAGS = CFLAGS + -mno-red-zone)
-# vpath finds the source in src/stubs
+# ── Pattern rules ───────────────────────────────────────────────
+# C sources: look up CFLAGS_<basename>.o; fall back to CFLAGS
 $(BUILDDIR)/%.o: %.c | $(BUILDDIR)
 	@echo "  CC $<"
-	@$(CC) $(STUB_CFLAGS) -c $< -o $@
+	@$(CC) $(if $(CFLAGS_$(notdir $@)),$(CFLAGS_$(notdir $@)),$(CFLAGS)) -c $< -o $@
 
-# ── Explicit overrides (explicit > pattern) ─────────────────────
-# These files need flags that differ from the primary pattern rule.
-# Must be explicit rules (not pattern) to override the pattern above.
-
-# src/main.c → CFLAGS + -mno-red-zone (entry point, not a stub)
-$(BUILDDIR)/main.o: src/main.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
-
-# PE parser split files → CFLAGS only (no -mno-red-zone)
-$(BUILDDIR)/pe_headers.o: src/pe_headers.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-$(BUILDDIR)/pe_imports.o: src/pe_imports.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-$(BUILDDIR)/pe_symbols.o: src/pe_symbols.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-$(BUILDDIR)/pe_rip_scan.o: src/pe_rip_scan.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-# src/run_guest.S → assembly
-$(BUILDDIR)/run_guest.o: src/run_guest.S | $(BUILDDIR)
+# Assembly sources: always plain CFLAGS
+$(BUILDDIR)/%.o: %.S | $(BUILDDIR)
 	@echo "  AS $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
-
-# src/syscall/signal_handler.c → CFLAGS + -mno-red-zone
-$(BUILDDIR)/signal_handler.o: src/syscall/signal_handler.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
-
-# src/loader/image_mapper.c → CFLAGS only (no -mno-red-zone)
-$(BUILDDIR)/image_mapper.o: src/loader/image_mapper.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-# src/loader/import_table.c → CFLAGS only (no -mno-red-zone)
-$(BUILDDIR)/import_table.o: src/loader/import_table.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-# src/loader/import_resolve.c → CFLAGS only (no -mno-red-zone)
-$(BUILDDIR)/import_resolve.o: src/loader/import_resolve.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-# src/loader/import_init.c → CFLAGS only (no -mno-red-zone)
-$(BUILDDIR)/import_init.o: src/loader/import_init.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
-
-# src/loader/teb_peb.c → CFLAGS + -mno-red-zone
-$(BUILDDIR)/teb_peb.o: src/loader/teb_peb.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
-
-# src/loader/entry.c → CFLAGS + -mno-red-zone
-$(BUILDDIR)/entry.o: src/loader/entry.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
-
-# src/loader/child_setup.c → CFLAGS + -mno-red-zone
-$(BUILDDIR)/child_setup.o: src/loader/child_setup.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
-
-# src/loader/crash_handlers.c → CFLAGS + -mno-red-zone
-$(BUILDDIR)/crash_handlers.o: src/loader/crash_handlers.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
-
-# src/loader/gs_base.c → CFLAGS + -mno-red-zone
-$(BUILDDIR)/gs_base.o: src/loader/gs_base.c | $(BUILDDIR)
-	@echo "  CC $<"
-	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
 # ── Test targets ────────────────────────────────────────────────
 # Test binaries (native ELF) + the hello_world sample .exe they exercise.
@@ -145,94 +116,25 @@ test: all $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution
 	timeout 5 ./$(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Tests completed ==="
 
-$(BUILDDIR)/test_parse: tests/test_parse.c $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o
+# Each test: prerequisite .c + named object groups; $^ expands to all prereqs
+$(BUILDDIR)/test_parse: tests/test_parse.c $(PE_OBJS)
 	@echo "  LD $@"
-	@$(CC) $(CFLAGS) -I include -o $@ $< $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o
+	@$(CC) $(CFLAGS) -I include -o $@ $^
 
-$(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
-	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o $(BUILDDIR)/image_mapper.o \
-	$(BUILDDIR)/import_table.o $(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o \
-	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
-	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
-	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/crt_offset_discovery.o \
-	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
-	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
-	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32_console.o $(BUILDDIR)/kernel32_process.o $(BUILDDIR)/kernel32_module.o $(BUILDDIR)/kernel32_misc.o \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
-	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o \
-	$(BUILDDIR)/common.o
+$(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c $(TEST_IMPORT_OBJS)
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
-$(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
-	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o $(BUILDDIR)/image_mapper.o \
-	$(BUILDDIR)/import_table.o $(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o $(BUILDDIR)/teb_peb.o \
-	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
-	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
-	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/crt_offset_discovery.o \
-	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
-	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
-	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32_console.o $(BUILDDIR)/kernel32_process.o $(BUILDDIR)/kernel32_module.o $(BUILDDIR)/kernel32_misc.o \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
-	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o \
-	$(BUILDDIR)/common.o
+$(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
-$(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c \
-	$(BUILDDIR)/dispatcher.o $(BUILDDIR)/signal_handler.o \
-	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
-	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
-	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32_console.o $(BUILDDIR)/kernel32_process.o $(BUILDDIR)/kernel32_module.o $(BUILDDIR)/kernel32_misc.o \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/abi_wrappers.o \
-	$(BUILDDIR)/common.o
+$(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c $(TEST_SYSCALL_OBJS)
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
-# ── Header dependencies ─────────────────────────────────────────
-
-# Root
-$(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
-$(BUILDDIR)/pe_headers.o: include/pe.h include/pe_parser.h include/common.h src/pe_priv.h
-$(BUILDDIR)/pe_imports.o: include/pe.h include/pe_parser.h src/pe_priv.h
-$(BUILDDIR)/pe_symbols.o: include/pe.h include/pe_parser.h
-$(BUILDDIR)/pe_rip_scan.o: include/pe.h include/pe_parser.h include/common.h src/pe_priv.h
-
-# Stubs
-$(BUILDDIR)/ntdll_handle.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
-$(BUILDDIR)/ntdll_io.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
-$(BUILDDIR)/ntdll_memory.o: include/ntdll.h include/pe.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
-$(BUILDDIR)/ntdll_process.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
-$(BUILDDIR)/ntdll_objects.o: include/ntdll.h src/stubs/ntdll_priv.h src/stubs/handler_abi.h
-$(BUILDDIR)/kernel32_console.o: include/kernel32.h src/stubs/kernel32_priv.h
-$(BUILDDIR)/kernel32_process.o: include/kernel32.h src/stubs/kernel32_priv.h
-$(BUILDDIR)/kernel32_module.o: include/kernel32.h src/stubs/kernel32_priv.h
-$(BUILDDIR)/kernel32_misc.o: include/kernel32.h src/stubs/kernel32_priv.h
-$(BUILDDIR)/crt_globals.o: src/stubs/msvcrt_priv.h
-$(BUILDDIR)/crt_file.o: src/stubs/msvcrt_priv.h
-$(BUILDDIR)/crt_startup.o: src/stubs/msvcrt_priv.h
-$(BUILDDIR)/crt_stdio.o: src/stubs/msvcrt_priv.h
-$(BUILDDIR)/crt_stdlib.o: src/stubs/msvcrt_priv.h
-$(BUILDDIR)/crt_refptrs.o: include/pe_parser.h src/stubs/msvcrt_priv.h
-$(BUILDDIR)/crt_offset_discovery.o: include/pe_parser.h src/stubs/msvcrt_priv.h
-
-# Loader
-$(BUILDDIR)/image_mapper.o: include/pe.h include/pe_parser.h src/loader/loader_priv.h
-$(BUILDDIR)/import_table.o: src/loader/loader_priv.h include/ntdll.h include/kernel32.h include/msvcrt.h
-$(BUILDDIR)/import_resolve.o: include/pe.h include/pe_parser.h src/loader/loader_priv.h
-$(BUILDDIR)/import_init.o: src/loader/loader_priv.h src/stubs/msvcrt_priv.h
-$(BUILDDIR)/teb_peb.o: include/pe.h src/loader/loader_priv.h
-$(BUILDDIR)/entry.o: src/loader/loader_priv.h
-$(BUILDDIR)/child_setup.o: include/pe.h include/msvcrt.h include/nt_constants.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h include/common.h src/loader/loader_priv.h
-$(BUILDDIR)/crash_handlers.o: include/common.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h src/loader/loader_priv.h
-# gs_base.c uses only sys/syscall.h, asm/prctl.h, stdio.h, errno.h, string.h, unistd.h
-# No header dependency needed (all system headers)
-# $(BUILDDIR)/gs_base.o: 
-
-# Syscall
-$(BUILDDIR)/thunk_gen.o: include/syscall/thunk_gen.h include/syscall/signal_handler.h
-$(BUILDDIR)/signal_handler.o: include/syscall/signal_handler.h
-$(BUILDDIR)/dispatcher.o: include/ntdll.h include/syscall/dispatcher.h
+# ── Auto-generated header dependencies ──────────────────────────
+-include $(wildcard $(OBJS:.o=.d))
 
 # ── Samples ──────────────────────────────────────────────────────
 # Cross-compile samples to PE .exe via Docker (mingw-w64)
