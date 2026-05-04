@@ -10,21 +10,76 @@ seccomp-filtered `SIGSYS` trampoline.
 
 ---
 
+## Getting Started
+
+New to the project? Here's everything you need to get up and running.
+
+### Prerequisites
+
+- **gcc** — the C compiler
+- **libseccomp-dev** — provides the seccomp filter library (`-lseccomp`)
+- **Docker** — required to cross-compile sample Windows binaries with mingw-w64
+
+Install the system dependencies (Debian/Ubuntu):
+
+```bash
+sudo apt install gcc libseccomp-dev docker.io
+```
+
+### Build the Loader
+
+```bash
+make           # compile the my_wine binary
+make clean     # remove build artifacts
+make test      # build and run the test suite
+```
+
+### Build and Run a Sample
+
+Samples are cross-compiled to PE `.exe` via a Docker container (mingw-w64):
+
+```bash
+make samples                  # build all samples
+make samples NAME=hello_world # build one sample
+make run-sample NAME=hello_world  # build + run under ./my_wine
+```
+
+You should see `Hello from Windows!` printed to the terminal.
+
+### Run a PE Binary Directly
+
+```bash
+./my_wine <path_to_pe_binary>
+```
+
+For example:
+
+```bash
+./my_wine samples/hello_world/hello_world.exe
+```
+
+---
+
 ## Build
 
-```
-make              # build the my_wine binary
-make clean        # remove build artifacts
-make test         # build and run the test suite
-```
+### Targets
 
-Dependencies: `gcc`, `libseccomp-dev` (for `libseccomp`).
+| Target | Description |
+|---|---|
+| `make` or `make all` | Build the `my_wine` binary |
+| `make clean` | Remove the `build/` directory |
+| `make test` | Build and run unit tests |
+| `make samples` | Cross-compile all samples via Docker |
+| `make samples NAME=foo` | Cross-compile one sample |
+| `make run-sample NAME=foo` | Build sample + run it under `./my_wine` |
 
-To compile a test Windows binary (requires `x86_64-w64-mingw32-gcc`):
+### Dependencies
 
-```
-make hello.exe
-```
+- **gcc** — C compiler
+- **libseccomp-dev** — seccomp filter support (`-lseccomp`)
+- **Docker** — cross-compilation with `x86_64-w64-mingw32-gcc`
+
+---
 
 ## Usage
 
@@ -35,7 +90,7 @@ make hello.exe
 Example:
 
 ```
-./my_wine examples/hello.exe
+./my_wine samples/hello_world/hello_world.exe
 ```
 
 The loader will:
@@ -50,6 +105,8 @@ The loader will:
 6. Fork a child process, install the syscall interception, and
    jump to the PE entry point.
 7. Wait for the child to exit and clean up guest resources.
+
+---
 
 ## Architecture Overview
 
@@ -127,62 +184,80 @@ PE file ──► mmap(file) ──► parse headers
 See [docs/architecture.md](docs/architecture.md) for a detailed
 architectural walkthrough.
 
+---
+
 ## Project Structure
 
 ```
 ├── Makefile                    # build system
 ├── src/
-│   ├── main.c                  # orchestrator: map, resolve, run
-│   ├── pe_parser.c             # PE header parsing (DOS/NT/sections)
-│   ├── run_guest.S             # naked assembly trampoline to entry
+│   ├── main.c                  # entry point: map, resolve, run
+│   ├── common.c                # shared utilities
+│   ├── pe_headers.c            # PE DOS/NT header parsing
+│   ├── pe_imports.c            # import descriptor chain traversal
+│   ├── pe_symbols.c            # COFF symbol table parsing
+│   ├── pe_rip_scan.c           # RIP-relative thunk scanning
+│   ├── pe_priv.h               # internal PE parser declarations
+│   ├── run_guest.S             # naked assembly trampoline
+│   ├── syscalls_inline.h       # inline syscall helpers
 │   ├── loader/
 │   │   ├── image_mapper.c      # mmap image, copy sections, mprotect
-│   │   ├── import_resolver.c   # resolve IAT (pass 1 + pass 2 thunk patch)
-│   │   ├── teb_peb.c           # TEB, PEB, guest stack allocation
+│   │   ├── import_table.c      # stub function registration table
+│   │   ├── import_resolve.c    # IAT resolution (pass 1 + pass 2)
+│   │   ├── import_init.c       # import resolution orchestrator
+│   │   ├── teb_peb.c           # TEB + PEB allocation and setup
 │   │   ├── entry.c             # fork(), child setup, __acrt_iob patch
+│   │   ├── child_setup.c       # child process initialization
+│   │   ├── crash_handlers.c    # exception/crash handling in child
+│   │   ├── gs_base.c           # GS segment base setup via arch_prctl
 │   │   └── loader_priv.h       # internal loader declarations
-│   ├── stubs/
-│   │   ├── kernel32.c          # kernel32.dll stubs (GetStdHandle, etc.)
-│   │   ├── ntdll_*.c           # ntdll.dll syscall handlers (split by
-│   │   │                        #   category: handle, io, memory, process)
-│   │   ├── crt_globals.c       # CRT global variables (argv, envp, etc.)
-│   │   ├── crt_file.c          # wine_FILE / __wine_iob implementation
-│   │   ├── crt_stdio.c         # fprintf, fwrite, vfprintf stubs
-│   │   ├── crt_stdlib.c        # malloc, free, exit, strlen, etc. stubs
-│   │   ├── crt_startup.c       # __getmainargs, __initenv, _initterm
-│   │   ├── crt_refptrs.c       # .refptr section patching
-│   │   └── msvcrt_priv.h       # private CRT declarations
+│   ├── stubs/                  # Windows API stub implementations
+│   │   ├── ntdll_*.c           # ntdll handlers (handle, io, memory,
+│   │   │                        #   process, objects)
+│   │   ├── kernel32_*.c        # kernel32 stubs (console, process,
+│   │   │                        #   module, misc)
+│   │   ├── crt_*.c             # CRT globals, stdio, stdlib,
+│   │   │                        #   startup, refptrs, offset discovery
+│   │   ├── abi_wrappers.c      # ABI compatibility wrappers
+│   │   ├── handler_abi.h       # handler calling convention macros
+│   │   ├── ntdll_priv.h        # private ntdll declarations
+│   │   ├── kernel32_priv.h     # private kernel32 declarations
+│   │   └── msvcrt_priv.h       # private msvcrt declarations
 │   └── syscall/
-│       ├── thunk_gen.c         # generate syscall thunks (mov r10,rcx;
-│       │                        #   mov eax,NR; syscall; ret)
-│       ├── signal_handler.c    # SIGSYS handler + seccomp filter setup
-│       └── dispatcher.c        # NT syscall dispatcher (switch on NR)
-├── include/
+│       ├── thunk_gen.c         # runtime syscall thunk generation
+│       ├── signal_handler.c    # SIGSYS handler + seccomp filter
+│       └── dispatcher.c        # NT syscall number → handler dispatch
+├── include/                    # public headers
 │   ├── pe.h                    # PE format structures (IMAGE_*)
 │   ├── pe_parser.h             # header parsing declarations
 │   ├── ntdll.h                 # ntdll API declarations
 │   ├── kernel32.h              # kernel32 API declarations
 │   ├── msvcrt.h                # msvcrt API declarations
-│   ├── wine_abi.h              # WINE_STUB / WINE_STUB_STATIC macros
 │   ├── nt_constants.h          # NT syscall numbers, TEB/PEB offsets,
 │   │                           # Wine syscall offset as named constants
+│   ├── wine_abi.h              # WINE_STUB / WINE_STUB_STATIC macros
+│   ├── abi_wrappers.h          # ABI wrapper declarations
+│   ├── common.h                # shared utility declarations
 │   └── syscall/
 │       ├── thunk_gen.h         # thunk generation declarations
 │       ├── signal_handler.h    # signal handler declarations
 │       └── dispatcher.h        # dispatcher function type
-├── tests/
+├── tests/                      # unit/integration tests
 │   ├── test_parse.c            # PE header parsing tests
 │   ├── test_import_resolution.c # import resolution tests
 │   ├── test_teb_peb.c          # TEB/PEB setup tests
 │   └── test_syscall_dispatch.c # syscall dispatch tests
-├── docs/
-│   ├── architecture.md         # architecture diagrams & data flow
-│   └── refptr.md               # .refptr patching deep-dive
-├── examples/
-│   └── hello.c                 # sample Windows hello-world program
-└── scripts/
-    └── build_test.sh           # compile examples/hello.c with mingw
+├── samples/                    # sample Windows programs
+│   ├── hello_world/
+│   │   └── hello.c             # minimal hello-world PE target
+│   ├── Dockerfile              # mingw-w64 cross-compile container
+│   └── samples.sh              # build/run samples via Docker
+└── docs/
+    ├── architecture.md         # architecture diagrams & data flow
+    └── refptr.md               # .refptr patching deep-dive
 ```
+
+---
 
 ## Known Limitations
 
@@ -209,6 +284,8 @@ architectural walkthrough.
   (0x018/0x020/0x028) is used when the symbol table is absent or
   stripped. Different CRT versions may require updated fallback
   offsets.
+
+---
 
 ## License
 
