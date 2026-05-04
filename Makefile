@@ -81,8 +81,16 @@ $(BUILDDIR)/image_mapper.o: src/loader/image_mapper.c | $(BUILDDIR)
 	@echo "  CC $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-# src/loader/import_resolver.c → CFLAGS only (no -mno-red-zone)
-$(BUILDDIR)/import_resolver.o: src/loader/import_resolver.c | $(BUILDDIR)
+# src/loader/import_table.c → CFLAGS only (no -mno-red-zone)
+$(BUILDDIR)/import_table.o: src/loader/import_table.c | $(BUILDDIR)
+	@echo "  CC $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+# src/loader/import_resolve.c → CFLAGS only (no -mno-red-zone)
+$(BUILDDIR)/import_resolve.o: src/loader/import_resolve.c | $(BUILDDIR)
+	@echo "  CC $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+# src/loader/import_init.c → CFLAGS only (no -mno-red-zone)
+$(BUILDDIR)/import_init.o: src/loader/import_init.c | $(BUILDDIR)
 	@echo "  CC $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -133,7 +141,7 @@ $(BUILDDIR)/test_parse: tests/test_parse.c $(BUILDDIR)/pe_headers.o $(BUILDDIR)/
 
 $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o $(BUILDDIR)/image_mapper.o \
-	$(BUILDDIR)/import_resolver.o \
+	$(BUILDDIR)/import_table.o $(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
 	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/crt_offset_discovery.o \
@@ -148,7 +156,7 @@ $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 
 $(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
 	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o $(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o $(BUILDDIR)/image_mapper.o \
-	$(BUILDDIR)/import_resolver.o $(BUILDDIR)/teb_peb.o \
+	$(BUILDDIR)/import_table.o $(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o $(BUILDDIR)/teb_peb.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
 	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/crt_offset_discovery.o \
@@ -197,7 +205,9 @@ $(BUILDDIR)/crt_offset_discovery.o: include/pe_parser.h src/stubs/msvcrt_priv.h
 
 # Loader
 $(BUILDDIR)/image_mapper.o: include/pe.h include/pe_parser.h src/loader/loader_priv.h
-$(BUILDDIR)/import_resolver.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
+$(BUILDDIR)/import_table.o: src/loader/loader_priv.h include/ntdll.h include/kernel32.h include/msvcrt.h
+$(BUILDDIR)/import_resolve.o: include/pe.h include/pe_parser.h src/loader/loader_priv.h
+$(BUILDDIR)/import_init.o: src/loader/loader_priv.h src/stubs/msvcrt_priv.h
 $(BUILDDIR)/teb_peb.o: include/pe.h src/loader/loader_priv.h
 $(BUILDDIR)/entry.o: include/pe.h include/msvcrt.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
 # gs_base.c uses only sys/syscall.h, asm/prctl.h, stdio.h, errno.h, string.h, unistd.h
