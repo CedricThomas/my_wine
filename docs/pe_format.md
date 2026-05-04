@@ -395,7 +395,7 @@ points to the same lookup data. During loading:
 
 Guest code calls through the IAT:
 
-```
+```asm
   call [IAT_entry]    ; jumps to the resolved function address
 ```
 
