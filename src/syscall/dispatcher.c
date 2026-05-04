@@ -8,6 +8,7 @@
 #include "include/nt_constants.h"
 #include "include/ntdll.h"
 #include "include/syscall/dispatcher.h"
+#include "../syscalls_inline.h"
 
 /*
  * dispatcher.c — NT syscall dispatcher
@@ -131,7 +132,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     /* Trace every syscall invocation to stderr via direct write syscall */
     char trace_buf[32];
     int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)syscall_number);
-    long __t; __asm__ volatile("syscall" : "=a"(__t) : "a"(1), "D"(2), "S"(trace_buf), "d"((size_t)trace_len) : "rcx", "r11", "memory", "cc"); (void)__t;
+    INLINE_SYSCALL_WRITE_ERR(trace_buf, (size_t)trace_len);
 
     /* syscall_number comes from si_syscall which includes the 0xF000
      * Wine offset. Strip it to get the base NT syscall number.       */

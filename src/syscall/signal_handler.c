@@ -14,6 +14,7 @@
 
 #include "include/syscall/signal_handler.h"
 #include "include/nt_constants.h"
+#include "../syscalls_inline.h"
 
 #define THUNK_PAGE 4096  /* from thunk_gen.c: each thunk occupies one page */
 

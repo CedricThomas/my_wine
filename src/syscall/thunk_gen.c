@@ -9,6 +9,7 @@
 #include "include/syscall/signal_handler.h"
 #include "include/nt_constants.h"
 #include "include/common.h"
+#include "../syscalls_inline.h"
 
 /*
  * syscall_gen.c — Syscall thunk generator
