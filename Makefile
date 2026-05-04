@@ -175,7 +175,7 @@ $(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c \
 
 # Root
 $(BUILDDIR)/my_wine.o: include/pe.h include/ntdll.h include/kernel32.h include/msvcrt.h
-$(BUILDDIR)/pe_headers.o: include/pe.h include/pe_parser.h src/pe_priv.h
+$(BUILDDIR)/pe_headers.o: include/pe.h include/pe_parser.h include/common.h src/pe_priv.h
 $(BUILDDIR)/pe_imports.o: include/pe.h include/pe_parser.h src/pe_priv.h
 $(BUILDDIR)/pe_symbols.o: include/pe.h include/pe_parser.h
 $(BUILDDIR)/pe_rip_scan.o: include/pe.h include/pe_parser.h include/common.h src/pe_priv.h
