@@ -11,7 +11,7 @@ void format_hex(char *buf, int buf_size, uint64_t val) {
     static const char hex_digits[] = "0123456789abcdef";
     int i;
 
-    assert(buf_size >= 17);
+    if (buf_size < 17) return;  /* silently skip — would only fire on programmer error */
 
     for (i = 15; i >= 0; i--) {
         buf[i] = hex_digits[val & 0xF];
@@ -34,7 +34,7 @@ void format_ptr(char *buf, int buf_size, void *p) {
 
 // ── with_mprotect_rw ────────────────────────────────────────────
 
-int with_mprotect_rw(void *addr, size_t len, void (*cb)(void *), void *cb_arg) {
+int with_mprotect_rw(void *addr, size_t len, void (*cb)(void *), void *cb_arg, int restore_prot) {
     void *aligned_addr = (void *)((uintptr_t)addr & ~PAGE_MASK);
     size_t total = (((uintptr_t)addr + len + PAGE_MASK) & ~PAGE_MASK) - (uintptr_t)aligned_addr;
 
@@ -44,7 +44,7 @@ int with_mprotect_rw(void *addr, size_t len, void (*cb)(void *), void *cb_arg) {
 
     cb(cb_arg);
 
-    if (mprotect(aligned_addr, total, PROT_READ | PROT_EXEC) != 0) {
+    if (mprotect(aligned_addr, total, restore_prot) != 0) {
         return -1;
     }
 

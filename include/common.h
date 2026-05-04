@@ -51,6 +51,6 @@
 
 void format_hex(char *buf, int buf_size, uint64_t val);
 void format_ptr(char *buf, int buf_size, void *p);
-int with_mprotect_rw(void *addr, size_t len, void (*cb)(void *), void *cb_arg);
+int with_mprotect_rw(void *addr, size_t len, void (*cb)(void *), void *cb_arg, int restore_prot);
 
 #endif // MY_WINE_COMMON_H

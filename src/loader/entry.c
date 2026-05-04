@@ -188,7 +188,7 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
                 fprintf(stderr, "WARNING: __acrt_iob_func thunk at 0x%lx is too close to .text end (need 15 bytes, have %ld), skipping patch\n",
                         (unsigned long)thunk_off, (long)(text_end > thunk_off ? text_end - thunk_off : 0));
             } else {
-                if (with_mprotect_rw(thunk, 15, acrt_iob_patch_cb, thunk) != 0) {
+                if (with_mprotect_rw(thunk, 15, acrt_iob_patch_cb, thunk, PROT_READ | PROT_EXEC) != 0) {
                     perror("mprotect __acrt_iob_func");
                 } else {
                     fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",

@@ -77,7 +77,7 @@ static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     refptr_patch_arg.name = name;
     refptr_patch_arg.rva = rva;
 
-    if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &refptr_patch_arg) != 0) {
+    if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &refptr_patch_arg, PROT_READ) != 0) {
         perror("patch_crt_refptrs: with_mprotect_rw");
     }
 }
