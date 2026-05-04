@@ -2,6 +2,7 @@
 #define MY_WINE_COMMON_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 // Memory page constants
 #define PAGE_SIZE         4096

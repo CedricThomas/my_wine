@@ -1,10 +1,9 @@
-#include "common.h"
+#include "include/common.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <stdint.h>
 
 // ── format_hex ──────────────────────────────────────────────────
 
@@ -35,7 +34,7 @@ void format_ptr(char *buf, int buf_size, void *p) {
 
 int with_mprotect_rw(void *addr, size_t len, void (*cb)(void *), void *cb_arg) {
     void *aligned_addr = (void *)((uintptr_t)addr & ~PAGE_MASK);
-    size_t total = ((uintptr_t)addr + len + PAGE_MASK & ~PAGE_MASK) - (uintptr_t)aligned_addr;
+    size_t total = (((uintptr_t)addr + len + PAGE_MASK) & ~PAGE_MASK) - (uintptr_t)aligned_addr;
 
     if (mprotect(aligned_addr, total, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
         return -1;
