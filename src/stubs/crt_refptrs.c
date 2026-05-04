@@ -130,8 +130,6 @@ static void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
                         is_store = 1;
                     if ((a & 0xF0) == 0x40 && b == 0xC7 && c == 0x00)   /* REX C7 00 */
                         is_store = 1;
-                    /* Also: C7 00 XX XX XX XX (mov [rax], imm32) */
-                    if (!is_store && a == 0xC7 && b == 0x00) is_store = 1;
                     if (is_store) {
                         has_write_deref = 1;
                         break;

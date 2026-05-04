@@ -50,8 +50,8 @@ extern void *__wine_iob_data(void);
  * On x86_64, SEH handlers receive (ExceptionRecord, EstablisherFrame,
  * ContextRecord, DispatcherContext) in RCX, RDX, R8, R9 per Microsoft x64 ABI.
  */
-__attribute__((ms_abi, used))
-static int seh_crash_handler(void *exception_record, void *establisher_frame,
+__attribute__((ms_abi, used, noreturn))
+static void seh_crash_handler(void *exception_record, void *establisher_frame,
                               void *context_record, void *dispatcher_context)
 {
     (void)exception_record;
