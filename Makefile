@@ -74,7 +74,8 @@ $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
 # ── Targets ─────────────────────────────────────────────────────
 
-all: my_wine
+all: my_wine samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch
 
 my_wine: $(OBJS)
 	@echo "==== Link my_wine ===="
@@ -103,10 +104,16 @@ SHELL.EXE = samples/hello_world/hello_world.exe
 $(SHELL.EXE):
 	@bash samples/samples.sh build hello_world
 
-# test depends on my_wine, the test binaries, AND hello_world.exe
-test: all $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+# test builds the test binaries; run-test builds + runs them
+
+TEST ?=
+
+test: my_wine $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch
-	@bash scripts/run_tests.sh
+
+run-test: test
+	@echo "==== Running tests ===="
+	@bash scripts/run_tests.sh $(TEST)
 
 # Each test: prerequisite .c + named object groups; $^ expands to all prereqs
 $(BUILDDIR)/test_parse: tests/test_parse.c $(PE_OBJS)
@@ -145,11 +152,19 @@ run-sample: all
 	@bash samples/samples.sh run $(SAMPLE)
 
 clean:
-	rm -rf $(BUILDDIR) my_wine *.o
-	find samples/ -name '*.exe' -delete 2>/dev/null || true
+	@echo "  CLEAN build artifacts"
+	rm -rf $(BUILDDIR)
 	rm -f include/crt_offsets_generated.h
 
-.PHONY: all clean test samples run-sample gen-crt-offsets $(BUILDDIR)
+fclean: clean
+	@echo "  FCLEAN end targets"
+	rm -f my_wine
+	find samples/ -name '*.exe' -delete 2>/dev/null || true
+
+re: fclean
+	@$(MAKE) all
+
+.PHONY: all clean fclean re test run-test samples run-sample gen-crt-offsets $(BUILDDIR)
 
 gen-crt-offsets:
 	@echo "Generating CRT offsets from current mingw-w64 toolchain..."

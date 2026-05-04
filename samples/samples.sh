@@ -112,10 +112,8 @@ run_sample() {
     fi
 
     echo "  RUN $name (under my_wine)"
-    set +e
-    timeout 10 "$MY_WINE" "$exe" "${@:2}"
-    local ret=$?
-    set -e
+    local ret=0
+    timeout 10 "$MY_WINE" "$exe" "${@:2}" || ret=$?
     if [ $ret -eq 0 ]; then
         echo "  PASS  $name"
     elif [ $ret -eq 124 ]; then
