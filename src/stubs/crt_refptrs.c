@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 
 #include "include/common.h"
+#include "include/debug.h"
 #include "msvcrt_priv.h"
 
 const refptr_mapping_t refptr_mappings[] = {
@@ -49,8 +50,8 @@ static void refptr_patch_cb(void *arg)
     struct refptr_patch_arg *a = (struct refptr_patch_arg *)arg;
     uint64_t old_val = (uint64_t)(uintptr_t)*a->refptr;
     *a->refptr = (uint64_t)(uintptr_t)a->target;
-    fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p\n",
-            a->name, (unsigned long)a->rva, old_val, a->target);
+    DEBUG(fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p\n",
+            a->name, (unsigned long)a->rva, old_val, a->target));
 }
 
 void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
@@ -85,8 +86,8 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
         g_crt_ctx.bss_vaddr = bss_sec->VirtualAddress;
         __imp___initenv_stub = (void **)((char *)image_base +
                                           g_crt_ctx.bss_vaddr + CRT_BSS_INITENV);
-        fprintf(stderr, "patch_crt_refptrs: .bss at VA=0x%lx, __imp___initenv_stub=%p\n",
-                (unsigned long)g_crt_ctx.bss_vaddr, (void *)__imp___initenv_stub);
+        DEBUG(fprintf(stderr, "patch_crt_refptrs: .bss at VA=0x%lx, __imp___initenv_stub=%p\n",
+                (unsigned long)g_crt_ctx.bss_vaddr, (void *)__imp___initenv_stub));
     } else {
         g_crt_ctx.bss_vaddr = 0;
     }
@@ -110,7 +111,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 
         if (target_rva != 0) {
             if (!patched_any)
-                fprintf(stderr, "patch_crt_refptrs: using COFF symbol table\n");
+                DEBUG(fprintf(stderr, "patch_crt_refptrs: using COFF symbol table\n"));
             apply_refptr_patch(image_base, target_rva, map->target,
                                map->name, image_size);
             patched_any = 1;
@@ -178,7 +179,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 
     /* ── Always supplement with .text scanning ── */
     if (!patched_initenv) {
-        fprintf(stderr, "patch_crt_refptrs: __imp___initenv not in COFF, scanning .text\n");
+        DEBUG(fprintf(stderr, "patch_crt_refptrs: __imp___initenv not in COFF, scanning .text\n"));
         scan_text_for_refptrs(image_base, nt, sections, image_size);
     }
 }
