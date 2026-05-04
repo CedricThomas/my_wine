@@ -9,6 +9,7 @@
 #define MY_WINE_LOADER_PRIV_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <sys/ucontext.h>
 #include "include/pe_parser.h"
 
@@ -32,8 +33,26 @@ typedef struct {
 } import_entry_t;
 
 /* Name→address table for NT, kernel32 and msvcrt functions
- * Defined in import_resolver.c */
+ * Defined in import_table.c */
 extern import_entry_t import_table[];
+extern size_t import_table_count;
+
+/* ── import_table.c ────────────────────────────────────────── */
+
+void set_import(const char *name, void *address);
+void init_import_table(void);
+int import_cmp_by_name(const void *key, const void *elem);
+
+/* ── import_resolve.c ─────────────────────────────────────── */
+
+int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
+void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
+                       IMAGE_SECTION_HEADER *sections,
+                       void *target_addr);
+
+/* ── import_init.c ─────────────────────────────────────────── */
+
+void init_msvcrt_imports(void);
 
 /* ── image_mapper.c ────────────────────────────────────────── */
 
@@ -53,15 +72,6 @@ void *map_image(const char *path,
                 IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS64 *out_nt,
                 size_t *out_nt_size);
-
-/* ── import_resolver.c ─────────────────────────────────────── */
-
-void init_msvcrt_imports(void);
-void init_import_table(void);
-int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
-void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
-                       IMAGE_SECTION_HEADER *sections,
-                       void *target_addr);
 
 /* ── teb_peb.c ─────────────────────────────────────────────── */
 

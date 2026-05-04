@@ -44,7 +44,7 @@ void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
 
 static void *resolve_import(const char *dll_name, const char *func_name)
 {
-    size_t count = sizeof(import_table) / sizeof(import_entry_t) - 1;
+    size_t count = import_table_count;
     import_entry_t *entry = bsearch(func_name, import_table,
                                      count, sizeof(import_entry_t), import_cmp_by_name);
     if (entry == NULL) {

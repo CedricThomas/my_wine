@@ -89,6 +89,8 @@ import_entry_t import_table[] = {
     { NULL, NULL, NULL }
 };
 
+size_t import_table_count = sizeof(import_table) / sizeof(import_entry_t) - 1;
+
 void set_import(const char *name, void *address)
 {
     for (int i = 0; import_table[i].name != NULL; i++) {
@@ -106,7 +108,7 @@ static int import_entry_cmp(const void *a, const void *b)
                   ((const import_entry_t *)b)->name);
 }
 
-static int import_cmp_by_name(const void *key, const void *elem)
+int import_cmp_by_name(const void *key, const void *elem)
 {
     return strcmp((const char *)key, ((const import_entry_t *)elem)->name);
 }
