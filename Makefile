@@ -136,7 +136,7 @@ $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 	$(BUILDDIR)/import_resolver.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
-	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o \
+	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/crt_offset_discovery.o \
 	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
@@ -151,7 +151,7 @@ $(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
 	$(BUILDDIR)/import_resolver.o $(BUILDDIR)/teb_peb.o \
 	$(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_file.o \
 	$(BUILDDIR)/crt_startup.o $(BUILDDIR)/crt_stdio.o \
-	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o \
+	$(BUILDDIR)/crt_stdlib.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/crt_offset_discovery.o \
 	$(BUILDDIR)/ntdll_handle.o $(BUILDDIR)/ntdll_io.o \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
@@ -193,6 +193,7 @@ $(BUILDDIR)/crt_startup.o: src/stubs/msvcrt_priv.h
 $(BUILDDIR)/crt_stdio.o: src/stubs/msvcrt_priv.h
 $(BUILDDIR)/crt_stdlib.o: src/stubs/msvcrt_priv.h
 $(BUILDDIR)/crt_refptrs.o: include/pe_parser.h src/stubs/msvcrt_priv.h
+$(BUILDDIR)/crt_offset_discovery.o: include/pe_parser.h src/stubs/msvcrt_priv.h
 
 # Loader
 $(BUILDDIR)/image_mapper.o: include/pe.h include/pe_parser.h src/loader/loader_priv.h

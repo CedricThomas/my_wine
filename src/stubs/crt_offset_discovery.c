@@ -20,10 +20,6 @@
 #include "include/pe_parser.h"
 #include "msvcrt_priv.h"
 
-/* Forward declaration: apply_refptr_patch lives in crt_refptrs.c */
-void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
-                        const char *name, uint64_t image_size);
-
 /*
  * Scan .text for the pattern:
  *   mov reg64, [rip + disp32]
@@ -39,7 +35,7 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
 {
     IMAGE_SECTION_HEADER *text_sec = find_section_by_name(nt, sections, ".text");
     if (!text_sec) {
-        fprintf(stderr, "patch_crt_refptrs: no .text section\n");
+        fprintf(stderr, "crt_offset_discovery: no .text section\n");
         return;
     }
 
@@ -112,7 +108,7 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
                 break;
             }
         }
-        fprintf(stderr, "patch_crt_refptrs: text-scan refptr at rva 0x%lx val=0x%lx in '%s' data=%d\n",
+        fprintf(stderr, "crt_offset_discovery: text-scan refptr at rva 0x%lx val=0x%lx in '%s' data=%d\n",
                 (unsigned long)target_rva, current, sec_name, in_data_section);
 
         if (!in_data_section) continue;
@@ -129,7 +125,7 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
     }
 
     if (!found)
-        fprintf(stderr, "patch_crt_refptrs: text-scan found no refptr targets\n");
+        fprintf(stderr, "crt_offset_discovery: text-scan found no refptr targets\n");
 }
 
 /*
@@ -290,6 +286,6 @@ void discover_crt_offsets(const char *file_path,
         if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = CRT_BSS_INITENV;
     }
 
-    fprintf(stderr, "patch_crt_refptrs: CRT offsets argc=0x%x argv=0x%x envp=0x%x\n",
+    fprintf(stderr, "crt_offset_discovery: CRT offsets argc=0x%x argv=0x%x envp=0x%x\n",
             g_crt_ctx.argc_bss_offset, g_crt_ctx.argv_bss_offset, g_crt_ctx.envp_bss_offset);
 }
