@@ -220,4 +220,98 @@ The section table begins immediately after the optional header at:
                        + sizeof(uint32_t)       // PE signature
                        + sizeof(IMAGE_FILE_HEADER)
                        + SizeOfOptionalHeader
+
+---
+
+## 3. Sections
+
+The section table describes each named region of the image. Each entry
+is an `IMAGE_SECTION_HEADER` (40 bytes) that tells the loader how to
+map a region from the file into memory.
+
+### Common Sections
+
+| Section | Content | Characteristics |
+|---|---|---|
+| `.text` | Executable code | `IMAGE_SCN_MEM_READ \| IMAGE_SCN_MEM_EXECUTE` |
+| `.data` | Initialized globals, statics | `IMAGE_SCN_MEM_READ \| IMAGE_SCN_MEM_WRITE` |
+| `.bss` | Uninitialized globals (zero-filled) | `IMAGE_SCN_MEM_READ \| IMAGE_SCN_MEM_WRITE` |
+| `.refptr` | Global Pointer to Data (GCC/MinGW) | `IMAGE_SCN_MEM_READ \| IMAGE_SCN_MEM_WRITE` |
+
+### Struct Sketch
+
+```c
+typedef struct {
+    char Name[8];
+    uint32_t VirtualSize;
+    uint32_t VirtualAddress;     // RVA
+    uint32_t SizeOfRawData;
+    uint32_t PointerToRawData;   // file offset
+    uint32_t PointerToRelocations;
+    uint32_t PointerToLinenumbers;
+    uint16_t NumberOfRelocations;
+    uint16_t NumberOfLinenumbers;
+    uint32_t Characteristics;     // IMAGE_SCN_MEM_READ|WRITE|EXECUTE
+} IMAGE_SECTION_HEADER;
+```
+
+| Field | Meaning |
+|---|---|
+| `Name` | Section name, padded to 8 bytes (e.g., `.text\0\0\0`)|
+| `VirtualSize` | Size of the section in memory (after alignment) |
+| `VirtualAddress` | RVA where the section is placed in the mapped image |
+| `SizeOfRawData` | Size of the section's raw data in the file |
+| `PointerToRawData` | File offset of the section's raw data |
+| `Characteristics` | Bit flags controlling memory protection and content |
+
+### Mapping into Memory
+
+Each section is mapped by calling `mmap` with a virtual address
+derived from its RVA and a protection mode derived from its
+Characteristics:
+
+```
+  mmap(image_base + VirtualAddress, VirtualSize, PROT from Characteristics)
+```
+
+| Section | PROT flags |
+|---|---|
+| `.text` | `PROT_READ \| PROT_EXEC` |
+| `.data` | `PROT_READ \| PROT_WRITE` |
+| `.bss` | `PROT_READ \| PROT_WRITE` (zero-filled beyond raw data) |
+| `.refptr` | `PROT_READ \| PROT_WRITE` |
+
+**Important:** `.bss` sections may have `SizeOfRawData=0` but
+`VirtualSize>0`. There is no data in the file — the section exists
+only in memory and must be zero-filled up to `VirtualSize`.
+
+### File Layout vs. Memory Layout
+
+Section alignment in memory (typically 4K / `0x1000`) differs from
+file alignment (typically 512B / `0x200`). Raw data is packed more
+tightly on disk.
+
+```
+File Layout (disk)                  Memory Layout (RVA-aligned)
+┌─────────────┐                    ┌─────────────┐
+│ .text       │  PointerToRawData  │ .text       │  VirtualAddress (RVA)
+│ 0x1000-2FFF │ ─────────────────► │ 0x1000-2FFF │  (4K aligned)
+├─────────────┤                    ├─────────────┤
+│ .data       │  PointerToRawData  │ .data       │  VirtualAddress (RVA)
+│ 0x3000-3FFF │ ─────────────────► │ 0x3000-3FFF │
+├─────────────┤                    ├─────────────┤
+│ .bss (0 B)  │  no raw data       │ .bss        │  zero-filled
+│             │                    │ 0x4000-4FFF │  (VirtualSize > 0)
+└─────────────┘                    └─────────────┘
+```
+
+**Key differences:**
+- **On disk**: sections are `FileAlignment`-aligned (`0x200`), raw
+  data is contiguous and may be smaller than `VirtualSize`
+- **In memory**: sections are `SectionAlignment`-aligned (`0x1000`),
+  each starts at `image_base + VirtualAddress`, padded to page size
+- **.bss**: `PointerToRawData` and `SizeOfRawData` may both be zero;
+  the loader allocates `VirtualSize` bytes and fills them with zeros
+
+See [architecture.md](architecture.md) §1.1 for the mapping process.
 ```
