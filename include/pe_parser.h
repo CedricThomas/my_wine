@@ -60,19 +60,6 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
 /* ── COFF Symbol Table ───────────────────────────────────────── */
 
 /*
- * Parse the COFF symbol table from an already-loaded PE image.
- * The symbol table must be within the copied headers region.
- * Returns number of symbols parsed, or 0 if no symbol table / inaccessible.
- * The symbols and string_table pointers point directly into the image memory
- * (no allocation).
- */
-int parse_symbol_table_from_image(void *image_base,
-                                   const IMAGE_NT_HEADERS64 *nt_headers,
-                                   size_t headers_size,
-                                   IMAGE_SYMBOL **out_symbols,
-                                   char **out_string_table);
-
-/*
  * Parse the COFF symbol table directly from the PE file on disk.
  * Reads PointerToSymbolTable as a file offset, so it works even when
  * the symbol table lies beyond SizeOfHeaders.

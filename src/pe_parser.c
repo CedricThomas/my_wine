@@ -246,59 +246,9 @@ int parse_imports(const void *base, size_t file_size,
 /* ── COFF Symbol Table ───────────────────────────────────────────── */
 
 /*
- * Parse the COFF symbol table from an already-loaded PE image.
- * The symbol table lives at file offset PointerToSymbolTable.
- * When headers are copied into the image (as is done in main.c), the symbol
- * table is at image_base + PointerToSymbolTable — provided it falls within
- * SizeOfHeaders. Otherwise it is not accessible and we return 0.
- *
- * Returns number of symbols parsed, or 0 if no symbol table / inaccessible.
- * The symbols and string_table pointers point directly into the image memory
- * (no allocation).
- */
-int parse_symbol_table_from_image(void *image_base,
-                                   const IMAGE_NT_HEADERS64 *nt_headers,
-                                   size_t headers_size,
-                                   IMAGE_SYMBOL **out_symbols,
-                                   char **out_string_table)
-{
-    uint32_t ptr  = nt_headers->FileHeader.PointerToSymbolTable;
-    uint32_t count = nt_headers->FileHeader.NumberOfSymbols;
-
-    *out_symbols = NULL;
-    *out_string_table = NULL;
-
-    if (ptr == 0 || count == 0)
-        return 0;   /* no symbol table in this image */
-
-    size_t sym_table_size = (size_t)count * IMAGE_SIZEOF_SYMBOL;
-
-    /* Symbol table must be within the copied headers region */
-    if ((size_t)ptr + sym_table_size > headers_size)
-        return 0;   /* symbol table lives beyond SizeOfHeaders — not copied */
-
-    IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)((char *)image_base + ptr);
-
-    /* String table: 4 bytes length (not counting itself) followed by
-     * null-terminated strings. It follows immediately after the symbol table. */
-    size_t str_off = ptr + sym_table_size;
-    if (str_off + 4 <= headers_size) {
-        uint32_t str_size = *((const uint32_t *)((char *)image_base + str_off));
-        /* str_size is the size NOT counting the 4-byte length field */
-        if (str_off + 4 + str_size <= headers_size && str_size > 0) {
-            *out_string_table = (char *)image_base + str_off + 4;
-        }
-    }
-
-    *out_symbols = symbols;
-    return (int)count;
-}
-
-/*
  * Parse the COFF symbol table directly from the PE file on disk.
- * Unlike parse_symbol_table_from_image(), this reads PointerToSymbolTable
- * as a file offset (not image offset), so it works even when the symbol
- * table lies beyond SizeOfHeaders.
+ * Reads PointerToSymbolTable as a file offset (not image offset),
+ * so it works even when the symbol table lies beyond SizeOfHeaders.
  *
  * The symbols and string_table are returned as malloc'd memory.
  * The string_table is embedded right after the symbols in the same buffer,
