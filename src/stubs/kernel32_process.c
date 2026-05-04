@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include "kernel32_priv.h"
+#include "include/debug.h"
 
 /* ── ExitProcess ────────────────────────────────────────────── */
 
@@ -51,7 +52,7 @@ void Sleep(uint32_t dwMilliseconds)
 {
     char buf[64];
     int len = sprintf(buf, "TRACE: Sleep(%u)\n", dwMilliseconds);
-    INLINE_SYSCALL_WRITE_ERR(buf, (size_t)len);
+    DEBUG_WRITE_ERR(buf, (size_t)len);
 
     struct timespec ts;
     ts.tv_sec  = dwMilliseconds / 1000;

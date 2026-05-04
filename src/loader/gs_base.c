@@ -18,6 +18,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "include/debug.h"
+
 /**
  * set_gs_base — set the GS segment base to addr.
  *
@@ -36,8 +38,8 @@ int set_gs_base(void *addr)
     errno = 0;
     rc = syscall(__NR_arch_prctl, ARCH_SET_GS, (unsigned long)addr);
     if (rc != 0) {
-        fprintf(stderr, "my_wine: arch_prctl(ARCH_SET_GS) failed: %s\n",
-                strerror(errno));
+        DEBUG(fprintf(stderr, "my_wine: arch_prctl(ARCH_SET_GS) failed: %s\n",
+                strerror(errno)));
         goto fallback;
     }
 
@@ -45,23 +47,23 @@ int set_gs_base(void *addr)
     errno = 0;
     long got = syscall(__NR_arch_prctl, ARCH_GET_GS, 0);
     if (got < 0) {
-        fprintf(stderr, "my_wine: arch_prctl(ARCH_GET_GS) failed: %s\n",
-                strerror(errno));
+        DEBUG(fprintf(stderr, "my_wine: arch_prctl(ARCH_GET_GS) failed: %s\n",
+                strerror(errno)));
         goto fallback;
     }
 
     if ((void *)got != addr) {
-        fprintf(stderr,
+        DEBUG(fprintf(stderr,
                 "my_wine: arch_prctl(ARCH_SET_GS) returned 0 but value "
                 "mismatch (wanted %p, got %p) — silent failure detected\n",
-                addr, (void *)got);
+                addr, (void *)got));
     } else {
         return 0;  /* verified OK */
     }
 
 fallback:
     /* Fallback: write GS base directly with FSGSBASE instruction */
-    fprintf(stderr, "my_wine: using FSGSBASE fallback for GS base\n");
+    DEBUG(fprintf(stderr, "my_wine: using FSGSBASE fallback for GS base\n"));
     __asm__ volatile ("wrgsbase %0" :: "r"((unsigned long)addr));
 
     /* Verify the fallback write */
@@ -70,8 +72,8 @@ fallback:
     if ((void *)val == addr) {
         return 0;
     }
-    fprintf(stderr, "my_wine: FSGSBASE fallback also failed "
-                    "(wanted %p, got %p)\n", addr, (void *)val);
+    DEBUG(fprintf(stderr, "my_wine: FSGSBASE fallback also failed "
+                    "(wanted %p, got %p)\n", addr, (void *)val));
     return -1;
 }
 
@@ -94,7 +96,7 @@ void *get_gs_base(void)
     }
 
     /* Fallback: rdgsbase */
-    fprintf(stderr, "my_wine: using FSGSBASE fallback to read GS base\n");
+    DEBUG(fprintf(stderr, "my_wine: using FSGSBASE fallback to read GS base\n"));
     unsigned long val;
     __asm__ volatile ("rdgsbase %0" : "=r"(val));
     return (void *)val;
