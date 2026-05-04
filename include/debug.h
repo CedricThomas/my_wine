@@ -13,7 +13,7 @@
  * When unset or empty, all debug output is compiled out (no-op).
  *
  * Usage:
- *   DEBUG(fprintf(stderr, "value = %d\n", val));
+ *   DEBUG("value = %d", val);
  *   DEBUG_WRITE_ERR("error", 5);
  *
  * NOTE: These macros are for informational/trace output only.
@@ -22,16 +22,17 @@
  */
 
 /*
- * DEBUG(stmt)
+ * DEBUG(fmt, ...)
  *
- * Evaluates `stmt` (typically a printf/fprintf call) only when
+ * Prints a formatted message to stderr only when
  * the MY_WINE_DEBUG environment variable is set.
- * Safe for use anywhere in regular code (not signal handlers).
+ * Automatically appends a newline. Safe for use anywhere in regular
+ * code (not signal handlers).
  */
-#define DEBUG(stmt)                                                   \
+#define DEBUG(fmt, ...)                                               \
     do {                                                              \
         if (getenv("MY_WINE_DEBUG")) {                                \
-            stmt;                                                     \
+            fprintf(stderr, fmt "\n", ##__VA_ARGS__);                 \
         }                                                             \
     } while (0)
 
