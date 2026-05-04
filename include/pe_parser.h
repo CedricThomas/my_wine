@@ -7,6 +7,8 @@
 #ifndef MY_WINE_PE_PARSER_H
 #define MY_WINE_PE_PARSER_H
 
+#include <stddef.h>
+
 #include "pe.h"
 
 /* ── Header Parsing ──────────────────────────────────────────── */
