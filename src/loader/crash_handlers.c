@@ -24,7 +24,6 @@
 
 #include "include/common.h"
 #include "include/syscall/thunk_gen.h"
-#include "include/syscall/dispatcher.h"
 #include <sys/user.h>
 
 /**

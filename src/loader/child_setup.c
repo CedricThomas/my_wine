@@ -2,7 +2,7 @@
  * child_setup.c — Guest state, patches, .bss mprotect, watchdog
  *
  * Contains all child-process setup logic that runs after fork:
- * - SEH chain + syscall thunk generation + SIGSYS handler + seccomp
+ * - SEH chain + syscall thunk generation
  * - Guest state (GS base, TEB SEH chain, PE re-parse)
  * - __acrt_iob_func patching
  * - .bss section mprotect after fork
@@ -153,8 +153,7 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
 /**
  * Set up the SEH chain and generate syscall thunks in the child.
  *
- * Creates a static SEH frame, generates thunks, installs the SIGSYS
- * handler, and enables seccomp filtering.
+ * Creates a static SEH frame and generates all syscall thunks.
  *
  * @return  pointer to the static SEH frame for TEB wiring
  */
@@ -379,6 +378,6 @@ void cleanup_guest(void *teb, void *stack_base)
         }
     }
 
-    /* Unmap thunk pages (from thunk_gen.c via signal_handler) */
+    /* Unmap thunk pages (from thunk_gen.c) */
     cleanup_thunk_pages();
 }

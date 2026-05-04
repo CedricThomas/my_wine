@@ -2,11 +2,11 @@
 #define MY_WINE_NT_CONSTANTS_H
 
 /*
- * nt_constants.h — Named NT syscall numbers, TEB/PEB offsets, Wine syscall offset
+ * nt_constants.h — Named NT syscall numbers, TEB/PEB offsets
  *
  * Centralized constants for the my_wine PE loader.
  * All magic numbers extracted from the syscall dispatcher, TEB/PEB setup,
- * and Wine thunk generation code.
+ * and thunk generation code.
  */
 
 /* ── NT syscall numbers (x86_64) ──────────────────────────────── */

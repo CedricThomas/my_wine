@@ -114,9 +114,9 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
 /*
  * handle_syscall — dispatch a Windows NT syscall to its handler.
  *
- * @syscall_number: the raw syscall number from si_syscall (includes 0xF000
- *                  Wine offset, e.g. 0xF005 for NtCallbackReturn)
- * @ctx:            pointer to the ucontext_t captured by the SIGSYS handler
+ * @syscall_number: the raw NT syscall number (passed directly by thunks,
+ *                  e.g. 0x05 for NtCallbackReturn)
+ * @ctx:            pointer to the ucontext_t captured by the thunk entry
  *
  * Decodes arguments from the x86_64 Windows calling convention:
  *   RCX (ARG1) = gregs[REG_RCX]
