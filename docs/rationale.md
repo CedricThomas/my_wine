@@ -5,198 +5,167 @@ section covers a key decision and the reasoning behind it.
 
 ---
 
-## 1. Why fork()
+## 1. Why single-process
 
-The loader runs in the **parent** process. The guest runs in the
-**child** process. `fork()` is the boundary between the two.
+The loader and the guest run in the **same process**. There is no
+`fork()`, no parent/child split — the UNIX side is always alive and in
+control.
 
-### Parent Manages the Guest
+### One Process, Two Roles
 
-The parent performs all heavy lifting before forking:
+The loader performs all heavy lifting first:
 
 - **Load PE** — open file, parse headers, `mmap` image at preferred base
 - **Resolve imports** — walk ILT/IAT, patch IAT with our stub addresses
 - **Patch .refptr** — rewrite CRT global pointers to our stubs
 - **Setup TEB/PEB** — allocate and initialize Windows-expected structures
 
-All of this requires a clean Linux environment with normal syscalls.
-If any step fails, the parent can report the error and exit cleanly.
+Then, instead of forking, the loader **switches to the guest stack** and
+jumps to the entry point. The UNIX side remains present throughout: it
+handles all syscalls via our dispatcher.
 
-### Child Runs the PE
+### Guest Runs on Its Own Stack
 
-After `fork()`, the child:
+After setup, the loader:
 
-- Inherits the mapped image via copy-on-write (same virtual addresses)
-- Installs the seccomp filter (traps `syscall >= 0xF000`)
-- Generates thunks in `PROT_EXEC` pages
+- Switches `RSP` to a dedicated guest stack (a `mmap`-allocated page)
 - Sets up `GS` base for the TEB
 - Jumps to the entry point
 
-The child is a sealed environment: only intercepted syscalls can reach
-the kernel, and the parent monitors it via `waitpid()`.
+When the guest executes a syscall, it enters our dispatcher via a direct
+call (not via seccomp). The dispatcher runs on the **UNIX stack**, reads
+arguments from the Windows x64 ABI registers, dispatches to the
+appropriate handler, writes the result back to `RAX`, then switches back
+to the guest stack and returns.
 
-### MAP_FIXED Is Inherited
+### No Fork Needed
 
-`mmap(..., MAP_FIXED, ...)` creates a mapping at a specific address.
-`fork()` duplicates the parent's address space via copy-on-write. The
-child sees the exact same mappings at the same addresses — no
-remapping needed.
+Without `fork()`, there is no copy-on-write to worry about and no
+parent/child separation. The PE mappings exist once, at their preferred
+addresses. The UNIX side manages everything from a single address space.
 
-### Parent Survives Crashes
+### Trade-off: Guest Crashes Kill the Loader
 
-If the guest crashes in the child (SIGSEGV, unhandled exception), the
-parent is unaffected. It collects the exit status via
-`waitpid()` → `WEXITSTATUS()` and can report diagnostics.
+If the guest crashes (SIGSEGV, unhandled exception), the entire process
+terminates. Unlike the fork model, there is no parent to collect
+`waitpid()` status and report diagnostics. This is the accepted trade-off
+for a simpler architecture that is closer to Wine's approach.
 
-### Clean Separation
+### Single Process Flow
 
 ```
-Parent (PID 1)              Child (PID 2, forked)
-──────────────────          ─────────────────────────
-- Load PE file              - Inherits mapped image
-- Parse headers             - Applies seccomp filter
-- Resolve imports           - Runs guest code
-- Setup TEB/PEB             - SIGSYS on NT syscalls
-- fork()                    - Parent waits via waitpid()
-- waitpid() → exit code     - Exit/crash in isolation
+UNIX loader                  Guest code
+─────────────                ──────────
+- Load PE file               (not yet running)
+- Parse headers
+- Resolve imports
+- Setup TEB/PEB
+- Switch to guest stack
+- Jump to entry point  →     Guest code runs
+                             call NtWriteFile
+                             │
+                             ▼
+                   Switch to UNIX stack
+                   handle_syscall()
+                   Switch to guest stack
+                             Guest continues...
 ```
 
-### Alternatives Considered
+### Why Not Fork?
 
-- **No fork** — running guest code in the same process would mean a
-  guest crash kills the loader. The parent would have no way to report
-  diagnostics.
-- **execve** — `execve` replaces the process image. The mapped PE
-  segments would be lost. We need the mappings to survive the
-  transition.
-- **threads** — threads share the same address space but share the
-  same seccomp filter. You cannot install a seccomp filter on one
-  thread without affecting all threads in the process.
+The fork model adds complexity for limited benefit:
+
+- **fork + seccomp** — requires a child process, a seccomp filter, a
+  SIGSYS handler, and a parent waiting via `waitpid()`. The fork
+  boundary complicates address space reasoning. Wine does not fork;
+  neither do we.
+- **Single process** — simpler mental model. The UNIX side is always present.
+  Stack switching is a well-known technique (used by Wine, v8, and
+  others) for managing two execution contexts in one process.
 
 ---
 
-## 2. Why seccomp + SIGSYS + thunks
+## 2. Why direct dispatch + stack switching
 
-my_wine intercepts NT syscalls using a three-part mechanism:
-dynamically generated thunks, a seccomp-BPF filter, and a signal
-handler.
+my_wine intercepts NT syscalls using **direct dispatch** with **stack
+switching**. When guest code calls an NT syscall, it jumps to our
+dispatcher, which switches to the UNIX stack, handles the call, then
+switches back.
 
 ### Wine-Style Offset Scheme
 
 NT syscalls use `0xF000 + nr` as their syscall number. This follows
 the Wine convention (`WINE_SYSCALL_OFFSET = 0xF000`). Linux syscall
 numbers are all `< 0x400`. The gap between `0x400` and `0xF000` is
-unused on x86_64. This allows a simple seccomp filter to distinguish
-native Linux syscalls from intercepted NT syscalls.
+unused on x86_64.
 
 ```
   syscall number < 0xF000  →  Linux kernel executes directly
-  syscall number >= 0xF000 →  seccomp traps, sends SIGSYS
+  syscall number >= 0xF000 →  intercepted by our dispatcher
 ```
 
-### seccomp-BPF Filter
+### Direct Call, Not Seccomp
 
-The filter is a Berkeley Packet Filter (BPF) program attached via
-`prctl(PR_SET_SECCOMP_FILTER, ...)`. It inspects the syscall number:
+Each NT syscall has a **dispatcher entry** in our code. The IAT in the
+PE is patched to point to these entries instead of the original import
+targets.
 
-```
-BPF: LOAD syscall_number
-BPF: JGE WINE_SYSCALL_OFFSET → TRAP (send SIGSYS)
-BPF: ALLOW (native Linux syscall, pass through)
-```
+Unlike the seccomp + SIGSYS approach, there is no kernel trap. The
+guest directly enters our C code via a call instruction. The dispatcher
+runs on the UNIX stack, not the guest stack.
 
-**TRAP** action sends `SIGSYS` to the process. Unlike **KILL** (which
-terminates the process), TRAP allows user-space handling.
+### Stack Switching
 
-The filter is installed in the child after `fork()` so the parent
-remains unaffected.
-
-### Thunk Generation
-
-Each NT syscall has a dynamically generated **thunk** (11 bytes)
-placed in a `PROT_EXEC` memory page. The IAT in the PE is patched to
-point to these thunks instead of the original import targets.
+The key mechanism is **stack switching**:
 
 ```asm
-; generated at runtime by src/syscall/thunk_gen.c
-mov  r10, rcx          ; 41 89 CF  (Windows: arg1 in RCX; Linux: in R10)
-mov  eax, NR + 0xF000  ; B8 XX XX XX XX
-syscall                ; 0F 05
-ret                    ; C3
+; c_dispatch_syscall() — src/syscall/dispatcher.c
+switch_to_unix_stack:
+    mov  rax, [gs:0x10]     ; save guest RSP from TEB
+    mov  rsp, <unix_stack>  ; switch to UNIX stack
+    call handle_syscall     ; run on UNIX stack, System V ABI
+    mov  [gs:0x10], rsp     ; restore guest RSP into TEB
+    mov  rsp, rax           ; switch back to guest stack
+    ret                      ; return to guest code
 ```
 
-When guest code calls `NtWriteFile`, it jumps to the thunk. The thunk:
+The sequence is:
 
-1. Copies `rcx` to `r10` (realigns first argument from Windows ABI
-   to Linux ABI — Linux expects arg1 in `r10` for `syscall`, Windows
-   places it in `rcx`)
-2. Loads the syscall number into `eax`
-3. Executes `syscall` — this triggers the seccomp filter
-4. The filter sends `SIGSYS` to our handler
+1. **Save guest RSP** — read from the TEB (at `GS:0x10`)
+2. **Switch to UNIX stack** — set `RSP` to our pre-allocated UNIX stack
+3. **Call handler** — `handle_syscall()` runs with full C ABI on the
+   UNIX stack; it reads arguments from the Windows x64 ABI registers
+   (`RCX`, `RDX`, `R8`, `R9`), dispatches to the appropriate handler,
+   and writes the result back to `RAX`
+4. **Restore guest RSP** — write current `RSP` back into the TEB
+5. **Switch back** — set `RSP` to the saved guest stack pointer
+6. **Return** — `ret` goes back to guest code; the result is in `RAX`
 
-Each thunk occupies its own page (4096 bytes) to allow independent
-`mprotect` and for the signal handler to validate the call site.
+Because the UNIX side runs on its own stack, it can use the full C ABI
+safely — no risk of clobbering guest stack data.
 
-### SIGSYS Handler → Dispatcher
+### Why Not seccomp + SIGSYS?
 
-`SIGSYS` is delivered to `sigsys_handler()` in
-`src/syscall/signal_handler.c`. The handler:
+The seccomp + SIGSYS approach requires:
 
-1. **Validates the call address** — ensures the return address (from
-   the signal frame) is within ±4096 bytes of a registered thunk page.
-   If not, it raises `SIGSEGV` (fatal — something unexpected happened).
-2. **Dispatches to `g_dispatcher()`** — passes the syscall number and
-   the signal's `ucontext_t` to `handle_syscall()` in
-   `src/syscall/dispatcher.c`.
-3. **The dispatcher** reads arguments from the Windows ABI registers
-   (`rcx`, `rdx`, `r8`, `r9`), routes to the appropriate handler
-   function, and writes the result back to `rax`.
-4. **Advances RIP** past the `syscall` instruction (2 bytes:
-   `0x0F 0x05`) so the thunk resumes at `ret`.
+- **libseccomp** — extra dependency for constructing the BPF filter
+- **A signal handler** — which has severe restrictions (only async-
+  signal-safe functions, no heap allocation, etc.)
+- **Per-thunk pages** — each thunk needs its own 4096-byte `PROT_EXEC`
+  page for the signal handler to validate the call site
+- **RIP advancement** — manually advancing the instruction pointer past
+  the `syscall` instruction before returning from the signal handler
 
-```
-Guest code: call NtWriteFile
-      │
-      ▼
-Thunk: syscall 0xF03D
-      │
-      ▼
-seccomp filter: syscall >= 0xF000 → TRAP
-      │
-      ▼
-SIGSYS delivered
-      │
-      ▼
-sigsys_handler() (src/syscall/signal_handler.c)
-  │
-  ├── validate: call_addr within ±4096 of registered thunk
-  │     │
-  │     └── if not: raise(SIGSEGV) — fatal
-  │
-  └── g_dispatcher(syscall_num, ucontext)
-          │
-          ▼
-  handle_syscall() (src/syscall/dispatcher.c)
-    │
-    ├── nt_nr = syscall_num - WINE_SYSCALL_OFFSET
-    ├── read args from RCX/RDX/R8/R9 (Windows x64 ABI)
-    ├── switch(nt_nr):
-    │     case NT_SYSCALL_WRITE_FILE → handler_NtWriteFile(...)
-    │     case NT_SYSCALL_TERMINATE_PROCESS → handler_NtTerminateProcess(...)
-    │     ...
-    └── write result to RAX
-          │
-          ▼
-Advance RIP past `syscall` → guest code continues with result in RAX
-```
+Direct dispatch with stack switching avoids all of this. It is simpler,
+faster, and closer to what Wine actually does.
 
 ### Why Not ptrace?
 
 `ptrace` can intercept syscalls, but it requires a context switch per
 **instruction** (not per syscall). The overhead is prohibitive: every
 instruction in the guest triggers a trap to the tracer. For a program
-that makes many syscalls (like CRT initialization), ptrace is orders
-of magnitude too slow.
+that makes many syscalls (like CRT initialization), ptrace is orders of
+magnitude too slow.
 
 ### Why Not LD_PRELOAD?
 
@@ -204,20 +173,19 @@ of magnitude too slow.
 syscalls. The Windows x64 ABI (`ms_abi`) passes arguments in
 `rcx`/`rdx`/`r8`/`r9`. `LD_PRELOAD` can only intercept functions
 called with the System V ABI (`rdi`/`rsi`/`rdx`/`rcx`/`r8`/`r9`).
-Guest code calls our thunks directly via `syscall` — there is no
-`libc` boundary to hook. Additionally, some guest operations (like
-`mmap` with specific flags) bypass `libc` entirely and go straight to
-the kernel.
+Guest code calls our dispatcher directly — there is no `libc` boundary
+to hook.
 
 ### Linux Syscalls Pass Through
 
-Linux syscalls (`< 0x400`) are never trapped. They execute directly by
-the kernel. This means the guest can still use standard Linux facilities
-(reading `/dev/null`, basic memory operations) without going through
-our handler. The seccomp filter only intercepts the `0xF000+` range.
+Linux syscalls (`< 0x400`) are never intercepted by our dispatcher.
+They execute directly by the kernel. This means the guest can still use
+standard Linux facilities (reading `/dev/null`, basic memory operations)
+without going through our handler. Our stubs call Linux syscalls
+directly, not through the dispatcher.
 
 See [architecture.md §§2,3](architecture.md) for the full syscall
-interception flow.
+dispatch flow.
 
 ---
 
@@ -311,13 +279,13 @@ See [CRT refptr Patching](refptr.md) for full implementation details.
 
 | Requirement | Why |
 |---|---|
-| Linux x86_64 | We use the GS segment for TEB access, seccomp-BPF for syscall filtering, and the x86_64 syscall ABI. No other architecture is supported. |
+| Linux x86_64 | We use the GS segment for TEB access and the x86_64 syscall ABI. No other architecture is supported. |
 | GCC | We need GCC-specific attributes: `__attribute__((ms_abi))` for Windows x64 calling convention, `__attribute__((force_align_arg_pointer))` for stack alignment, `__attribute__((naked))` for trampoline assembly. |
-| libseccomp-dev | Provides `libseccomp` for constructing the seccomp-BPF filter that traps NT syscalls. Linked via `-lseccomp`. |
 | Docker + mingw-w64 | Cross-compilation to PE format via `x86_64-w64-mingw32-gcc`. Used for building sample Windows binaries, not for the loader itself. |
-| `-mno-red-zone` | The Windows x64 ABI has no red zone. Without this flag, GCC assumes a 128-byte red zone below RSP, which conflicts with signal handlers and guest stack operations. |
+| `-mno-red-zone` | The Windows x64 ABI has no red zone. Without this flag, GCC assumes a 128-byte red zone below RSP, which conflicts with stack switching and guest stack operations. |
 | `-fno-stack-protector` | Stack canaries require `__stack_chk_fail` from glibc, which the guest process can't call. Disabling them prevents crashes from missing glibc symbols. |
 | `-fno-exceptions` | No C++ exception handling is needed. Disabling avoids generating unwind tables and reducing code size. |
+| `-ldl` | Needed for `dlsym` in test builds. Not required for the loader itself. |
 | `arch_prctl(ARCH_SET_GS)` | We set the GS base to point to the TEB. This requires `arch_prctl` syscall (not FSGSBASE instructions). |
 
 The compiler flags (`-mno-red-zone`, `-fno-stack-protector`, `-fno-exceptions`) are applied via `SPECIAL_CFLAGS` in the Makefile to `loader/`, `stubs/`, and `syscall/` files.
@@ -328,6 +296,8 @@ The compiler flags (`-mno-red-zone`, `-fno-stack-protector`, `-fno-exceptions`) 
 
 | Limitation | Rationale |
 |---|---|
+| **Guest crashes kill the loader** | The single-process model means a guest SIGSEGV terminates the entire process. There is no parent to collect diagnostics. This is the accepted trade-off for simplicity and a closer match to Wine's approach. |
+| **No nested syscall dispatch** | When our stubs call Linux syscalls (e.g., `write(2)` from `handler_NtWriteFile`), they go directly to the kernel, not through the dispatcher. Nested NT syscall dispatch is not supported. |
 | **No relocation support** | We don't implement relocation processing. A `MAP_STACK` fallback exists but relocations are never applied. |
 | **No dynamic loading** | `LoadLibraryA` returns `NULL`. Runtime DLL loading would require a full PE loading path at runtime. |
 | **No TLS support** | `TlsGetValue` returns `NULL`; `__dyn_tls_init_callback` is stubbed. Per-thread slot management and callback invocation add complexity for minimal gain in single-threaded targets. |
@@ -344,7 +314,7 @@ The compiler flags (`-mno-red-zone`, `-fno-stack-protector`, `-fno-exceptions`) 
 
 - [Onboarding](onboarding.md) — Getting started guide and reading order
 - [PE Format Primer](pe_format.md) — PE structure basics
-- [Architecture](architecture.md) — How it works: data flow, fork model, syscall interception
+- [Architecture](architecture.md) — How it works: data flow, single-process model, syscall dispatch
 - [CRT refptr Patching](refptr.md) — .refptr details
 - [README](../README.md) — Build, run, quick start
 

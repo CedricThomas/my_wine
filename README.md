@@ -100,9 +100,9 @@ The loader will:
    implementations.
 5. Set up the TEB (Thread Environment Block), PEB (Process
    Environment Block), and guest stack.
-6. Fork a child process, install the syscall interception, and
-   jump to the PE entry point.
-7. Wait for the child to exit and clean up guest resources.
+6. Install the direct dispatch trampoline and jump to the PE
+   entry point.
+7. Return from the entry point and clean up guest resources.
 
 ---
 
@@ -110,7 +110,7 @@ The loader will:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│                    my_wine (host process)                  │
+│                     my_wine (single process)               │
 │                                                            │
 │  main()                                                    │
 │   │                                                        │
@@ -119,31 +119,24 @@ The loader will:
 │   ├──► resolve_imports()        # IAT → our functions      │
 │   ├──► setup_teb_peb()          # TEB + PEB + GS base      │
 │   ├──► setup_stack()            # guest stack (mmap)       │
-│   └──► jump_to_entry()          # fork()                   │
+│   └──► jump_to_entry()          # stack-switch + jump      │
 │                        │                                    │
-│                        ├──► parent: waitpid() → exit code   │
-│                        │                                    │
-│                        └──► child:                         │
-│                             ├── install signal handlers     │
-│                             ├── generate_all_thunks()       │
-│                             ├── setup_sigsys_handler()      │
-│                             ├── patch __acrt_iob_func       │
-│                             └── run_guest() → entry point   │
+│                        └──► guest_setup()                   │
+│                             ├── patch __acrt_iob_func      │
+│                             ├── install dispatcher trampoline │
+│                             └── run_guest() → entry point  │
 │                                                      │
 │              ┌─────────────────────────────────────┐       │
 │              │   Guest PE code runs here           │       │
 │              │                                     │       │
 │              │   PE code → syscall                 │       │
 │              │     │                               │       │
-│              │     ├─ syscall < WINE_SYSCALL_OFFSET → Linux OS  │       │
-│              │     └─ syscall >= WINE_SYSCALL_OFFSET (0xF000) → SIGSYS   │       │
+│              │     ├─ syscall < 0xF000 → Linux OS  │       │
+│              │     └─ syscall >= 0xF000 → __wine_dispatcher │       │
 │              │                          │           │       │
-│              │                   sigsys_handler()   │       │
+│              │                   dispatcher()       │       │
 │              │                   │                   │       │
-│              │                   ├─ validate thunk   │       │
-│              │                   └─ dispatcher()      │       │
-│              │                       │               │       │
-│              │                   handler_NtXXX()      │       │
+│              │                   └─ handler_NtXXX()  │       │
 │              │                       │               │       │
 │              │               stub (mprotect, syscall  │       │
 │              │                to Linux kernel, etc.)  │       │
@@ -174,9 +167,9 @@ PE file ──► mmap(file) ──► parse headers
                   setup_stack()        ← guest stack (downward)
                            │
                            ▼
-                  fork()
-                   ├── parent: waitpid() + cleanup
-                   └── child:  signal handlers → thunks → entry
+                  guest_setup()  ← single-process, stack-switch
+                   ├── patch __acrt_iob_func
+                   └── jump to entry point via dispatcher trampoline
 ```
 
 See [docs/architecture.md](docs/architecture.md) for a detailed
@@ -205,7 +198,7 @@ architectural walkthrough.
 │   │   ├── import_init.c       # import resolution orchestrator
 │   │   ├── teb_peb.c           # TEB + PEB allocation and setup
 │   │   ├── entry.c             # fork(), child setup, __acrt_iob patch
-│   │   ├── child_setup.c       # child process initialization
+│   │   ├── guest_setup.c       # guest process initialization
 │   │   ├── crash_handlers.c    # exception/crash handling in child
 │   │   ├── gs_base.c           # GS segment base setup via arch_prctl
 │   │   └── loader_priv.h       # internal loader declarations
@@ -222,8 +215,8 @@ architectural walkthrough.
 │   │   ├── kernel32_priv.h     # private kernel32 declarations
 │   │   └── msvcrt_priv.h       # private msvcrt declarations
 │   └── syscall/
-│       ├── thunk_gen.c         # runtime syscall thunk generation
-│       ├── signal_handler.c    # SIGSYS handler + seccomp filter
+│       ├── dispatcher_entry.S  # assembly entry into dispatcher
+│       ├── dispatcher_entry.c  # dispatcher entry glue
 │       └── dispatcher.c        # NT syscall number → handler dispatch
 ├── include/                    # public headers
 │   ├── pe.h                    # PE format structures (IMAGE_*)
@@ -237,8 +230,7 @@ architectural walkthrough.
 │   ├── abi_wrappers.h          # ABI wrapper declarations
 │   ├── common.h                # shared utility declarations
 │   └── syscall/
-│       ├── thunk_gen.h         # thunk generation declarations
-│       ├── signal_handler.h    # signal handler declarations
+│       ├── dispatcher_entry.h  # dispatcher entry declarations
 │       └── dispatcher.h        # dispatcher function type
 ├── tests/                      # unit/integration tests
 │   ├── test_parse.c            # PE header parsing tests
