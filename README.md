@@ -75,7 +75,6 @@ For example:
 ### Dependencies
 
 - **gcc** — C compiler
-- **libseccomp-dev** — seccomp filter support (`-lseccomp`)
 - **Docker** — cross-compilation with `x86_64-w64-mingw32-gcc`
 
 ---
@@ -91,15 +90,6 @@ Example:
 ```
 ./my_wine samples/hello_world/hello_world.exe
 ```
-
-### Options
-
-```
-./my_wine [--watchdog=N] <pe_binary>
-```
-
-- `--watchdog=N` — Set watchdog timeout in seconds (default: 60, range: 1-3600)
-  Can also be set via the `MY_WINE_WATCHDOG` environment variable.
 
 The loader will:
 

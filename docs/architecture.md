@@ -95,7 +95,7 @@ The import resolver works in two passes:
 ```
   GS:0 ──► TEB (Thread Environment Block)
   │
-  ├── [TEB_SEH_CHAIN       (0x00)] SEH frame pointer  (set by child in entry.c)
+  ├── [TEB_SEH_CHAIN       (0x00)] SEH frame pointer  (set during setup_seh())
   ├── [TEB_TEB_SELF_REF    (0x08)] TEB self-reference
   ├── [TEB_THREAD_PTR      (0x30)] Thread pointer (→ TEB)
   └── [TEB_PEB_PTR         (0x60)] PEB pointer
