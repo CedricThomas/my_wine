@@ -11,6 +11,7 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include "include/syscall/dispatcher_entry.h"
+#include "include/debug.h"
 
 #define UNIX_STACK_SIZE (128 * 1024)  /* 128 KB */
 
@@ -26,7 +27,7 @@ int setup_unix_stack(void)
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (base == MAP_FAILED) {
-        fprintf(stderr, "wine: failed to allocate UNIX stack\n");
+        DEBUG(fprintf(stderr, "wine: failed to allocate UNIX stack\n"));
         return -1;
     }
 

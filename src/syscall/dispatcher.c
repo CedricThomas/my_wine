@@ -10,6 +10,7 @@
 #include "include/syscall/dispatcher.h"
 #include "include/syscall/dispatcher_entry.h"  /* guest_regs, __wine_guest_regs */
 #include "../syscalls_inline.h"
+#include "include/debug.h"
 
 /*
  * dispatcher.c — NT syscall dispatcher
@@ -69,13 +70,13 @@ static inline uint64_t read_guest_stack(int index)
     uintptr_t rsp = (uintptr_t)__wine_guest_regs.rsp;
 
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
-        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
-                (unsigned long)rsp);
+        DEBUG(fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
+                      (unsigned long)rsp));
         return 0;
     }
     if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
-        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
-                (unsigned long)rsp);
+        DEBUG(fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
+                      (unsigned long)rsp));
         return 0;
     }
     uint64_t *stack = (uint64_t *)(uintptr_t)rsp;
@@ -105,15 +106,15 @@ static inline uint64_t read_guest_stack_ctx(ucontext_t *ctx, int index)
 
     /* Validate RSP is in a reasonable user-space range */
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
-        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
-                (unsigned long)rsp);
+        DEBUG(fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
+                      (unsigned long)rsp));
         return 0;
     }
 
     /* Additional guard: RSP must pass our guest-ptr validator */
     if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
-        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
-                (unsigned long)rsp);
+        DEBUG(fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
+                      (unsigned long)rsp));
         return 0;
     }
 
@@ -141,8 +142,8 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
         return 0;
     }
     if (!is_valid_guest_ptr(guest_ptr, 8)) {
-        fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at %s\n",
-                (unsigned long)guest_ptr, name);
+        DEBUG(fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at %s\n",
+                      (unsigned long)guest_ptr, name));
         return STATUS_ACCESS_VIOLATION;
     }
     if (out_val) *out_val = *(uint64_t *)(uintptr_t)guest_ptr;
@@ -166,7 +167,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
 {
     char trace_buf[32];
     int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)nr);
-    INLINE_SYSCALL_WRITE_ERR(trace_buf, (size_t)trace_len);
+    DEBUG_WRITE_ERR(trace_buf, (size_t)trace_len);
 
     uint64_t arg1 = __wine_guest_regs.rcx;
     uint64_t arg2 = __wine_guest_regs.rdx;
@@ -419,7 +420,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     /* Trace every syscall invocation to stderr via direct write syscall */
     char trace_buf[32];
     int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)syscall_number);
-    INLINE_SYSCALL_WRITE_ERR(trace_buf, (size_t)trace_len);
+    DEBUG_WRITE_ERR(trace_buf, (size_t)trace_len);
 
     /* syscall_number is the raw NT syscall number (passed directly
      * by the thunks — no Wine offset).                               */
