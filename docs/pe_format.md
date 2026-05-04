@@ -220,6 +220,7 @@ The section table begins immediately after the optional header at:
                        + sizeof(uint32_t)       // PE signature
                        + sizeof(IMAGE_FILE_HEADER)
                        + SizeOfOptionalHeader
+```
 
 ---
 
@@ -314,7 +315,6 @@ File Layout (disk)                  Memory Layout (RVA-aligned)
   the loader allocates `VirtualSize` bytes and fills them with zeros
 
 See [architecture.md](architecture.md) §1.1 for the mapping process.
-```
 
 ---
 
@@ -413,3 +413,194 @@ DataDirectory[IMPORT] ──► IMAGE_IMPORT_DESCRIPTOR ──► DLL name ("ntd
 ```
 
 See [architecture.md §1.2](architecture.md) for the import resolution process.
+
+---
+
+## 5. RVA vs File Offsets
+
+The PE format uses two different address spaces — **RVA** for the
+mapped image in memory and **file offsets** for the data on disk.
+Confusing them is the most common source of bugs in PE parsers.
+
+### What is an RVA?
+
+**RVA** (Relative Virtual Address) is an offset from `ImageBase`.
+It is **not** an absolute virtual address. To get the actual address
+where the loader maps data:
+
+```
+  absolute_address = ImageBase + RVA
+```
+
+Almost every address stored inside the PE headers is an RVA:
+`AddressOfEntryPoint`, `VirtualAddress` in section headers, and
+every entry in the `DataDirectory`.
+
+### What is a File Offset?
+
+A **file offset** is the raw byte position in the file on disk,
+starting from the very first byte (`0x0000`). It has nothing to do
+with `ImageBase` or memory layout. `e_lfanew` and `PointerToRawData`
+are file offsets.
+
+### Converting RVA to File Offset
+
+To read data from the file when you only have an RVA, you must:
+
+1. **Find the containing section** — scan the section table for the
+   first entry where the RVA falls within its virtual range.
+2. **Compute the offset** — map from the section's virtual address
+   to its file position.
+
+```
+  For each section:
+    if (RVA >= section.VirtualAddress) &&
+       (RVA < section.VirtualAddress + section.VirtualSize):
+
+      file_offset = section.PointerToRawData + (RVA - section.VirtualAddress)
+      break
+```
+
+If no section contains the RVA, the address is in the header region
+(RVA < first section's VirtualAddress) — the file offset equals the
+RVA directly (headers start at file offset 0).
+
+### C Pseudocode
+
+```c
+uint32_t rva_to_file_offset(const IMAGE_SECTION_HEADER *sections,
+                            int num_sections, uint32_t rva)
+{
+    /* Header region: before any section's VA */
+    if (rva < sections[0].VirtualAddress) {
+        return rva;  /* headers start at file offset 0 */
+    }
+
+    for (int i = 0; i < num_sections; i++) {
+        if (rva >= sections[i].VirtualAddress &&
+            rva < sections[i].VirtualAddress + sections[i].VirtualSize) {
+            return sections[i].PointerToRawData +
+                   (rva - sections[i].VirtualAddress);
+        }
+    }
+
+    /* RVA not in any section — invalid */
+    return 0;
+}
+```
+
+### Visual Flow
+
+```
+Given RVA = 0x1234
+
+Step 1 — Find the section:
+
+  ┌──────────────────────────────────────────────┐
+  │  Section    VA Range         Raw File Offset  │
+  │  .text     0x1000-0x1FFF    0x0400           │  ← 0x1234 is here
+  │  .data     0x2000-0x2FFF    0x2000           │
+  │  .bss      0x3000-0x3FFF    (none)           │
+  └──────────────────────────────────────────────┘
+
+Step 2 — Compute file offset:
+
+  file_offset = PointerToRawData + (RVA - VirtualAddress)
+              = 0x0400 + (0x1234 - 0x1000)
+              = 0x0400 + 0x0234
+              = 0x0634
+
+  Read from file at offset 0x0634.
+```
+
+**Rules of thumb:**
+- `AddressOfEntryPoint`, `VirtualAddress`, DataDirectory entries → **RVA**
+- `e_lfanew`, `PointerToRawData`, `PointerToSymbolTable` → **file offset**
+- When in doubt: check the PE spec name — "*Address" fields are RVA,
+  "*ToRaw*" fields are file offsets
+
+---
+
+## 6. Entry Point
+
+The entry point is where the loader hands control to the program.
+In the PE headers it is stored as `AddressOfEntryPoint` in the
+`IMAGE_OPTIONAL_HEADER`.
+
+### It Is an RVA
+
+`AddressOfEntryPoint` is an RVA, not an absolute address. The loader
+converts it before jumping:
+
+```
+  entry_address = ImageBase + AddressOfEntryPoint
+```
+
+In my_wine, this is resolved to the actual guest address after
+mapping.
+
+### What Does It Point To?
+
+For **mingw-w64** compiled executables, `AddressOfEntryPoint`
+typically points to `mainCRTStartup` (the C runtime startup
+function). This is not `main()` itself — the CRT startup:
+
+1. Initializes the C runtime (global constructors, heap, etc.)
+2. Parses `argc`, `argv`, and `envp` from the process environment
+3. Calls `main(argc, argv, envp)`
+
+This is the same startup chain used on native Windows.
+
+### my_wine Reaches the Entry Point Via `run_guest.S`
+
+In my_wine, the guest entry point is reached through a **naked
+assembly trampoline** (`run_guest.S`). After `fork()`, the child
+process:
+
+1. Maps all sections via `mmap`
+2. Patches the IAT
+3. Patches `.refptr` entries
+4. Jumps to the entry point via a naked assembly function
+   (no prologue, no epilogue — just a direct `jmp`)
+
+The naked function is critical: any stack adjustment or register
+saving would corrupt the guest's expected state. The guest believes
+it was started by the Windows loader and expects the stack and
+registers in a specific configuration.
+
+### DLLs Have No Entry Point
+
+`AddressOfEntryPoint` can be **zero** for DLLs — they do not have
+an entry point in the same way executables do. my_wine only handles
+executables, so a zero entry point indicates a malformed or
+unsupported binary.
+
+See [architecture.md §2](architecture.md) for the guest execution flow (fork model).
+
+---
+
+## 7. Summary
+
+A quick reference mapping header fields to their meaning and where
+my_wine uses them:
+
+| Header Field | Meaning | Where my_wine uses it |
+|---|---|---|
+| `e_lfanew` (DOS Header) | File offset to PE signature | `pe_headers.c` — find NT headers |
+| `Machine` (File Header) | Target architecture (0x8664 = x64) | `pe_headers.c` — validate x86_64 |
+| `NumberOfSections` (File Header) | Count of sections in the PE | `pe_headers.c` — parse section table |
+| `SizeOfImage` (Optional Header) | Total mapped size in bytes | `image_mapper.c` — mmap size |
+| `SectionAlignment` (Optional Header) | Memory alignment (typically 4K) | `image_mapper.c` — section alignment |
+| `FileAlignment` (Optional Header) | File alignment (typically 512B) | `pe_headers.c` — section parsing |
+| `AddressOfEntryPoint` (Optional Header) | RVA of code entry point | `entry.c` — jump target |
+| `DataDirectory[IMPORT]` (Optional Header) | RVA of import descriptor table | `pe_imports.c`, `import_resolve.c` |
+
+---
+
+## Related Documents
+
+- [Onboarding](onboarding.md) — Reading order and project guide
+- [Architecture](architecture.md) — How it works: data flow, fork model, syscall interception
+- [Rationale](rationale.md) — Why fork, why seccomp, requirements, limitations
+- [CRT refptr Patching](refptr.md) — Deep-dive into .refptr section handling
+- [README](../README.md) — Build, run, quick start
