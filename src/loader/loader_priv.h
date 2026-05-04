@@ -9,12 +9,15 @@
 #define MY_WINE_LOADER_PRIV_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 #include <sys/ucontext.h>
+#include "include/pe.h"
 #include "include/pe_parser.h"
 
 /* ── Global state shared across loader modules ─────────────── */
 
-/* Set by image_mapper.c, read by teb_peb.c and import_resolver.c */
+/* Set by image_mapper.c, read by teb_peb.c and import_resolve.c */
 extern void *g_image_base;
 
 /* Set by teb_peb.c (setup_stack), read by main.c */
@@ -31,9 +34,49 @@ typedef struct {
     void *address;
 } import_entry_t;
 
+/* Flat import entry used in pass 2 thunk patching */
+struct import_flat {
+    uint64_t   ilt_value;      /* OriginalFirstThunk[i].AddressOfData */
+    uint64_t   resolved_addr;  /* FirstThunk[i].AddressOfData (from pass 1) */
+    const char *dll_name;
+    const char *func_name;
+};
+
 /* Name→address table for NT, kernel32 and msvcrt functions
- * Defined in import_resolver.c */
+ * Defined in import_table.c */
 extern import_entry_t import_table[];
+extern size_t import_table_count;
+
+/* ── import_table.c ────────────────────────────────────────── */
+
+void set_import(const char *name, void *address);
+void init_import_table(void);
+int import_cmp_by_name(const void *key, const void *elem);
+int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
+                            struct import_flat flat[]);
+bool strategy_resolved_overlap(uint64_t current_val,
+                               struct import_flat *flat, int num_flat);
+bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
+                              uint64_t target,
+                              struct import_flat *flat, int num_flat);
+bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
+                               uint64_t current_val,
+                               uint64_t import_dir_va, uint64_t import_dir_end,
+                               struct import_flat *flat, int num_flat);
+bool strategy_positional(uint64_t *target_ptr, uint64_t target,
+                         int thunk_idx,
+                         struct import_flat *flat, int num_flat);
+
+/* ── import_resolve.c ─────────────────────────────────────── */
+
+int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
+void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
+                       IMAGE_SECTION_HEADER *sections,
+                       void *target_addr);
+
+/* ── import_init.c ─────────────────────────────────────────── */
+
+void init_msvcrt_imports(void);
 
 /* ── image_mapper.c ────────────────────────────────────────── */
 
@@ -54,24 +97,24 @@ void *map_image(const char *path,
                 IMAGE_NT_HEADERS64 *out_nt,
                 size_t *out_nt_size);
 
-/* ── import_resolver.c ─────────────────────────────────────── */
-
-void init_msvcrt_imports(void);
-void init_import_table(void);
-int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
-void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
-                       IMAGE_SECTION_HEADER *sections,
-                       void *target_addr);
-
 /* ── teb_peb.c ─────────────────────────────────────────────── */
 
 void *setup_teb_peb(void);
 void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
 
-/* ── entry.c ───────────────────────────────────────────────── */
+/* ── crash_handlers.c ─────────────────────────────────────── */
+
+void setup_signal_handlers(void);
+__attribute__((ms_abi)) void seh_crash_handler(void *, void *, void *, void *);
+
+/* ── entry.c / child_setup.c ────────────────────────────────── */
 
 int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base,
                   void *teb, char **guest_argv, char **guest_envp);
+
+void setup_child_and_run(uint64_t entry_abs, void *stack_top, void *teb,
+                         char **guest_argv, char **guest_envp);
+void cleanup_guest(void *teb, void *stack_base);
 
 /* ── gs_base.c ─────────────────────────────────────────────── */
 

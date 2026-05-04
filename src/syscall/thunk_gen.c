@@ -8,6 +8,8 @@
 #include "include/syscall/thunk_gen.h"
 #include "include/syscall/signal_handler.h"
 #include "include/nt_constants.h"
+#include "include/common.h"
+#include "../syscalls_inline.h"
 
 /*
  * syscall_gen.c — Syscall thunk generator
@@ -21,7 +23,6 @@
  */
 
 #define THUNK_SIZE 11
-#define THUNK_PAGE 4096
 
 #define NUM_NT_SYSCALLS 16
 
@@ -62,16 +63,16 @@ void *generate_thunk(uint16_t syscall_number)
     uint32_t actual_nr = (uint32_t)(syscall_number + WINE_SYSCALL_OFFSET);
     uint8_t code[THUNK_SIZE] = {
         0x41, 0x89, 0xCF,                       /* mov r10, rcx */
-        0xB8,
+        X86_MOV_ABS,
         (uint8_t)(actual_nr & 0xFF),            /* mov eax, actual_nr */
         (uint8_t)((actual_nr >> 8) & 0xFF),
         (uint8_t)((actual_nr >> 16) & 0xFF),
         (uint8_t)((actual_nr >> 24) & 0xFF),
-        0x0F, 0x05,                              /* syscall */
-        0xC3                                     /* ret */
+        X86_SYSCALL_BYTE1, X86_SYSCALL_BYTE2,                              /* syscall */
+        X86_RET                                      /* ret */
     };
 
-    void *mem = mmap(NULL, THUNK_PAGE,
+    void *mem = mmap(NULL, PAGE_SIZE,
                      PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) {

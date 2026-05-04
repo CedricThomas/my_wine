@@ -8,7 +8,7 @@
  * Gracefully skips with a message when arch_prctl(ARCH_SET_GS) is
  * unavailable (e.g., running under certain containers).
  *
- * Build: linked against pe_parser.o, image_mapper.o, import_resolver.o,
+ * Build: linked against pe_parser.o, image_mapper.o, import_table.o, import_resolve.o, import_init.o,
  *   and teb_peb.o for the setup_teb_peb function.
  */
 
@@ -115,7 +115,7 @@ static void test_teb_peb_setup(void)
     /* Set g_image_base to a plausible value (typical PE image base) */
     g_image_base = (void *)0x140000000ULL;
 
-    /* Initialize import table (needed by import_resolver.o for __msvcrt_*) */
+    /* Initialize import table (needed by import_table.o, import_resolve.o, import_init.o for __msvcrt_*) */
     init_msvcrt_imports();
     init_import_table();
 

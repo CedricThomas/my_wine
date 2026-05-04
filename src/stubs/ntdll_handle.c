@@ -7,9 +7,9 @@
 
 #include <stdint.h>
 #include <unistd.h>
-#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
+#include "../syscalls_inline.h"
 
 /* ── Handle Table ──────────────────────────────────────────────── */
 
@@ -78,9 +78,7 @@ uint64_t handler_NtClose(uint64_t handle)
     int fd = handle_to_fd(handle);
     if (fd < 0) return STATUS_INVALID_HANDLE;
 
-    long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_close), "D"(fd) : "rcx", "r11", "cc");
-    (void)res;
+    INLINE_SYSCALL_CLOSE(fd);
     free_handle(handle);
 
     return STATUS_SUCCESS;

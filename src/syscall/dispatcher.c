@@ -4,9 +4,11 @@
 #include <stdint.h>
 #include <sys/ucontext.h>
 
+#include "include/common.h"
 #include "include/nt_constants.h"
 #include "include/ntdll.h"
 #include "include/syscall/dispatcher.h"
+#include "../syscalls_inline.h"
 
 /*
  * dispatcher.c — NT syscall dispatcher
@@ -78,15 +80,36 @@ static inline uint64_t read_guest_stack(ucontext_t *ctx, int index)
     return stack[index];
 }
 
-/* ── Dispatcher ───────────────────────────────────────────────── */
-
-/* Helper: write a static message to stderr via direct inline syscall */
-static inline void disp_write_stderr(const char *msg)
+/*
+ * read_guest_ptr — validate a guest pointer, read the uint64_t value,
+ * and set up a pointer for write-back.
+ *
+ * @guest_ptr  the guest-space pointer to validate and read
+ * @out_val    output: the value read from guest_ptr (0 if guest_ptr is NULL)
+ * @out_ptr    output: a host pointer into the guest address (NULL if guest_ptr is NULL)
+ * @name       for error messages
+ *
+ * @return 0 on success, STATUS_ACCESS_VIOLATION on invalid pointer.
+ */
+static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
+                          const char *name)
 {
-    long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(msg), "d"((size_t)__builtin_strlen(msg)) : "rcx", "r11", "memory", "cc");
-    (void)ret;
+    if (guest_ptr == 0) {
+        if (out_val) *out_val = 0;
+        if (out_ptr) *out_ptr = NULL;
+        return 0;
+    }
+    if (!is_valid_guest_ptr(guest_ptr, 8)) {
+        fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at %s\n",
+                (unsigned long)guest_ptr, name);
+        return STATUS_ACCESS_VIOLATION;
+    }
+    if (out_val) *out_val = *(uint64_t *)(uintptr_t)guest_ptr;
+    if (out_ptr) *out_ptr = (void *)(uintptr_t)guest_ptr;
+    return 0;
 }
+
+/* ── Dispatcher ───────────────────────────────────────────────── */
 
 /*
  * handle_syscall — dispatch a Windows NT syscall to its handler.
@@ -109,7 +132,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     /* Trace every syscall invocation to stderr via direct write syscall */
     char trace_buf[32];
     int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)syscall_number);
-    long __t; __asm__ volatile("syscall" : "=a"(__t) : "a"(1), "D"(2), "S"(trace_buf), "d"((size_t)trace_len) : "rcx", "r11", "memory", "cc"); (void)__t;
+    INLINE_SYSCALL_WRITE_ERR(trace_buf, (size_t)trace_len);
 
     /* syscall_number comes from si_syscall which includes the 0xF000
      * Wine offset. Strip it to get the base NT syscall number.       */
@@ -131,16 +154,10 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     {
         uint64_t h_buffer = arg3;
         uint64_t h_ret_len = read_guest_stack(ctx, 1);
-        if (h_buffer != 0 && !is_valid_guest_ptr(h_buffer, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at buffer\n",
-                    (unsigned long)h_buffer);
-            return STATUS_ACCESS_VIOLATION;
-        }
-        if (h_ret_len != 0 && !is_valid_guest_ptr(h_ret_len, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at return_length\n",
-                    (unsigned long)h_ret_len);
-            return STATUS_ACCESS_VIOLATION;
-        }
+        int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
+        if (status != 0) return status;
+        status = read_guest_ptr(h_ret_len, NULL, NULL, "return_length");
+        if (status != 0) return status;
         result = handler_NtQueryInformationProcess(
             arg1, arg2, h_buffer, arg4, h_ret_len);
         break;
@@ -152,126 +169,70 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 
     case NT_SYSCALL_ALLOC_VM: /* NtAllocateVirtualMemory */
     {
-        /* base_address and region_size are guest-space pointers;
-         * pass host-side copies, then write back results.          */
-        uint64_t h_base_addr = arg2;   /* guest ptr value           */
-        uint64_t h_region_sz = arg4;
-        uint64_t *p_base = NULL;
-        uint64_t *p_region = NULL;
-        if (arg2 != 0) {
-            if (!is_valid_guest_ptr(arg2, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at base_address\n",
-                        (unsigned long)arg2);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_base = (uint64_t *)(uintptr_t)arg2;
-            h_base_addr = *p_base;
-        }
-        if (arg4 != 0) {
-            if (!is_valid_guest_ptr(arg4, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at region_size\n",
-                        (unsigned long)arg4);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_region = (uint64_t *)(uintptr_t)arg4;
-            h_region_sz = *p_region;
-        }
+        uint64_t h_base_addr = 0;
+        uint64_t h_region_sz = 0;
+        void *p_base = NULL;
+        void *p_region = NULL;
+        int status = read_guest_ptr(arg2, &h_base_addr, &p_base, "base_address");
+        if (status != 0) return status;
+        status = read_guest_ptr(arg4, &h_region_sz, &p_region, "region_size");
+        if (status != 0) return status;
         result = handler_NtAllocateVirtualMemory(
             arg1, &h_base_addr, arg3, &h_region_sz,
             read_guest_stack(ctx, 1),
             read_guest_stack(ctx, 2));
-        if (p_base != NULL)    *p_base = h_base_addr;
-        if (p_region != NULL) *p_region = h_region_sz;
+        if (p_base)   *(uint64_t *)p_base = h_base_addr;
+        if (p_region) *(uint64_t *)p_region = h_region_sz;
         break;
     }
 
     case NT_SYSCALL_FREE_VM: /* NtFreeVirtualMemory */
     {
-        uint64_t h_base_addr = arg2;
-        uint64_t h_region_sz = arg3;
-        uint64_t *p_base = NULL;
-        uint64_t *p_region = NULL;
-        if (arg2 != 0) {
-            if (!is_valid_guest_ptr(arg2, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at base_address\n",
-                        (unsigned long)arg2);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_base = (uint64_t *)(uintptr_t)arg2;
-            h_base_addr = *p_base;
-        }
-        if (arg3 != 0) {
-            if (!is_valid_guest_ptr(arg3, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at region_size\n",
-                        (unsigned long)arg3);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_region = (uint64_t *)(uintptr_t)arg3;
-            h_region_sz = *p_region;
-        }
+        uint64_t h_base_addr = 0;
+        uint64_t h_region_sz = 0;
+        void *p_base = NULL;
+        void *p_region = NULL;
+        int status = read_guest_ptr(arg2, &h_base_addr, &p_base, "base_address");
+        if (status != 0) return status;
+        status = read_guest_ptr(arg3, &h_region_sz, &p_region, "region_size");
+        if (status != 0) return status;
         result = handler_NtFreeVirtualMemory(arg1, &h_base_addr, &h_region_sz, arg4);
-        if (p_base != NULL)    *p_base = h_base_addr;
-        if (p_region != NULL) *p_region = h_region_sz;
+        if (p_base)   *(uint64_t *)p_base = h_base_addr;
+        if (p_region) *(uint64_t *)p_region = h_region_sz;
         break;
     }
 
     case NT_SYSCALL_GET_CTX_THREAD: /* NtGetContextThread */
     {
-        if (arg2 != 0 && !is_valid_guest_ptr(arg2, sizeof(uint64_t))) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at context\n",
-                    (unsigned long)arg2);
-            return STATUS_ACCESS_VIOLATION;
-        }
+        int status = read_guest_ptr(arg2, NULL, NULL, "context");
+        if (status != 0) return status;
         result = handler_NtGetContextThread(arg1, arg2);
         break;
     }
 
     case NT_SYSCALL_SET_CTX_THREAD: /* NtSetContextThread */
     {
-        if (arg2 != 0 && !is_valid_guest_ptr(arg2, sizeof(uint64_t))) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at context\n",
-                    (unsigned long)arg2);
-            return STATUS_ACCESS_VIOLATION;
-        }
+        int status = read_guest_ptr(arg2, NULL, NULL, "context");
+        if (status != 0) return status;
         result = handler_NtSetContextThread(arg1, arg2);
         break;
     }
 
     case NT_SYSCALL_MAP_VIEW: /* NtMapViewOfSection */
     {
-        uint64_t h_base_addr = arg3;
+        uint64_t h_base_addr = 0;
         uint64_t h_section_off = read_guest_stack(ctx, 1);
         uint64_t h_view_sz = read_guest_stack(ctx, 2);
-        uint64_t *p_base = NULL;
-        uint64_t *p_offset = NULL;
-        uint64_t *p_vsz = NULL;
-        if (arg3 != 0) {
-            if (!is_valid_guest_ptr(arg3, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at base_address\n",
-                        (unsigned long)arg3);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_base = (uint64_t *)(uintptr_t)arg3;
-            h_base_addr = *p_base;
-        }
-        if (h_section_off != 0) {
-            if (!is_valid_guest_ptr(h_section_off, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at section_offset\n",
-                        (unsigned long)h_section_off);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_offset = (uint64_t *)(uintptr_t)h_section_off;
-            h_section_off = *p_offset;
-        }
-        if (h_view_sz != 0) {
-            if (!is_valid_guest_ptr(h_view_sz, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at view_size\n",
-                        (unsigned long)h_view_sz);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_vsz = (uint64_t *)(uintptr_t)h_view_sz;
-            h_view_sz = *p_vsz;
-        }
+        void *p_base = NULL;
+        void *p_offset = NULL;
+        void *p_vsz = NULL;
+        int status = read_guest_ptr(arg3, &h_base_addr, &p_base, "base_address");
+        if (status != 0) return status;
+        status = read_guest_ptr(h_section_off, &h_section_off, &p_offset,
+                                "section_offset");
+        if (status != 0) return status;
+        status = read_guest_ptr(h_view_sz, &h_view_sz, &p_vsz, "view_size");
+        if (status != 0) return status;
         result = handler_NtMapViewOfSection(
             arg1, arg2, &h_base_addr, arg4,
             read_guest_stack(ctx, 1),
@@ -279,9 +240,9 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
             read_guest_stack(ctx, 4),
             read_guest_stack(ctx, 5),
             read_guest_stack(ctx, 6));
-        if (p_base != NULL)   *p_base = h_base_addr;
-        if (p_offset != NULL) *p_offset = h_section_off;
-        if (p_vsz != NULL)   *p_vsz = h_view_sz;
+        if (p_base)   *(uint64_t *)p_base = h_base_addr;
+        if (p_offset) *(uint64_t *)p_offset = h_section_off;
+        if (p_vsz)    *(uint64_t *)p_vsz = h_view_sz;
         break;
     }
 
@@ -297,16 +258,10 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     {
         uint64_t h_buffer = read_guest_stack(ctx, 1);
         uint64_t h_bytes_read = read_guest_stack(ctx, 4);
-        if (h_buffer != 0 && !is_valid_guest_ptr(h_buffer, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at buffer\n",
-                    (unsigned long)h_buffer);
-            return STATUS_ACCESS_VIOLATION;
-        }
-        if (h_bytes_read != 0 && !is_valid_guest_ptr(h_bytes_read, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at bytes_read\n",
-                    (unsigned long)h_bytes_read);
-            return STATUS_ACCESS_VIOLATION;
-        }
+        int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
+        if (status != 0) return status;
+        status = read_guest_ptr(h_bytes_read, NULL, NULL, "bytes_read");
+        if (status != 0) return status;
         result = handler_NtReadFile(arg1, arg2, arg3, arg4,
                                     h_buffer,
                                     read_guest_stack(ctx, 2),
@@ -319,16 +274,10 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     {
         uint64_t h_buffer = read_guest_stack(ctx, 1);
         uint64_t h_bytes_written = read_guest_stack(ctx, 4);
-        if (h_buffer != 0 && !is_valid_guest_ptr(h_buffer, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at buffer\n",
-                    (unsigned long)h_buffer);
-            return STATUS_ACCESS_VIOLATION;
-        }
-        if (h_bytes_written != 0 && !is_valid_guest_ptr(h_bytes_written, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at bytes_written\n",
-                    (unsigned long)h_bytes_written);
-            return STATUS_ACCESS_VIOLATION;
-        }
+        int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
+        if (status != 0) return status;
+        status = read_guest_ptr(h_bytes_written, NULL, NULL, "bytes_written");
+        if (status != 0) return status;
         result = handler_NtWriteFile(arg1, arg2, arg3, arg4,
                                      h_buffer,
                                      read_guest_stack(ctx, 2),
@@ -339,69 +288,41 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 
     case NT_SYSCALL_CREATE_EVENT: /* NtCreateEvent */
     {
-        uint64_t h_handle = arg1;
-        uint64_t *p_handle = NULL;
-        if (arg1 != 0) {
-            if (!is_valid_guest_ptr(arg1, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at event_handle\n",
-                        (unsigned long)arg1);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_handle = (uint64_t *)(uintptr_t)arg1;
-            h_handle = *p_handle;
-        }
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "event_handle");
+        if (status != 0) return status;
         result = handler_NtCreateEvent(&h_handle, arg2, arg3, arg4,
                                        read_guest_stack(ctx, 1));
-        if (p_handle != NULL) *p_handle = h_handle;
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
         break;
     }
 
     case NT_SYSCALL_CREATE_SECTION: /* NtCreateSection */
     {
-        uint64_t h_handle = arg1;
-        uint64_t h_max_sz = arg4;
-        uint64_t *p_handle = NULL;
-        uint64_t *p_max = NULL;
-        if (arg1 != 0) {
-            if (!is_valid_guest_ptr(arg1, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at section_handle\n",
-                        (unsigned long)arg1);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_handle = (uint64_t *)(uintptr_t)arg1;
-            h_handle = *p_handle;
-        }
-        if (arg4 != 0) {
-            if (!is_valid_guest_ptr(arg4, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at maximum_size\n",
-                        (unsigned long)arg4);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_max = (uint64_t *)(uintptr_t)arg4;
-            h_max_sz = *p_max;
-        }
+        uint64_t h_handle = 0;
+        uint64_t h_max_sz = 0;
+        void *p_handle = NULL;
+        void *p_max = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "section_handle");
+        if (status != 0) return status;
+        status = read_guest_ptr(arg4, &h_max_sz, &p_max, "maximum_size");
+        if (status != 0) return status;
         result = handler_NtCreateSection(&h_handle, arg2, arg3, &h_max_sz,
                                          read_guest_stack(ctx, 1),
                                          read_guest_stack(ctx, 2),
                                          read_guest_stack(ctx, 3));
-        if (p_handle != NULL) *p_handle = h_handle;
-        if (p_max != NULL)   *p_max = h_max_sz;
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
+        if (p_max)    *(uint64_t *)p_max = h_max_sz;
         break;
     }
 
     case NT_SYSCALL_CREATE_THREAD_EX: /* NtCreateThreadEx */
     {
-        uint64_t h_handle = arg1;
-        uint64_t *p_handle = NULL;
-        if (arg1 != 0) {
-            if (!is_valid_guest_ptr(arg1, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at thread_handle\n",
-                        (unsigned long)arg1);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_handle = (uint64_t *)(uintptr_t)arg1;
-            h_handle = *p_handle;
-        }
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "thread_handle");
+        if (status != 0) return status;
         result = handler_NtCreateThreadEx(&h_handle, arg2, arg3, arg4,
                                           read_guest_stack(ctx, 1),
                                           read_guest_stack(ctx, 2),
@@ -410,37 +331,24 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
                                           read_guest_stack(ctx, 5),
                                           read_guest_stack(ctx, 6),
                                           read_guest_stack(ctx, 7));
-        if (p_handle != NULL) *p_handle = h_handle;
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
         break;
     }
 
     case NT_SYSCALL_OPEN_FILE: /* NtOpenFile */
     {
-        uint64_t h_handle = arg1;
-        uint64_t *p_handle = NULL;
-        if (arg1 != 0) {
-            if (!is_valid_guest_ptr(arg1, 8)) {
-                fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at file_handle\n",
-                        (unsigned long)arg1);
-                return STATUS_ACCESS_VIOLATION;
-            }
-            p_handle = (uint64_t *)(uintptr_t)arg1;
-            h_handle = *p_handle;
-        }
-        if (arg3 != 0 && !is_valid_guest_ptr(arg3, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at object_attributes\n",
-                    (unsigned long)arg3);
-            return STATUS_ACCESS_VIOLATION;
-        }
-        if (arg4 != 0 && !is_valid_guest_ptr(arg4, 8)) {
-            fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at io_status_block\n",
-                    (unsigned long)arg4);
-            return STATUS_ACCESS_VIOLATION;
-        }
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "file_handle");
+        if (status != 0) return status;
+        status = read_guest_ptr(arg3, NULL, NULL, "object_attributes");
+        if (status != 0) return status;
+        status = read_guest_ptr(arg4, NULL, NULL, "io_status_block");
+        if (status != 0) return status;
         result = handler_NtOpenFile(&h_handle, arg2, arg3, arg4,
                                     read_guest_stack(ctx, 1),
                                     read_guest_stack(ctx, 2));
-        if (p_handle != NULL) *p_handle = h_handle;
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
         break;
     }
 
@@ -448,7 +356,6 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         fprintf(stderr, "my_wine: unhandled syscall 0x%lX\n",
                 (unsigned long)syscall_number);
         raise(SIGSEGV);
-        return -1;
     }
 
     ctx->uc_mcontext.gregs[REG_RAX] = (greg_t)result;
