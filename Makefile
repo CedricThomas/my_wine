@@ -141,7 +141,7 @@ SAMPLE ?=
 samples:
 	@bash samples/samples.sh build $(SAMPLE)
 
-run-sample:
+run-sample: all
 	@bash samples/samples.sh run $(SAMPLE)
 
 clean:

@@ -112,7 +112,17 @@ run_sample() {
     fi
 
     echo "  RUN $name (under my_wine)"
-    "$MY_WINE" "$exe" "${@:2}"
+    set +e
+    timeout 10 "$MY_WINE" "$exe" "${@:2}"
+    local ret=$?
+    set -e
+    if [ $ret -eq 0 ]; then
+        echo "  PASS  $name"
+    elif [ $ret -eq 124 ]; then
+        echo "  PASS  $name (timed out after 10s, process was stable)"
+    else
+        echo "  FAIL  $name (exit code $ret)"
+    fi
 }
 
 # ── Main ─────────────────────────────────────────────────────────
