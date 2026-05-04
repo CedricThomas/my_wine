@@ -17,7 +17,7 @@
 
 /* ── Global state shared across loader modules ─────────────── */
 
-/* Set by image_mapper.c, read by teb_peb.c and import_resolver.c */
+/* Set by image_mapper.c, read by teb_peb.c and import_resolve.c */
 extern void *g_image_base;
 
 /* Set by teb_peb.c (setup_stack), read by main.c */
@@ -52,17 +52,8 @@ extern size_t import_table_count;
 void set_import(const char *name, void *address);
 void init_import_table(void);
 int import_cmp_by_name(const void *key, const void *elem);
-
-/* ── import_resolve.c ─────────────────────────────────────── */
-
-int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
-void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
-                       IMAGE_SECTION_HEADER *sections,
-                       void *target_addr);
-
 int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
                             struct import_flat flat[]);
-
 bool strategy_resolved_overlap(uint64_t current_val,
                                struct import_flat *flat, int num_flat);
 bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
@@ -75,6 +66,13 @@ bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
 bool strategy_positional(uint64_t *target_ptr, uint64_t target,
                          int thunk_idx,
                          struct import_flat *flat, int num_flat);
+
+/* ── import_resolve.c ─────────────────────────────────────── */
+
+int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
+void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
+                       IMAGE_SECTION_HEADER *sections,
+                       void *target_addr);
 
 /* ── import_init.c ─────────────────────────────────────────── */
 

@@ -7,7 +7,7 @@
  *
  * Gracefully skips with a message when hello.exe is not available.
  *
- * Build: linked against pe_parser.o, image_mapper.o, import_resolver.o
+ * Build: linked against pe_parser.o, image_mapper.o, import_table.o, import_resolve.o, import_init.o
  *   and all CRT/ntdll stub .o files for handler resolution.
  */
 

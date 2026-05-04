@@ -2,7 +2,7 @@
  * import_registry.h — Declarative import table entry macros
  *
  * Provides DECLARE_IMPORT macros that generate initialiser elements
- * for the import_table[] array in import_resolver.c.  The declarative
+ * for the import_table[] array in import_table.c.  The declarative
  * style makes the table self-documenting and easier to extend.
  *
  * Usage:
