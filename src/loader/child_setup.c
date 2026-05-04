@@ -274,17 +274,20 @@ static void wd_handler(int sig, siginfo_t *info, void *uc_ptr)
 }
 
 /* ── Step 5: Watchdog + jump to guest (noreturn) ─────────────── */
-static void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
-                                    char **guest_argv, char **guest_envp)
-    __attribute__((noreturn));
-static void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
+static __attribute__((noreturn)) void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
                                     char **guest_argv, char **guest_envp)
 {
     /* Watchdog: 60s timeout to allow full CRT startup */
-    { struct sigaction w; memset(&w,0,sizeof(w));
-      w.sa_sigaction=wd_handler; w.sa_flags=SA_SIGINFO; sigemptyset(&w.sa_mask);
-      sigaction(SIGALRM,&w,NULL); struct itimerval t={.it_interval={0,0},.it_value={WATCHDOG_TIMEOUT,0}};
-      setitimer(ITIMER_REAL,&t,NULL); }
+    {
+        struct sigaction w;
+        memset(&w, 0, sizeof(w));
+        w.sa_sigaction = wd_handler;
+        w.sa_flags = SA_SIGINFO;
+        sigemptyset(&w.sa_mask);
+        sigaction(SIGALRM, &w, NULL);
+        struct itimerval t = {.it_interval = {0, 0}, .it_value = {WATCHDOG_TIMEOUT, 0}};
+        setitimer(ITIMER_REAL, &t, NULL);
+    }
 
     void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
 
