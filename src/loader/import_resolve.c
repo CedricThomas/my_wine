@@ -9,23 +9,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include <search.h>
 #include <strings.h>
-#include <stdbool.h>
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
 #include "loader_priv.h"
-
-/* Flat import entry used in pass 2 thunk patching */
-struct import_flat {
-    uint64_t   ilt_value;      /* OriginalFirstThunk[i].AddressOfData */
-    uint64_t   resolved_addr;  /* FirstThunk[i].AddressOfData (from pass 1) */
-    const char *dll_name;
-    const char *func_name;
-};
 
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
@@ -140,120 +130,6 @@ static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
     return scan_rip_relative_jumps(base, nt, sections,
                                     nt->FileHeader.NumberOfSections,
                                     targets, MAX_THUNK_TARGETS);
-}
-
-/**
- * Build a flat array of (ILT value, resolved address, func name) from
- * all import descriptors, in DLL order.
- * Returns the number of flat entries created.
- */
-static int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
-                                   struct import_flat flat[MAX_FLAT_IMPORTS])
-{
-    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
-    uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    IMAGE_IMPORT_DESCRIPTOR *desc_start = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
-
-    int num_flat = 0;
-    IMAGE_IMPORT_DESCRIPTOR *desc = desc_start;
-    while (desc->Name != 0 && num_flat < MAX_FLAT_IMPORTS) {
-        const char *dll_name = (const char *)((char *)base + desc->Name);
-        IMAGE_THUNK_DATA64 *orig_thunks = (IMAGE_THUNK_DATA64 *)((char *)base + desc->u1.OriginalFirstThunk);
-        IMAGE_THUNK_DATA64 *iath = (IMAGE_THUNK_DATA64 *)((char *)base + desc->FirstThunk);
-
-        for (int i = 0; orig_thunks[i].AddressOfData != 0 && num_flat < MAX_FLAT_IMPORTS; i++) {
-            flat[num_flat].ilt_value = orig_thunks[i].AddressOfData;
-            flat[num_flat].resolved_addr = iath[i].AddressOfData;
-            flat[num_flat].dll_name = dll_name;
-            if (orig_thunks[i].AddressOfData & 0x8000000000000000ULL) {
-                flat[num_flat].func_name = "<ordinal>";
-            } else {
-                IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData);
-                flat[num_flat].func_name = (const char *)imp_name->Name;
-            }
-            num_flat++;
-        }
-        desc++;
-    }
-
-    return num_flat;
-}
-
-/**
- * Strategy 1: target overlaps with a resolved import address.
- * Check if current value matches any resolved_addr in the flat array.
- * Does NOT write -- the value is already correct (from pass 1 IAT).
- */
-static bool strategy_resolved_overlap(uint64_t current_val,
-                                     struct import_flat *flat, int num_flat)
-{
-    for (int f = 0; f < num_flat; f++) {
-        if (flat[f].resolved_addr == current_val) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Strategy 2: ILT entry value equals a resolved address.
- * If current_val matches an ilt_value whose resolved_addr is set,
- * write the resolved_addr to the target location.
- */
-static bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
-                                    uint64_t target,
-                                    struct import_flat *flat, int num_flat)
-{
-    if (current_val == 0)
-        return false;
-    for (int f = 0; f < num_flat; f++) {
-        if (flat[f].ilt_value == current_val && flat[f].resolved_addr != 0) {
-            *target_ptr = flat[f].resolved_addr;
-            printf("    Thunk patch (ilt match): %s!%s at 0x%lx <- 0x%lx\n",
-                   flat[f].dll_name, flat[f].func_name,
-                   (unsigned long)target, (unsigned long)flat[f].resolved_addr);
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Strategy 3: ILT offset+slot matches thunk position.
- * If target falls within the import directory, compute slot index
- * and use the corresponding flat entry.
- */
-static bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
-                                     uint64_t current_val,
-                                     uint64_t import_dir_va, uint64_t import_dir_end,
-                                     struct import_flat *flat, int num_flat)
-{
-    if (current_val == 0 || target < import_dir_va || target >= import_dir_end)
-        return false;
-    int slot_idx = (int)((target - import_dir_va) / 8);
-    if (slot_idx < 0 || slot_idx >= num_flat || flat[slot_idx].resolved_addr == 0)
-        return false;
-    *target_ptr = flat[slot_idx].resolved_addr;
-    printf("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx\n",
-           flat[slot_idx].dll_name, flat[slot_idx].func_name,
-           (unsigned long)target, (unsigned long)flat[slot_idx].resolved_addr);
-    return true;
-}
-
-/**
- * Strategy 4: fallback by position in the flat array.
- */
-static bool strategy_positional(uint64_t *target_ptr, uint64_t target,
-                               int thunk_idx,
-                               struct import_flat *flat, int num_flat)
-{
-    if (thunk_idx >= num_flat || flat[thunk_idx].resolved_addr == 0)
-        return false;
-    *target_ptr = flat[thunk_idx].resolved_addr;
-    printf("    Thunk patch (pos match): %s!%s at 0x%lx <- 0x%lx\n",
-           flat[thunk_idx].dll_name, flat[thunk_idx].func_name,
-           (unsigned long)target, (unsigned long)flat[thunk_idx].resolved_addr);
-    return true;
 }
 
 /**

@@ -10,7 +10,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <sys/ucontext.h>
+#include "include/pe.h"
 #include "include/pe_parser.h"
 
 /* ── Global state shared across loader modules ─────────────── */
@@ -32,6 +34,14 @@ typedef struct {
     void *address;
 } import_entry_t;
 
+/* Flat import entry used in pass 2 thunk patching */
+struct import_flat {
+    uint64_t   ilt_value;      /* OriginalFirstThunk[i].AddressOfData */
+    uint64_t   resolved_addr;  /* FirstThunk[i].AddressOfData (from pass 1) */
+    const char *dll_name;
+    const char *func_name;
+};
+
 /* Name→address table for NT, kernel32 and msvcrt functions
  * Defined in import_table.c */
 extern import_entry_t import_table[];
@@ -49,6 +59,22 @@ int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
 void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
                        IMAGE_SECTION_HEADER *sections,
                        void *target_addr);
+
+int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
+                            struct import_flat flat[]);
+
+bool strategy_resolved_overlap(uint64_t current_val,
+                               struct import_flat *flat, int num_flat);
+bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
+                              uint64_t target,
+                              struct import_flat *flat, int num_flat);
+bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
+                               uint64_t current_val,
+                               uint64_t import_dir_va, uint64_t import_dir_end,
+                               struct import_flat *flat, int num_flat);
+bool strategy_positional(uint64_t *target_ptr, uint64_t target,
+                         int thunk_idx,
+                         struct import_flat *flat, int num_flat);
 
 /* ── import_init.c ─────────────────────────────────────────── */
 
