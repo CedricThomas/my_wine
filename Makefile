@@ -53,23 +53,9 @@ vpath %.S src src/syscall
 # Pattern rule uses $(CFLAGS) as default. Override for files needing
 # $(SPECIAL_CFLAGS) (entry points, loader core, stubs, syscall infra).
 
-# Root src/*.c
-CFLAGS_main.o = $(SPECIAL_CFLAGS)
-CFLAGS_common.o = $(SPECIAL_CFLAGS)
-
-# Loader src/loader/*.c
-CFLAGS_entry.o = $(SPECIAL_CFLAGS)
-CFLAGS_teb_peb.o = $(SPECIAL_CFLAGS)
-CFLAGS_guest_setup.o = $(SPECIAL_CFLAGS)
-CFLAGS_crash_handlers.o = $(SPECIAL_CFLAGS)
-CFLAGS_gs_base.o = $(SPECIAL_CFLAGS)
-
-# Syscall src/syscall/*.c
-CFLAGS_thunk_gen.o = $(SPECIAL_CFLAGS)
-CFLAGS_dispatcher.o = $(SPECIAL_CFLAGS)
-CFLAGS_dispatcher_entry_asm.o = $(SPECIAL_CFLAGS)
-
-# Stubs (auto-generated from discovered STUBS_OBJS)
+SPECIAL_OBJS = main.o common.o entry.o teb_peb.o guest_setup.o crash_handlers.o gs_base.o \
+	thunk_gen.o dispatcher.o dispatcher_entry_asm.o
+$(foreach obj,$(SPECIAL_OBJS),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
 # ── Targets ─────────────────────────────────────────────────────
@@ -108,29 +94,29 @@ $(SHELL.EXE):
 
 TEST ?=
 
-test: my_wine $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+tests: my_wine $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch
 
-run-test: test
+run-test: tests
 	@echo "==== Running tests ===="
 	@bash scripts/run_tests.sh $(TEST)
 
-# Each test: prerequisite .c + named object groups; $^ expands to all prereqs
-$(BUILDDIR)/test_parse: tests/test_parse.c $(PE_OBJS)
-	@echo "  LD $@"
-	@$(CC) $(CFLAGS) -I include -o $@ $^
+# Per-test object groups
+TEST_parse_OBJS = $(PE_OBJS)
+TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS)
+TEST_teb_peb_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o
+TEST_syscall_dispatch_OBJS = $(TEST_SYSCALL_OBJS)
 
-$(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c $(TEST_IMPORT_OBJS)
-	@echo "  LD $@"
-	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
+define TEST_RULE
+$(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
+	@echo "  LD $$@"
+	@$(CC) $(CFLAGS) -I include -o $$@ $$^ $(LDFLAGS)
+endef
 
-$(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o
-	@echo "  LD $@"
-	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
-
-$(BUILDDIR)/test_syscall_dispatch: tests/test_syscall_dispatch.c $(TEST_SYSCALL_OBJS)
-	@echo "  LD $@"
-	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
+$(eval $(call TEST_RULE,parse,$(PE_OBJS)))
+$(eval $(call TEST_RULE,import_resolution,$(TEST_IMPORT_OBJS)))
+$(eval $(call TEST_RULE,teb_peb,$(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o))
+$(eval $(call TEST_RULE,syscall_dispatch,$(TEST_SYSCALL_OBJS)))
 
 # ── Auto-generated header dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
@@ -164,8 +150,8 @@ fclean: clean
 re: fclean
 	@$(MAKE) all
 
-.PHONY: all clean fclean re test run-test samples run-sample gen-crt-offsets $(BUILDDIR)
-
 gen-crt-offsets:
 	@echo "Generating CRT offsets from current mingw-w64 toolchain..."
 	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed, using hardcoded fallback"; exit 0; }
+
+.PHONY: all clean fclean re tests run-test samples run-sample gen-crt-offsets $(BUILDDIR)
