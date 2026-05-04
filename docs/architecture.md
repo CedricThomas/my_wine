@@ -308,3 +308,12 @@ adjusting `rsp`. The Windows x64 ABI has no red zone. Compiling with
 `-mno-red-zone` prevents the compiler from using this space, avoiding
 conflicts when stub code runs in the guest context where the stack
 layout is controlled by the PE.
+
+---
+
+## Related Documents
+
+- [Onboarding](onboarding.md) — Getting started guide and reading order
+- [PE Format Primer](pe_format.md) — PE structure basics
+- [Rationale](rationale.md) — Design decisions, requirements, limitations
+- [CRT refptr Patching](refptr.md) — .refptr deep-dive

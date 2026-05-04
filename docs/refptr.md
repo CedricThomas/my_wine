@@ -223,3 +223,12 @@ parent) because:
    child (inherited from the image mapping), so `mprotect` works in
    either. But doing it in the child avoids unnecessary patching in
    the parent.
+
+---
+
+## Related Documents
+
+- [Onboarding](onboarding.md) — Getting started guide and reading order
+- [PE Format Primer](pe_format.md) — PE structure basics
+- [Rationale](rationale.md) — Design decisions, requirements, limitations
+- [Architecture](architecture.md) — How it works
