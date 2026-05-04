@@ -67,6 +67,10 @@ bool strategy_positional(uint64_t *target_ptr, uint64_t target,
                          int thunk_idx,
                          struct import_flat *flat, int num_flat);
 
+/* ── ordinal_table.c ─────────────────────────────────────── */
+
+const char *ordinal_lookup(const char *dll_name, uint16_t ordinal);
+
 /* ── import_resolve.c ─────────────────────────────────────── */
 
 int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);

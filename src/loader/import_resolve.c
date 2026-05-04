@@ -86,9 +86,16 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
 
             if (orig_thunks[i].AddressOfData & 0x8000000000000000ULL) {
                 /* Ordinal import (high bit set) */
-                uint64_t ordinal = orig_thunks[i].AddressOfData & 0xFFFF;
-                fprintf(stderr, "  WARNING: ordinal import %lu not supported\n", ordinal);
-                continue;
+                uint16_t ordinal = (uint16_t)(orig_thunks[i].AddressOfData & 0xFFFF);
+                const char *func_name = ordinal_lookup(dll_name, ordinal);
+                if (func_name != NULL) {
+                    addr = resolve_import(dll_name, func_name);
+                    printf("    Resolved ordinal %s!%d -> %s -> %p\n",
+                           dll_name, ordinal, func_name, addr);
+                } else {
+                    fprintf(stderr, "  WARNING: ordinal import %s!%d not in lookup table\n",
+                            dll_name, ordinal);
+                }
             } else {
                 /* Name import */
                 IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData);

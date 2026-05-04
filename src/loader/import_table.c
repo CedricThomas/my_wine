@@ -149,7 +149,9 @@ int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
             flat[num_flat].resolved_addr = iath[i].AddressOfData;
             flat[num_flat].dll_name = dll_name;
             if (orig_thunks[i].AddressOfData & 0x8000000000000000ULL) {
-                flat[num_flat].func_name = "<ordinal>";
+                uint16_t ordinal = (uint16_t)(orig_thunks[i].AddressOfData & 0xFFFF);
+                const char *fname = ordinal_lookup(dll_name, ordinal);
+                flat[num_flat].func_name = fname ? fname : "<ordinal>";
             } else {
                 IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData);
                 flat[num_flat].func_name = (const char *)imp_name->Name;
