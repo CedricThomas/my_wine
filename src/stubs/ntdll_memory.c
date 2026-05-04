@@ -9,13 +9,10 @@
 #include <stddef.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
 #include "include/abi_wrappers.h"
-
-/* Linux x86_64 syscall numbers */
-#define SYS_munmap  11
-#define SYS_fstat    5
 
 /* ── Section / View storage ────────────────────────────────────── */
 
@@ -82,7 +79,7 @@ uint64_t handler_NtFreeVirtualMemory(uint64_t process, uint64_t *base_address,
         return STATUS_INVALID_PARAMETER;
 
     long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_munmap), "D"((void *)(uintptr_t)*base_address), "S"((size_t)*region_size) : "rcx", "r11", "cc");
+    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_munmap), "D"((void *)(uintptr_t)*base_address), "S"((size_t)*region_size) : "rcx", "r11", "cc");
     if (res != 0)
         return STATUS_UNSUCCESSFUL;
 
@@ -181,7 +178,7 @@ uint64_t handler_NtUnmapViewOfSection(uint64_t process, uint64_t base_address)
     size_t view_sz = views[idx].size;
 
     long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_munmap), "D"(views[idx].base), "S"(view_sz) : "rcx", "r11", "cc");
+    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_munmap), "D"(views[idx].base), "S"(view_sz) : "rcx", "r11", "cc");
     if (res != 0)
         return STATUS_UNSUCCESSFUL;
 
@@ -216,7 +213,7 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
         /* Get actual file size via fstat syscall */
         struct stat st;
         long res;
-        __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_fstat), "D"(fd), "S"(&st) : "rcx", "r11", "memory", "cc");
+        __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_fstat), "D"(fd), "S"(&st) : "rcx", "r11", "memory", "cc");
         if (res < 0)
             return STATUS_UNSUCCESSFUL;
         size = (size_t)st.st_size;
@@ -237,7 +234,7 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
             return STATUS_UNSUCCESSFUL;
         sysv_memcpy(base, temp_map, size);
         long res;
-        __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_munmap), "D"(temp_map), "S"(size) : "rcx", "r11", "cc");
+        __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_munmap), "D"(temp_map), "S"(size) : "rcx", "r11", "cc");
     }
 
     int idx = section_count++;

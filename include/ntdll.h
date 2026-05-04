@@ -110,15 +110,13 @@ typedef struct {
 } UNICODE_STRING;
 
 typedef struct {
-    uint32_t  Length;
-    uint32_t  _pad;
-    uint64_t  RootDirectory;
-    uint64_t  ObjectName;
-    uint32_t  Attributes;
-    uint32_t  _pad2;
-    uint64_t  SecurityDescriptor;
-    uint64_t  SecurityQos;
-} OBJECT_ATTRIBUTES;
+    uint32_t  Length;             // offset 0
+    uint64_t  RootDirectory;      // offset 4 (packed, no alignment)
+    uint64_t  ObjectName;         // offset 12
+    uint32_t  Attributes;         // offset 20
+    uint64_t  SecurityDescriptor; // offset 24
+    uint64_t  SecurityQos;        // offset 32
+} OBJECT_ATTRIBUTES;              // total 40 bytes
 #pragma pack(pop)
 
 #endif // MY_WINE_NTDLL_H

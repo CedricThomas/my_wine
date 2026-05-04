@@ -6,23 +6,20 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/mman.h>
+#include <asm/unistd_64.h>
 #include "include/kernel32.h"
+#include "include/nt_constants.h"
 #include "include/ntdll.h"
 #include "include/syscall/thunk_gen.h"
 #include "include/wine_abi.h"
 #include "include/abi_wrappers.h"
 #include "ntdll_priv.h"
 
-/* Linux x86_64 syscall numbers */
-#define SYS_write      1
-#define SYS_exit_group 231
-#define SYS_nanosleep  35
-
 /* Helper: write a static message to stderr via direct syscall */
 static inline void write_to_stderr(const char *msg)
 {
     long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_write), "D"(2), "S"(msg), "d"((size_t)__builtin_strlen(msg)) : "rcx", "r11", "memory", "cc");
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(msg), "d"((size_t)__builtin_strlen(msg)) : "rcx", "r11", "memory", "cc");
     (void)ret;
 }
 
@@ -62,9 +59,9 @@ int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
               uint32_t *lpNumberOfBytesWritten, void *lpOverlapped)
 {
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
-    void *thunk = lookup_thunk(0x3D);
+    void *thunk = lookup_thunk(NT_SYSCALL_WRITE_FILE);
     if (thunk == NULL) {
-        write_to_stderr("my_wine: WriteFile: thunk 0x3D not found\n");
+        write_to_stderr("my_wine: WriteFile: thunk not found\n");
         return 0;
     }
 
@@ -100,9 +97,9 @@ int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
              uint32_t *lpNumberOfBytesRead, void *lpOverlapped)
 {
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
-    void *thunk = lookup_thunk(0x3C);
+    void *thunk = lookup_thunk(NT_SYSCALL_READ_FILE);
     if (thunk == NULL) {
-        write_to_stderr("my_wine: ReadFile: thunk 0x3C not found\n");
+        write_to_stderr("my_wine: ReadFile: thunk not found\n");
         return 0;
     }
 
@@ -137,11 +134,11 @@ WINE_STUB
 void ExitProcess(uint32_t uExitCode)
 {
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
-    void *thunk = lookup_thunk(0x2A);
+    void *thunk = lookup_thunk(NT_SYSCALL_TERMINATE_PROCESS);
     if (thunk == NULL) {
-        write_to_stderr("my_wine: ExitProcess: thunk 0x2A not found\n");
+        write_to_stderr("my_wine: ExitProcess: thunk not found\n");
         long ret;
-        __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_exit_group), "D"(1) : "rcx", "r11", "cc");
+        __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit_group), "D"(1) : "rcx", "r11", "cc");
     }
 
     /*
@@ -253,14 +250,14 @@ void Sleep(uint32_t dwMilliseconds)
     char buf[64];
     long ret;
     int len = sprintf(buf, "TRACE: Sleep(%u)\n", dwMilliseconds);
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_write), "D"(2), "S"(buf), "d"((size_t)len) : "rcx", "r11", "memory", "cc");
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(buf), "d"((size_t)len) : "rcx", "r11", "memory", "cc");
     (void)ret;
 
     struct timespec ts;
     ts.tv_sec  = dwMilliseconds / 1000;
     ts.tv_nsec = (dwMilliseconds % 1000) * 1000000L;
     /* Call nanosleep syscall directly (avoids ABI mismatch with libc wrapper) */
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_nanosleep), "D"(&ts), "S"((const void *)0) : "rcx", "r11", "memory", "cc");
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_nanosleep), "D"(&ts), "S"((const void *)0) : "rcx", "r11", "memory", "cc");
     (void)ret;
 }
 

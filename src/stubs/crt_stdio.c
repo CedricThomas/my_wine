@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <asm/unistd_64.h>
 #include "msvcrt_priv.h"
 
 /* ── Internal implementations ──────────────────────────────── */
@@ -36,7 +37,7 @@ int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap)
     long res;
     __asm__ volatile("syscall"
                      : "=a"(res)
-                     : "a"(1), "D"(fd), "S"(format), "d"(len)
+                     : "a"(__NR_write), "D"(fd), "S"(format), "d"(len)
                      : "rcx", "r11", "memory", "cc");
     (void)res;
     return (int)len;
@@ -67,7 +68,7 @@ size_t wine_fwrite(const void *ptr, size_t size, size_t nmemb, wine_FILE *stream
     long res;
     __asm__ volatile("syscall"
                      : "=a"(res)
-                     : "a"(1), "D"(fd), "S"(ptr), "d"(total)
+                     : "a"(__NR_write), "D"(fd), "S"(ptr), "d"(total)
                      : "rcx", "r11", "memory", "cc");
     if (res < 0) return 0;
     return (size_t)res / size;

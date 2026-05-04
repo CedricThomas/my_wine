@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <signal.h>
+#include <asm/unistd_64.h>
 #include "msvcrt_priv.h"
 #include "include/abi_wrappers.h"
 
@@ -34,7 +35,7 @@ void _amsg_exit(int msg)
     buf[len++] = ')';
     buf[len++] = '\n';
     buf[len] = 0;
-    long a = 1;
+    long a = __NR_write;
     __asm__ volatile("syscall"
         : "+a"(a) : "D"(2), "S"(buf), "d"(len) : "rcx","r11","memory","cc");
     wine__exit(1);
@@ -52,7 +53,7 @@ WINE_STUB_STATIC
 void wine__exit(int code)
 {
     /* Call Linux sys_exit directly */
-    syscall(60, code);
+    syscall(__NR_exit, code);
     __builtin_unreachable();
 }
 
@@ -67,7 +68,7 @@ static void print_hex_val(int fd, const char *label, uintptr_t val)
     buf[p++] = '0'; buf[p++] = 'x';
     for (int i = 60; i >= 0; i -= 4) buf[p++] = hex[(val >> i) & 0xf];
     buf[p++] = '\n';
-    long a = 1;
+    long a = __NR_write;
     __asm__ volatile("syscall" : "+a"(a) : "D"(fd), "S"(buf), "d"(p) : "rcx","r11","memory","cc");
 }
 
