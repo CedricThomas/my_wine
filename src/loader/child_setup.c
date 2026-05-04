@@ -86,20 +86,52 @@ static void acrt_iob_patch_cb(void *arg)
     for (int k = 11; k < 15; k++) code[k] = X86_NOP;
 }
 
+/* Compute .text section end for bounds checking */
+static uint64_t find_text_end(IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
+{
+    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        if (memcmp(sections[i].Name, ".text", 5) == 0) {
+            uint64_t end = sections[i].VirtualAddress + sections[i].Misc.VirtualSize;
+            if (end < sections[i].VirtualAddress ||
+                sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
+                end = sections[i].VirtualAddress + sections[i].SizeOfRawData;
+            return end;
+        }
+    }
+    return 0;
+}
+
+/* Validate opcode, check bounds, apply the iob patch */
+static int apply_iob_patch(void *thunk, uint8_t *code, uint64_t thunk_off,
+                           uint64_t text_end)
+{
+    /* Validate: first two bytes should be ff 25 (jmp *disp32(%rip)) */
+    if (code[0] != X86_JMP_RIP || code[1] != X86_MOD_RIP) {
+        fprintf(stderr, "WARNING: __acrt_iob_func at 0x%lx has unexpected opcode 0x%02x 0x%02x, skipping patch\n",
+                (unsigned long)(uintptr_t)thunk, code[0], code[1]);
+        return -1;
+    }
+
+    /* Bounds check: ensure 15-byte patch won't exceed .text section */
+    if (text_end == 0 || thunk_off + 15 > text_end) {
+        fprintf(stderr, "WARNING: __acrt_iob_func thunk at 0x%lx is too close to .text end (need 15 bytes, have %ld), skipping patch\n",
+                (unsigned long)thunk_off, (long)(text_end > thunk_off ? text_end - thunk_off : 0));
+        return -1;
+    }
+
+    if (with_mprotect_rw(thunk, 15, acrt_iob_patch_cb, thunk, PROT_READ | PROT_EXEC) != 0) {
+        perror("mprotect __acrt_iob_func");
+        return -1;
+    }
+    fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",
+            (unsigned long)(uintptr_t)thunk);
+    return 0;
+}
+
 static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
                            IMAGE_SECTION_HEADER *sections)
 {
-    /* Compute .text section end for bounds checking */
-    uint64_t text_end = 0;
-    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
-        if (memcmp(sections[i].Name, ".text", 5) == 0) {
-            text_end = sections[i].VirtualAddress + sections[i].Misc.VirtualSize;
-            if (text_end < sections[i].VirtualAddress ||
-                sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
-                text_end = sections[i].VirtualAddress + sections[i].SizeOfRawData;
-            break;
-        }
-    }
+    uint64_t text_end = find_text_end(nt, sections);
 
     /*
      * Find the .text jmp-thunk whose IAT target resolves to __iob_func.
@@ -112,28 +144,8 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
         fprintf(stderr, "WARNING: __acrt_iob_func thunk not found, skipping patch\n");
     } else {
         uint8_t *code = (uint8_t *)thunk;
-        uintptr_t thunk_abs = (uintptr_t)thunk;
-
-        /* Validate: first two bytes should be ff 25 (jmp *disp32(%rip)) */
-        bool is_jmp_thunk = (code[0] == X86_JMP_RIP && code[1] == X86_MOD_RIP);
-        if (!is_jmp_thunk) {
-            fprintf(stderr, "WARNING: __acrt_iob_func at 0x%lx has unexpected opcode 0x%02x 0x%02x, skipping patch\n",
-                    thunk_abs, code[0], code[1]);
-        } else {
-            /* Bounds check: ensure 15-byte patch won't exceed .text section */
-            uint64_t thunk_off = (uint64_t)thunk - (uint64_t)base;
-            if (text_end == 0 || thunk_off + 15 > text_end) {
-                fprintf(stderr, "WARNING: __acrt_iob_func thunk at 0x%lx is too close to .text end (need 15 bytes, have %ld), skipping patch\n",
-                        (unsigned long)thunk_off, (long)(text_end > thunk_off ? text_end - thunk_off : 0));
-            } else {
-                if (with_mprotect_rw(thunk, 15, acrt_iob_patch_cb, thunk, PROT_READ | PROT_EXEC) != 0) {
-                    perror("mprotect __acrt_iob_func");
-                } else {
-                    fprintf(stderr, "patched __acrt_iob_func at 0x%lx -> returns __wine_iob_data\n",
-                            thunk_abs);
-                }
-            }
-        }
+        uint64_t thunk_off = (uint64_t)thunk - (uint64_t)base;
+        apply_iob_patch(thunk, code, thunk_off, text_end);
     }
 }
 
@@ -225,25 +237,41 @@ static void apply_final_patches(void *base, IMAGE_NT_HEADERS64 *nt,
 }
 
 /* ── Watchdog handler (used in step 5) ──────────────────────── */
-static void wd_handler(int sig, siginfo_t *info, void *uc_ptr) { (void)sig; (void)info;
-   ucontext_t *uc = (ucontext_t*)uc_ptr;
-   greg_t *r = uc->uc_mcontext.gregs;
-   char b[150]; int off = 0;
-   const char hdr[] = "WD:RIP=0x";
-   for (int i = 0; hdr[i]; i++) b[off++] = hdr[i];
-   uint64_t val = (uint64_t)r[REG_RIP];
-   format_hex(b + off, sizeof(b) - off, val); off += 16;
-   const char hdr2[] = " RSP=0x";
-   for (int i = 0; hdr2[i]; i++) b[off++] = hdr2[i];
-   val = (uint64_t)r[REG_RSP];
-   format_hex(b + off, sizeof(b) - off, val); off += 16;
-   const char hdr3[] = " RAX=0x";
-   for (int i = 0; hdr3[i]; i++) b[off++] = hdr3[i];
-   val = (uint64_t)r[REG_RAX];
-   format_hex(b + off, sizeof(b) - off, val); off += 16;
-   b[off++] = '\n'; b[off] = '\0';
-   INLINE_SYSCALL_WRITE_ERR(b, (size_t)off);
-   INLINE_SYSCALL_EXIT(0xFF); }
+static void wd_handler(int sig, siginfo_t *info, void *uc_ptr)
+{
+    (void)sig;
+    (void)info;
+    ucontext_t *uc = (ucontext_t *)uc_ptr;
+    greg_t *r = uc->uc_mcontext.gregs;
+    char b[150];
+    int off = 0;
+
+    const char hdr[] = "WD:RIP=0x";
+    for (int i = 0; hdr[i]; i++)
+        b[off++] = hdr[i];
+    uint64_t val = (uint64_t)r[REG_RIP];
+    format_hex(b + off, sizeof(b) - off, val);
+    off += 16;
+
+    const char hdr2[] = " RSP=0x";
+    for (int i = 0; hdr2[i]; i++)
+        b[off++] = hdr2[i];
+    val = (uint64_t)r[REG_RSP];
+    format_hex(b + off, sizeof(b) - off, val);
+    off += 16;
+
+    const char hdr3[] = " RAX=0x";
+    for (int i = 0; hdr3[i]; i++)
+        b[off++] = hdr3[i];
+    val = (uint64_t)r[REG_RAX];
+    format_hex(b + off, sizeof(b) - off, val);
+    off += 16;
+
+    b[off++] = '\n';
+    b[off] = '\0';
+    INLINE_SYSCALL_WRITE_ERR(b, (size_t)off);
+    INLINE_SYSCALL_EXIT(0xFF);
+}
 
 /* ── Step 5: Watchdog + jump to guest (noreturn) ─────────────── */
 static void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
