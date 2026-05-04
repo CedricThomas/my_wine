@@ -104,6 +104,11 @@ $(BUILDDIR)/entry.o: src/loader/entry.c | $(BUILDDIR)
 	@echo "  CC $<"
 	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
 
+# src/loader/child_setup.c → CFLAGS + -mno-red-zone
+$(BUILDDIR)/child_setup.o: src/loader/child_setup.c | $(BUILDDIR)
+	@echo "  CC $<"
+	@$(CC) $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions -c $< -o $@
+
 # src/loader/gs_base.c → CFLAGS + -mno-red-zone
 $(BUILDDIR)/gs_base.o: src/loader/gs_base.c | $(BUILDDIR)
 	@echo "  CC $<"
@@ -209,7 +214,8 @@ $(BUILDDIR)/import_table.o: src/loader/loader_priv.h include/ntdll.h include/ker
 $(BUILDDIR)/import_resolve.o: include/pe.h include/pe_parser.h src/loader/loader_priv.h
 $(BUILDDIR)/import_init.o: src/loader/loader_priv.h src/stubs/msvcrt_priv.h
 $(BUILDDIR)/teb_peb.o: include/pe.h src/loader/loader_priv.h
-$(BUILDDIR)/entry.o: include/pe.h include/msvcrt.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h src/stubs/msvcrt_priv.h src/loader/loader_priv.h
+$(BUILDDIR)/entry.o: src/loader/loader_priv.h
+$(BUILDDIR)/child_setup.o: include/pe.h include/msvcrt.h include/nt_constants.h include/syscall/thunk_gen.h include/syscall/signal_handler.h include/syscall/dispatcher.h include/common.h src/loader/loader_priv.h
 # gs_base.c uses only sys/syscall.h, asm/prctl.h, stdio.h, errno.h, string.h, unistd.h
 # No header dependency needed (all system headers)
 # $(BUILDDIR)/gs_base.o: 
