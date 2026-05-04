@@ -24,9 +24,9 @@ Each section contains:
 | [6](#6-limited-syscall-handlers) | Limited Syscall Handlers | High | None |
 | [7](#7-no-heap-management) | No Heap Management | Medium | CriticalSection (§4) |
 | [8](#8-no-filesystem-io) | No Filesystem I/O | High | Syscall handlers (§6) |
-| [9](#9-hardcoded-crt-fallback-offsets) | Hardcoded CRT Fallback Offsets | Low | None |
-| [10](#10-no-ordinal-imports) | No Ordinal Imports | Low | None |
-| [11](#11-60s-watchdog) | 60s Watchdog | Low | None |
+| [9](#9-hardcoded-crt-fallback-offsets) | ✅ Hardcoded CRT Fallback Offsets — **RESOLVED** | Low | None |
+| [10](#10-no-ordinal-imports) | ✅ No Ordinal Imports — **RESOLVED** | Low | None |
+| [11](#11-60s-watchdog) | ✅ 60s Watchdog — **RESOLVED** | Low | None |
 | [12](#12-single-thread-seh) | Single-thread SEH | High | Threading (§3, §4) |
 
 ### Recommended Implementation Order
@@ -34,7 +34,8 @@ Each section contains:
 By dependency graph (leaf nodes first):
 
 ```
-Phase 1 (no prerequisites):  §11 → §10 → §9 → §1
+✅ Done:  §11, §10, §9
+Phase 1 (remaining):  §1
 Phase 2 (need §1 or nothing): §6 → §3
 Phase 3 (need §6):  §4 → §8
 Phase 4 (need §4 + §7): §5
@@ -626,6 +627,13 @@ Shell script compiles test PE, extracts actual offsets, generates
 
 None. Option A requires mingw-w64 (already needed).
 
+### ✅ RESOLVED
+
+Implemented via `scripts/gen_crt_offsets.sh` — compiles a test PE with mingw-w64,
+extracts actual `.refptr` offsets from COFF symbols, generates `include/crt_offsets_generated.h`.
+When present, `crt_offset_discovery.c` uses generated offsets instead of hardcoded values.
+Run `make gen-crt-offsets` to generate (requires Docker). Falls back to hardcoded values gracefully.
+
 ---
 
 ## 10. No Ordinal Imports
@@ -666,6 +674,12 @@ None.
 Ordinal numbers change between Windows versions. Acceptable since we only
 support mingw-w64.
 
+### ✅ RESOLVED
+
+Implemented via `src/loader/ordinal_table.c` — static lookup table (~160 entries for
+ntdll/kernel32/msvcrt ordinals). `resolve_import_pass1()` now looks up ordinal→name and
+resolves through the existing name-based path. Pass 2 thunk patching also uses the lookup.
+
 ---
 
 ## 11. 60s Watchdog
@@ -691,6 +705,11 @@ begins (covers only CRT init phase, ~5s).
 ### Prerequisites
 
 None.
+
+### ✅ RESOLVED
+
+Timeout is now configurable via `MY_WINE_WATCHDOG` environment variable or `--watchdog=N`
+CLI argument (range 1-3600 seconds, default 60). `MY_WINE_WATCHDOG` takes precedence.
 
 ---
 

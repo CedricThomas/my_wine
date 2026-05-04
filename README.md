@@ -279,11 +279,6 @@ architectural walkthrough.
   assumes the specific CRT layout and import patterns produced by
   mingw-w64 with GCC. MSVC-compiled binaries or other toolchains may
   not work.
-- **CRT refptr patching** — argc/argv/envp offsets are discovered
-  from the PE's COFF symbol table. A hardcoded fallback
-  (0x018/0x020/0x028) is used when the symbol table is absent or
-  stripped. Different CRT versions may require updated fallback
-  offsets.
 
 ---
 

@@ -336,9 +336,6 @@ The compiler flags (`-mno-red-zone`, `-fno-stack-protector`, `-fno-exceptions`) 
 | **Limited syscall handlers** | Only NT syscalls we explicitly implement work. Unsupported syscalls cause `STATUS_NOT_IMPLEMENTED` in the dispatcher. |
 | **No heap management** | No `HeapAlloc`/`HeapFree` — only limited virtual memory via `mmap`. A full Windows-compatible allocator is out of scope. |
 | **No filesystem I/O** | Only console I/O via `NtWriteFile`/`NtReadFile`. File I/O requires Windows-to-Linux path mapping and Windows file semantics. |
-| **Hardcoded CRT fallback offsets** | Offsets 0x018/0x020/0x028 when symbols are stripped. Different CRT versions may change these offsets. |
-| **No ordinal imports** | Ordinal imports (high-bit set in thunks) are not resolved. Only name-based imports via `IMAGE_IMPORT_BY_NAME` are supported. Ordinal imports are skipped with a warning. |
-| **60s watchdog** | Child process has a 60-second timeout. Prevents indefinite hangs from blocking the parent's `waitpid()`. |
 | **Single-thread SEH** | The SEH chain is global; no per-thread cleanup. Per-thread SEH requires thread-aware exception chain management. |
 
 ---
