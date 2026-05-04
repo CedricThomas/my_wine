@@ -46,6 +46,22 @@ const refptr_mapping_t refptr_mappings[] = {
     { NULL, NULL }
 };
 
+static struct refptr_patch_arg {
+    uint64_t *refptr;
+    void *target;
+    const char *name;
+    uint64_t rva;
+} refptr_patch_arg;
+
+static void refptr_patch_cb(void *arg)
+{
+    struct refptr_patch_arg *a = (struct refptr_patch_arg *)arg;
+    uint64_t old_val = (uint64_t)(uintptr_t)*a->refptr;
+    *a->refptr = (uint64_t)(uintptr_t)a->target;
+    fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p\n",
+            a->name, (unsigned long)a->rva, old_val, a->target);
+}
+
 static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
                                const char *name, uint64_t image_size)
 {
@@ -54,21 +70,15 @@ static void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     }
 
     uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
-    void *old_val = (void *)*refptr;
-
     char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)PAGE_MASK);
-    if (mprotect(page_start, PAGE_SIZE, PROT_READ | PROT_WRITE) != 0) {
-        perror("patch_crt_refptrs: mprotect");
-        return;
-    }
 
-    *refptr = (uint64_t)(uintptr_t)target;
-    fprintf(stderr, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p\n",
-            name, (unsigned long)rva, (unsigned long)old_val, target);
+    refptr_patch_arg.refptr = refptr;
+    refptr_patch_arg.target = target;
+    refptr_patch_arg.name = name;
+    refptr_patch_arg.rva = rva;
 
-    /* Best-effort restore */
-    if (mprotect(page_start, PAGE_SIZE, PROT_READ) != 0) {
-        perror("patch_crt_refptrs: mprotect restore");
+    if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &refptr_patch_arg) != 0) {
+        perror("patch_crt_refptrs: with_mprotect_rw");
     }
 }
 

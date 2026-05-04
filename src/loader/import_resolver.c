@@ -17,6 +17,7 @@
 #include <stdbool.h>
 
 #include "include/pe.h"
+#include "include/pe_parser.h"
 #include "include/ntdll.h"
 #include "include/kernel32.h"
 #include "include/msvcrt.h"
@@ -165,35 +166,9 @@ void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
                        IMAGE_SECTION_HEADER *sections,
                        void *target_addr)
 {
-    /* Locate .text section */
-    uint64_t text_start = 0, text_end = 0;
-    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
-        if (memcmp(sections[i].Name, ".text", 5) == 0) {
-            text_start = sections[i].VirtualAddress;
-            text_end   = text_start + sections[i].Misc.VirtualSize;
-            if (text_end < text_start || sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
-                text_end = text_start + sections[i].SizeOfRawData;
-            break;
-        }
-    }
-    if (text_start == 0) return NULL;
-
-    uint8_t *text_base = (uint8_t *)image_base + text_start;
-    uint64_t text_size = text_end - text_start;
-    uint64_t target_val = (uint64_t)(uintptr_t)target_addr;
-
-    for (uint64_t off = 0; off + 6 <= text_size; off++) {
-        if (text_base[off] == X86_JMP_RIP && text_base[off + 1] == X86_MOD_RIP) {
-            int32_t disp = *(int32_t *)(text_base + off + 2);
-            uint64_t instr_addr = text_start + off;
-            uint64_t target_rva = instr_addr + 6 + disp;
-            uint64_t *target_ptr = (uint64_t *)((char *)image_base + target_rva);
-            if (*target_ptr == target_val) {
-                return (void *)((char *)image_base + instr_addr);
-            }
-        }
-    }
-    return NULL;
+    return find_rip_relative_jump_to(image_base, nt, sections,
+                                      nt->FileHeader.NumberOfSections,
+                                      target_addr);
 }
 
 static void *resolve_import(const char *dll_name, const char *func_name)
@@ -285,62 +260,15 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
 static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
                                  uint64_t targets[MAX_THUNK_TARGETS])
 {
-    /* Find .text section */
     const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
     uint32_t pe_off = img_dos->e_lfanew;
     uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
                        nt->FileHeader.SizeOfOptionalHeader;
     IMAGE_SECTION_HEADER *sections = (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
 
-    uint64_t text_start = 0, text_end = 0;
-    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
-        if (memcmp(sections[i].Name, ".text", 5) == 0) {
-            text_start = sections[i].VirtualAddress;
-            text_end   = text_start + sections[i].Misc.VirtualSize;
-            if (text_end < text_start || sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
-                text_end = text_start + sections[i].SizeOfRawData;
-            break;
-        }
-    }
-
-    if (text_start == 0) {
-        fprintf(stderr, "WARNING: .text section not found, skipping thunk scan\n");
-        return 0;
-    }
-
-    uint8_t *text_base = (uint8_t *)base + text_start;
-    uint64_t text_size = text_end - text_start;
-    int num_targets = 0;
-
-    for (uint64_t off = 0; off + 6 <= text_size; off++) {
-        if (text_base[off] == X86_JMP_RIP && text_base[off + 1] == X86_MOD_RIP) {
-            int32_t disp = *(int32_t *)(text_base + off + 2);
-            uint64_t instr_addr = text_start + off;
-            uint64_t target = instr_addr + 6 + disp;
-
-            /* Deduplicate */
-            int dup = 0;
-            for (int t = 0; t < num_targets; t++) {
-                if (targets[t] == target) { dup = 1; break; }
-            }
-            if (!dup && num_targets < MAX_THUNK_TARGETS) {
-                targets[num_targets++] = target;
-            }
-        }
-    }
-
-    /* Sort targets by address (insertion sort) */
-    for (int i = 1; i < num_targets; i++) {
-        uint64_t key = targets[i];
-        int j = i - 1;
-        while (j >= 0 && targets[j] > key) {
-            targets[j + 1] = targets[j];
-            j--;
-        }
-        targets[j + 1] = key;
-    }
-
-    return num_targets;
+    return scan_rip_relative_jumps(base, nt, sections,
+                                    nt->FileHeader.NumberOfSections,
+                                    targets, MAX_THUNK_TARGETS);
 }
 
 /**

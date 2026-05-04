@@ -132,7 +132,8 @@ $(BUILDDIR)/test_import_resolution: tests/test_import_resolution.c \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
-	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o
+	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o \
+	$(BUILDDIR)/common.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
@@ -146,7 +147,8 @@ $(BUILDDIR)/test_teb_peb: tests/test_teb_peb.c \
 	$(BUILDDIR)/ntdll_memory.o $(BUILDDIR)/ntdll_process.o \
 	$(BUILDDIR)/ntdll_objects.o $(BUILDDIR)/kernel32.o \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/signal_handler.o \
-	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o
+	$(BUILDDIR)/gs_base.o $(BUILDDIR)/abi_wrappers.o \
+	$(BUILDDIR)/common.o
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) -I include -o $@ $^ $(LDFLAGS)
 
