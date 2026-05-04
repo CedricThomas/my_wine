@@ -40,8 +40,8 @@ Samples are cross-compiled to PE `.exe` via a Docker container (mingw-w64):
 
 ```bash
 make samples                  # build all samples
-make samples NAME=hello_world # build one sample
-make run-sample NAME=hello_world  # build + run under ./my_wine
+make samples SAMPLE=hello_world # build one sample
+make run-sample SAMPLE=hello_world  # build + run under ./my_wine
 ```
 
 You should see `Hello from Windows!` printed to the terminal.
@@ -70,8 +70,8 @@ For example:
 | `make clean` | Remove the `build/` directory |
 | `make test` | Build and run unit tests |
 | `make samples` | Cross-compile all samples via Docker |
-| `make samples NAME=foo` | Cross-compile one sample |
-| `make run-sample NAME=foo` | Build sample + run it under `./my_wine` |
+| `make samples SAMPLE=foo` | Cross-compile one sample |
+| `make run-sample SAMPLE=foo` | Build sample + run it under `./my_wine` |
 
 ### Dependencies
 
@@ -216,7 +216,7 @@ architectural walkthrough.
 │   │   │                        #   process, objects)
 │   │   ├── kernel32_*.c        # kernel32 stubs (console, process,
 │   │   │                        #   module, misc)
-│   │   ├── crt_*.c             # CRT globals, stdio, stdlib,
+│   │   ├── crt_*.c             # CRT globals, stdio, stdlib, file I/O,
 │   │   │                        #   startup, refptrs, offset discovery
 │   │   ├── abi_wrappers.c      # ABI compatibility wrappers
 │   │   ├── handler_abi.h       # handler calling convention macros
