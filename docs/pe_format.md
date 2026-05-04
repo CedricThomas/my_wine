@@ -315,3 +315,101 @@ File Layout (disk)                  Memory Layout (RVA-aligned)
 
 See [architecture.md](architecture.md) §1.1 for the mapping process.
 ```
+
+---
+
+## 4. Imports
+
+Windows executables rely on imported functions from DLLs. The import
+chain tells the loader which DLLs to load and which symbols to
+resolve.
+
+### The Import Chain
+
+The entry point is `OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]`,
+which holds the RVA of an array of `IMAGE_IMPORT_DESCRIPTOR` entries.
+The array is NULL-terminated (all fields zero).
+
+```c
+typedef struct _IMAGE_IMPORT_DESCRIPTOR {
+    union {
+        uint32_t Characteristics;
+        uint32_t OriginalFirstThunk;  // RVA of ILT (import lookup table)
+    } DUMMYUNIONNAME;
+    uint32_t TimeDateStamp;           // 0 before loading, DLL timestamp after
+    uint32_t ForwarderChain;
+    uint32_t Name;                    // RVA to DLL name (e.g., "ntdll.dll")
+    uint32_t FirstThunk;              // RVA of IAT (import address table)
+} IMAGE_IMPORT_DESCRIPTOR;
+```
+
+| Field | Meaning |
+|---|---|
+| `OriginalFirstThunk` | RVA to the **ILT** (import lookup table) — the read-only lookup thunks |
+| `FirstThunk` | RVA to the **IAT** (import address table) — the writable call targets |
+| `Name` | RVA to a null-terminated DLL name string |
+
+The ILT is used by the loader to find what to import; the IAT is what
+guest code actually calls through.
+
+### Thunk Entries
+
+Both the ILT and IAT are arrays of `IMAGE_THUNK_DATA64` entries.
+Each entry is either an ordinal import or a name import, distinguished
+by the highest bit (bit 63):
+
+```c
+typedef struct _IMAGE_THUNK_DATA64 {
+    union {
+        uint64_t ForwarderString;    // RVA to forwarder string
+        uint64_t Function;           // direct address (after loader patches IAT)
+        uint64_t Ordinal;            // if bit63 set: ordinal import
+        uint64_t AddressOfData;      // if bit63 clear: RVA to IMAGE_IMPORT_BY_NAME
+    } u1;
+} IMAGE_THUNK_DATA64;
+```
+
+- **Bit 63 set** (ordinal import): the lower 16 bits contain the
+  ordinal number. The DLL is called by ordinal, not by name.
+- **Bit 63 clear** (name import): the value is an RVA pointing to an
+  `IMAGE_IMPORT_BY_NAME` structure in the data directory.
+
+```c
+typedef struct _IMAGE_IMPORT_BY_NAME {
+    uint16_t Hint;       // optional hint for faster lookup
+    char Name[1];        // null-terminated function name
+} IMAGE_IMPORT_BY_NAME;
+```
+
+### IAT Patching
+
+Before the loader runs, the IAT is a copy of the ILT — each entry
+points to the same lookup data. During loading:
+
+1. The loader reads each `IMAGE_IMPORT_DESCRIPTOR`, resolves the DLL
+   name, and loads the DLL.
+2. For each ILT entry, the loader looks up the function (by name
+   or ordinal) in the DLL's export table.
+3. The corresponding IAT entry is **patched** with the actual
+   function address.
+
+Guest code calls through the IAT:
+
+```
+  call [IAT_entry]    ; jumps to the resolved function address
+```
+
+The IAT lives in a writable section (`.idata` or `.data`) so the
+loader can patch it. The ILT remains read-only.
+
+### Import Chain Flow
+
+```
+DataDirectory[IMPORT] ──► IMAGE_IMPORT_DESCRIPTOR ──► DLL name ("ntdll.dll")
+                              │
+                              ├── OriginalFirstThunk ──► ILT (lookup thunks) ──► function names/ordinals
+                              │
+                              └── FirstThunk ──────────► IAT (writable) ──► [patched by loader]
+```
+
+See [architecture.md §1.2](architecture.md) for the import resolution process.
