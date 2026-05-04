@@ -70,13 +70,13 @@ static inline uint64_t read_guest_stack(int index)
     uintptr_t rsp = (uintptr_t)__wine_guest_regs.rsp;
 
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
-        DEBUG(fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
-                      (unsigned long)rsp));
+        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
+                (unsigned long)rsp);
         return 0;
     }
     if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
-        DEBUG(fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
-                      (unsigned long)rsp));
+        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
+                (unsigned long)rsp);
         return 0;
     }
     uint64_t *stack = (uint64_t *)(uintptr_t)rsp;
@@ -106,15 +106,15 @@ static inline uint64_t read_guest_stack_ctx(ucontext_t *ctx, int index)
 
     /* Validate RSP is in a reasonable user-space range */
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
-        DEBUG(fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
-                      (unsigned long)rsp));
+        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
+                (unsigned long)rsp);
         return 0;
     }
 
     /* Additional guard: RSP must pass our guest-ptr validator */
     if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
-        DEBUG(fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
-                      (unsigned long)rsp));
+        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
+                (unsigned long)rsp);
         return 0;
     }
 
@@ -142,8 +142,8 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
         return 0;
     }
     if (!is_valid_guest_ptr(guest_ptr, 8)) {
-        DEBUG(fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at %s\n",
-                      (unsigned long)guest_ptr, name));
+        fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at %s\n",
+                (unsigned long)guest_ptr, name);
         return STATUS_ACCESS_VIOLATION;
     }
     if (out_val) *out_val = *(uint64_t *)(uintptr_t)guest_ptr;
