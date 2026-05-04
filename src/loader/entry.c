@@ -24,7 +24,7 @@ extern void run_guest(void (*)(void), void *, void *, char **, char **,
 /* From child_setup.c — called in child and parent after fork */
 extern void setup_child_and_run(uint64_t entry_abs, void *stack_top,
                                 void *teb, char **guest_argv,
-                                char **guest_envp);
+                                char **guest_envp, int watchdog_timeout);
 extern void cleanup_guest(void *teb, void *stack_base);
 
 /**
@@ -50,7 +50,7 @@ extern void cleanup_guest(void *teb, void *stack_base);
  * @return  exit code of the child, or -1 on fork failure
  */
 int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *teb,
-                  char **guest_argv, char **guest_envp)
+                  char **guest_argv, char **guest_envp, int watchdog_timeout)
 {
     (void)stack_base;  /* suppress unused warning */
     pid_t pid = fork();
@@ -58,7 +58,7 @@ int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base, void *t
     if (pid < 0) { perror("fork"); return 1; }
 
     if (pid == 0) {
-        setup_child_and_run(entry_abs, stack_top, teb, guest_argv, guest_envp);
+        setup_child_and_run(entry_abs, stack_top, teb, guest_argv, guest_envp, watchdog_timeout);
     }
 
     int status;

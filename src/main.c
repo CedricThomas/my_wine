@@ -20,6 +20,7 @@
 
 #include "include/pe.h"
 #include "include/msvcrt.h"
+#include "include/common.h"
 #include "loader/loader_priv.h"
 
 extern char **environ;  // from libc, for guest envp
@@ -91,8 +92,22 @@ static void seed_bss_vars(void *base,
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <pe_binary>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <pe_binary> [--watchdog=N]\n", argv[0]);
         return 1;
+    }
+
+    /* Parse --watchdog=N argument */
+    int watchdog_timeout = WATCHDOG_TIMEOUT_DEFAULT;
+    for (int i = 1; i < argc; i++) {
+        char *warg = argv[i];
+        if (strncmp(warg, "--watchdog=", 11) == 0) {
+            int val = atoi(warg + 11);
+            if (val >= WATCHDOG_TIMEOUT_MIN && val <= WATCHDOG_TIMEOUT_MAX)
+                watchdog_timeout = val;
+            else
+                fprintf(stderr, "WARNING: --watchdog value out of range [%d-%d], using default %d\n",
+                        WATCHDOG_TIMEOUT_MIN, WATCHDOG_TIMEOUT_MAX, WATCHDOG_TIMEOUT_DEFAULT);
+        }
     }
 
     /* 1. Map the PE image (open file, parse headers, copy sections, set protections) */
@@ -194,5 +209,5 @@ int main(int argc, char *argv[])
                 (unsigned long)entry_abs);
     }
 
-    return jump_to_entry(entry_abs, stack_top, g_stack_base, teb, guest_argv, guest_envp);
+    return jump_to_entry(entry_abs, stack_top, g_stack_base, teb, guest_argv, guest_envp, watchdog_timeout);
 }

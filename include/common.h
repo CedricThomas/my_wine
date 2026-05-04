@@ -45,7 +45,9 @@
 #define SIG_STACK_SIZE      65536
 
 // Watchdog timeout (seconds)
-#define WATCHDOG_TIMEOUT    60
+#define WATCHDOG_TIMEOUT_DEFAULT  60
+#define WATCHDOG_TIMEOUT_MIN      1
+#define WATCHDOG_TIMEOUT_MAX      3600
 
 // ── Shared helpers ─────────────────────────────────────────────
 

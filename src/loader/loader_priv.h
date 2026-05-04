@@ -110,10 +110,12 @@ __attribute__((ms_abi)) void seh_crash_handler(void *, void *, void *, void *);
 /* ── entry.c / child_setup.c ────────────────────────────────── */
 
 int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base,
-                  void *teb, char **guest_argv, char **guest_envp);
+                  void *teb, char **guest_argv, char **guest_envp,
+                  int watchdog_timeout);
 
 void setup_child_and_run(uint64_t entry_abs, void *stack_top, void *teb,
-                         char **guest_argv, char **guest_envp);
+                         char **guest_argv, char **guest_envp,
+                         int watchdog_timeout);
 void cleanup_guest(void *teb, void *stack_base);
 
 /* ── gs_base.c ─────────────────────────────────────────────── */

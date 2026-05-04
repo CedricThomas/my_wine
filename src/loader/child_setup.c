@@ -275,9 +275,9 @@ static void wd_handler(int sig, siginfo_t *info, void *uc_ptr)
 
 /* ── Step 5: Watchdog + jump to guest (noreturn) ─────────────── */
 static __attribute__((noreturn)) void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
-                                    char **guest_argv, char **guest_envp)
+                                    int watchdog_timeout, char **guest_argv, char **guest_envp)
 {
-    /* Watchdog: 60s timeout to allow full CRT startup */
+    /* Configurable watchdog */
     {
         struct sigaction w;
         memset(&w, 0, sizeof(w));
@@ -285,7 +285,15 @@ static __attribute__((noreturn)) void setup_watchdog_and_jump(uint64_t entry_abs
         w.sa_flags = SA_SIGINFO;
         sigemptyset(&w.sa_mask);
         sigaction(SIGALRM, &w, NULL);
-        struct itimerval t = {.it_interval = {0, 0}, .it_value = {WATCHDOG_TIMEOUT, 0}};
+
+        int timeout = watchdog_timeout;
+        const char *env = getenv("MY_WINE_WATCHDOG");
+        if (env) {
+            int env_val = atoi(env);
+            if (env_val >= WATCHDOG_TIMEOUT_MIN && env_val <= WATCHDOG_TIMEOUT_MAX)
+                timeout = env_val;
+        }
+        struct itimerval t = {.it_interval = {0, 0}, .it_value = {timeout, 0}};
         setitimer(ITIMER_REAL, &t, NULL);
     }
 
@@ -321,7 +329,8 @@ static __attribute__((noreturn)) void setup_watchdog_and_jump(uint64_t entry_abs
  */
 void setup_child_and_run(
         uint64_t entry_abs, void *stack_top, void *teb,
-        char **guest_argv, char **guest_envp)
+        char **guest_argv, char **guest_envp,
+        int watchdog_timeout)
 {
     setup_signal_handlers();
     void *seh_frame = setup_seh_and_thunks();
@@ -338,7 +347,7 @@ void setup_child_and_run(
     void *base = (void *)(uintptr_t)image_base;
     apply_final_patches(base, nt, sections);
 
-    setup_watchdog_and_jump(entry_abs, stack_top, guest_argv, guest_envp);
+    setup_watchdog_and_jump(entry_abs, stack_top, watchdog_timeout, guest_argv, guest_envp);
 }
 
 /**
