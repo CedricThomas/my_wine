@@ -5,8 +5,8 @@ mingw-w64-compiled Windows x86_64 executables on Linux without Wine.
 
 It maps the PE image into memory, resolves imports to our stub
 implementations, sets up the Windows TEB/PEB environment, and
-jumps to the entry point — intercepting NT syscalls via a
-seccomp-filtered `SIGSYS` trampoline.
+jumps to the entry point — intercepting NT syscalls via dynamically
+generated thunks that call `__wine_dispatcher`.
 
 ---
 
