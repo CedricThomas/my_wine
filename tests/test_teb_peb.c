@@ -5,6 +5,7 @@
  * gs:[0x30] (thread pointer), and gs:[0x60] (PEB) values.
  * Cleans up (munmap TEB/PEB) after verification.
  *
+ * Runs directly in the main process (Wine shared-process model).
  * Gracefully skips with a message when arch_prctl(ARCH_SET_GS) is
  * unavailable (e.g., running under certain containers).
  *
@@ -20,8 +21,6 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 
 #include "pe.h"
 #include "src/loader/loader_priv.h"
@@ -58,49 +57,30 @@ static void check(const char *label, int condition)
 
 static int can_set_gs_base(void)
 {
-    /* Run the GS base probe in a child process so that if the
-     * FSGSBASE instructions segfault (which can happen intermittently
-     * in sandbox/container environments), the parent is unaffected. */
-    pid_t pid = fork();
-    if (pid < 0) {
-        return 0;  /* fork failed */
-    }
-
-    if (pid == 0) {
-        /* Child: attempt the probe */
-        void *page = mmap(NULL, 4096, PROT_READ|PROT_WRITE,
-                          MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-        if (page == MAP_FAILED) {
-            _exit(1);
-        }
-
-        if (set_gs_base(page) != 0) {
-            munmap(page, 4096);
-            _exit(1);
-        }
-
-        void *got = get_gs_base();
-        if (got != page) {
-            munmap(page, 4096);
-            _exit(1);
-        }
-
-        /* Restore GS to NULL */
-        set_gs_base(NULL);
-        munmap(page, 4096);
-        _exit(0);  /* success */
-    }
-
-    /* Parent: wait for child */
-    int status;
-    if (waitpid(pid, &status, 0) != pid)
+    /* Direct probe in the main process (shared-process model).
+     * If the underlying arch_prctl/FSGSBASE crashes, so does this
+     * process — that's acceptable for a test binary. */
+    void *page = mmap(NULL, 4096, PROT_READ|PROT_WRITE,
+                      MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    if (page == MAP_FAILED) {
         return 0;
+    }
 
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
-        return 1;
+    if (set_gs_base(page) != 0) {
+        munmap(page, 4096);
+        return 0;
+    }
 
-    /* Child crashed or failed */
-    return 0;
+    void *got = get_gs_base();
+    if (got != page) {
+        munmap(page, 4096);
+        return 0;
+    }
+
+    /* Restore GS to NULL */
+    set_gs_base(NULL);
+    munmap(page, 4096);
+    return 1;
 }
 
 /* ── Test: TEB/PEB structure and GS base ───────────────────── */
@@ -223,149 +203,13 @@ int main(void)
 {
     printf("=== TEB/PEB Tests ===\n");
 
-    /* Run each test in a child process so that if FSGSBASE
-     * instructions segfault (intermittent sandbox issue), the
-     * parent can catch it and report as skipped rather than crashing. */
+    test_teb_peb_setup();
+    test_stack_setup();
 
-    int test1_ok = 0, test2_ok = 0;
-
-    /* ── Test 1: TEB/PEB Setup ──────────────────────────── */
-    {
-        int pipefd[2];
-        if (pipe(pipefd) < 0) {
-            perror("pipe");
-            return 1;
-        }
-
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("fork");
-            return 1;
-        }
-
-        if (pid == 0) {
-            /* Child: close read end, run test, write results to pipe */
-            close(pipefd[0]);
-
-            if (!can_set_gs_base()) {
-                printf("\n=== TEB/PEB Setup: SKIPPED (neither arch_prctl nor FSGSBASE can set GS base) ===\n");
-                char msg[] = "0 0 0";
-                write(pipefd[1], msg, sizeof(msg) - 1);
-                close(pipefd[1]);
-                _exit(0);
-            }
-
-            test_teb_peb_setup();
-
-            char buf[32];
-            int n = snprintf(buf, sizeof(buf), "%d %d %d",
-                             total_tests, passed_tests, failed_tests);
-            write(pipefd[1], buf, n);
-            close(pipefd[1]);
-            _exit(failed_tests > 0 ? 1 : 0);
-        }
-
-        /* Parent: close write end, wait for child */
-        close(pipefd[1]);
-        int status;
-        if (waitpid(pid, &status, 0) != pid) {
-            printf("\n=== TEB/PEB Setup: ERROR (child terminated unexpectedly) ===\n");
-            close(pipefd[0]);
-            return 1;
-        }
-
-        /* Read test results from pipe (best effort) */
-        char buf[256] = {0};
-        ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
-        if (n > 0) {
-            int t, p, f;
-            if (sscanf(buf, "%d %d %d", &t, &p, &f) == 3) {
-                total_tests += t;
-                passed_tests += p;
-                failed_tests += f;
-            }
-        }
-        close(pipefd[0]);
-
-        if (WIFSIGNALED(status)) {
-            printf("\n=== TEB/PEB Setup: SKIPPED (child crashed with signal %d — FSGSBASE unavailable) ===\n",
-                   WTERMSIG(status));
-            /* Count as skipped, not failed */
-        } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-            printf("  [TEB/PEB Setup completed OK]\n");
-            test1_ok = 1;
-        } else {
-            printf("\n=== TEB/PEB Setup: FAILED ===\n");
-        }
-    }
-
-    /* ── Test 2: Stack Setup ────────────────────────────── */
-    {
-        int pipefd[2];
-        if (pipe(pipefd) < 0) {
-            perror("pipe");
-            return 1;
-        }
-
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("fork");
-            return 1;
-        }
-
-        if (pid == 0) {
-            /* Child: close read end, run test, write results to pipe */
-            close(pipefd[0]);
-
-            test_stack_setup();
-
-            char buf[32];
-            int n = snprintf(buf, sizeof(buf), "%d %d %d",
-                             total_tests, passed_tests, failed_tests);
-            write(pipefd[1], buf, n);
-            close(pipefd[1]);
-            _exit(failed_tests > 0 ? 1 : 0);
-        }
-
-        /* Parent: close write end, wait for child */
-        close(pipefd[1]);
-        int status;
-        if (waitpid(pid, &status, 0) != pid) {
-            printf("\n=== Stack Setup: ERROR (child terminated unexpectedly) ===\n");
-            close(pipefd[0]);
-            return 1;
-        }
-
-        /* Read test results from pipe (best effort) */
-        char buf[256] = {0};
-        ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
-        if (n > 0) {
-            int t, p, f;
-            if (sscanf(buf, "%d %d %d", &t, &p, &f) == 3) {
-                total_tests += t;
-                passed_tests += p;
-                failed_tests += f;
-            }
-        }
-        close(pipefd[0]);
-
-        if (WIFSIGNALED(status)) {
-            printf("\n=== Stack Setup: SKIPPED (child crashed with signal %d) ===\n",
-                   WTERMSIG(status));
-        } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-            printf("  [Stack Setup completed OK]\n");
-            test2_ok = 1;
-        } else {
-            printf("\n=== Stack Setup: FAILED ===\n");
-        }
-    }
-
-    /* Summary */
     printf("\n========================================\n");
     printf("Total:  %d  Passed: %d  Failed: %d\n",
            total_tests, passed_tests, failed_tests);
     printf("========================================\n");
 
-    /* Pass if at least one test group completed OK */
-    return (test1_ok || test2_ok) ? 0 : 1;
+    return failed_tests > 0 ? 1 : 0;
 }
