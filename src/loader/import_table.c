@@ -61,7 +61,7 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "TlsGetValue", (void*)TlsGetValue },
     { "kernel32.dll", "VirtualProtect", (void*)VirtualProtect },
     { "kernel32.dll", "VirtualQuery", (void*)VirtualQuery },
-    { "ntdll.dll", "__C_specific_handler", (void*)__C_specific_handler },
+    { "msvcrt.dll", "__C_specific_handler", (void*)__C_specific_handler },
     /* msvcrt functions (statically known) */
     { "msvcrt.dll", "__getmainargs", (void*)__getmainargs },
     { "msvcrt.dll", "__initenv", (void*)__initenv },
