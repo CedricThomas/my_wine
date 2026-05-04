@@ -506,7 +506,7 @@ int scan_rip_relative_jumps(void *image_base,
 
     uint64_t text_start = text->VirtualAddress;
     uint64_t text_end   = text_start + text->Misc.VirtualSize;
-    if (text_end < text_start || text->SizeOfRawData > text->Misc.VirtualSize)
+    if (text_end < text_start || text->Misc.VirtualSize > text->SizeOfRawData)
         text_end = text_start + text->SizeOfRawData;
 
     uint64_t text_size = text_end - text_start;
@@ -555,8 +555,6 @@ void *find_rip_relative_jump_to(void *image_base,
                                 int num_sections,
                                 void *target_addr)
 {
-    (void)num_sections;
-
     /* Find .text section */
     const IMAGE_SECTION_HEADER *text = find_section_by_name(nt, sections, ".text");
     if (text == NULL)
@@ -564,7 +562,7 @@ void *find_rip_relative_jump_to(void *image_base,
 
     uint64_t text_start = text->VirtualAddress;
     uint64_t text_end   = text_start + text->Misc.VirtualSize;
-    if (text_end < text_start || text->SizeOfRawData > text->Misc.VirtualSize)
+    if (text_end < text_start || text->Misc.VirtualSize > text->SizeOfRawData)
         text_end = text_start + text->SizeOfRawData;
 
     uint64_t text_size = text_end - text_start;
@@ -572,6 +570,14 @@ void *find_rip_relative_jump_to(void *image_base,
     /* Section too small for any valid instruction (need at least 6 bytes) */
     if (text_size < 6)
         return NULL;
+
+    /* Compute image bounds from all sections for safe pointer dereference */
+    uint64_t image_max = 0;
+    for (int i = 0; i < num_sections; i++) {
+        uint64_t s_end = sections[i].VirtualAddress + sections[i].Misc.VirtualSize;
+        if (s_end > image_max)
+            image_max = s_end;
+    }
 
     uint8_t *text_base = (uint8_t *)image_base + text_start;
     uint64_t target_val = (uint64_t)(uintptr_t)target_addr;
@@ -581,6 +587,11 @@ void *find_rip_relative_jump_to(void *image_base,
             int32_t disp = *(int32_t *)(text_base + off + 2);
             uint64_t instr_addr = text_start + off;
             uint64_t target_rva = instr_addr + 6 + disp;
+
+            /* Bounds check: skip false matches that point outside the image */
+            if (target_rva + 8 > image_max)
+                continue;
+
             uint64_t *target_ptr = (uint64_t *)((char *)image_base + target_rva);
             if (*target_ptr == target_val) {
                 return (void *)((char *)image_base + instr_addr);

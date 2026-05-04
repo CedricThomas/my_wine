@@ -24,7 +24,9 @@ void format_hex(char *buf, int buf_size, uint64_t val) {
 
 void format_ptr(char *buf, int buf_size, void *p) {
     if (p == NULL) {
-        strcpy(buf, "(nil)");
+        if (buf_size >= 6) {
+            strcpy(buf, "(nil)");
+        }
     } else {
         format_hex(buf, buf_size, (uint64_t)(uintptr_t)p);
     }
