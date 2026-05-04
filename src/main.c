@@ -22,6 +22,7 @@
 #include "include/msvcrt.h"
 #include "include/common.h"
 #include "loader/loader_priv.h"
+#include "include/debug.h"
 
 extern char **environ;  // from libc, for guest envp
 
@@ -61,8 +62,8 @@ static void seed_bss_vars(void *base,
 
     if (g_crt_ctx.argc_bss_offset != 0) {
         *(uint32_t *)(bss_base + g_crt_ctx.argc_bss_offset) = 1;
-        fprintf(stderr, ".bss: wrote argc=1 at offset 0x%x\n",
-                g_crt_ctx.argc_bss_offset);
+        DEBUG(fprintf(stderr, ".bss: wrote argc=1 at offset 0x%x\n",
+                g_crt_ctx.argc_bss_offset));
     } else {
         fprintf(stderr, "WARNING: argc_bss_offset is 0, "
                 "skipping argc pre-seed\n");
@@ -70,8 +71,8 @@ static void seed_bss_vars(void *base,
 
     if (g_crt_ctx.argv_bss_offset != 0) {
         *(uint64_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
-        fprintf(stderr, ".bss: wrote argv=NULL at offset 0x%x\n",
-                g_crt_ctx.argv_bss_offset);
+        DEBUG(fprintf(stderr, ".bss: wrote argv=NULL at offset 0x%x\n",
+                g_crt_ctx.argv_bss_offset));
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
                 "skipping argv pre-seed\n");
@@ -79,8 +80,8 @@ static void seed_bss_vars(void *base,
 
     if (g_crt_ctx.envp_bss_offset != 0) {
         *(uint64_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
-        fprintf(stderr, ".bss: wrote envp=NULL at offset 0x%x\n",
-                g_crt_ctx.envp_bss_offset);
+        DEBUG(fprintf(stderr, ".bss: wrote envp=NULL at offset 0x%x\n",
+                g_crt_ctx.envp_bss_offset));
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "
                 "skipping envp pre-seed\n");
@@ -141,8 +142,8 @@ int main(int argc, char *argv[])
             /* Zero the entire .data section */
             memset((uint8_t *)base + data_vaddr, 0, data_size);
 
-            printf(".data section: vaddr=0x%lx, size=0x%lx, zeroed\n",
-                   (unsigned long)data_vaddr, (unsigned long)data_size);
+            DEBUG(printf(".data section: vaddr=0x%lx, size=0x%lx, zeroed\n",
+                   (unsigned long)data_vaddr, (unsigned long)data_size));
         }
     }
 

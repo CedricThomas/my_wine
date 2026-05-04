@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "debug.h"
 
 // Memory page constants
 #define PAGE_SIZE         4096
