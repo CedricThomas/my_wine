@@ -22,6 +22,7 @@
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <asm/unistd_64.h>
+#include "include/nt_constants.h"
 #include <fcntl.h>
 #include <signal.h>
 #include <ucontext.h>
@@ -60,7 +61,7 @@ static int seh_crash_handler(void *exception_record, void *establisher_frame,
 
     /* Dump info via syscall (stderr) */
     { const char t[] = "SEV: SEH handler invoked (exception in guest code)\n";
-      syscall(SYS_write, 2, t, sizeof(t)-1); }
+      syscall(__NR_write, 2, t, sizeof(t)-1); }
 
     /* Extract exit code from exception record if possible, else use 0xC0000005 (ACCESS_VIOLATION) */
     uint64_t exit_code = 0xC0000005;
@@ -94,7 +95,7 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
     else if (sig == SIGTRAP) { sig_name = sig_trap; sig_len = 13; }
 
     long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(sig_name), "d"((size_t)sig_len) : "rcx","r11","memory","cc");
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(sig_name), "d"((size_t)sig_len) : "rcx","r11","memory","cc");
 
     ucontext_t *uc = (ucontext_t *)ucontext;
     if (uc) {
@@ -113,7 +114,7 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         }
         hex_buf[off++] = '\n';
         hex_buf[off] = '\0';
-        __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(hex_buf), "d"((size_t)off) : "rcx","r11","memory","cc");
+        __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(hex_buf), "d"((size_t)off) : "rcx","r11","memory","cc");
     }
 
     _exit(139);
@@ -227,8 +228,8 @@ static void wd_handler(int sig, siginfo_t *info, void *uc_ptr) { (void)sig; (voi
    val = (uint64_t)r[REG_RAX];
    for (int i = 15; i >= 0; i--) { uint8_t nib = (val >> (4*i)) & 0xf; b[off++] = (nib < 10) ? (nib + '0') : (nib - 10 + 'a'); }
    b[off++] = '\n'; b[off] = '\0';
-   long ret; __asm__ volatile("syscall" : "=a"(ret) : "a"(1), "D"(2), "S"(b), "d"((size_t)off) : "rcx","r11","memory","cc");
-   __asm__ volatile("syscall" : "=a"(ret) : "a"(60), "D"(0xFF) : "rcx","r11","cc"); }
+   long ret; __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(b), "d"((size_t)off) : "rcx","r11","memory","cc");
+   __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit), "D"(0xFF) : "rcx","r11","cc"); }
 
 static __attribute__((noreturn)) void setup_child_and_run(
         uint64_t entry_abs, void *stack_top, void *teb,
@@ -246,7 +247,7 @@ static __attribute__((noreturn)) void setup_child_and_run(
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGTRAP, &sa, NULL);
     { const char t[] = "CHILD: all handlers set\n";
-      syscall(SYS_write, 2, t, sizeof(t)-1); }
+      syscall(__NR_write, 2, t, sizeof(t)-1); }
 
     /* Set up signal stack for reliable signal handling */
     {
@@ -287,11 +288,11 @@ static __attribute__((noreturn)) void setup_child_and_run(
         int dbg_n = snprintf(dbg_buf, sizeof(dbg_buf),
             "DEBUG child: &__imp___initenv_stub=%p, *__imp___initenv_stub=%p\n",
             (void *)&__imp___initenv_stub, (void *)__imp___initenv_stub);
-        syscall(SYS_write, 2, dbg_buf, dbg_n);
+        syscall(__NR_write, 2, dbg_buf, dbg_n);
     }
 
     /* Point TEB gs:[0x00] to our SEH frame */
-    *(void **)((uint8_t *)teb) = (void *)child_seh_frame;
+    *(void **)((uint8_t *)teb + TEB_SEH_CHAIN) = (void *)child_seh_frame;
 
     /* Patch __acrt_iob_func thunk to return __wine_iob_data directly */
     uint64_t image_base = entry_abs & ~0xFFFFFUL;
@@ -367,7 +368,7 @@ static void cleanup_guest(void *teb, void *stack_base)
 {
     if (teb) {
         /* Unmap PEB first (it's separate from TEB, stored at teb+0x60) */
-        void *peb = *(void **)((char *)teb + 0x60);
+        void *peb = *(void **)((char *)teb + TEB_PEB_PTR);
         if (peb) {
             if (munmap(peb, 4096) != 0) {
                 perror("cleanup_guest: munmap PEB");
