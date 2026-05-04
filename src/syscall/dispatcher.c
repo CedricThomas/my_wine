@@ -8,15 +8,22 @@
 #include "include/nt_constants.h"
 #include "include/ntdll.h"
 #include "include/syscall/dispatcher.h"
+#include "include/syscall/dispatcher_entry.h"  /* guest_regs, __wine_guest_regs */
 #include "../syscalls_inline.h"
 
 /*
  * dispatcher.c — NT syscall dispatcher
  *
  * Maps Windows NT syscall numbers to C handler functions.
- * Decodes arguments from the ucontext using the x86_64 Windows
+ * Decodes arguments from guest registers using the x86_64 Windows
  * calling convention (RCX, RDX, R8, R9, ...) and dispatches
  * to the appropriate handler.
+ *
+ * Two dispatch entry points:
+ *   - c_dispatch_syscall(nr): new path, reads from __wine_guest_regs
+ *     directly (single-process model, no ucontext).
+ *   - handle_syscall(nr, ctx): legacy path, reads from ucontext_t.
+ *     Kept for backward compatibility with existing tests.
  */
 
 /* ── Guest stack reader ───────────────────────────────────────── */
@@ -45,6 +52,40 @@ static inline int is_valid_guest_ptr(uint64_t ptr, size_t min_size)
 /*
  * read_guest_stack — read an argument from the guest stack.
  *
+ * Uses __wine_guest_regs.rsp as the base pointer (single-process model).
+ * In the Windows x64 ABI, args 5+ are on the stack:
+ *   [RSP+0]  = return address (index 0)
+ *   [RSP+8]  = arg5 (index 1)
+ *   [RSP+16] = arg6 (index 2)
+ *   ...
+ *
+ * @index  stack index (1 = arg5, 2 = arg6, ...)
+ *
+ * @return the 64-bit value from the guest stack, or 0 on invalid RSP.
+ */
+static inline uint64_t read_guest_stack(int index)
+{
+    if (index < 0 || index > 15) return 0;
+    uintptr_t rsp = (uintptr_t)__wine_guest_regs.rsp;
+
+    if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
+        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
+                (unsigned long)rsp);
+        return 0;
+    }
+    if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
+        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
+                (unsigned long)rsp);
+        return 0;
+    }
+    uint64_t *stack = (uint64_t *)(uintptr_t)rsp;
+    return stack[index];
+}
+
+/*
+ * read_guest_stack_ctx — read an argument from the guest stack, using
+ * the ucontext from the SIGSYS handler (legacy path for tests).
+ *
  * In the Windows x64 ABI, args 5+ are placed on the stack after the
  * call instruction pushes the return address. At the point of the
  * syscall instruction:
@@ -57,7 +98,7 @@ static inline int is_valid_guest_ptr(uint64_t ptr, size_t min_size)
  * The guest stack is mmap'd into our address space, so we can
  * dereference it directly. RSP is validated before dereference.
  */
-static inline uint64_t read_guest_stack(ucontext_t *ctx, int index)
+static inline uint64_t read_guest_stack_ctx(ucontext_t *ctx, int index)
 {
     if (index < 0 || index > 15) return 0;
     uintptr_t rsp = (uintptr_t)ctx->uc_mcontext.gregs[REG_RSP];
@@ -109,7 +150,249 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
     return 0;
 }
 
-/* ── Dispatcher ───────────────────────────────────────────────── */
+/* ── C dispatcher (single-process, no ucontext) ────────────────── */
+
+/*
+ * c_dispatch_syscall — dispatch a Windows NT syscall to its handler.
+ *
+ * Reads input arguments directly from __wine_guest_regs (populated by
+ * the assembly entry). Writes result into __wine_guest_regs.rax.
+ *
+ * @nr  NT syscall number
+ *
+ * @return result to place in RAX
+ */
+uint64_t c_dispatch_syscall(uint64_t nr)
+{
+    char trace_buf[32];
+    int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)nr);
+    INLINE_SYSCALL_WRITE_ERR(trace_buf, (size_t)trace_len);
+
+    uint64_t arg1 = __wine_guest_regs.rcx;
+    uint64_t arg2 = __wine_guest_regs.rdx;
+    uint64_t arg3 = __wine_guest_regs.r8;
+    uint64_t arg4 = __wine_guest_regs.r9;
+    uint64_t result = 0;
+
+    switch (nr) {
+
+    case NT_SYSCALL_CALLBACK_RETURN: /* NtCallbackReturn */
+        result = handler_NtCallbackReturn();
+        break;
+
+    case NT_SYSCALL_QUERY_INFO_PROCESS: /* NtQueryInformationProcess */
+    {
+        uint64_t h_buffer = arg3;
+        uint64_t h_ret_len = read_guest_stack(1);
+        int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(h_ret_len, NULL, NULL, "return_length");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtQueryInformationProcess(
+            arg1, arg2, h_buffer, arg4, h_ret_len);
+        break;
+    }
+
+    case NT_SYSCALL_CLOSE: /* NtClose */
+        result = handler_NtClose(arg1);
+        break;
+
+    case NT_SYSCALL_ALLOC_VM: /* NtAllocateVirtualMemory */
+    {
+        uint64_t h_base_addr = 0;
+        uint64_t h_region_sz = 0;
+        void *p_base = NULL;
+        void *p_region = NULL;
+        int status = read_guest_ptr(arg2, &h_base_addr, &p_base, "base_address");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(arg4, &h_region_sz, &p_region, "region_size");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtAllocateVirtualMemory(
+            arg1, &h_base_addr, arg3, &h_region_sz,
+            read_guest_stack(1),
+            read_guest_stack(2));
+        if (p_base)   *(uint64_t *)p_base = h_base_addr;
+        if (p_region) *(uint64_t *)p_region = h_region_sz;
+        break;
+    }
+
+    case NT_SYSCALL_FREE_VM: /* NtFreeVirtualMemory */
+    {
+        uint64_t h_base_addr = 0;
+        uint64_t h_region_sz = 0;
+        void *p_base = NULL;
+        void *p_region = NULL;
+        int status = read_guest_ptr(arg2, &h_base_addr, &p_base, "base_address");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(arg3, &h_region_sz, &p_region, "region_size");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtFreeVirtualMemory(arg1, &h_base_addr, &h_region_sz, arg4);
+        if (p_base)   *(uint64_t *)p_base = h_base_addr;
+        if (p_region) *(uint64_t *)p_region = h_region_sz;
+        break;
+    }
+
+    case NT_SYSCALL_GET_CTX_THREAD: /* NtGetContextThread */
+    {
+        int status = read_guest_ptr(arg2, NULL, NULL, "context");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtGetContextThread(arg1, arg2);
+        break;
+    }
+
+    case NT_SYSCALL_SET_CTX_THREAD: /* NtSetContextThread */
+    {
+        int status = read_guest_ptr(arg2, NULL, NULL, "context");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtSetContextThread(arg1, arg2);
+        break;
+    }
+
+    case NT_SYSCALL_MAP_VIEW: /* NtMapViewOfSection */
+    {
+        uint64_t h_base_addr = 0;
+        uint64_t h_section_off = read_guest_stack(1);
+        uint64_t h_view_sz = read_guest_stack(2);
+        void *p_base = NULL;
+        void *p_offset = NULL;
+        void *p_vsz = NULL;
+        int status = read_guest_ptr(arg3, &h_base_addr, &p_base, "base_address");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(h_section_off, &h_section_off, &p_offset,
+                                "section_offset");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(h_view_sz, &h_view_sz, &p_vsz, "view_size");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtMapViewOfSection(
+            arg1, arg2, &h_base_addr, arg4,
+            read_guest_stack(1),
+            &h_section_off, &h_view_sz,
+            read_guest_stack(4),
+            read_guest_stack(5),
+            read_guest_stack(6));
+        if (p_base)   *(uint64_t *)p_base = h_base_addr;
+        if (p_offset) *(uint64_t *)p_offset = h_section_off;
+        if (p_vsz)    *(uint64_t *)p_vsz = h_view_sz;
+        break;
+    }
+
+    case NT_SYSCALL_UNMAP_VIEW: /* NtUnmapViewOfSection */
+        result = handler_NtUnmapViewOfSection(arg1, arg2);
+        break;
+
+    case NT_SYSCALL_TERMINATE_PROCESS: /* NtTerminateProcess */
+        result = handler_NtTerminateProcess(arg1, arg2);
+        break;
+
+    case NT_SYSCALL_READ_FILE: /* NtReadFile */
+    {
+        uint64_t h_buffer = read_guest_stack(1);
+        uint64_t h_bytes_read = read_guest_stack(4);
+        int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(h_bytes_read, NULL, NULL, "bytes_read");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtReadFile(arg1, arg2, arg3, arg4,
+                                    h_buffer,
+                                    read_guest_stack(2),
+                                    read_guest_stack(3),
+                                    h_bytes_read);
+        break;
+    }
+
+    case NT_SYSCALL_WRITE_FILE: /* NtWriteFile */
+    {
+        uint64_t h_buffer = read_guest_stack(1);
+        uint64_t h_bytes_written = read_guest_stack(4);
+        int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(h_bytes_written, NULL, NULL, "bytes_written");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtWriteFile(arg1, arg2, arg3, arg4,
+                                     h_buffer,
+                                     read_guest_stack(2),
+                                     read_guest_stack(3),
+                                     h_bytes_written);
+        break;
+    }
+
+    case NT_SYSCALL_CREATE_EVENT: /* NtCreateEvent */
+    {
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "event_handle");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtCreateEvent(&h_handle, arg2, arg3, arg4,
+                                       read_guest_stack(1));
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
+        break;
+    }
+
+    case NT_SYSCALL_CREATE_SECTION: /* NtCreateSection */
+    {
+        uint64_t h_handle = 0;
+        uint64_t h_max_sz = 0;
+        void *p_handle = NULL;
+        void *p_max = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "section_handle");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(arg4, &h_max_sz, &p_max, "maximum_size");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtCreateSection(&h_handle, arg2, arg3, &h_max_sz,
+                                         read_guest_stack(1),
+                                         read_guest_stack(2),
+                                         read_guest_stack(3));
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
+        if (p_max)    *(uint64_t *)p_max = h_max_sz;
+        break;
+    }
+
+    case NT_SYSCALL_CREATE_THREAD_EX: /* NtCreateThreadEx */
+    {
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "thread_handle");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtCreateThreadEx(&h_handle, arg2, arg3, arg4,
+                                          read_guest_stack(1),
+                                          read_guest_stack(2),
+                                          read_guest_stack(3),
+                                          read_guest_stack(4),
+                                          read_guest_stack(5),
+                                          read_guest_stack(6),
+                                          read_guest_stack(7));
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
+        break;
+    }
+
+    case NT_SYSCALL_OPEN_FILE: /* NtOpenFile */
+    {
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "file_handle");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(arg3, NULL, NULL, "object_attributes");
+        if (status != 0) return (uint64_t)status;
+        status = read_guest_ptr(arg4, NULL, NULL, "io_status_block");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtOpenFile(&h_handle, arg2, arg3, arg4,
+                                    read_guest_stack(1),
+                                    read_guest_stack(2));
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
+        break;
+    }
+
+    default:
+        fprintf(stderr, "my_wine: unhandled syscall 0x%lX\n",
+                (unsigned long)nr);
+        raise(SIGSEGV);
+    }
+
+    __wine_guest_regs.rax = result;
+    return result;
+}
+
+/* ── Legacy dispatcher (ucontext-based, for test compatibility) ── */
 
 /*
  * handle_syscall — dispatch a Windows NT syscall to its handler.
@@ -126,6 +409,10 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
  *
  * Writes the return value into gregs[REG_RAX].
  * On unhandled syscall, prints an error to stderr and raises SIGSEGV.
+ *
+ * NOTE: This function is kept for backward compatibility with existing
+ * tests that construct ucontext_t manually. The production path uses
+ * c_dispatch_syscall() instead.
  */
 int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 {
@@ -153,7 +440,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     case NT_SYSCALL_QUERY_INFO_PROCESS: /* NtQueryInformationProcess */
     {
         uint64_t h_buffer = arg3;
-        uint64_t h_ret_len = read_guest_stack(ctx, 1);
+        uint64_t h_ret_len = read_guest_stack_ctx(ctx, 1);
         int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
         if (status != 0) return status;
         status = read_guest_ptr(h_ret_len, NULL, NULL, "return_length");
@@ -179,8 +466,8 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         if (status != 0) return status;
         result = handler_NtAllocateVirtualMemory(
             arg1, &h_base_addr, arg3, &h_region_sz,
-            read_guest_stack(ctx, 1),
-            read_guest_stack(ctx, 2));
+            read_guest_stack_ctx(ctx, 1),
+            read_guest_stack_ctx(ctx, 2));
         if (p_base)   *(uint64_t *)p_base = h_base_addr;
         if (p_region) *(uint64_t *)p_region = h_region_sz;
         break;
@@ -221,8 +508,8 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     case NT_SYSCALL_MAP_VIEW: /* NtMapViewOfSection */
     {
         uint64_t h_base_addr = 0;
-        uint64_t h_section_off = read_guest_stack(ctx, 1);
-        uint64_t h_view_sz = read_guest_stack(ctx, 2);
+        uint64_t h_section_off = read_guest_stack_ctx(ctx, 1);
+        uint64_t h_view_sz = read_guest_stack_ctx(ctx, 2);
         void *p_base = NULL;
         void *p_offset = NULL;
         void *p_vsz = NULL;
@@ -235,11 +522,11 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         if (status != 0) return status;
         result = handler_NtMapViewOfSection(
             arg1, arg2, &h_base_addr, arg4,
-            read_guest_stack(ctx, 1),
+            read_guest_stack_ctx(ctx, 1),
             &h_section_off, &h_view_sz,
-            read_guest_stack(ctx, 4),
-            read_guest_stack(ctx, 5),
-            read_guest_stack(ctx, 6));
+            read_guest_stack_ctx(ctx, 4),
+            read_guest_stack_ctx(ctx, 5),
+            read_guest_stack_ctx(ctx, 6));
         if (p_base)   *(uint64_t *)p_base = h_base_addr;
         if (p_offset) *(uint64_t *)p_offset = h_section_off;
         if (p_vsz)    *(uint64_t *)p_vsz = h_view_sz;
@@ -256,32 +543,32 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 
     case NT_SYSCALL_READ_FILE: /* NtReadFile */
     {
-        uint64_t h_buffer = read_guest_stack(ctx, 1);
-        uint64_t h_bytes_read = read_guest_stack(ctx, 4);
+        uint64_t h_buffer = read_guest_stack_ctx(ctx, 1);
+        uint64_t h_bytes_read = read_guest_stack_ctx(ctx, 4);
         int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
         if (status != 0) return status;
         status = read_guest_ptr(h_bytes_read, NULL, NULL, "bytes_read");
         if (status != 0) return status;
         result = handler_NtReadFile(arg1, arg2, arg3, arg4,
                                     h_buffer,
-                                    read_guest_stack(ctx, 2),
-                                    read_guest_stack(ctx, 3),
+                                    read_guest_stack_ctx(ctx, 2),
+                                    read_guest_stack_ctx(ctx, 3),
                                     h_bytes_read);
         break;
     }
 
     case NT_SYSCALL_WRITE_FILE: /* NtWriteFile */
     {
-        uint64_t h_buffer = read_guest_stack(ctx, 1);
-        uint64_t h_bytes_written = read_guest_stack(ctx, 4);
+        uint64_t h_buffer = read_guest_stack_ctx(ctx, 1);
+        uint64_t h_bytes_written = read_guest_stack_ctx(ctx, 4);
         int status = read_guest_ptr(h_buffer, NULL, NULL, "buffer");
         if (status != 0) return status;
         status = read_guest_ptr(h_bytes_written, NULL, NULL, "bytes_written");
         if (status != 0) return status;
         result = handler_NtWriteFile(arg1, arg2, arg3, arg4,
                                      h_buffer,
-                                     read_guest_stack(ctx, 2),
-                                     read_guest_stack(ctx, 3),
+                                     read_guest_stack_ctx(ctx, 2),
+                                     read_guest_stack_ctx(ctx, 3),
                                      h_bytes_written);
         break;
     }
@@ -293,7 +580,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         int status = read_guest_ptr(arg1, &h_handle, &p_handle, "event_handle");
         if (status != 0) return status;
         result = handler_NtCreateEvent(&h_handle, arg2, arg3, arg4,
-                                       read_guest_stack(ctx, 1));
+                                       read_guest_stack_ctx(ctx, 1));
         if (p_handle) *(uint64_t *)p_handle = h_handle;
         break;
     }
@@ -309,9 +596,9 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         status = read_guest_ptr(arg4, &h_max_sz, &p_max, "maximum_size");
         if (status != 0) return status;
         result = handler_NtCreateSection(&h_handle, arg2, arg3, &h_max_sz,
-                                         read_guest_stack(ctx, 1),
-                                         read_guest_stack(ctx, 2),
-                                         read_guest_stack(ctx, 3));
+                                         read_guest_stack_ctx(ctx, 1),
+                                         read_guest_stack_ctx(ctx, 2),
+                                         read_guest_stack_ctx(ctx, 3));
         if (p_handle) *(uint64_t *)p_handle = h_handle;
         if (p_max)    *(uint64_t *)p_max = h_max_sz;
         break;
@@ -324,13 +611,13 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         int status = read_guest_ptr(arg1, &h_handle, &p_handle, "thread_handle");
         if (status != 0) return status;
         result = handler_NtCreateThreadEx(&h_handle, arg2, arg3, arg4,
-                                          read_guest_stack(ctx, 1),
-                                          read_guest_stack(ctx, 2),
-                                          read_guest_stack(ctx, 3),
-                                          read_guest_stack(ctx, 4),
-                                          read_guest_stack(ctx, 5),
-                                          read_guest_stack(ctx, 6),
-                                          read_guest_stack(ctx, 7));
+                                          read_guest_stack_ctx(ctx, 1),
+                                          read_guest_stack_ctx(ctx, 2),
+                                          read_guest_stack_ctx(ctx, 3),
+                                          read_guest_stack_ctx(ctx, 4),
+                                          read_guest_stack_ctx(ctx, 5),
+                                          read_guest_stack_ctx(ctx, 6),
+                                          read_guest_stack_ctx(ctx, 7));
         if (p_handle) *(uint64_t *)p_handle = h_handle;
         break;
     }
@@ -346,8 +633,8 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         status = read_guest_ptr(arg4, NULL, NULL, "io_status_block");
         if (status != 0) return status;
         result = handler_NtOpenFile(&h_handle, arg2, arg3, arg4,
-                                    read_guest_stack(ctx, 1),
-                                    read_guest_stack(ctx, 2));
+                                    read_guest_stack_ctx(ctx, 1),
+                                    read_guest_stack_ctx(ctx, 2));
         if (p_handle) *(uint64_t *)p_handle = h_handle;
         break;
     }

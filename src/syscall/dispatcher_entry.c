@@ -17,12 +17,7 @@
 struct guest_regs __wine_guest_regs = {0};
 void *unix_stack_ptr_val = NULL;
 
-/* Stub for c_dispatch_syscall — fully implemented in Phase 3 (dispatcher.c rewrite) */
-uint64_t c_dispatch_syscall(uint64_t nr)
-{
-    (void)nr;
-    return 0;
-}
+/* c_dispatch_syscall is implemented in dispatcher.c */
 
 int setup_unix_stack(void)
 {
