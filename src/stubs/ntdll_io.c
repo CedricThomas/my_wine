@@ -7,15 +7,11 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <unistd.h>
+#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
 
-/* Linux x86_64 syscall numbers */
-#define SYS_read       0
-#define SYS_write      1
-#define SYS_close      3
-#define SYS_openat    257
-#define AT_FDCWD      ((long)-100)
+#define AT_FDCWD ((long)-100)
 
 HANDLER
 uint64_t handler_NtWriteFile(uint64_t file_handle, uint64_t event, uint64_t apc,
@@ -29,7 +25,7 @@ uint64_t handler_NtWriteFile(uint64_t file_handle, uint64_t event, uint64_t apc,
 
     const char *buf = (const char *)(uintptr_t)buffer;
     long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_write), "D"(fd), "S"(buf), "d"((size_t)length) : "rcx", "r11", "memory", "cc");
+    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_write), "D"(fd), "S"(buf), "d"((size_t)length) : "rcx", "r11", "memory", "cc");
     ssize_t n = (ssize_t)res;
     if (n < 0) return STATUS_UNSUCCESSFUL;
 
@@ -51,7 +47,7 @@ uint64_t handler_NtReadFile(uint64_t file_handle, uint64_t event, uint64_t apc,
 
     char *buf = (char *)(uintptr_t)buffer;
     long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_read), "D"(fd), "S"(buf), "d"((size_t)length) : "rcx", "r11", "memory", "cc");
+    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_read), "D"(fd), "S"(buf), "d"((size_t)length) : "rcx", "r11", "memory", "cc");
     ssize_t n = (ssize_t)res;
     if (n < 0) return STATUS_UNSUCCESSFUL;
 
@@ -61,24 +57,6 @@ uint64_t handler_NtReadFile(uint64_t file_handle, uint64_t event, uint64_t apc,
     return STATUS_SUCCESS;
 }
 
-/*
- * handler_NtOpenFile
- *
- * OBJECT_ATTRIBUTES (x64, 40 bytes):
- *   uint32_t  Length           (24)
- *   int32_t   pad
- *   uint64_t  RootDirectory
- *   uint64_t  ObjectName  (pointer to UNICODE_STRING)
- *   uint32_t  Attributes
- *   int32_t   pad
- *   uint64_t  SecurityDescriptor
- *   uint64_t  SecurityQualityOfService
- *
- * UNICODE_STRING (x64, 12 bytes):
- *   uint16_t  Length
- *   uint16_t  MaximumLength
- *   uint64_t  Buffer     (pointer to wchar_t string)
- */
 HANDLER
 uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
                             uint64_t object_attributes, uint64_t io_status_block,
@@ -103,15 +81,15 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
 
     /* Extract path from OBJECT_ATTRIBUTES if provided */
     if (object_attributes != 0) {
-        /* Read ObjectName pointer (offset 16 in OBJECT_ATTRIBUTES) */
-        uint64_t object_name_ptr = *(uint64_t *)((uintptr_t)object_attributes + 16);
+        /* Read ObjectName pointer from OBJECT_ATTRIBUTES */
+        uint64_t object_name_ptr = ((OBJECT_ATTRIBUTES *)object_attributes)->ObjectName;
 
         if (object_name_ptr != 0) {
-            /* Read UNICODE_STRING (12 bytes) */
-            uint16_t wcs_len = *(uint16_t *)(uintptr_t)object_name_ptr;
+            /* Read UNICODE_STRING */
+            uint16_t wcs_len = ((UNICODE_STRING *)object_name_ptr)->Length;
             if (wcs_len > 16384) wcs_len = 16384; /* cap at 8192 wchar_t */
             const wchar_t *wcs = (const wchar_t *)(
-                (uintptr_t)object_name_ptr + 12
+                (uintptr_t)((UNICODE_STRING *)object_name_ptr)->Buffer
             );
             if (wcs_len > 0) {
                 /* Convert from UTF-16 to UTF-8 (assume ASCII for simplicity) */
@@ -136,7 +114,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
 
     /* Open the file via openat syscall (avoids libc after GS base change) */
     long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_openat), "D"(AT_FDCWD), "S"(open_path), "d"(oflags) : "rcx", "r11", "memory", "cc");
+    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_openat), "D"(AT_FDCWD), "S"(open_path), "d"(oflags) : "rcx", "r11", "memory", "cc");
     int fd = (int)res;
     if (fd < 0) {
         return STATUS_UNSUCCESSFUL;
@@ -145,7 +123,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     /* Store in handle table */
     uint64_t handle = fd_to_handle(fd);
     if (handle == 0) {
-        __asm__ volatile("syscall" : "=a"(res) : "a"(SYS_close), "D"(fd) : "rcx", "r11", "cc");
+        __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_close), "D"(fd) : "rcx", "r11", "cc");
         return STATUS_UNSUCCESSFUL;
     }
 

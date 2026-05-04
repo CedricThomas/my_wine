@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <unistd.h>
+#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
 
@@ -78,7 +79,7 @@ uint64_t handler_NtClose(uint64_t handle)
     if (fd < 0) return STATUS_INVALID_HANDLE;
 
     long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(3), "D"(fd) : "rcx", "r11", "cc");
+    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_close), "D"(fd) : "rcx", "r11", "cc");
     (void)res;
     free_handle(handle);
 

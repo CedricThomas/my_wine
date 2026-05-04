@@ -11,6 +11,7 @@
 #include "include/syscall/thunk_gen.h"
 #include "include/wine_abi.h"
 #include "include/abi_wrappers.h"
+#include "ntdll_priv.h"
 
 /* Linux x86_64 syscall numbers */
 #define SYS_write      1
@@ -277,15 +278,7 @@ void *TlsGetValue(uint32_t dwTlsIndex)
 WINE_STUB
 int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect)
 {
-    int prot = 0;
-    switch ((int)flNewProtect) {
-    case PAGE_READONLY:        prot = PROT_READ; break;
-    case PAGE_READWRITE:       prot = PROT_READ | PROT_WRITE; break;
-    case PAGE_EXECUTE:         prot = PROT_EXEC; break;
-    case PAGE_EXECUTE_READ:    prot = PROT_READ | PROT_EXEC; break;
-    case PAGE_EXECUTE_READWRITE: prot = PROT_READ | PROT_WRITE | PROT_EXEC; break;
-    default: prot = PROT_READ | PROT_WRITE; break;
-    }
+    int prot = map_protect(flNewProtect);
 
     /* Save old protection */
     if (lpflOldProtect) {

@@ -101,4 +101,24 @@ NTSTATUS handler_NtCreateThreadEx(PVOID *thread_handle, ULONG desired_access, PV
 // NtOpenFile (0x4F)
 NTSTATUS handler_NtOpenFile(PVOID *file_handle, ULONG desired_access, PVOID object_attributes, PVOID io_status_block, ULONG share_access, ULONG dispose);
 
+/* ── Windows struct definitions (packed) ─────────────────── */
+#pragma pack(push, 1)
+typedef struct {
+    uint16_t Length;
+    uint16_t MaximumLength;
+    uint64_t Buffer;
+} UNICODE_STRING;
+
+typedef struct {
+    uint32_t  Length;
+    uint32_t  _pad;
+    uint64_t  RootDirectory;
+    uint64_t  ObjectName;
+    uint32_t  Attributes;
+    uint32_t  _pad2;
+    uint64_t  SecurityDescriptor;
+    uint64_t  SecurityQos;
+} OBJECT_ATTRIBUTES;
+#pragma pack(pop)
+
 #endif // MY_WINE_NTDLL_H

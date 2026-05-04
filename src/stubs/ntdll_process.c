@@ -6,12 +6,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
-
-/* Linux x86_64 syscall numbers */
-#define SYS_exit     60
-#define SYS_getpid   39
 
 HANDLER
 uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_status)
@@ -20,7 +17,7 @@ uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_statu
         return STATUS_SUCCESS;
 
     long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_exit), "D"((unsigned long)exit_status) : "rcx", "r11", "cc");
+    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit), "D"((unsigned long)exit_status) : "rcx", "r11", "cc");
     /* __builtin_unreachable() ensures the compiler knows this doesn't return */
     __builtin_unreachable();
 }
@@ -68,7 +65,7 @@ uint64_t handler_NtQueryInformationProcess(uint64_t process_handle,
         out[2] = 1;                         /* AffinityMask */
         out[3] = 8;                         /* BasePriority */
         long ret;
-        __asm__ volatile("syscall" : "=a"(ret) : "a"(SYS_getpid) : "rcx", "r11", "cc");
+        __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_getpid) : "rcx", "r11", "cc");
         out[4] = (uint64_t)ret;             /* UniqueProcessId */
         out[5] = (uint64_t)ret;             /* InheritedFromUniqueProcessId */
         if (return_length) *(uint32_t *)(uintptr_t)return_length = 40;
