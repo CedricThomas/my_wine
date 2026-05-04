@@ -221,6 +221,91 @@ interception flow.
 
 ---
 
+## 3. Why .refptr patching
+
+GCC/MinGW generates a `.refptr` section in the PE's `.data` segment
+containing pointers to CRT globals (`__argc`, `__argv`, `__envp`, etc.).
+In our Linux environment these pointers resolve to garbage — the PE's
+own `.data` at its preferred base has no CRT globals. We must redirect
+them to our Linux-side stubs (`ctor_list_stub`, `dtor_list_stub`, etc.).
+
+### Two Strategies
+
+We support two approaches for locating the `.refptr` entries:
+
+#### COFF Symbol Table Lookup
+
+When the PE retains its symbol table, we can dynamically discover
+the exact offsets of each `.refptr` entry by name. This is the
+preferred approach — it works regardless of linker ordering.
+
+```c
+// src/stubs/crt_refptrs.c — runs in parent before fork
+struct external *ext = coff_get_external(pe);
+for (uint16_t i = 0; i < ext->NumberOfSymbols; i++) {
+    uint8_t *sym = sym_buf + i * SYMBOL_SIZE;
+    const char *name = get_symbol_name(sym, sym_buf, ext);
+    if (strcmp(name, "__imp___argc") == 0
+        || strcmp(name, "__imp___argv") == 0
+        || strcmp(name, "__imp___environ") == 0) {
+        // patch the pointer at sym->Value in .data
+    }
+}
+```
+
+#### Hardcoded Offsets (Fallback)
+
+When the symbol table is stripped, we fall back to known offsets.
+These are determined empirically from the MinGW linker layout:
+
+- `__argc` at offset `0x018`
+- `__argv` at offset `0x020`
+- `__environ` at offset `0x028`
+
+```c
+// Fallback when symbols are stripped
+const struct { const char *name; uint32_t offset; void *stub; } fallbacks[] = {
+    { "__argc",     0x018, &argc_stub },
+    { "__argv",     0x020, &argv_stub },
+    { "__environ",  0x028, &environ_stub },
+    // ...
+};
+```
+
+This approach is fragile (depends on linker version and CRT layout)
+but covers the common case of stripped release builds.
+
+### `__acrt_iob_func` Patch
+
+The mingw-w64 CRT function `__acrt_iob_func` has a bug in its
+wrapper: it clobbers the upper 32 bits of `RCX`. This causes
+undefined behavior when `printf`-family functions use it to
+access the `iob` array.
+
+We fix this with a 15-byte overwrite at the function's entry point:
+
+```asm
+; Replace the buggy wrapper with a direct return of our iob array
+movabs rax, <__wine_iob_data()>   ; 48 B8 xx xx xx xx xx xx xx xx
+ret                               ; C3
+```
+
+This must be done in the **child** process because
+`__wine_iob_data()` returns a child-specific address that does not
+exist in the parent. The implementation lives in
+`src/loader/entry.c`.
+
+### Summary
+
+| What | Where | When |
+|------|-------|------|
+| `.refptr` redirection | `src/stubs/crt_refptrs.c` | Parent, before `fork()` |
+| `__acrt_iob_func` patch | `src/loader/entry.c` | Child, before entry point |
+
+See [CRT refptr Patching](refptr.md) for full implementation details.
+
+---
+
 ## Related Documents
 
 - [PE Format Primer](pe_format.md) — PE structure basics
