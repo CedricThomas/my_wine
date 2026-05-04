@@ -20,6 +20,7 @@
 #include "include/common.h"
 
 #include "loader_priv.h"
+#include "include/debug.h"
 
 /* Name→address table for NT, kernel32 and msvcrt functions */
 import_entry_t import_table[] = {
@@ -101,7 +102,7 @@ void set_import(const char *name, void *address)
             return;
         }
     }
-    fprintf(stderr, "ERROR: set_import: symbol '%s' not found\n", name);
+    DEBUG("ERROR: set_import: symbol '%s' not found", name);
 }
 
 static int import_entry_cmp(const void *a, const void *b)
@@ -194,7 +195,7 @@ bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
     for (int f = 0; f < num_flat; f++) {
         if (flat[f].ilt_value == current_val && flat[f].resolved_addr != 0) {
             *target_ptr = flat[f].resolved_addr;
-            printf("    Thunk patch (ilt match): %s!%s at 0x%lx <- 0x%lx\n",
+            DEBUG("    Thunk patch (ilt match): %s!%s at 0x%lx <- 0x%lx",
                    flat[f].dll_name, flat[f].func_name,
                    (unsigned long)target, (unsigned long)flat[f].resolved_addr);
             return true;
@@ -219,7 +220,7 @@ bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
     if (slot_idx < 0 || slot_idx >= num_flat || flat[slot_idx].resolved_addr == 0)
         return false;
     *target_ptr = flat[slot_idx].resolved_addr;
-    printf("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx\n",
+    DEBUG("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx",
            flat[slot_idx].dll_name, flat[slot_idx].func_name,
            (unsigned long)target, (unsigned long)flat[slot_idx].resolved_addr);
     return true;
@@ -235,7 +236,7 @@ bool strategy_positional(uint64_t *target_ptr, uint64_t target,
     if (thunk_idx >= num_flat || flat[thunk_idx].resolved_addr == 0)
         return false;
     *target_ptr = flat[thunk_idx].resolved_addr;
-    printf("    Thunk patch (pos match): %s!%s at 0x%lx <- 0x%lx\n",
+    DEBUG("    Thunk patch (pos match): %s!%s at 0x%lx <- 0x%lx",
            flat[thunk_idx].dll_name, flat[thunk_idx].func_name,
            (unsigned long)target, (unsigned long)flat[thunk_idx].resolved_addr);
     return true;

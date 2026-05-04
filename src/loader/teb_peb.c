@@ -17,6 +17,7 @@
 #include "include/pe.h"
 #include "include/nt_constants.h"
 #include "loader_priv.h"
+#include "include/debug.h"
 
 void *g_stack_base = NULL;
 size_t g_stack_size = 0;
@@ -76,14 +77,14 @@ void *setup_teb_peb(void)
 
     /* Set GS segment to point to TEB */
     if (set_gs_base(teb) != 0) {
-        fprintf(stderr, "my_wine: cannot set GS base, guest execution will fail\n");
+        DEBUG("my_wine: cannot set GS base, guest execution will fail");
         munmap(peb, peb_size);
         munmap(teb, teb_size);
         return NULL;
     }
 
-    printf("TEB at %p, PEB at %p\n", teb, peb);
-    printf("GS base: %p (verify via get_gs_base)\n", get_gs_base());
+    DEBUG("TEB at %p, PEB at %p", teb, peb);
+    DEBUG("GS base: %p (verify via get_gs_base)", get_gs_base());
 
     return teb;
 }
@@ -127,7 +128,7 @@ void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
 
 
     /* Print stack info */
-    printf("Stack: base=%p, top=%p, reserve=0x%lx, commit=0x%lx\n",
+    DEBUG("Stack: base=%p, top=%p, reserve=0x%lx, commit=0x%lx",
            stack_base, (void *)stack_top,
            (unsigned long)reserve, (unsigned long)commit);
 
