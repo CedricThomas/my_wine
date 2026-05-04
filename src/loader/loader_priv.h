@@ -102,10 +102,19 @@ void *map_image(const char *path,
 void *setup_teb_peb(void);
 void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
 
-/* ── entry.c ───────────────────────────────────────────────── */
+/* ── crash_handlers.c ─────────────────────────────────────── */
+
+void setup_signal_handlers(void);
+__attribute__((ms_abi)) void seh_crash_handler(void *, void *, void *, void *);
+
+/* ── entry.c / child_setup.c ────────────────────────────────── */
 
 int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base,
                   void *teb, char **guest_argv, char **guest_envp);
+
+void setup_child_and_run(uint64_t entry_abs, void *stack_top, void *teb,
+                         char **guest_argv, char **guest_envp);
+void cleanup_guest(void *teb, void *stack_base);
 
 /* ── gs_base.c ─────────────────────────────────────────────── */
 
