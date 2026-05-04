@@ -108,11 +108,11 @@ test: all $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution
 		echo "No hello_world.exe found — running error/negative tests only"; \
 		timeout 5 ./$(BUILDDIR)/test_parse; \
 	fi
-	@echo "=== Running test_import_resolution (t7.3) ==="
+	@echo "=== Running test_import_resolution ==="
 	timeout 5 ./$(BUILDDIR)/test_import_resolution
-	@echo "=== Running test_teb_peb (t7.4) ==="
+	@echo "=== Running test_teb_peb ==="
 	timeout 120 ./$(BUILDDIR)/test_teb_peb
-	@echo "=== Running test_syscall_dispatch (t7.5) ==="
+	@echo "=== Running test_syscall_dispatch ==="
 	timeout 5 ./$(BUILDDIR)/test_syscall_dispatch
 	@echo "=== Tests completed ==="
 
