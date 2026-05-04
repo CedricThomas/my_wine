@@ -203,29 +203,8 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
  * Set up the child process and jump to the PE entry point.
  * Called in the forked child; does not return.
  */
-static void wd_handler(int sig, siginfo_t *info, void *uc_ptr) { (void)sig; (void)info;
-   ucontext_t *uc = (ucontext_t*)uc_ptr;
-   greg_t *r = uc->uc_mcontext.gregs;
-   char b[150]; int off = 0;
-   const char hdr[] = "WD:RIP=0x";
-   for (int i = 0; hdr[i]; i++) b[off++] = hdr[i];
-   uint64_t val = (uint64_t)r[REG_RIP];
-   format_hex(b + off, sizeof(b) - off, val); off += 16;
-   const char hdr2[] = " RSP=0x";
-   for (int i = 0; hdr2[i]; i++) b[off++] = hdr2[i];
-   val = (uint64_t)r[REG_RSP];
-   format_hex(b + off, sizeof(b) - off, val); off += 16;
-   const char hdr3[] = " RAX=0x";
-   for (int i = 0; hdr3[i]; i++) b[off++] = hdr3[i];
-   val = (uint64_t)r[REG_RAX];
-   format_hex(b + off, sizeof(b) - off, val); off += 16;
-   b[off++] = '\n'; b[off] = '\0';
-   long ret; __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(b), "d"((size_t)off) : "rcx","r11","memory","cc");
-   __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit), "D"(0xFF) : "rcx","r11","cc"); }
-
-static __attribute__((noreturn)) void setup_child_and_run(
-        uint64_t entry_abs, void *stack_top, void *teb,
-        char **guest_argv, char **guest_envp)
+/* ── Step 1: Signal handlers ─────────────────────────────── */
+static void setup_signal_handlers(void)
 {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -253,8 +232,13 @@ static __attribute__((noreturn)) void setup_child_and_run(
             sigaltstack(&ss, NULL);
         }
     }
+}
 
-    /* Set up SEH chain (must be done in child; frame must persist for guest SEH walk) */
+/* ── Step 2: SEH chain + syscall thunks ──────────────────── */
+/* Returns pointer to the static SEH frame for TEB wiring in step 3 */
+static void *setup_seh_and_thunks(void)
+{
+    /* SEH chain (must be done in child; frame must persist for guest SEH walk) */
     static __attribute__((aligned(8))) uint64_t child_seh_frame[2];
     child_seh_frame[0] = 0;  /* next = NULL (end of chain) */
     child_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
@@ -263,10 +247,14 @@ static __attribute__((noreturn)) void setup_child_and_run(
     setup_sigsys_handler(handle_syscall);
     setup_seccomp();
 
-    fprintf(stderr, "my_wine: jumping to entry 0x%lx via inline asm\n",
-            (unsigned long)entry_abs);
-    fflush(stderr);
+    return child_seh_frame;
+}
 
+/* ── Step 3: Guest state (GS base, TEB SEH, PE re-parse) ── */
+static void setup_guest_state(void *teb, uint64_t entry_abs, void *seh_frame,
+                              IMAGE_NT_HEADERS64 **out_nt,
+                              IMAGE_SECTION_HEADER **out_sections)
+{
     /* Re-set GS base in child (inherited from parent but let's be sure) */
     if (set_gs_base(teb) != 0) {
         fprintf(stderr, "my_wine: cannot set GS base in child, aborting\n");
@@ -284,9 +272,9 @@ static __attribute__((noreturn)) void setup_child_and_run(
     }
 
     /* Point TEB gs:[0x00] to our SEH frame */
-    *(void **)((uint8_t *)teb + TEB_SEH_CHAIN) = (void *)child_seh_frame;
+    *(void **)((uint8_t *)teb + TEB_SEH_CHAIN) = seh_frame;
 
-    /* Patch __acrt_iob_func thunk to return __wine_iob_data directly */
+    /* Re-parse PE headers from entry_abs to get nt_headers + sections */
     uint64_t image_base = entry_abs & ~0xFFFFFUL;
     void *base = (void *)(uintptr_t)image_base;
     const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
@@ -297,6 +285,14 @@ static __attribute__((noreturn)) void setup_child_and_run(
     IMAGE_SECTION_HEADER *sections =
         (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
 
+    *out_nt = nt;
+    *out_sections = sections;
+}
+
+/* ── Step 4: Final patches ───────────────────────────────── */
+static void apply_final_patches(void *base, IMAGE_NT_HEADERS64 *nt,
+                                IMAGE_SECTION_HEADER *sections)
+{
     patch_acrt_iob(base, nt, sections);
 
     /* Ensure .bss is writable after fork (mprotect may not propagate) */
@@ -313,37 +309,91 @@ static __attribute__((noreturn)) void setup_child_and_run(
             }
         }
     }
+}
 
-    /* Jump to the PE's AddressOfEntryPoint (mainCRTStartup or main) */
+/* ── Watchdog handler (used in step 5) ──────────────────── */
+static void wd_handler(int sig, siginfo_t *info, void *uc_ptr) { (void)sig; (void)info;
+   ucontext_t *uc = (ucontext_t*)uc_ptr;
+   greg_t *r = uc->uc_mcontext.gregs;
+   char b[150]; int off = 0;
+   const char hdr[] = "WD:RIP=0x";
+   for (int i = 0; hdr[i]; i++) b[off++] = hdr[i];
+   uint64_t val = (uint64_t)r[REG_RIP];
+   format_hex(b + off, sizeof(b) - off, val); off += 16;
+   const char hdr2[] = " RSP=0x";
+   for (int i = 0; hdr2[i]; i++) b[off++] = hdr2[i];
+   val = (uint64_t)r[REG_RSP];
+   format_hex(b + off, sizeof(b) - off, val); off += 16;
+   const char hdr3[] = " RAX=0x";
+   for (int i = 0; hdr3[i]; i++) b[off++] = hdr3[i];
+   val = (uint64_t)r[REG_RAX];
+   format_hex(b + off, sizeof(b) - off, val); off += 16;
+   b[off++] = '\n'; b[off] = '\0';
+   long ret; __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_write), "D"(2), "S"(b), "d"((size_t)off) : "rcx","r11","memory","cc");
+   __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit), "D"(0xFF) : "rcx","r11","cc"); }
+
+/* ── Step 5: Watchdog + jump to guest (noreturn) ─────────── */
+static void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
+                                    char **guest_argv, char **guest_envp)
+    __attribute__((noreturn));
+static void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
+                                    char **guest_argv, char **guest_envp)
+{
     /* Watchdog: 60s timeout to allow full CRT startup */
     { struct sigaction w; memset(&w,0,sizeof(w));
       w.sa_sigaction=wd_handler; w.sa_flags=SA_SIGINFO; sigemptyset(&w.sa_mask);
       sigaction(SIGALRM,&w,NULL); struct itimerval t={.it_interval={0,0},.it_value={WATCHDOG_TIMEOUT,0}};
       setitimer(ITIMER_REAL,&t,NULL); }
-    {
-        void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
 
-        /* Find ExitProcess from the import table so we can call it after main returns */
-        void (*exit_fn)(uint32_t) = NULL;
-        for (int i = 0; import_table[i].name != NULL; i++) {
-            if (strcmp(import_table[i].name, "ExitProcess") == 0 &&
-                import_table[i].address != NULL) {
-                exit_fn = (void (*)(uint32_t))import_table[i].address;
-                break;
-            }
-        }
-        if (!exit_fn) {
-            fprintf(stderr, "ERROR: ExitProcess not found in import table\n");
-            _exit(1);
-        }
-        fprintf(stderr, "my_wine: ExitProcess at %p\n", (void *)exit_fn);
+    void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
 
-        run_guest(entry, stack_top, NULL, guest_argv, guest_envp, exit_fn);
+    /* Find ExitProcess from the import table so we can call it after main returns */
+    void (*exit_fn)(uint32_t) = NULL;
+    for (int i = 0; import_table[i].name != NULL; i++) {
+        if (strcmp(import_table[i].name, "ExitProcess") == 0 &&
+            import_table[i].address != NULL) {
+            exit_fn = (void (*)(uint32_t))import_table[i].address;
+            break;
+        }
     }
+    if (!exit_fn) {
+        fprintf(stderr, "ERROR: ExitProcess not found in import table\n");
+        _exit(1);
+    }
+    fprintf(stderr, "my_wine: ExitProcess at %p\n", (void *)exit_fn);
+
+    run_guest(entry, stack_top, NULL, guest_argv, guest_envp, exit_fn);
 
     fprintf(stderr, "my_wine: inline jump returned\n");
     fflush(stderr);
     _exit(1);
+}
+
+/* ── Orchestrator ────────────────────────────────────────── */
+/**
+ * Set up the child process and jump to the PE entry point.
+ * Called in the forked child; does not return.
+ */
+static void setup_child_and_run(
+        uint64_t entry_abs, void *stack_top, void *teb,
+        char **guest_argv, char **guest_envp)
+{
+    setup_signal_handlers();
+    void *seh_frame = setup_seh_and_thunks();
+
+    fprintf(stderr, "my_wine: jumping to entry 0x%lx via inline asm\n",
+            (unsigned long)entry_abs);
+    fflush(stderr);
+
+    IMAGE_NT_HEADERS64 *nt = NULL;
+    IMAGE_SECTION_HEADER *sections = NULL;
+    setup_guest_state(teb, entry_abs, seh_frame, &nt, &sections);
+
+    uint64_t image_base = entry_abs & ~0xFFFFFUL;
+    void *base = (void *)(uintptr_t)image_base;
+    apply_final_patches(base, nt, sections);
+
+    setup_watchdog_and_jump(entry_abs, stack_top, guest_argv, guest_envp);
 }
 
 /**
