@@ -24,22 +24,18 @@ Each section contains:
 | [6](#6-limited-syscall-handlers) | Limited Syscall Handlers | High | None |
 | [7](#7-no-heap-management) | No Heap Management | Medium | CriticalSection (§4) |
 | [8](#8-no-filesystem-io) | No Filesystem I/O | High | Syscall handlers (§6) |
-| [9](#9-hardcoded-crt-fallback-offsets) | ✅ Hardcoded CRT Fallback Offsets — **RESOLVED** | Low | None |
-| [10](#10-no-ordinal-imports) | ✅ No Ordinal Imports — **RESOLVED** | Low | None |
-| [11](#11-60s-watchdog) | ✅ 60s Watchdog — **RESOLVED (architectural change)** | Low | None |
-| [12](#12-single-thread-seh) | Single-thread SEH | High | Threading (§3, §4) |
+| [9](#9-single-thread-seh) | Single-thread SEH | High | Threading (§3, §4) |
 
 ### Recommended Implementation Order
 
 By dependency graph (leaf nodes first):
 
 ```
-✅ Done:  §10, §9
-Phase 1 (remaining):  §1
-Phase 2 (need §1 or nothing): §6 → §3
+Phase 1:  §1
+Phase 2 (need §1): §6 → §3
 Phase 3 (need §6):  §4 → §8
 Phase 4 (need §4 + §7): §5
-Phase 5 (need §3 + §4): §12
+Phase 5 (need §3 + §4): §9
 ```
 
 ---
@@ -597,107 +593,7 @@ Benefits from ordinal import support (§10). Needs dispatcher registration (§6)
 
 ---
 
-## 9. Hardcoded CRT Fallback Offsets
-
-### Current State
-
-Hardcoded offsets (`0x018`, `0x020`, `0x028`) when COFF symbol lookup fails.
-Vary by mingw-w64 version and linker flags.
-
-**Discovery hierarchy:** (1) COFF symbol table, (2) data section scan,
-(3) `.text` instruction scan, (4) **hardcoded fallback** (fragile).
-
-### Approach
-
-**Option A (Recommended): Build-time offset measurement.**
-Shell script compiles test PE, extracts actual offsets, generates
-`include/crt_offsets_generated.h`.
-
-**Option B: Extended runtime probing.** Scan `.bss` for patterns.
-
-**Option C: Remove fallback entirely.** Hard error.
-
-### Complexity
-
-- Option A: Low (one script + header)
-- Option B: Medium (~50 lines)
-- Option C: Very Low (5 lines)
-
-**Status: ✅ Resolved** — `scripts/gen_crt_offsets.sh` generates `include/crt_offsets_generated.h` from the current mingw-w64 toolchain. Falls back to hardcoded values when Docker is unavailable.
-
-### Prerequisites
-
-None. Option A requires mingw-w64 (already needed).
-
----
-
-## 10. No Ordinal Imports
-
-### Current State
-
-Ordinal imports (high bit set) are skipped with a warning. IAT entry left at
-0 — crashes when called.
-
-### Approach
-
-**Static ordinal database:**
-
-```c
-// src/loader/ordinal_table.c
-typedef struct { const char *dll; uint16_t ordinal; const char *name; } ordinal_mapping_t;
-
-static const ordinal_mapping_t ordinal_table[] = {
-    { "ntdll.dll", 0x0005, "NtCallbackReturn" },
-    { "ntdll.dll", 0x000F, "NtClose" },
-    { "ntdll.dll", 0x0018, "NtAllocateVirtualMemory" },
-    // ... ~50 entries for ntdll/kernel32/msvcrt
-    { NULL, 0, NULL }
-};
-```
-
-Modify `resolve_import_pass1()` to look up ordinal → name, then resolve through
-existing name-based path.
-
-### Complexity: Low (~60 lines total)
-
-### Prerequisites
-
-None.
-
-### Risks
-
-Ordinal numbers change between Windows versions. Acceptable since we only
-support mingw-w64.
-
-**Status: ✅ Resolved** — `src/loader/ordinal_table.c` with ~160 entries covering ntdll/kernel32/msvcrt ordinals (Windows 10/11 x64). Integrated into both Pass 1 and Pass 2 import resolution.
-
----
-
-## 11. 60s Watchdog
-
-**Status: ✅ Resolved by architectural change (fork → single process).**
-
-The watchdog timer was necessary because the fork model spawned a separate child
-process whose lifetime needed to be bounded — a hung child could leave the parent
-waiting on `waitpid()` indefinitely. The 60-second timeout in `child_setup.c`
-was a safety net for that fork-based child process.
-
-The architectural change to a **single-process, stack-switching model** eliminates
-the fork entirely. Guest code runs in the same process as the loader, so there is
-no child process to time out. The watchdog is no longer needed.
-
-### Historical Context
-
-The previous approach explored:
-- **Option A:** Configurable timeout via `MY_WINE_WATCHDOG` env var or `--watchdog=N` CLI arg
-- **Option B:** Self-disabling after guest `main()` entry
-- **Option C:** Heartbeat timer reset on each syscall dispatch
-
-All options are now moot — the fork-based child process no longer exists.
-
----
-
-## 12. Single-thread SEH
+## 9. Single-thread SEH
 
 ### Current State
 
@@ -758,9 +654,7 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 | §6 Syscall | §4 Sync, §8 File I/O | None |
 | §7 Heap | §5 Toolchain | §4 Sync |
 | §8 File I/O | Real applications | §6 Syscall |
-| §9 CRT Offsets | Robustness | None |
-| §10 Ordinal Imports | More PEs | None |
-| §12 SEH | Exception safety | §3, §4 |
+| §9 SEH | Exception safety | §3, §4 |
 
 ---
 
