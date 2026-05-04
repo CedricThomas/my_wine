@@ -80,7 +80,7 @@ targets.
 ## 3. How `patch_crt_refptrs` Works
 
 `patch_crt_refptrs()` is defined in `src/stubs/crt_refptrs.c`. It
-runs in the parent process before `fork()`.
+runs during loader initialization.
 
 ### Step 1: Find the `.refptr` Section
 
@@ -186,7 +186,7 @@ But our stub may not honor this convention in all cases.
 
 ### The Fix
 
-The fix is applied in the child process (after `fork()`) in
+The fix is applied during guest setup in
 `entry.c:patch_acrt_iob()`. It patches the `__acrt_iob_func` wrapper
 in the PE's `.text` section:
 
@@ -211,18 +211,17 @@ This is a **15-byte overwrite** of the original `jmp *disp(%rip)`
 thunk instruction. It requires `mprotect` to make `.text` writable
 temporarily.
 
-### Why in the Child?
+### Why During Guest Setup?
 
-The `__acrt_iob_func` patch is done in the child process (not the
-parent) because:
+The `__acrt_iob_func` patch is done during guest setup because:
 
 1. The `__wine_iob_data()` function returns a pointer that is only
-   meaningful in the child's address space (the host's `__wine_iob`
-   is copied by `fork()`).
-2. The `.text` section is `PROT_READ|PROT_EXEC` in both parent and
-   child (inherited from the image mapping), so `mprotect` works in
-   either. But doing it in the child avoids unnecessary patching in
-   the parent.
+   meaningful in the guest address space (the host's `__wine_iob`
+   is part of the mapped image).
+2. The `.text` section is `PROT_READ|PROT_EXEC` (inherited from the
+   image mapping), so `mprotect` works at any point. But doing it
+   during guest setup, before guest code runs, avoids unnecessary
+   patching on the loader side.
 
 ---
 
