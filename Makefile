@@ -106,24 +106,7 @@ $(SHELL.EXE):
 # test depends on my_wine, the test binaries, AND hello_world.exe
 test: all $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch
-	@echo "=== Running test_parse ==="
-	@if [ -f $(SHELL.EXE) ]; then \
-		timeout 5 ./$(BUILDDIR)/test_parse $(SHELL.EXE); \
-	else \
-		echo "No hello_world.exe found — running error/negative tests only"; \
-		timeout 5 ./$(BUILDDIR)/test_parse; \
-	fi
-	@echo "=== Running test_import_resolution ==="
-	timeout 5 ./$(BUILDDIR)/test_import_resolution
-	@echo "=== Running test_teb_peb ==="
-	@if timeout 120 ./$(BUILDDIR)/test_teb_peb 2>&1; then \
-		:; \
-	else \
-		echo "  SKIP: test_teb_peb terminated abnormally (FSGSBASE unavailable)"; \
-	fi
-	@echo "=== Running test_syscall_dispatch ==="
-	timeout 5 ./$(BUILDDIR)/test_syscall_dispatch
-	@echo "=== Tests completed ==="
+	@bash scripts/run_tests.sh
 
 # Each test: prerequisite .c + named object groups; $^ expands to all prereqs
 $(BUILDDIR)/test_parse: tests/test_parse.c $(PE_OBJS)
