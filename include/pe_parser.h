@@ -96,4 +96,31 @@ uint32_t lookup_symbol_rva(const IMAGE_SYMBOL *symbols, int count,
                             int num_sections,
                             const char *name);
 
+/* ── Code Scanning ──────────────────────────────────────────── */
+
+/*
+ * Scan .text for rip-relative jmp thunks (ff 25 disp32).
+ * Collects unique IAT target RVAs, deduplicates, sorts by address.
+ * Returns the number of unique targets collected.
+ * Returns 0 if .text not found or section too small.
+ */
+int scan_rip_relative_jumps(void *image_base,
+                            const IMAGE_NT_HEADERS64 *nt,
+                            const IMAGE_SECTION_HEADER *sections,
+                            int num_sections,
+                            uint64_t *targets,
+                            int max_targets);
+
+/*
+ * Find the .text jmp-thunk whose IAT entry resolves to target_addr.
+ * Scans "ff 25 disp32" instructions in .text, dereferences the IAT
+ * pointer, and checks for a match.
+ * Returns the absolute address of the thunk instruction, or NULL.
+ */
+void *find_rip_relative_jump_to(void *image_base,
+                                const IMAGE_NT_HEADERS64 *nt,
+                                const IMAGE_SECTION_HEADER *sections,
+                                int num_sections,
+                                void *target_addr);
+
 #endif /* MY_WINE_PE_PARSER_H */
