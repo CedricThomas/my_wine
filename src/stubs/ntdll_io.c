@@ -7,9 +7,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <unistd.h>
-#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
+#include "../syscalls_inline.h"
 
 #define AT_FDCWD ((long)-100)
 
@@ -24,8 +24,7 @@ uint64_t handler_NtWriteFile(uint64_t file_handle, uint64_t event, uint64_t apc,
     if (fd < 0) return STATUS_INVALID_HANDLE;
 
     const char *buf = (const char *)(uintptr_t)buffer;
-    long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_write), "D"(fd), "S"(buf), "d"((size_t)length) : "rcx", "r11", "memory", "cc");
+    long res = INLINE_SYSCALL_WRITE(fd, buf, length);
     ssize_t n = (ssize_t)res;
     if (n < 0) return STATUS_UNSUCCESSFUL;
 
@@ -46,8 +45,7 @@ uint64_t handler_NtReadFile(uint64_t file_handle, uint64_t event, uint64_t apc,
     if (fd < 0) return STATUS_INVALID_HANDLE;
 
     char *buf = (char *)(uintptr_t)buffer;
-    long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_read), "D"(fd), "S"(buf), "d"((size_t)length) : "rcx", "r11", "memory", "cc");
+    long res = INLINE_SYSCALL_READ(fd, buf, length);
     ssize_t n = (ssize_t)res;
     if (n < 0) return STATUS_UNSUCCESSFUL;
 
@@ -113,8 +111,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     const char *open_path = path ? path : "/dev/null";
 
     /* Open the file via openat syscall (avoids libc after GS base change) */
-    long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_openat), "D"(AT_FDCWD), "S"(open_path), "d"(oflags) : "rcx", "r11", "memory", "cc");
+    long res = INLINE_SYSCALL_OPENAT(AT_FDCWD, open_path, oflags);
     int fd = (int)res;
     if (fd < 0) {
         return STATUS_UNSUCCESSFUL;
@@ -123,7 +120,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     /* Store in handle table */
     uint64_t handle = fd_to_handle(fd);
     if (handle == 0) {
-        __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_close), "D"(fd) : "rcx", "r11", "cc");
+        INLINE_SYSCALL_CLOSE(fd);
         return STATUS_UNSUCCESSFUL;
     }
 

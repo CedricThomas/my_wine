@@ -6,9 +6,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
+#include "../syscalls_inline.h"
 
 HANDLER
 uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_status)
@@ -16,10 +16,7 @@ uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_statu
     if (process_handle != 0xFFFFFFFF)
         return STATUS_SUCCESS;
 
-    long ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_exit), "D"((unsigned long)exit_status) : "rcx", "r11", "cc");
-    /* __builtin_unreachable() ensures the compiler knows this doesn't return */
-    __builtin_unreachable();
+    INLINE_SYSCALL_EXIT((unsigned long)exit_status);
 }
 
 HANDLER
@@ -64,8 +61,7 @@ uint64_t handler_NtQueryInformationProcess(uint64_t process_handle,
         out[1] = 0;                         /* PebBaseAddress — set by loader */
         out[2] = 1;                         /* AffinityMask */
         out[3] = 8;                         /* BasePriority */
-        long ret;
-        __asm__ volatile("syscall" : "=a"(ret) : "a"(__NR_getpid) : "rcx", "r11", "cc");
+        long ret = INLINE_SYSCALL_GETPID();
         out[4] = (uint64_t)ret;             /* UniqueProcessId */
         out[5] = (uint64_t)ret;             /* InheritedFromUniqueProcessId */
         if (return_length) *(uint32_t *)(uintptr_t)return_length = 40;

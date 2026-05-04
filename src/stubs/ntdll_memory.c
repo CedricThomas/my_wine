@@ -9,9 +9,9 @@
 #include <stddef.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <asm/unistd_64.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
+#include "../syscalls_inline.h"
 #include "include/abi_wrappers.h"
 #include "include/common.h"
 
@@ -79,8 +79,7 @@ uint64_t handler_NtFreeVirtualMemory(uint64_t process, uint64_t *base_address,
     if (base_address == 0 || *base_address == 0)
         return STATUS_INVALID_PARAMETER;
 
-    long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_munmap), "D"((void *)(uintptr_t)*base_address), "S"((size_t)*region_size) : "rcx", "r11", "cc");
+    long res = INLINE_SYSCALL_MUNMAP((void *)(uintptr_t)*base_address, (size_t)*region_size);
     if (res != 0)
         return STATUS_UNSUCCESSFUL;
 
@@ -178,8 +177,7 @@ uint64_t handler_NtUnmapViewOfSection(uint64_t process, uint64_t base_address)
 
     size_t view_sz = views[idx].size;
 
-    long res;
-    __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_munmap), "D"(views[idx].base), "S"(view_sz) : "rcx", "r11", "cc");
+    long res = INLINE_SYSCALL_MUNMAP(views[idx].base, view_sz);
     if (res != 0)
         return STATUS_UNSUCCESSFUL;
 
@@ -213,8 +211,7 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
             return STATUS_INVALID_HANDLE;
         /* Get actual file size via fstat syscall */
         struct stat st;
-        long res;
-        __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_fstat), "D"(fd), "S"(&st) : "rcx", "r11", "memory", "cc");
+        long res = INLINE_SYSCALL_FSTAT(fd, &st);
         if (res < 0)
             return STATUS_UNSUCCESSFUL;
         size = (size_t)st.st_size;
@@ -234,8 +231,7 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
         if (temp_map == MAP_FAILED)
             return STATUS_UNSUCCESSFUL;
         sysv_memcpy(base, temp_map, size);
-        long res;
-        __asm__ volatile("syscall" : "=a"(res) : "a"(__NR_munmap), "D"(temp_map), "S"(size) : "rcx", "r11", "cc");
+        INLINE_SYSCALL_MUNMAP(temp_map, size);
     }
 
     int idx = section_count++;
