@@ -17,6 +17,7 @@
 #include <fcntl.h>
 
 #include "include/pe.h"
+#include "include/debug.h"
 #include "loader_priv.h"
 
 void *g_image_base = NULL;
@@ -53,7 +54,7 @@ void *map_image(const char *path,
     /* 3. Parse headers */
     IMAGE_DOS_HEADER dos;
     if (parse_dos_header(file_base, file_size, &dos) != 0) {
-        fprintf(stderr, "Invalid DOS header\n");
+        DEBUG("Invalid DOS header");
         munmap(file_base, file_size);
         close(fd);
         return NULL;
@@ -61,7 +62,7 @@ void *map_image(const char *path,
 
     IMAGE_NT_HEADERS64 nt;
     if (parse_nt_headers(file_base, file_size, &dos, &nt) != 0) {
-        fprintf(stderr, "Invalid NT headers\n");
+        DEBUG("Invalid NT headers");
         munmap(file_base, file_size);
         close(fd);
         return NULL;
@@ -70,7 +71,7 @@ void *map_image(const char *path,
     IMAGE_SECTION_HEADER *sections = NULL;
     int num_sections = parse_sections(file_base, file_size, &nt, &sections);
     if (num_sections < 0) {
-        fprintf(stderr, "Failed to parse sections\n");
+        DEBUG("Failed to parse sections");
         munmap(file_base, file_size);
         close(fd);
         return NULL;

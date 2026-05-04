@@ -27,7 +27,7 @@ int setup_unix_stack(void)
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (base == MAP_FAILED) {
-        DEBUG(fprintf(stderr, "wine: failed to allocate UNIX stack\n"));
+        DEBUG("wine: failed to allocate UNIX stack");
         return -1;
     }
 

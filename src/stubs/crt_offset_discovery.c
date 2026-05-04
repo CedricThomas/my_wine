@@ -43,7 +43,7 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
 {
     IMAGE_SECTION_HEADER *text_sec = find_section_by_name(nt, sections, ".text");
     if (!text_sec) {
-        DEBUG(fprintf(stderr, "crt_offset_discovery: no .text section\n"));
+        DEBUG("crt_offset_discovery: no .text section");
         return;
     }
 
@@ -116,8 +116,8 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
                 break;
             }
         }
-        DEBUG(fprintf(stderr, "crt_offset_discovery: text-scan refptr at rva 0x%lx val=0x%lx in '%s' data=%d\n",
-                (unsigned long)target_rva, current, sec_name, in_data_section));
+        DEBUG("crt_offset_discovery: text-scan refptr at rva 0x%lx val=0x%lx in '%s' data=%d",
+                (unsigned long)target_rva, current, sec_name, in_data_section);
 
         if (!in_data_section) continue;
 
@@ -133,7 +133,7 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
     }
 
     if (!found)
-        DEBUG(fprintf(stderr, "crt_offset_discovery: text-scan found no refptr targets\n"));
+        DEBUG("crt_offset_discovery: text-scan found no refptr targets");
 }
 
 /*
@@ -289,18 +289,18 @@ void discover_crt_offsets(const char *file_path,
     /* Fallback: if COFF lookup failed, use generated or hardcoded offsets */
     if (g_crt_ctx.argc_bss_offset == 0 || g_crt_ctx.argv_bss_offset == 0 || g_crt_ctx.envp_bss_offset == 0) {
 #ifdef HAVE_GENERATED_CRT_OFFSETS
-        DEBUG(fprintf(stderr, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, using generated CRT offsets\n"));
+        DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, using generated CRT offsets");
         if (g_crt_ctx.argc_bss_offset == 0) g_crt_ctx.argc_bss_offset = CRT_BSS_ARGC;
         if (g_crt_ctx.argv_bss_offset == 0) g_crt_ctx.argv_bss_offset = CRT_BSS_ARGV;
         if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = CRT_BSS_INITENV;
 #else
-        DEBUG(fprintf(stderr, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, using hardcoded CRT offsets (0x%x/0x%x/0x%x)\n", CRT_BSS_INITENV, CRT_BSS_ARGV, CRT_BSS_ARGC));
+        DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, using hardcoded CRT offsets (0x%x/0x%x/0x%x)", CRT_BSS_INITENV, CRT_BSS_ARGV, CRT_BSS_ARGC);
         if (g_crt_ctx.argc_bss_offset == 0) g_crt_ctx.argc_bss_offset = CRT_BSS_ARGC;
         if (g_crt_ctx.argv_bss_offset == 0) g_crt_ctx.argv_bss_offset = CRT_BSS_ARGV;
         if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = CRT_BSS_INITENV;
 #endif
     }
 
-    DEBUG(fprintf(stderr, "crt_offset_discovery: CRT offsets argc=0x%x argv=0x%x envp=0x%x\n",
-            g_crt_ctx.argc_bss_offset, g_crt_ctx.argv_bss_offset, g_crt_ctx.envp_bss_offset));
+    DEBUG("crt_offset_discovery: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
+            g_crt_ctx.argc_bss_offset, g_crt_ctx.argv_bss_offset, g_crt_ctx.envp_bss_offset);
 }
