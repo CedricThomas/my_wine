@@ -93,6 +93,15 @@ Example:
 ./my_wine samples/hello_world/hello_world.exe
 ```
 
+### Options
+
+```
+./my_wine [--watchdog=N] <pe_binary>
+```
+
+- `--watchdog=N` — Set watchdog timeout in seconds (default: 60, range: 1-3600)
+  Can also be set via the `MY_WINE_WATCHDOG` environment variable.
+
 The loader will:
 
 1. Open and parse the PE file.

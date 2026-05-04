@@ -623,16 +623,11 @@ Shell script compiles test PE, extracts actual offsets, generates
 - Option B: Medium (~50 lines)
 - Option C: Very Low (5 lines)
 
+**Status: ✅ Resolved** — `scripts/gen_crt_offsets.sh` generates `include/crt_offsets_generated.h` from the current mingw-w64 toolchain. Falls back to hardcoded values when Docker is unavailable.
+
 ### Prerequisites
 
 None. Option A requires mingw-w64 (already needed).
-
-### ✅ RESOLVED
-
-Implemented via `scripts/gen_crt_offsets.sh` — compiles a test PE with mingw-w64,
-extracts actual `.refptr` offsets from COFF symbols, generates `include/crt_offsets_generated.h`.
-When present, `crt_offset_discovery.c` uses generated offsets instead of hardcoded values.
-Run `make gen-crt-offsets` to generate (requires Docker). Falls back to hardcoded values gracefully.
 
 ---
 
@@ -674,11 +669,7 @@ None.
 Ordinal numbers change between Windows versions. Acceptable since we only
 support mingw-w64.
 
-### ✅ RESOLVED
-
-Implemented via `src/loader/ordinal_table.c` — static lookup table (~160 entries for
-ntdll/kernel32/msvcrt ordinals). `resolve_import_pass1()` now looks up ordinal→name and
-resolves through the existing name-based path. Pass 2 thunk patching also uses the lookup.
+**Status: ✅ Resolved** — `src/loader/ordinal_table.c` with ~160 entries covering ntdll/kernel32/msvcrt ordinals (Windows 10/11 x64). Integrated into both Pass 1 and Pass 2 import resolution.
 
 ---
 
@@ -706,10 +697,7 @@ begins (covers only CRT init phase, ~5s).
 
 None.
 
-### ✅ RESOLVED
-
-Timeout is now configurable via `MY_WINE_WATCHDOG` environment variable or `--watchdog=N`
-CLI argument (range 1-3600 seconds, default 60). `MY_WINE_WATCHDOG` takes precedence.
+**Status: ✅ Resolved** — `--watchdog=N` CLI arg (1-3600s range) + `MY_WINE_WATCHDOG` env var override. Default remains 60s.
 
 ---
 
