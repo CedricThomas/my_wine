@@ -64,16 +64,11 @@ int main(int argc, char *argv[])
     void *stack_top = setup_stack(&nt.OptionalHeader);
     if (!stack_top) return 1;
 
-    /* 8. Zero .data section and initialize global variables
+    /* 8. Zero .data section and pre-seed argc/argv/envp in .bss
      *
-     * The memset below zeros the entire .data section, so the zero-init
-     * values (has_cctor=0, managedapp=0, startinfo=NULL, mainret=0, envp=NULL,
-     * argv=NULL) are redundant — they are already zero after memset.
-     *
-     * The offsets below (0x004, 0x008, 0x010, 0x018, 0x020, 0x028) are
-     * relative to the .data section base. They are CRT-specific variable
-     * offsets that ideally would come from the PE's symbol table, but are
-     * linker-defined for mingw-w64 CRT startup layout.
+     * The memset below zeros the entire .data section. The argc/argv/envp
+     * writes target the .bss section using COFF-derived offsets from
+     * g_crt_ctx (populated by patch_crt_refptrs in step 4).
      */
     {
         int data_section_idx = -1;
@@ -96,14 +91,64 @@ int main(int argc, char *argv[])
             /* Zero the entire .data section */
             memset((uint8_t *)base + data_vaddr, 0, data_size);
 
-            /* Compute base within .data section dynamically */
-            uint8_t *data_base = (uint8_t *)base + data_vaddr;
-
-            /* argc = 1, relative to .data section base */
-            *(uint32_t *)(data_base + 0x028) = 1;
-
-            printf(".data section: vaddr=0x%lx, size=0x%lx, initialized argc\n",
+            printf(".data section: vaddr=0x%lx, size=0x%lx, zeroed\n",
                    (unsigned long)data_vaddr, (unsigned long)data_size);
+        }
+
+        /* Pre-seed argc/argv/envp in .bss using COFF-derived offsets.
+         * g_crt_ctx was populated by patch_crt_refptrs (step 4) which
+         * looks up _argc/__argc, _argv/__argv, _environ/__envp in the
+         * COFF symbol table and computes offsets relative to .bss base.
+         * Fallback to hardcoded values if COFF lookup was incomplete.
+         * Explicit mprotect ensures .bss is writable before we write. */
+        if (g_crt_ctx.bss_vaddr == 0) {
+            fprintf(stderr, "WARNING: .bss section not found, skipping argc/argv/envp pre-seed\n");
+        } else {
+            uint8_t *bss_base = (uint8_t *)base + g_crt_ctx.bss_vaddr;
+            /* Find .bss section for size calculation */
+            IMAGE_SECTION_HEADER *bss_sec = NULL;
+            for (int i = 0; i < nt.FileHeader.NumberOfSections; i++) {
+                if (memcmp(sections[i].Name, ".bss", 4) == 0) {
+                    bss_sec = &sections[i];
+                    break;
+                }
+            }
+            if (bss_sec == NULL) {
+                fprintf(stderr, "WARNING: .bss section not found in headers, skipping pre-seed\n");
+            } else {
+                size_t bss_size = bss_sec->Misc.VirtualSize;
+                if (bss_size == 0) bss_size = bss_sec->SizeOfRawData;
+                /* Ensure .bss page is writable */
+                uintptr_t bss_page = (uintptr_t)bss_base & ~(uintptr_t)4095;
+                if (mprotect((void *)bss_page, (bss_size + 4095) & ~(size_t)4095,
+                              PROT_READ | PROT_WRITE) != 0) {
+                    fprintf(stderr, "WARNING: mprotect .bss failed, skipping pre-seed\n");
+                } else {
+                    if (g_crt_ctx.argc_bss_offset != 0) {
+                        *(uint32_t *)(bss_base + g_crt_ctx.argc_bss_offset) = 1;
+                        fprintf(stderr, ".bss: wrote argc=1 at offset 0x%x\n",
+                                g_crt_ctx.argc_bss_offset);
+                    } else {
+                        fprintf(stderr, "WARNING: argc_bss_offset is 0, skipping argc pre-seed\n");
+                    }
+
+                    if (g_crt_ctx.argv_bss_offset != 0) {
+                        *(uint64_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+                        fprintf(stderr, ".bss: wrote argv=NULL at offset 0x%x\n",
+                                g_crt_ctx.argv_bss_offset);
+                    } else {
+                        fprintf(stderr, "WARNING: argv_bss_offset is 0, skipping argv pre-seed\n");
+                    }
+
+                    if (g_crt_ctx.envp_bss_offset != 0) {
+                        *(uint64_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+                        fprintf(stderr, ".bss: wrote envp=NULL at offset 0x%x\n",
+                                g_crt_ctx.envp_bss_offset);
+                    } else {
+                        fprintf(stderr, "WARNING: envp_bss_offset is 0, skipping envp pre-seed\n");
+                    }
+                }
+            }
         }
     }
 
@@ -120,24 +165,6 @@ int main(int argc, char *argv[])
     /* Fill _cmdline_storage so _acmdln points to the actual PE path */
     strncpy(_cmdline_storage, argv[1], sizeof(_cmdline_storage) - 1);
     _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
-
-    /* Pre-seed argv/envp pointers in the PE's .bss with NULL so the CRT
-     * startup doesn't crash dereferencing host addresses.
-     * The real values will be set by __getmainargs via our stub.
-     *
-     * Use .bss section VA dynamically (set by patch_crt_refptrs in g_crt_ctx.bss_vaddr).
-     * The offsets (0x018, 0x020) are relative to .bss base and are CRT-specific;
-     * they correspond to the mingw-w64 CRT's envp/argv locations. */
-    {
-        if (g_crt_ctx.bss_vaddr != 0) {
-            /* Skip .bss write for now - causes SIGSEGV on some systems
-             * where the .bss page isn't properly writable after mprotect. */
-            fprintf(stderr, "Skipping .bss pre-seed (bss_vaddr=0x%lx)\n",
-                    (unsigned long)g_crt_ctx.bss_vaddr);
-        } else {
-            fprintf(stderr, "WARNING: g_crt_ctx.bss_vaddr not set, skipping .bss pre-seed\n");
-        }
-    }
 
     /* 10. Look up user main() symbol; fall back to entry point if not found */
     uint64_t main_rva = 0;
