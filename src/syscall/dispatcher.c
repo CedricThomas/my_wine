@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <sys/ucontext.h>
 
+#include "include/nt_constants.h"
 #include "include/ntdll.h"
 #include "include/syscall/dispatcher.h"
 
@@ -112,7 +113,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 
     /* syscall_number comes from si_syscall which includes the 0xF000
      * Wine offset. Strip it to get the base NT syscall number.       */
-    uint64_t nt_nr = syscall_number - 0xF000;
+    uint64_t nt_nr = syscall_number - WINE_SYSCALL_OFFSET;
 
     uint64_t arg1 = ctx->uc_mcontext.gregs[REG_RCX];
     uint64_t arg2 = ctx->uc_mcontext.gregs[REG_RDX];
@@ -122,11 +123,11 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 
     switch (nt_nr) {
 
-    case 0x05: /* NtCallbackReturn */
+    case NT_SYSCALL_CALLBACK_RETURN: /* NtCallbackReturn */
         result = handler_NtCallbackReturn();
         break;
 
-    case 0x07: /* NtQueryInformationProcess */
+    case NT_SYSCALL_QUERY_INFO_PROCESS: /* NtQueryInformationProcess */
     {
         uint64_t h_buffer = arg3;
         uint64_t h_ret_len = read_guest_stack(ctx, 1);
@@ -145,11 +146,11 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x0F: /* NtClose */
+    case NT_SYSCALL_CLOSE: /* NtClose */
         result = handler_NtClose(arg1);
         break;
 
-    case 0x18: /* NtAllocateVirtualMemory */
+    case NT_SYSCALL_ALLOC_VM: /* NtAllocateVirtualMemory */
     {
         /* base_address and region_size are guest-space pointers;
          * pass host-side copies, then write back results.          */
@@ -184,7 +185,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x19: /* NtFreeVirtualMemory */
+    case NT_SYSCALL_FREE_VM: /* NtFreeVirtualMemory */
     {
         uint64_t h_base_addr = arg2;
         uint64_t h_region_sz = arg3;
@@ -214,7 +215,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x24: /* NtGetContextThread */
+    case NT_SYSCALL_GET_CTX_THREAD: /* NtGetContextThread */
     {
         if (arg2 != 0 && !is_valid_guest_ptr(arg2, sizeof(uint64_t))) {
             fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at context\n",
@@ -225,7 +226,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x26: /* NtSetContextThread */
+    case NT_SYSCALL_SET_CTX_THREAD: /* NtSetContextThread */
     {
         if (arg2 != 0 && !is_valid_guest_ptr(arg2, sizeof(uint64_t))) {
             fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at context\n",
@@ -236,7 +237,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x28: /* NtMapViewOfSection */
+    case NT_SYSCALL_MAP_VIEW: /* NtMapViewOfSection */
     {
         uint64_t h_base_addr = arg3;
         uint64_t h_section_off = read_guest_stack(ctx, 1);
@@ -284,15 +285,15 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x29: /* NtUnmapViewOfSection */
+    case NT_SYSCALL_UNMAP_VIEW: /* NtUnmapViewOfSection */
         result = handler_NtUnmapViewOfSection(arg1, arg2);
         break;
 
-    case 0x2A: /* NtTerminateProcess */
+    case NT_SYSCALL_TERMINATE_PROCESS: /* NtTerminateProcess */
         result = handler_NtTerminateProcess(arg1, arg2);
         break;
 
-    case 0x3C: /* NtReadFile */
+    case NT_SYSCALL_READ_FILE: /* NtReadFile */
     {
         uint64_t h_buffer = read_guest_stack(ctx, 1);
         uint64_t h_bytes_read = read_guest_stack(ctx, 4);
@@ -314,7 +315,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x3D: /* NtWriteFile */
+    case NT_SYSCALL_WRITE_FILE: /* NtWriteFile */
     {
         uint64_t h_buffer = read_guest_stack(ctx, 1);
         uint64_t h_bytes_written = read_guest_stack(ctx, 4);
@@ -336,7 +337,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x48: /* NtCreateEvent */
+    case NT_SYSCALL_CREATE_EVENT: /* NtCreateEvent */
     {
         uint64_t h_handle = arg1;
         uint64_t *p_handle = NULL;
@@ -355,7 +356,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x4A: /* NtCreateSection */
+    case NT_SYSCALL_CREATE_SECTION: /* NtCreateSection */
     {
         uint64_t h_handle = arg1;
         uint64_t h_max_sz = arg4;
@@ -388,7 +389,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x4E: /* NtCreateThreadEx */
+    case NT_SYSCALL_CREATE_THREAD_EX: /* NtCreateThreadEx */
     {
         uint64_t h_handle = arg1;
         uint64_t *p_handle = NULL;
@@ -413,7 +414,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
-    case 0x4F: /* NtOpenFile */
+    case NT_SYSCALL_OPEN_FILE: /* NtOpenFile */
     {
         uint64_t h_handle = arg1;
         uint64_t *p_handle = NULL;
