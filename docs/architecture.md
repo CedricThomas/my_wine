@@ -79,15 +79,18 @@ The import resolver works in two passes:
 ```
   GS:0 ──► TEB (Thread Environment Block)
   │
-  ├── [0x00] SEH frame pointer  (set by child in entry.c)
-  ├── [0x08] TEB self-reference
-  ├── [0x30] Thread pointer (→ TEB)
-  └── [0x60] PEB pointer
+  ├── [TEB_SEH_CHAIN       (0x00)] SEH frame pointer  (set by child in entry.c)
+  ├── [TEB_TEB_SELF_REF    (0x08)] TEB self-reference
+  ├── [TEB_THREAD_PTR      (0x30)] Thread pointer (→ TEB)
+  └── [TEB_PEB_PTR         (0x60)] PEB pointer
 
   PEB (Process Environment Block)
-  ├── [0x002] BeingDebugged = 0
-  └── [0x008] ImageBaseAddress → mapped image
+  ├── [PEB_BEING_DEBUGGED  (0x002)] BeingDebugged = 0
+  └── [PEB_IMAGE_BASE      (0x008)] ImageBaseAddress → mapped image
 ```
+
+All TEB and PEB offsets are defined as named constants (`TEB_*`,
+`PEB_*`) in `include/nt_constants.h`.
 
 `arch_prctl(ARCH_SET_GS, teb)` makes the guest's `GS` segment
 point to the TEB, matching Windows x86_64 expectations.
@@ -151,20 +154,21 @@ The `MAP_FIXED` image mapping is inherited by the child via
 
 ### 3.1 The 0xF000 Offset Scheme
 
-Wine uses syscall numbers in the range `0xF000+` for NT syscalls.
-Linux syscall numbers are all `< 0x400`. A seccomp-BPF filter
-distinguishes them:
+Wine uses syscall numbers in the range `WINE_SYSCALL_OFFSET+` (0xF000+) for
+NT syscalls. The offset is defined as `WINE_SYSCALL_OFFSET` in
+`include/nt_constants.h`. Linux syscall numbers are all `< 0x400`. A
+seccomp-BPF filter distinguishes them:
 
 ```
 BPF: LOAD syscall_number
-BPF: JGE 0xF000 → TRAP (send SIGSYS)
+BPF: JGE WINE_SYSCALL_OFFSET → TRAP (send SIGSYS)
 BPF: ALLOW (native Linux syscall, pass through)
 ```
 
 This means:
-- **syscall < 0xF000** → executed directly by the Linux kernel
-- **syscall >= 0xF000** → trapped by seccomp, delivers `SIGSYS` to
-  our handler
+- **syscall < WINE_SYSCALL_OFFSET** → executed directly by the Linux kernel
+- **syscall >= WINE_SYSCALL_OFFSET (0xF000)** → trapped by seccomp, delivers
+  `SIGSYS` to our handler
 
 ### 3.2 Thunk Generation
 
@@ -209,12 +213,12 @@ with a `0xF000+` number, triggering `SIGSYS`.
             ▼
     handle_syscall() (src/syscall/dispatcher.c)
       │
-      ├── nt_nr = syscall_num - 0xF000
+      ├── nt_nr = syscall_num - WINE_SYSCALL_OFFSET
       ├── read args from RCX/RDX/R8/R9 (Windows x64 ABI)
       ├── switch(nt_nr):
-      │     case 0x3D → handler_NtWriteFile(...)
-      │     case 0x2A → handler_NtTerminateProcess(...)
-      │     case 0x18 → handler_NtAllocateVirtualMemory(...)
+      │     case NT_SYSCALL_WRITE_FILE (0x3D) → handler_NtWriteFile(...)
+      │     case NT_SYSCALL_TERMINATE_PROCESS (0x2A) → handler_NtTerminateProcess(...)
+      │     case NT_SYSCALL_ALLOC_VM (0x18) → handler_NtAllocateVirtualMemory(...)
       │     ...
       └── write result to RAX
             │

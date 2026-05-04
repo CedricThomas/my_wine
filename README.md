@@ -80,8 +80,8 @@ The loader will:
 │              │                                     │       │
 │              │   PE code → syscall                 │       │
 │              │     │                               │       │
-│              │     ├─ syscall < 0xF000 → Linux OS  │       │
-│              │     └─ syscall >= 0xF000 → SIGSYS   │       │
+│              │     ├─ syscall < WINE_SYSCALL_OFFSET → Linux OS  │       │
+│              │     └─ syscall >= WINE_SYSCALL_OFFSET (0xF000) → SIGSYS   │       │
 │              │                          │           │       │
 │              │                   sigsys_handler()   │       │
 │              │                   │                   │       │
@@ -164,6 +164,8 @@ architectural walkthrough.
 │   ├── kernel32.h              # kernel32 API declarations
 │   ├── msvcrt.h                # msvcrt API declarations
 │   ├── wine_abi.h              # WINE_STUB / WINE_STUB_STATIC macros
+│   ├── nt_constants.h          # NT syscall numbers, TEB/PEB offsets,
+│   │                           # Wine syscall offset as named constants
 │   └── syscall/
 │       ├── thunk_gen.h         # thunk generation declarations
 │       ├── signal_handler.h    # signal handler declarations
@@ -202,10 +204,11 @@ architectural walkthrough.
   assumes the specific CRT layout and import patterns produced by
   mingw-w64 with GCC. MSVC-compiled binaries or other toolchains may
   not work.
-- **CRT refptr patching requires matching CRT version** — the
-  `.refptr` offset table is derived from a specific mingw-w64 CRT
-  version. Newer or older CRT versions may have different layouts
-  and require updated offsets.
+- **CRT refptr patching** — argc/argv/envp offsets are discovered
+  from the PE's COFF symbol table. A hardcoded fallback
+  (0x018/0x020/0x028) is used when the symbol table is absent or
+  stripped. Different CRT versions may require updated fallback
+  offsets.
 
 ## License
 
