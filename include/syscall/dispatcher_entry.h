@@ -41,4 +41,7 @@ extern void *unix_stack_ptr_val;
 /* C dispatcher entry point — implemented in dispatcher.c */
 uint64_t c_dispatch_syscall(uint64_t nr);
 
+/* Return the address of the assembly dispatcher for thunk generation */
+void *wine_dispatcher_addr(void);
+
 #endif /* DISPATCHER_ENTRY_H */

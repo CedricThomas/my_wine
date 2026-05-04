@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "include/syscall/thunk_gen.h"
+#include "include/syscall/dispatcher_entry.h"
 #include "include/nt_constants.h"
 #include "include/common.h"
 #include "../syscalls_inline.h"
@@ -80,8 +81,7 @@ void **generate_all_thunks(void)
     }
     thunk_blob_size = alloc;
 
-    extern void __wine_dispatcher(void);
-    void *dispatcher = (void *)&__wine_dispatcher;
+    void *dispatcher = wine_dispatcher_addr();
 
     for (int i = 0; i < NUM_NT_SYSCALLS; i++) {
         uint16_t nr = nt_syscall_list[i];

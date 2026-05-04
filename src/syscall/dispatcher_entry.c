@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <dlfcn.h>
 #include <sys/mman.h>
 #include "include/syscall/dispatcher_entry.h"
 
@@ -47,4 +48,13 @@ void cleanup_unix_stack(void)
         munmap(base, UNIX_STACK_SIZE);
         unix_stack_ptr_val = NULL;
     }
+}
+
+/* Return the address of the assembly dispatcher for thunk generation */
+void *wine_dispatcher_addr(void)
+{
+    /* Use dlsym so this works even when dispatcher_entry_asm.S is not
+     * linked (e.g. in test builds). Returns NULL if the symbol is absent. */
+    void *handle = dlsym(RTLD_DEFAULT, "__wine_dispatcher");
+    return handle;
 }
