@@ -110,15 +110,14 @@ void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
 void setup_signal_handlers(void);
 __attribute__((ms_abi)) void seh_crash_handler(void *, void *, void *, void *);
 
-/* ── entry.c / child_setup.c ────────────────────────────────── */
+/* ── entry.c / guest_setup.c ─────────────────────────────── */
 
-int jump_to_entry(uint64_t entry_abs, void *stack_top, void *stack_base,
-                  void *teb, char **guest_argv, char **guest_envp,
-                  int watchdog_timeout);
-
-void setup_child_and_run(uint64_t entry_abs, void *stack_top, void *teb,
-                         char **guest_argv, char **guest_envp,
-                         int watchdog_timeout);
+__attribute__((noreturn)) void run_guest_entry(uint64_t entry_abs, void *stack_top,
+                                                void *teb, char **guest_argv,
+                                                char **guest_envp);
+__attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *stack_top,
+                                                    void *teb, char **guest_argv,
+                                                    char **guest_envp);
 void cleanup_guest(void *teb, void *stack_base);
 
 /* ── gs_base.c ─────────────────────────────────────────────── */

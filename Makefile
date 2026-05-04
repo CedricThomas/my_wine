@@ -60,7 +60,7 @@ CFLAGS_common.o = $(SPECIAL_CFLAGS)
 # Loader src/loader/*.c
 CFLAGS_entry.o = $(SPECIAL_CFLAGS)
 CFLAGS_teb_peb.o = $(SPECIAL_CFLAGS)
-CFLAGS_child_setup.o = $(SPECIAL_CFLAGS)
+CFLAGS_guest_setup.o = $(SPECIAL_CFLAGS)
 CFLAGS_crash_handlers.o = $(SPECIAL_CFLAGS)
 CFLAGS_gs_base.o = $(SPECIAL_CFLAGS)
 

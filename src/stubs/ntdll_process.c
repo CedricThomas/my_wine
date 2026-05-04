@@ -10,11 +10,28 @@
 #include "ntdll_priv.h"
 #include "../syscalls_inline.h"
 
+/* Cleanup functions — declared as weak externs so test builds (which don't
+ * link the loader/syscall modules) don't get undefined reference errors.
+ * Weak symbols resolve to NULL when not defined, so we check before calling. */
+__attribute__((weak)) extern void cleanup_unix_stack(void);
+__attribute__((weak)) extern void cleanup_thunk_pages(void);
+__attribute__((weak)) extern void *get_gs_base(void);
+__attribute__((weak)) extern void cleanup_guest(void *teb, void *stack_base);
+__attribute__((weak)) extern void *g_stack_base;
+
 HANDLER
 uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_status)
 {
     if (process_handle != 0xFFFFFFFF)
         return STATUS_SUCCESS;
+
+    /* Clean up guest resources before exiting (only when symbols are linked) */
+    if (cleanup_unix_stack) cleanup_unix_stack();
+    if (cleanup_thunk_pages) cleanup_thunk_pages();
+    if (get_gs_base && cleanup_guest) {
+        void *teb = get_gs_base();
+        cleanup_guest(teb, g_stack_base);
+    }
 
     INLINE_SYSCALL_EXIT((unsigned long)exit_status);
 }

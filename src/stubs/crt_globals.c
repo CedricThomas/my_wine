@@ -13,7 +13,7 @@ int _commode = 0;
 int _fmode = 0;
 char **_msvcrt_environ = NULL;
 
-/* Set from main.c before jump_to_entry; used by __getmainargs and _acmdln */
+/* Set from main.c before run_guest_entry; used by __getmainargs and _acmdln */
 char **g_guest_argv  = NULL;
 char **g_guest_envp  = NULL;
 

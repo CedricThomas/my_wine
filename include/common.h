@@ -44,11 +44,6 @@
 // Signal stack size (64KB, matching original value)
 #define SIG_STACK_SIZE      65536
 
-// Watchdog timeout (seconds)
-#define WATCHDOG_TIMEOUT_DEFAULT  60
-#define WATCHDOG_TIMEOUT_MIN      1
-#define WATCHDOG_TIMEOUT_MAX      3600
-
 // ── Shared helpers ─────────────────────────────────────────────
 
 void format_hex(char *buf, int buf_size, uint64_t val);

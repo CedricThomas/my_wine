@@ -114,7 +114,7 @@ void setup_signal_handlers(void)
     sigaction(SIGFPE, &sa, NULL);
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGTRAP, &sa, NULL);
-    { const char t[] = "CHILD: all handlers set\n";
+    { const char t[] = "GUEST: all handlers set\n";
       syscall(__NR_write, 2, t, sizeof(t)-1); }
 
     /* Set up signal stack for reliable signal handling */

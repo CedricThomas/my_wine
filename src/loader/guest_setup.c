@@ -1,15 +1,15 @@
 /*
- * child_setup.c — Guest state, patches, .bss mprotect, watchdog
+ * guest_setup.c — Guest state, patches, .bss mprotect
  *
- * Contains all child-process setup logic that runs after fork:
+ * Contains all guest setup logic that runs in the single-process model:
  * - SEH chain + syscall thunk generation
  * - Guest state (GS base, TEB SEH chain, PE re-parse)
  * - __acrt_iob_func patching
- * - .bss section mprotect after fork
- * - Watchdog timer + jump to guest entry via run_guest
+ * - .bss section mprotect
+ * - Unix stack setup for syscall dispatch
  * - Cleanup of guest resources (TEB, PEB, stack, thunk pages)
  *
- * setup_child_and_run and cleanup_guest are called from entry.c.
+ * setup_guest_and_run and cleanup_guest are called from entry.c.
  */
 
 #define _GNU_SOURCE
@@ -21,6 +21,7 @@
 #include "include/nt_constants.h"
 #include "include/syscall/thunk_gen.h"
 #include "include/syscall/dispatcher.h"
+#include "include/syscall/dispatcher_entry.h"
 #include "include/common.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,15 +29,10 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <sys/prctl.h>
 #include <signal.h>
 #include <sys/syscall.h>
-#include <sys/time.h>
-#include <asm/unistd_64.h>
 #include <fcntl.h>
 #include <stdbool.h>
-#include <sys/user.h>
-#include <sys/wait.h>
 
 /* ── Extern declarations ─────────────────────────────────────── */
 
@@ -151,7 +147,8 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
 /* ── Step 2: SEH chain + syscall thunks ──────────────────────── */
 
 /**
- * Set up the SEH chain and generate syscall thunks in the child.
+ * Set up the SEH chain and generate syscall thunks.
+ * Also sets up the unix stack for syscall dispatch.
  *
  * Creates a static SEH frame and generates all syscall thunks.
  *
@@ -159,34 +156,40 @@ static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
  */
 static void *setup_seh_and_thunks(void)
 {
-    /* SEH chain (must be done in child; frame must persist for guest SEH walk) */
-    static __attribute__((aligned(8))) uint64_t child_seh_frame[2];
-    child_seh_frame[0] = 0;  /* next = NULL (end of chain) */
-    child_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
+    /* SEH chain (frame must persist for guest SEH walk) */
+    static __attribute__((aligned(8))) uint64_t guest_seh_frame[2];
+    guest_seh_frame[0] = 0;  /* next = NULL (end of chain) */
+    guest_seh_frame[1] = (uint64_t)(uintptr_t)&seh_crash_handler;
 
     generate_all_thunks();
 
-    return child_seh_frame;
+    /* Set up unix stack for syscall dispatch */
+    if (setup_unix_stack() != 0) {
+        fprintf(stderr, "my_wine: cannot setup unix stack, aborting\n");
+        _exit(1);
+    }
+
+    return guest_seh_frame;
 }
 
-/* ── Step 3: Guest state (GS base, TEB SEH, PE re-parse) ────── */
+/* ── Step 3: Guest state (GS base, TEB SEH, PE re-parse) ───── */
 
 static void setup_guest_state(void *teb, uint64_t entry_abs, void *seh_frame,
                               IMAGE_NT_HEADERS64 **out_nt,
                               IMAGE_SECTION_HEADER **out_sections)
 {
-    /* Re-set GS base in child (inherited from parent but let's be sure) */
+    /* Re-set GS base */
     if (set_gs_base(teb) != 0) {
-        fprintf(stderr, "my_wine: cannot set GS base in child, aborting\n");
+        fprintf(stderr, "my_wine: cannot set GS base, aborting\n");
         _exit(1);
     }
 
-    /* Debug: verify __imp___initenv_stub in child */
+    /* Debug: verify __imp___initenv_stub */
     {
         extern void **__imp___initenv_stub;
         char dbg_buf[128];
         int dbg_n = snprintf(dbg_buf, sizeof(dbg_buf),
-            "DEBUG child: &__imp___initenv_stub=%p, *__imp___initenv_stub=%p\n",
+            "DEBUG guest: &__imp___initenv_stub=%p, *__imp___initenv_stub=%p\n",
             (void *)&__imp___initenv_stub, (void *)__imp___initenv_stub);
         syscall(__NR_write, 2, dbg_buf, dbg_n);
     }
@@ -216,7 +219,7 @@ static void apply_final_patches(void *base, IMAGE_NT_HEADERS64 *nt,
 {
     patch_acrt_iob(base, nt, sections);
 
-    /* Ensure .bss is writable after fork (mprotect may not propagate) */
+    /* Ensure .bss is writable (mprotect may not propagate) */
     for (uint32_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
         if (sections[i].Characteristics & IMAGE_SCN_MEM_WRITE) {
             size_t sz = sections[i].Misc.VirtualSize;
@@ -232,67 +235,10 @@ static void apply_final_patches(void *base, IMAGE_NT_HEADERS64 *nt,
     }
 }
 
-/* ── Watchdog handler (used in step 5) ──────────────────────── */
-static void wd_handler(int sig, siginfo_t *info, void *uc_ptr)
+/* ── Step 5: Jump to guest (noreturn) ───────────────────────── */
+static __attribute__((noreturn)) void jump_to_guest(uint64_t entry_abs, void *stack_top,
+                                                    char **guest_argv, char **guest_envp)
 {
-    (void)sig;
-    (void)info;
-    ucontext_t *uc = (ucontext_t *)uc_ptr;
-    greg_t *r = uc->uc_mcontext.gregs;
-    char b[150];
-    int off = 0;
-
-    const char hdr[] = "WD:RIP=0x";
-    for (int i = 0; hdr[i]; i++)
-        b[off++] = hdr[i];
-    uint64_t val = (uint64_t)r[REG_RIP];
-    format_hex(b + off, sizeof(b) - off, val);
-    off += 16;
-
-    const char hdr2[] = " RSP=0x";
-    for (int i = 0; hdr2[i]; i++)
-        b[off++] = hdr2[i];
-    val = (uint64_t)r[REG_RSP];
-    format_hex(b + off, sizeof(b) - off, val);
-    off += 16;
-
-    const char hdr3[] = " RAX=0x";
-    for (int i = 0; hdr3[i]; i++)
-        b[off++] = hdr3[i];
-    val = (uint64_t)r[REG_RAX];
-    format_hex(b + off, sizeof(b) - off, val);
-    off += 16;
-
-    b[off++] = '\n';
-    b[off] = '\0';
-    INLINE_SYSCALL_WRITE_ERR(b, (size_t)off);
-    INLINE_SYSCALL_EXIT(0xFF);
-}
-
-/* ── Step 5: Watchdog + jump to guest (noreturn) ─────────────── */
-static __attribute__((noreturn)) void setup_watchdog_and_jump(uint64_t entry_abs, void *stack_top,
-                                    int watchdog_timeout, char **guest_argv, char **guest_envp)
-{
-    /* Configurable watchdog */
-    {
-        struct sigaction w;
-        memset(&w, 0, sizeof(w));
-        w.sa_sigaction = wd_handler;
-        w.sa_flags = SA_SIGINFO;
-        sigemptyset(&w.sa_mask);
-        sigaction(SIGALRM, &w, NULL);
-
-        int timeout = watchdog_timeout;
-        const char *env = getenv("MY_WINE_WATCHDOG");
-        if (env) {
-            int env_val = atoi(env);
-            if (env_val >= WATCHDOG_TIMEOUT_MIN && env_val <= WATCHDOG_TIMEOUT_MAX)
-                timeout = env_val;
-        }
-        struct itimerval t = {.it_interval = {0, 0}, .it_value = {timeout, 0}};
-        setitimer(ITIMER_REAL, &t, NULL);
-    }
-
     void (*entry)(void) = (void (*)(void))(void *)(uintptr_t)entry_abs;
 
     /* Find ExitProcess from the import table so you can call it after main returns */
@@ -320,13 +266,12 @@ static __attribute__((noreturn)) void setup_watchdog_and_jump(uint64_t entry_abs
 /* ── Orchestrator ────────────────────────────────────────────── */
 
 /**
- * Set up the child process and jump to the PE entry point.
- * Called in the forked child; does not return.
+ * Set up the guest and jump to the PE entry point.
+ * Called in the single-process model; does not return.
  */
-void setup_child_and_run(
+__attribute__((noreturn)) void setup_guest_and_run(
         uint64_t entry_abs, void *stack_top, void *teb,
-        char **guest_argv, char **guest_envp,
-        int watchdog_timeout)
+        char **guest_argv, char **guest_envp)
 {
     setup_signal_handlers();
     void *seh_frame = setup_seh_and_thunks();
@@ -343,15 +288,13 @@ void setup_child_and_run(
     void *base = (void *)(uintptr_t)image_base;
     apply_final_patches(base, nt, sections);
 
-    setup_watchdog_and_jump(entry_abs, stack_top, watchdog_timeout, guest_argv, guest_envp);
+    jump_to_guest(entry_abs, stack_top, guest_argv, guest_envp);
 }
 
 /**
  * cleanup_guest — unmap all guest resources (TEB, PEB, stack, thunk pages).
  *
- * Called after the child exits to reclaim mmap'd memory. Although the
- * OS cleans everything when the parent exits too, this is done for
- * correctness and to keep resource accounting clean.
+ * Called after the guest exits (in NtTerminateProcess) to reclaim mmap'd memory.
  *
  * @param  teb        TEB pointer (NULL to skip TEB/PEB cleanup)
  * @param  stack_base guest stack base (NULL to skip stack cleanup)
