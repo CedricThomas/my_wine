@@ -127,4 +127,9 @@ void cleanup_guest(void *teb, void *stack_base);
 int set_gs_base(void *addr);
 void *get_gs_base(void);
 
+/* ── dispatcher_entry.c ─────────────────────────────────────── */
+
+int setup_unix_stack(void);
+void cleanup_unix_stack(void);
+
 #endif /* MY_WINE_LOADER_PRIV_H */
