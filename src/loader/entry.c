@@ -69,6 +69,7 @@ static void seh_crash_handler(void *exception_record, void *establisher_frame,
 
     /* Call NtTerminateProcess to exit cleanly */
     syscall(__NR_exit, (int)(exit_code & 0xFF));
+    __builtin_unreachable();
 }
 
 /**

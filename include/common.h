@@ -40,10 +40,16 @@
 #define MAX_THUNK_TARGETS   256
 #define MAX_FLAT_IMPORTS    256
 
-// Signal stack size
-#define SIG_STACK_SIZE      (16 * 1024)
+// Signal stack size (64KB, matching original value)
+#define SIG_STACK_SIZE      65536
 
 // Watchdog timeout (seconds)
 #define WATCHDOG_TIMEOUT    60
+
+// ── Shared helpers ─────────────────────────────────────────────
+
+void format_hex(char *buf, int buf_size, uint64_t val);
+void format_ptr(char *buf, int buf_size, void *p);
+int with_mprotect_rw(void *addr, size_t len, void (*cb)(void *), void *cb_arg);
 
 #endif // MY_WINE_COMMON_H
