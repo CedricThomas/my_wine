@@ -309,6 +309,83 @@ static int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
 }
 
 /**
+ * Strategy 1: target overlaps with a resolved import address.
+ * Check if current value matches any resolved_addr in the flat array.
+ * Does NOT write -- the value is already correct (from pass 1 IAT).
+ */
+static bool strategy_resolved_overlap(uint64_t current_val,
+                                     struct import_flat *flat, int num_flat)
+{
+    for (int f = 0; f < num_flat; f++) {
+        if (flat[f].resolved_addr == current_val) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Strategy 2: ILT entry value equals a resolved address.
+ * If current_val matches an ilt_value whose resolved_addr is set,
+ * write the resolved_addr to the target location.
+ */
+static bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
+                                    uint64_t target,
+                                    struct import_flat *flat, int num_flat)
+{
+    if (current_val == 0)
+        return false;
+    for (int f = 0; f < num_flat; f++) {
+        if (flat[f].ilt_value == current_val && flat[f].resolved_addr != 0) {
+            *target_ptr = flat[f].resolved_addr;
+            printf("    Thunk patch (ilt match): %s!%s at 0x%lx <- 0x%lx\n",
+                   flat[f].dll_name, flat[f].func_name,
+                   (unsigned long)target, (unsigned long)flat[f].resolved_addr);
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Strategy 3: ILT offset+slot matches thunk position.
+ * If target falls within the import directory, compute slot index
+ * and use the corresponding flat entry.
+ */
+static bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
+                                     uint64_t current_val,
+                                     uint64_t import_dir_va, uint64_t import_dir_end,
+                                     struct import_flat *flat, int num_flat)
+{
+    if (current_val == 0 || target < import_dir_va || target >= import_dir_end)
+        return false;
+    int slot_idx = (int)((target - import_dir_va) / 8);
+    if (slot_idx < 0 || slot_idx >= num_flat || flat[slot_idx].resolved_addr == 0)
+        return false;
+    *target_ptr = flat[slot_idx].resolved_addr;
+    printf("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx\n",
+           flat[slot_idx].dll_name, flat[slot_idx].func_name,
+           (unsigned long)target, (unsigned long)flat[slot_idx].resolved_addr);
+    return true;
+}
+
+/**
+ * Strategy 4: fallback by position in the flat array.
+ */
+static bool strategy_positional(uint64_t *target_ptr, uint64_t target,
+                               int thunk_idx,
+                               struct import_flat *flat, int num_flat)
+{
+    if (thunk_idx >= num_flat || flat[thunk_idx].resolved_addr == 0)
+        return false;
+    *target_ptr = flat[thunk_idx].resolved_addr;
+    printf("    Thunk patch (pos match): %s!%s at 0x%lx <- 0x%lx\n",
+           flat[thunk_idx].dll_name, flat[thunk_idx].func_name,
+           (unsigned long)target, (unsigned long)flat[thunk_idx].resolved_addr);
+    return true;
+}
+
+/**
  * Match thunk IAT targets against the flat import array and patch mismatches.
  * Uses four strategies: resolved-address overlap, ILT value match,
  * ILT offset/slot match, and positional fallback.
@@ -327,57 +404,12 @@ static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
         uint64_t *target_ptr = (uint64_t *)((char *)base + target);
         uint64_t current_val = *target_ptr;
 
-        int did_match = 0;
-
-        /* Strategy 1: resolved address overlap (target overlaps with IAT from pass 1) */
-        for (int f = 0; f < num_flat; f++) {
-            if (flat[f].resolved_addr == current_val) {
-                matched++;
-                did_match = 1;
-                break;
-            }
-        }
-
-        /* Strategy 2: ILT value match */
-        if (!did_match && current_val != 0) {
-            for (int f = 0; f < num_flat; f++) {
-                if (flat[f].ilt_value == current_val && flat[f].resolved_addr != 0) {
-                    *target_ptr = flat[f].resolved_addr;
-                    printf("    Thunk patch (ilt match): %s!%s at 0x%lx <- 0x%lx\n",
-                           flat[f].dll_name, flat[f].func_name,
-                           (unsigned long)target, (unsigned long)flat[f].resolved_addr);
-                    matched++;
-                    did_match = 1;
-                    break;
-                }
-            }
-        }
-
-        /* Strategy 3: ILT offset/slot match */
-        if (!did_match && current_val != 0) {
-            if (target >= import_dir_va && target < import_dir_end) {
-                int slot_idx = (int)((target - import_dir_va) / 8);
-                if (slot_idx >= 0 && slot_idx < num_flat &&
-                    flat[slot_idx].resolved_addr != 0) {
-                    *target_ptr = flat[slot_idx].resolved_addr;
-                    printf("    Thunk patch (ilt-offset match): %s!%s at 0x%lx <- 0x%lx\n",
-                           flat[slot_idx].dll_name, flat[slot_idx].func_name,
-                           (unsigned long)target, (unsigned long)flat[slot_idx].resolved_addr);
-                    matched++;
-                    did_match = 1;
-                }
-            }
-        }
-
-        /* Strategy 4: positional fallback */
-        if (!did_match) {
-            if (t < num_flat && flat[t].resolved_addr != 0) {
-                *target_ptr = flat[t].resolved_addr;
-                printf("    Thunk patch (pos match): %s!%s at 0x%lx <- 0x%lx\n",
-                       flat[t].dll_name, flat[t].func_name,
-                       (unsigned long)target, (unsigned long)flat[t].resolved_addr);
-                matched++;
-            }
+        if (strategy_resolved_overlap(current_val, flat, num_flat) ||
+            strategy_ilt_value_match(target_ptr, current_val, target, flat, num_flat) ||
+            strategy_ilt_offset_match(target_ptr, target, current_val,
+                                      import_dir_va, import_dir_end, flat, num_flat) ||
+            strategy_positional(target_ptr, target, t, flat, num_flat)) {
+            matched++;
         }
     }
 
