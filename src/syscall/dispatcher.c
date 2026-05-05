@@ -50,6 +50,18 @@ static inline int is_valid_guest_ptr(uint64_t ptr, size_t min_size)
     return 1;
 }
 
+/* Format "TRACE: syscall 0xXXXXXXXX\n" into buf (signal-safe, no snprintf) */
+static void format_trace_syscall(char *buf, uint64_t nr)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const char prefix[] = "TRACE: syscall 0x";
+    int i;
+    for (i = 0; prefix[i]; i++) buf[i] = prefix[i];
+    for (int k = 7; k >= 0; k--) buf[i++] = hex[(nr >> (k * 4)) & 0xF];
+    buf[i++] = '\n';
+    buf[i] = '\0';
+}
+
 /*
  * read_guest_stack — read an argument from the guest stack.
  *
@@ -166,8 +178,8 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
 uint64_t c_dispatch_syscall(uint64_t nr)
 {
     char trace_buf[32];
-    int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)nr);
-    DEBUG_WRITE_ERR(trace_buf, (size_t)trace_len);
+    format_trace_syscall(trace_buf, nr);
+    INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXX\n"));
 
     uint64_t arg1 = __wine_guest_regs.rcx;
     uint64_t arg2 = __wine_guest_regs.rdx;
@@ -386,7 +398,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     default:
         fprintf(stderr, "my_wine: unhandled syscall 0x%lX\n",
                 (unsigned long)nr);
-        raise(SIGSEGV);
+        INLINE_SYSCALL_KILL(INLINE_SYSCALL_GETPID(), SIGSEGV);
     }
 
     __wine_guest_regs.rax = result;
@@ -419,8 +431,8 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 {
     /* Trace every syscall invocation to stderr via direct write syscall */
     char trace_buf[32];
-    int trace_len = snprintf(trace_buf, sizeof(trace_buf), "TRACE: syscall 0x%lX\n", (unsigned long)syscall_number);
-    DEBUG_WRITE_ERR(trace_buf, (size_t)trace_len);
+    format_trace_syscall(trace_buf, syscall_number);
+    INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXX\n"));
 
     /* syscall_number is the raw NT syscall number (passed directly
      * by the thunks — no Wine offset).                               */
@@ -643,7 +655,7 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     default:
         fprintf(stderr, "my_wine: unhandled syscall 0x%lX\n",
                 (unsigned long)syscall_number);
-        raise(SIGSEGV);
+        INLINE_SYSCALL_KILL(INLINE_SYSCALL_GETPID(), SIGSEGV);
     }
 
     ctx->uc_mcontext.gregs[REG_RAX] = (greg_t)result;
