@@ -3,7 +3,7 @@
  *
  * Called via `call __wine_dispatcher` from generated thunks.
  * On entry: RDI = syscall number, [RSP] = return address (pushed by thunk),
- *           RCX/RDX/R8/R9 = guest args, RSP = guest stack pointer.
+ *           RCX/RDX/R8/R9 = guest args, RDI/RSI = callee-saved, RSP = guest stack pointer.
  *
  * Saves all guest state to __wine_guest_regs global struct, switches
  * to UNIX stack, calls c_dispatch_syscall(), restores state, returns.
@@ -19,9 +19,11 @@
 .equ RDX_OFF,       8
 .equ R8_OFF,        16
 .equ R9_OFF,        24
-.equ RSP_OFF,       32
-.equ RET_ADDR_OFF,  40
-.equ RAX_OFF,       48
+.equ RDI_OFF,       32
+.equ RSI_OFF,       40
+.equ RSP_OFF,       48
+.equ RET_ADDR_OFF,  56
+.equ RAX_OFF,       64
 
 .extern __wine_guest_regs
 .extern unix_stack_ptr_val
@@ -46,6 +48,10 @@ __wine_dispatcher:
     mov %rdx, __wine_guest_regs+RDX_OFF(%rip)
     mov %r8,  __wine_guest_regs+R8_OFF(%rip)
     mov %r9,  __wine_guest_regs+R9_OFF(%rip)
+
+    /* Guest callee-saved registers (clobbered by thunk/dispatcher) */
+    mov %rdi, __wine_guest_regs+RDI_OFF(%rip)
+    mov %rsi, __wine_guest_regs+RSI_OFF(%rip)
 
     /* ── Switch to UNIX stack ── */
 
@@ -75,6 +81,8 @@ __wine_dispatcher:
     mov __wine_guest_regs+RDX_OFF(%rip), %rdx
     mov __wine_guest_regs+R8_OFF(%rip), %r8
     mov __wine_guest_regs+R9_OFF(%rip), %r9
+    mov __wine_guest_regs+RDI_OFF(%rip), %rdi
+    mov __wine_guest_regs+RSI_OFF(%rip), %rsi
     mov __wine_guest_regs+RAX_OFF(%rip), %rax
 
     /* Pop the thunk's return address from guest stack (pushed by thunk's `call`).
