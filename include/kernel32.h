@@ -42,6 +42,28 @@ void *GetModuleHandleA(const char *lpModuleName);
 __attribute__((ms_abi))
 int lstrlenA(const char *lpString);
 
+/* ── FILETIME / LARGE_INTEGER types ───────────────────────── */
+
+typedef struct {
+    uint32_t dwLowDateTime;
+    uint32_t dwHighDateTime;
+} FILETIME;
+
+typedef struct {
+    int64_t QuadPart;
+} LARGE_INTEGER;
+
+/* ── Time functions ─────────────────────────────────────────── */
+
+__attribute__((ms_abi))
+void GetSystemTimeAsFileTime(FILETIME *lpSystemTime);
+
+__attribute__((ms_abi))
+int QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount);
+
+__attribute__((ms_abi))
+int QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency);
+
 /* ── Additional kernel32 stubs ──────────────────────────────── */
 
 /* Critical Section functions */

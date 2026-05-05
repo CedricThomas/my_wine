@@ -56,6 +56,66 @@ void *TlsGetValue(uint32_t dwTlsIndex)
     return NULL;
 }
 
+/* ── GetSystemTimeAsFileTime ───────────────────────────────── */
+/*
+ * Maps to NtQuerySystemTime. Returns current system time as a FILETIME
+ * (100ns since 1601-01-01 UTC).
+ */
+WINE_STUB
+void GetSystemTimeAsFileTime(FILETIME *lpSystemTime)
+{
+    if (lpSystemTime == NULL) {
+        g_last_error = 87; /* ERROR_INVALID_PARAMETER */
+        return;
+    }
+
+    uint64_t filetime;
+    handler_NtQuerySystemTime((uint64_t)&filetime);
+
+    lpSystemTime->dwLowDateTime  = (uint32_t)(filetime & 0xFFFFFFFF);
+    lpSystemTime->dwHighDateTime = (uint32_t)(filetime >> 32);
+}
+
+/* ── QueryPerformanceCounter ───────────────────────────────── */
+/*
+ * Maps to NtQueryPerformanceCounter. Returns a high-resolution
+ * performance counter value as 100ns ticks.
+ */
+WINE_STUB
+int QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount)
+{
+    if (lpPerformanceCount == NULL) {
+        g_last_error = 87; /* ERROR_INVALID_PARAMETER */
+        return 0;
+    }
+
+    uint64_t counter;
+    handler_NtQueryPerformanceCounter((uint64_t)&counter);
+
+    lpPerformanceCount->QuadPart = (int64_t)counter;
+    return 1;
+}
+
+/* ── QueryPerformanceFrequency ─────────────────────────────── */
+/*
+ * Maps to NtQueryPerformanceFrequency. Returns the performance counter
+ * frequency (10^7 = 100ns resolution).
+ */
+WINE_STUB
+int QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency)
+{
+    if (lpFrequency == NULL) {
+        g_last_error = 87; /* ERROR_INVALID_PARAMETER */
+        return 0;
+    }
+
+    uint64_t freq;
+    handler_NtQueryPerformanceFrequency((uint64_t)&freq);
+
+    lpFrequency->QuadPart = (int64_t)freq;
+    return 1;
+}
+
 /* ── VirtualProtect ─────────────────────────────────────────── */
 
 WINE_STUB

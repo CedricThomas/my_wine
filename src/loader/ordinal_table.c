@@ -138,6 +138,8 @@ static const ordinal_entry_t ordinal_table[] = {
     { "kernel32.dll", 191, "GetSystemTime" },
     { "kernel32.dll", 192, "GetSystemTimeAsFileTime" },
     { "kernel32.dll", 193, "Sleep" },
+    { "kernel32.dll", 194, "QueryPerformanceCounter" },
+    { "kernel32.dll", 195, "QueryPerformanceFrequency" },
     { "kernel32.dll", 200, "CreateMutexA" },
     { "kernel32.dll", 201, "CreateMutexW" },
     { "kernel32.dll", 202, "ReleaseMutex" },
