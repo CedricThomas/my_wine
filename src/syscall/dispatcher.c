@@ -1,5 +1,4 @@
 #define _GNU_SOURCE
-#define SIGSEGV 11
 #include <stdint.h>
 #include <sys/ucontext.h>
 
@@ -351,6 +350,28 @@ uint64_t c_dispatch_syscall(uint64_t nr)
         result = handler_NtUnmapViewOfSection(arg1, arg2);
         break;
 
+    case NT_SYSCALL_QUERY_SYSTEM_TIME: /* NtQuerySystemTime */
+    {
+        uint64_t h_ft_val = 0;
+        void *p_ft = NULL;
+        int status = read_guest_ptr(arg1, &h_ft_val, &p_ft, "filetime_ptr");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtQuerySystemTime((PVOID)&h_ft_val);
+        if (p_ft) *(uint64_t *)p_ft = h_ft_val;
+        break;
+    }
+
+    case NT_SYSCALL_DELAY_EXECUTION: /* NtDelayExecution */
+    {
+        uint64_t h_timeout = 0;
+        void *p_timeout = NULL;
+        int status = read_guest_ptr(arg2, &h_timeout, &p_timeout, "timeout_ptr");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtDelayExecution(arg1, (PVOID)&h_timeout);
+        if (p_timeout) *(uint64_t *)p_timeout = h_timeout;
+        break;
+    }
+
     case NT_SYSCALL_TERMINATE_PROCESS: /* NtTerminateProcess */
         result = handler_NtTerminateProcess(arg1, arg2);
         break;
@@ -453,13 +474,36 @@ uint64_t c_dispatch_syscall(uint64_t nr)
         break;
     }
 
+    case NT_SYSCALL_QUERY_PERFORMANCE_COUNTER: /* NtQueryPerformanceCounter */
+    {
+        uint64_t h_counter = 0;
+        void *p_counter = NULL;
+        int status = read_guest_ptr(arg1, &h_counter, &p_counter, "counter_ptr");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtQueryPerformanceCounter((PVOID)&h_counter);
+        if (p_counter) *(uint64_t *)p_counter = h_counter;
+        break;
+    }
+
+    case NT_SYSCALL_QUERY_PERFORMANCE_FREQUENCY: /* NtQueryPerformanceFrequency */
+    {
+        uint64_t h_freq = 0;
+        void *p_freq = NULL;
+        int status = read_guest_ptr(arg1, &h_freq, &p_freq, "frequency_ptr");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtQueryPerformanceFrequency((PVOID)&h_freq);
+        if (p_freq) *(uint64_t *)p_freq = h_freq;
+        break;
+    }
+
     default:
         {
             char buf[39];
             format_err_unhandled_syscall(buf, nr);
             INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         }
-        INLINE_SYSCALL_KILL(INLINE_SYSCALL_GETPID(), SIGSEGV);
+        result = STATUS_NOT_IMPLEMENTED;
+        break;
     }
 
     __wine_guest_regs.rax = result;
@@ -482,7 +526,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
  *   R9  (ARG4) = gregs[REG_R9]
  *
  * Writes the return value into gregs[REG_RAX].
- * On unhandled syscall, prints an error to stderr and raises SIGSEGV.
+ * On unhandled syscall, prints an error to stderr and returns STATUS_NOT_IMPLEMENTED.
  *
  * NOTE: This function is kept for backward compatibility with existing
  * tests that construct ucontext_t manually. The production path uses
@@ -611,6 +655,28 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         result = handler_NtUnmapViewOfSection(arg1, arg2);
         break;
 
+    case NT_SYSCALL_QUERY_SYSTEM_TIME: /* NtQuerySystemTime */
+    {
+        uint64_t h_ft_val = 0;
+        void *p_ft = NULL;
+        int status = read_guest_ptr(arg1, &h_ft_val, &p_ft, "filetime_ptr");
+        if (status != 0) return status;
+        result = handler_NtQuerySystemTime((PVOID)&h_ft_val);
+        if (p_ft) *(uint64_t *)p_ft = h_ft_val;
+        break;
+    }
+
+    case NT_SYSCALL_DELAY_EXECUTION: /* NtDelayExecution */
+    {
+        uint64_t h_timeout = 0;
+        void *p_timeout = NULL;
+        int status = read_guest_ptr(arg2, &h_timeout, &p_timeout, "timeout_ptr");
+        if (status != 0) return status;
+        result = handler_NtDelayExecution(arg1, (PVOID)&h_timeout);
+        if (p_timeout) *(uint64_t *)p_timeout = h_timeout;
+        break;
+    }
+
     case NT_SYSCALL_TERMINATE_PROCESS: /* NtTerminateProcess */
         result = handler_NtTerminateProcess(arg1, arg2);
         break;
@@ -713,13 +779,36 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         break;
     }
 
+    case NT_SYSCALL_QUERY_PERFORMANCE_COUNTER: /* NtQueryPerformanceCounter */
+    {
+        uint64_t h_counter = 0;
+        void *p_counter = NULL;
+        int status = read_guest_ptr(arg1, &h_counter, &p_counter, "counter_ptr");
+        if (status != 0) return status;
+        result = handler_NtQueryPerformanceCounter((PVOID)&h_counter);
+        if (p_counter) *(uint64_t *)p_counter = h_counter;
+        break;
+    }
+
+    case NT_SYSCALL_QUERY_PERFORMANCE_FREQUENCY: /* NtQueryPerformanceFrequency */
+    {
+        uint64_t h_freq = 0;
+        void *p_freq = NULL;
+        int status = read_guest_ptr(arg1, &h_freq, &p_freq, "frequency_ptr");
+        if (status != 0) return status;
+        result = handler_NtQueryPerformanceFrequency((PVOID)&h_freq);
+        if (p_freq) *(uint64_t *)p_freq = h_freq;
+        break;
+    }
+
     default:
         {
             char buf[39];
             format_err_unhandled_syscall(buf, syscall_number);
             INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         }
-        INLINE_SYSCALL_KILL(INLINE_SYSCALL_GETPID(), SIGSEGV);
+        result = STATUS_NOT_IMPLEMENTED;
+        break;
     }
 
     ctx->uc_mcontext.gregs[REG_RAX] = (greg_t)result;

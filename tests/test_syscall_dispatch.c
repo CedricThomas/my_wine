@@ -268,6 +268,90 @@ static void test_sequential_dispatch(void)
           __wine_guest_regs.rax == STATUS_SUCCESS);
 }
 
+/* ── Test: NtQuerySystemTime (0x09) ─────────────────────────── */
+
+static void test_nt_query_system_time(void)
+{
+    printf("\n--- NtQuerySystemTime (0x09) ---\n");
+    uint64_t filetime_val = 0;
+    __wine_guest_regs.rcx = (uint64_t)&filetime_val;
+    __wine_guest_regs.rdx = 0;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x09, "NtQuerySystemTime", STATUS_SUCCESS);
+    check("FILETIME value written and non-zero", filetime_val > 0);
+
+    /* NULL ptr returns STATUS_SUCCESS */
+    __wine_guest_regs.rcx = 0;
+    test_syscall_one(0x09, "NtQuerySystemTime(NULL)", STATUS_SUCCESS);
+}
+
+/* ── Test: NtQueryPerformanceCounter (0x55) ─────────────────── */
+
+static void test_nt_query_performance_counter(void)
+{
+    printf("\n--- NtQueryPerformanceCounter (0x55) ---\n");
+    uint64_t counter_val = 0;
+    __wine_guest_regs.rcx = (uint64_t)&counter_val;
+    __wine_guest_regs.rdx = 0;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x55, "NtQueryPerformanceCounter", STATUS_SUCCESS);
+    check("Counter value written and non-zero", counter_val > 0);
+
+    /* NULL ptr returns STATUS_SUCCESS */
+    __wine_guest_regs.rcx = 0;
+    test_syscall_one(0x55, "NtQueryPerformanceCounter(NULL)", STATUS_SUCCESS);
+}
+
+/* ── Test: NtQueryPerformanceFrequency (0x56) ───────────────── */
+
+static void test_nt_query_performance_frequency(void)
+{
+    printf("\n--- NtQueryPerformanceFrequency (0x56) ---\n");
+    uint64_t freq_val = 0;
+    __wine_guest_regs.rcx = (uint64_t)&freq_val;
+    __wine_guest_regs.rdx = 0;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x56, "NtQueryPerformanceFrequency", STATUS_SUCCESS);
+    check("Frequency is 10^7 (10000000)", freq_val == 10000000ULL);
+
+    /* NULL ptr returns STATUS_SUCCESS */
+    __wine_guest_regs.rcx = 0;
+    test_syscall_one(0x56, "NtQueryPerformanceFrequency(NULL)", STATUS_SUCCESS);
+}
+
+/* ── Test: NtDelayExecution (0x1A) ─────────────────────────── */
+
+static void test_nt_delay_execution(void)
+{
+    printf("\n--- NtDelayExecution (0x1A) ---\n");
+
+    /* NULL timeout returns STATUS_SUCCESS (infinite delay → immediate return) */
+    __wine_guest_regs.rcx = 0;  /* alarm_pending = FALSE */
+    __wine_guest_regs.rdx = 0;  /* timeout_ptr = NULL */
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x1A, "NtDelayExecution(NULL)", STATUS_SUCCESS);
+
+    /* Zero timeout (immediate return) */
+    int64_t timeout_val = 0;  /* absolute 0 → return SUCCESS */
+    __wine_guest_regs.rcx = 0;
+    __wine_guest_regs.rdx = (uint64_t)&timeout_val;
+    test_syscall_one(0x1A, "NtDelayExecution(0 timeout)", STATUS_SUCCESS);
+
+    /* Very small relative delay */
+    timeout_val = -100000; /* -100000 * 100ns = 10ms */
+    __wine_guest_regs.rcx = 0;
+    __wine_guest_regs.rdx = (uint64_t)&timeout_val;
+    test_syscall_one(0x1A, "NtDelayExecution(10ms relative)", STATUS_SUCCESS);
+}
+
 /* ── Main ───────────────────────────────────────────────────── */
 
 int main(void)
@@ -290,6 +374,10 @@ int main(void)
     test_nt_create_event();
     test_argument_decoding();
     test_sequential_dispatch();
+    test_nt_query_system_time();
+    test_nt_query_performance_counter();
+    test_nt_query_performance_frequency();
+    test_nt_delay_execution();
 
     /* ── Summary ──────────────────────────────────────────── */
     printf("\n========================================\n");
