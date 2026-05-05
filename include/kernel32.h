@@ -86,14 +86,15 @@ int ReleaseMutex(void *hMutex);
 
 /* ── Additional kernel32 stubs ──────────────────────────────── */
 
-/* Critical Section functions */
+/* Critical Section functions — 40-byte layout matching Windows x64 */
 typedef struct {
-    void *DebugInfo;
-    int LockCount;
-    int RecursionCount;
-    void *OwningThread;
-    void *SpinCount;
-} CRITICAL_SECTION;
+    void    *DebugInfo;             // 0x00, 8 bytes
+    int32_t  LockCount;             // 0x08, 4 bytes — -1=free, 0=owned
+    int32_t  RecursionCount;        // 0x0C, 4 bytes
+    uint64_t OwningThread;          // 0x10, 8 bytes — thread ID
+    uint64_t LockSemaphore;         // 0x18, 8 bytes — kernel EVENT handle
+    uint64_t SpinCount;             // 0x20, 8 bytes
+} CRITICAL_SECTION;                 // total 40 bytes
 
 __attribute__((ms_abi))
 void InitializeCriticalSection(CRITICAL_SECTION *cs);

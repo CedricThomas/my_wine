@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <unistd.h>
 #include "kernel32_priv.h"
 
 /* Thread-local last-error code */
@@ -18,19 +19,40 @@ int lstrlenA(const char *lpString)
 WINE_STUB
 void InitializeCriticalSection(CRITICAL_SECTION *cs)
 {
-    if (cs) __builtin_memset(cs, 0, sizeof(*cs));
+    if (cs) {
+        cs->DebugInfo = NULL;
+        cs->LockCount = -1;
+        cs->RecursionCount = 0;
+        cs->OwningThread = 0;
+        cs->LockSemaphore = 0;
+        cs->SpinCount = 0;
+    }
 }
 
 WINE_STUB
 void EnterCriticalSection(CRITICAL_SECTION *cs)
 {
-    if (cs) cs->LockCount++;
+    if (!cs) return;
+    int32_t expected = -1;
+    if (__atomic_compare_exchange_n(&cs->LockCount, &expected, 0, 0,
+                                     __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+        cs->RecursionCount = 1;
+        cs->OwningThread = getpid();
+        return;
+    }
+    // Slow path (placeholder — will be filled in task-2)
+    // TODO: handle contention via LockSemaphore
 }
 
 WINE_STUB
 void LeaveCriticalSection(CRITICAL_SECTION *cs)
 {
-    if (cs) cs->RecursionCount--;
+    if (!cs) return;
+    cs->RecursionCount--;
+    if (cs->RecursionCount == 0) {
+        cs->LockCount = -1;
+        cs->OwningThread = 0;
+    }
 }
 
 WINE_STUB
