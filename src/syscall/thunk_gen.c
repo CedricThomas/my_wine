@@ -15,12 +15,17 @@
  * thunk_gen.c — Direct-call thunk generator
  *
  * Generates machine code for thunks that call __wine_dispatcher directly.
- * Each thunk encodes (16 bytes):
- *   push rdi               — save original RDI (2 bytes)
- *   mov rdi, imm32(NT_NR)  — put the NT syscall number in RDI (7 bytes)
- *   call __wine_dispatcher — jump to dispatcher (5 bytes)
- *   pop rdi                — restore original RDI (1 byte)
- *   ret                    — return to guest caller (1 byte)
+ * Each thunk encodes (23 bytes):
+ *   push rdi                — save original RDI (2 bytes)
+ *   mov rdi, imm32(NT_NR)   — put the NT syscall number in RDI (7 bytes)
+ *   mov rax, imm64(dispatcher) — load dispatcher address (10 bytes)
+ *   call rax                — jump to dispatcher (2 bytes)
+ *   pop rdi                 — restore original RDI (1 byte)
+ *   ret                     — return to guest caller (1 byte)
+ *
+ * Uses absolute indirect call (mov rax; call rax) instead of relative call
+ * (E8 displacement) to handle ASLR: the thunk blob and dispatcher can be
+ * more than 2 GB apart when both are independently randomized.
  *
  * RDI is saved/restored here (not in the dispatcher) so the dispatcher's
  * return goes to `pop rdi` instead of having to skip past the thunk.
@@ -28,7 +33,7 @@
  * All thunks live in a single mmap'd executable blob.
  */
 
-#define THUNK_SIZE 16        /* 2+7+5+1+1 bytes: push+mov+call+pop+ret */
+#define THUNK_SIZE 23        /* 2+7+10+2+1+1 bytes: push+mov+rax+call+pop+ret */
 #define NUM_NT_SYSCALLS 16
 
 static void *thunk_blob = NULL;    /* single mmap'd executable region */
@@ -49,13 +54,14 @@ static const uint16_t nt_syscall_list[] = {
 };
 
 /*
- * write_thunk_at — encode a 16-byte thunk at the given location.
+ * write_thunk_at — encode a 23-byte thunk at the given location.
  * Layout:
  *   Offset 0-1:   push rdi          (save original RDI)
  *   Offset 2-8:   mov rdi, imm32    (set syscall number)
- *   Offset 9-13:  call dispatcher   (enter dispatcher; RIP after call = loc+14)
- *   Offset 14:    pop rdi           (restore original RDI, after dispatcher returns)
- *   Offset 15:    ret               (return to guest caller)
+ *   Offset 9-18:  mov rax, imm64    (load dispatcher address, absolute)
+ *   Offset 19-20: call rax          (enter dispatcher via indirect call)
+ *   Offset 21:    pop rdi           (restore original RDI, after dispatcher returns)
+ *   Offset 22:    ret               (return to guest caller)
  */
 static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatcher_addr)
 {
@@ -77,26 +83,31 @@ static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatch
     loc[7] = (uint8_t)((syscall_number >> 16) & 0xFF);
     loc[8] = (uint8_t)((syscall_number >> 24) & 0xFF);
 
-    /* call __wine_dispatcher — 5 bytes: E8 XX XX XX XX
-     * RIP after the 5-byte call = loc + 14, so displacement is relative to that */
-    loc[9] = 0xE8;
-    int64_t raw_disp = (int64_t)(uintptr_t)dispatcher_addr - (int64_t)(uintptr_t)(loc + 14);
-    if (raw_disp > INT32_MAX || raw_disp < INT32_MIN) {
-        fprintf(stderr, "wine: fatal: dispatcher displacement %lld out of int32_t range (ASLR issue?)\n", (long long)raw_disp);
-        abort();
-    }
-    int32_t disp = (int32_t)raw_disp;
-    DEBUG("wine: thunk[%d] dispatcher=0x%lx disp=%d", syscall_number, (unsigned long)dispatcher_addr, disp);
-    loc[10] = (uint8_t)(disp & 0xFF);
-    loc[11] = (uint8_t)((disp >> 8) & 0xFF);
-    loc[12] = (uint8_t)((disp >> 16) & 0xFF);
-    loc[13] = (uint8_t)((disp >> 24) & 0xFF);
+    /* mov rax, imm64(dispatcher) — 10 bytes: 48 B8 XX XX XX XX XX XX XX XX
+     * Absolute indirect call — no displacement overflow risk regardless of ASLR */
+    loc[9] = 0x48;        /* REX.W */
+    loc[10] = 0xB8;       /* mov rax, imm64 */
+    uint64_t addr = (uint64_t)(uintptr_t)dispatcher_addr;
+    loc[11] = (uint8_t)(addr & 0xFF);
+    loc[12] = (uint8_t)((addr >> 8) & 0xFF);
+    loc[13] = (uint8_t)((addr >> 16) & 0xFF);
+    loc[14] = (uint8_t)((addr >> 24) & 0xFF);
+    loc[15] = (uint8_t)((addr >> 32) & 0xFF);
+    loc[16] = (uint8_t)((addr >> 40) & 0xFF);
+    loc[17] = (uint8_t)((addr >> 48) & 0xFF);
+    loc[18] = (uint8_t)((addr >> 56) & 0xFF);
+
+    DEBUG("wine: thunk[%d] dispatcher=0x%lx", syscall_number, (unsigned long)dispatcher_addr);
+
+    /* call rax — 2 bytes: FF D0 (indirect call through RAX) */
+    loc[19] = 0xFF;
+    loc[20] = 0xD0;
 
     /* pop rdi — 1 byte: 5F (restore original RDI after dispatcher returns) */
-    loc[14] = 0x5F;
+    loc[21] = 0x5F;
 
     /* ret — 1 byte: C3 (return to guest caller) */
-    loc[15] = 0xC3;
+    loc[22] = 0xC3;
 }
 
 /*

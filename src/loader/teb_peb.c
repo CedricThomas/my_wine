@@ -121,9 +121,12 @@ void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
         return NULL;
     }
 
-    /* Top of stack (aligned to 16 bytes for x86_64 ABI requirement) */
+    /* Top of stack (aligned to 16 bytes for x86_64 ABI requirement).
+     * Sub 8 BEFORE alignment to ensure stack_top - 8 never exceeds
+     * the mmap'd region. Without this, page-aligned bases + page-aligned
+     * commits can push stack_top past the region boundary under ASLR. */
     uintptr_t stack_top = (uintptr_t)stack_base + commit;
-    stack_top = (stack_top & ~(uintptr_t)15) + 8;  /* ABI requires rsp%16==8 */
+    stack_top = ((stack_top - 8) & ~(uintptr_t)15) + 8;  /* ABI requires rsp%16==8 */
 
 
     /* Print stack info */
