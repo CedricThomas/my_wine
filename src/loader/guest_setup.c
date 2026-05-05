@@ -231,6 +231,21 @@ static void apply_final_patches(void *base, IMAGE_NT_HEADERS64 *nt,
 }
 
 /* ── Step 5: Jump to guest (noreturn) ───────────────────────── */
+
+/*
+ * string_eq — safe string comparison without glibc.
+ * Must not call strcmp/memcmp/strncmp because after GS→TEB switch,
+ * glibc accesses vDSO via GS-relative offsets and will crash.
+ */
+static inline int string_eq(const char *s, const char *t)
+{
+    while (*s && *s == *t) {
+        s++;
+        t++;
+    }
+    return *s == *t;
+}
+
 static __attribute__((noreturn)) void jump_to_guest(uint64_t entry_abs, void *stack_top,
                                                     char **guest_argv, char **guest_envp)
 {
@@ -239,22 +254,24 @@ static __attribute__((noreturn)) void jump_to_guest(uint64_t entry_abs, void *st
     /* Find ExitProcess from the import table so you can call it after main returns */
     void (*exit_fn)(uint32_t) = NULL;
     for (int i = 0; import_table[i].name != NULL; i++) {
-        if (strcmp(import_table[i].name, "ExitProcess") == 0 &&
+        if (string_eq(import_table[i].name, "ExitProcess") &&
             import_table[i].address != NULL) {
             exit_fn = (void (*)(uint32_t))import_table[i].address;
             break;
         }
     }
     if (!exit_fn) {
-        fprintf(stderr, "ERROR: ExitProcess not found in import table\n");
-        _exit(1);
+        /* After GS→TEB, glibc (fprintf) crashes via vDSO. Use raw syscall. */
+        const char msg[] = "ERROR: ExitProcess not found in import table\n";
+        INLINE_SYSCALL_WRITE_ERR(msg, sizeof(msg) - 1);
+        INLINE_SYSCALL_EXIT(1);
     }
     /* ExitProcess found */
 
     run_guest(entry, stack_top, NULL, guest_argv, guest_envp, exit_fn);
 
     /* run_guest should not return (ExitProcess exits) */
-    _exit(1);
+    INLINE_SYSCALL_EXIT(1);
 }
 
 /* ── Orchestrator ────────────────────────────────────────────── */
