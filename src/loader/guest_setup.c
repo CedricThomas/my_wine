@@ -198,8 +198,9 @@ static void finalize_guest_state(void *teb, void *seh_frame)
 {
     /* Re-set GS base */
     if (set_gs_base(teb) != 0) {
-        fprintf(stderr, "my_wine: cannot set GS base, aborting\n");
-        _exit(1);
+        /* GS may already point to TEB — avoid glibc (vDSO via GS).
+         * Use syscall-only exit. */
+        INLINE_SYSCALL_EXIT(1);
     }
 
     /* Point TEB gs:[0x00] to our SEH frame */
