@@ -109,7 +109,7 @@ void *lookup_thunk(uint16_t syscall_number)
 void cleanup_thunk_pages(void)
 {
     if (thunk_blob != NULL) {
-        munmap(thunk_blob, thunk_blob_size);
+        INLINE_SYSCALL_MUNMAP(thunk_blob, thunk_blob_size);
         thunk_blob = NULL;
         thunk_blob_size = 0;
     }
