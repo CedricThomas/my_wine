@@ -23,19 +23,61 @@ Each section contains:
 | [5](#5-only-mingw-w64-executables) | Only mingw-w64 Executables | High | Heap (§7) |
 | [6](#6-limited-syscall-handlers) | Limited Syscall Handlers | High | None |
 | [7](#7-no-heap-management) | No Heap Management | Medium | CriticalSection (§4) |
-| [8](#8-no-filesystem-io) | No Filesystem I/O | High | Syscall handlers (§6) |
-| [9](#9-single-thread-seh) | Single-thread SEH | High | Threading (§3, §4) |
+| [8](#8-limited-filesystem-io) | Limited Filesystem I/O | High | Syscall handlers (§6) |
+| [9](#9-shared-teb-threading) | Shared-TEB Threading Model | High | Per-thread TEB (§4) |
+
+### Current Capabilities Summary
+
+The project currently has **16 NT syscall handlers**, **handle table with 256
+entries** (stdin/stdout/stderr pre-initialized), **thread creation via
+NtCreateThreadEx** (clone with shared address space), and **full CRT startup
+chain** (mainCRTStartup → __getmainargs → _initterm → main).
+
+**Implemented syscalls** (from `include/nt_constants.h`):
+
+| Syscall | NT # | Status |
+|---------|------|--------|
+| `NtCallbackReturn` | `0x05` | ✅ Working |
+| `NtQueryInformationProcess` | `0x07` | ✅ Working (ProcessBasicInformation, ProcessWorkingSetSize) |
+| `NtClose` | `0x0F` | ✅ Working |
+| `NtAllocateVirtualMemory` | `0x18` | ✅ Working (mmap-based) |
+| `NtFreeVirtualMemory` | `0x19` | ✅ Working (munmap-based) |
+| `NtGetContextThread` | `0x24` | ✅ Stub (zeros CONTEXT struct) |
+| `NtSetContextThread` | `0x26` | ✅ Stub (no-op) |
+| `NtMapViewOfSection` | `0x28` | ✅ Working (file-backed and anonymous) |
+| `NtUnmapViewOfSection` | `0x29` | ✅ Working |
+| `NtTerminateProcess` | `0x2A` | ✅ Working (INLINE_SYSCALL_EXIT) |
+| `NtReadFile` | `0x3C` | ✅ Working (handle→FD, direct read) |
+| `NtWriteFile` | `0x3D` | ✅ Working (handle→FD, direct write) |
+| `NtCreateEvent` | `0x48` | ✅ Basic (no wait/signal) |
+| `NtCreateSection` | `0x4A` | ✅ Working (file-backed and anonymous) |
+| `NtCreateThreadEx` | `0x4E` | ✅ Working (clone() with CLONE_VM\|CLONE_FS\|CLONE_FILES\|CLONE_SIGHAND\|SIGCHLD) |
+| `NtOpenFile` | `0x4F` | ✅ Working (UTF-16→UTF-8 ASCII conversion, handle table integration) |
+
+**Implemented kernel32 stubs:**
+GetStdHandle, WriteFile, ReadFile, ExitProcess, Sleep, VirtualProtect,
+VirtualQuery, lstrlenA, InitializeCriticalSection, EnterCriticalSection,
+LeaveCriticalSection, DeleteCriticalSection, GetLastError, TlsGetValue,
+GetStartupInfoA, SetUnhandledExceptionFilter, __C_specific_handler,
+GetProcAddress, LoadLibraryA, GetModuleHandleA.
+
+**Implemented msvcrt/CRT stubs:**
+__getmainargs, __iob_func, fprintf, fwrite, malloc, calloc, free, memcpy,
+strlen, strncmp, exit, _exit, abort, signal, _amsg_exit, _cexit, __set_app_type,
+__initenv, _initterm, _initterm_e, _onexit, __p__commode, __p__fmode, _setargv,
+__lconv_init, __setusermatherr.
 
 ### Recommended Implementation Order
 
 By dependency graph (leaf nodes first):
 
 ```
-Phase 1:  §1
-Phase 2 (need §1): §6 → §3
-Phase 3 (need §6):  §4 → §8
-Phase 4 (need §4 + §7): §5
-Phase 5 (need §3 + §4): §9
+Phase 1:  §6 (more syscalls) → §8 (full file I/O)
+Phase 2:  §1
+Phase 3:  §4 (real CriticalSection) → §7 (heap)
+Phase 4 (need §1): §2 (dynamic loading) → §5 (toolchain)
+Phase 5 (need §4): §9 (per-thread TEB)
+Phase 6:  §3 (TLS)
 ```
 
 ---
@@ -96,8 +138,8 @@ New `apply_relocations()` in `src/loader/relocations.c`, called from
 | Risk | Severity | Mitigation |
 |------|----------|------------|
 | Corrupting `.text` with wrong offset math | High | Validate target within `SizeOfImage` |
-| mpostect ordering (SIGSEGV on read-only) | Medium | Apply **before** mprotect eliminates this |
-| IAT order vs import resolution | Low | Natural order in main.c: relocate before resolve |
+| mprotect ordering (SIGSEGV on read-only) | Medium | Apply **before** mprotect eliminates this |
+| IAT order vs import resolution | Low | Natural order: relocate before resolve |
 
 ### Implementation Plan
 
@@ -114,11 +156,12 @@ New `apply_relocations()` in `src/loader/relocations.c`, called from
 ### Current State
 
 `LoadLibraryA` returns `NULL`. `GetProcAddress` and `GetModuleHandleA` are
-also NULL-returning stubs. Runtime DLL loading is not implemented.
+also NULL-returning stubs (in `src/stubs/kernel32_module.c`). Runtime DLL
+loading is not implemented.
 
 ### Investigation
 
-**What `LoadLibraryA` must do (at guest runtime in child process):**
+**What `LoadLibraryA` must do (at guest runtime in single-process model):**
 
 ```
 LoadLibraryA("some.dll")
@@ -134,7 +177,7 @@ LoadLibraryA("some.dll")
 ```
 
 **Key insight:** `mmap`, `open`, `fstat` are Linux syscalls < 0x400 — pass
-through seccomp. `LoadLibraryA` can use libc directly in the child.
+through seccomp. `LoadLibraryA` can use libc directly.
 
 **Import resolution refactoring:** Current `resolve_import()` does static
 `import_table` lookup only. Must become **three-tier**:
@@ -228,7 +271,7 @@ Win32 API. `TlsAlloc` returns index 1-64 (bitmap). Index →
 
 **Phase 1** (initial thread): TLS directory parsing in `teb_peb.c`.
 **Phase 2** (explicit API): `TlsAlloc` (bitmap), `TlsGetValue`, `TlsSetValue`, `TlsFree`.
-**Phase 3** (threading): Per-thread TLS when `NtCreateThreadEx` is implemented.
+**Phase 3** (threading): Per-thread TLS when per-thread TEB is implemented.
 
 ### Complexity: Medium (~160 lines for Phase 1+2)
 
@@ -249,19 +292,36 @@ None. Independent.
 
 ### Current State
 
-`InitializeCriticalSection`, `EnterCriticalSection`, `LeaveCriticalSection`,
-`DeleteCriticalSection` are no-ops. No real mutual exclusion.
+`InitializeCriticalSection` zeros the struct, `EnterCriticalSection`
+increments `LockCount`, `LeaveCriticalSection` decrements `RecursionCount`,
+`DeleteCriticalSection` is a no-op. These are **simplistic counters with no
+real mutual exclusion** (in `src/stubs/kernel32_misc.c`).
 
-**Critical header bug** (`include/kernel32.h`): `CRITICAL_SECTION` is 32
-bytes with misnamed fields. **Correct layout is 40 bytes:**
+`NtCreateEvent` is implemented (allocates handle table slot + event struct)
+but `NtSetEvent`, `NtResetEvent`, and `NtWaitForSingleObject` are not
+implemented. Events exist in the handle table but cannot be waited on or
+signaled.
+
+**Critical header bug** (`include/kernel32.h`): `CRITICAL_SECTION` is
+**28 bytes with misnamed fields**. **Correct layout is 40 bytes:**
 
 ```c
+// Current (WRONG — 28 bytes, missing LockSemaphore):
+typedef struct {
+    void *DebugInfo;      // 0x00, 8 bytes
+    int   LockCount;      // 0x08, 4 bytes
+    int   RecursionCount; // 0x0C, 4 bytes
+    void *OwningThread;   // 0x10, 8 bytes
+    void *SpinCount;      // 0x18, 8 bytes ← WRONG: should be LockSemaphore then SpinCount
+} CRITICAL_SECTION;       // total 28 bytes ← WRONG
+
+// Correct (40 bytes):
 typedef struct _RTL_CRITICAL_SECTION {
     void    *DebugInfo;         // 0x00, 8 bytes  — NULL or -1
     LONG    LockCount;          // 0x08, 4 bytes  — -1=free, 0=owned, >0=contention
     LONG    RecursionCount;     // 0x0C, 4 bytes  — re-entry depth
     HANDLE  OwningThread;       // 0x10, 8 bytes  — thread ID
-    HANDLE  LockSemaphore;      // 0x18, 8 bytes  — kernel handle (EVENT)
+    HANDLE  LockSemaphore;      // 0x18, 8 bytes  — kernel handle (EVENT) ← MISSING
     ULONG_PTR SpinCount;        // 0x20, 8 bytes  — spin iterations
 } RTL_CRITICAL_SECTION;         // total 40 bytes
 ```
@@ -309,7 +369,8 @@ implement `NtSetEvent` and `NtWaitForSingleObject`.
 
 ### Prerequisites
 
-`NtCreateEvent` exists. Need `NtSetEvent` and `NtWaitForSingleObject`.
+`NtCreateEvent` exists. Need `NtSetEvent`, `NtResetEvent`, and
+`NtWaitForSingleObject`.
 
 ### Risks
 
@@ -356,9 +417,9 @@ KERNEL32.dll:      GetCommandLineW, GetEnvironmentStringsW, GetStartupInfoW, ...
 **iob differences:** `__acrt_iob_func` is imported from `ucrtbase.dll` (direct
 import, no wrapper to patch). Simply resolving to `__wine_iob_data` works.
 
-**`__acrt_iob_func` patching:** The current 15-byte `.text` patch is a
-workaround for a **mingw-w64 import library bug**. MSVC doesn't have this
-wrapper — no patching needed.
+**`__acrt_iob_func` patching:** The current 15-byte `.text` patch (in
+`src/loader/guest_setup.c`) is a workaround for a **mingw-w64 import library
+bug**. MSVC doesn't have this wrapper — no patching needed.
 
 ### Approach
 
@@ -385,7 +446,7 @@ Heap (§7) — `malloc`/`calloc`/`free` are imported from `ucrtbase.dll`.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Breaking mingw-w664 support | High | High | New paths are additive |
+| Breaking mingw-w64 support | High | High | New paths are additive |
 | UCRT FILE struct differs (64-96 vs 48) | Medium | Medium | Zero-pad `__wine_iob` to 96 bytes |
 
 ### Files to Change
@@ -397,7 +458,7 @@ Heap (§7) — `malloc`/`calloc`/`free` are imported from `ucrtbase.dll`.
 | `src/stubs/crt_stdio.c` | `__wine_iob` padded to 96 bytes |
 | `src/stubs/kernel32_misc.c` | `GetCommandLineW`, `GetEnvironmentStringsW` |
 | `src/stubs/crt_offset_discovery.c` | Skip for non-mingw CRTs |
-| `src/loader/child_setup.c` | Conditional `patch_acrt_iob` |
+| `src/loader/guest_setup.c` | Conditional `patch_acrt_iob` |
 
 ---
 
@@ -405,37 +466,79 @@ Heap (§7) — `malloc`/`calloc`/`free` are imported from `ucrtbase.dll`.
 
 ### Current State
 
-Only **16 NT syscalls** are implemented. Unsupported syscalls cause
-`STATUS_NOT_IMPLEMENTED` (or `raise(SIGSEGV)` in some paths).
+**16 NT syscalls** are implemented. Unsupported syscalls cause
+`INLINE_SYSCALL_KILL(getpid(), SIGSEGV)` (the default case in `dispatcher.c`).
 
-**Currently implemented:** `NtCallbackReturn`, `NtQueryInformationProcess`,
-`NtClose`, `NtAllocateVirtualMemory`, `NtFreeVirtualMemory`,
-`NtGetContextThread`, `NtSetContextThread`, `NtMapViewOfSection`,
-`NtUnmapViewOfSection`, `NtTerminateProcess`, `NtReadFile`, `NtWriteFile`,
-`NtCreateEvent`, `NtCreateSection`, `NtCreateThreadEx`, `NtOpenFile`.
+All 16 are listed in the [Current Capabilities Summary](#current-capabilities-summary).
 
 ### P0 Missing Syscalls (blocks most real applications)
+
+**Correct syscall numbers verified against Windows 10/11 x86_64:**
 
 | Syscall | NT # | Linux Mapping |
 |---------|------|---------------|
 | `NtWaitForSingleObject` | `0x00` | futex / pthread_cond_wait |
+| `NtQuerySystemTime` | `0x09` | clock_gettime(CLOCK_REALTIME) |
+| `NtDelayExecution` | `0x1A` | nanosleep() |
+| `NtTerminateThread` | `0x1D` | pthread_exit / kill |
+| `NtReleaseMutex` | `0x1E` | pthread_mutex_unlock |
+| `NtCreateMutex` | `0x44` | pthread_mutex_init |
+| `NtProtectVirtualMemory` | `0x4D` | mprotect() |
+| `NtQueryPerformanceCounter` | `0x55` | clock_gettime(CLOCK_MONOTONIC) |
+| `NtQueryPerformanceFrequency` | `0x56` | Return constant |
 | `NtWaitForMultipleObjects` | `0x58` | ppoll() |
+| `NtCreateFile` | `0x59` | openat() + path parsing |
+| `NtSetEvent` | `0x5C` | pthread_cond_signal |
+| `NtResetEvent` | `0x5E` | Clear flag |
+| `NtQueryAttributesFile` | `0x3B` | stat() |
+
+**NOTE:** Earlier versions of this document incorrectly listed
+`NtQuerySystemTime` as `0x58` (conflicting with `NtWaitForMultipleObjects`)
+and `NtProtectVirtualMemory` as `0x4E` (conflicting with
+`NtCreateThreadEx`). The corrected values above have been verified against
+the Windows x86_64 syscall table.
+
+### Priority Subsets
+
+**P0-A (Quick wins — trivial syscalls):**
+
+| Syscall | NT # | Implementation |
+|---------|------|---------------|
+| `NtQuerySystemTime` | `0x09` | clock_gettime(CLOCK_REALTIME) |
+| `NtQueryPerformanceCounter` | `0x55` | clock_gettime(CLOCK_MONOTONIC) |
+| `NtQueryPerformanceFrequency` | `0x56` | Return constant |
+| `NtDelayExecution` | `0x1A` | nanosleep() (already used by Sleep stub) |
+
+**P0-B (Sync infrastructure — enables CriticalSection + heap):**
+
+| Syscall | NT # | Implementation |
+|---------|------|---------------|
+| `NtWaitForSingleObject` | `0x00` | futex / pthread_cond_wait |
 | `NtSetEvent` | `0x5C` | pthread_cond_signal |
 | `NtResetEvent` | `0x5E` | Clear flag |
 | `NtCreateMutex` | `0x44` | pthread_mutex_init |
 | `NtReleaseMutex` | `0x1E` | pthread_mutex_unlock |
-| `NtQuerySystemTime` | `0x58` | clock_gettime(CLOCK_REALTIME) |
-| `NtQueryPerformanceCounter` | `0x55` | clock_gettime(CLOCK_MONOTONIC) |
-| `NtQueryPerformanceFrequency` | `0x56` | Return constant |
-| `NtDelayExecution` | `0x1A` | nanosleep() |
-| `NtTerminateThread` | `0x1D` | pthread_exit / kill |
+
+**P0-C (File I/O expansion):**
+
+| Syscall | NT # | Implementation |
+|---------|------|---------------|
 | `NtCreateFile` | `0x59` | openat() + path parsing |
 | `NtQueryAttributesFile` | `0x3B` | stat() |
-| `NtProtectVirtualMemory` | `0x4E` | mprotect() |
+
+**P0-D (Process/memory):**
+
+| Syscall | NT # | Implementation |
+|---------|------|---------------|
+| `NtProtectVirtualMemory` | `0x4D` | mprotect() |
+| `NtTerminateThread` | `0x1D` | pthread_exit / kill |
 
 ### Auto-Generation
 
-Current: **four manual edits across three files** per syscall.
+Current: **four manual edits across three files** per syscall (dispatcher.c
+case, handler in ntdll_*.c, thunk in thunk_gen.c, header declaration in
+ntdll.h).
+
 Recommended: `include/nt_syscalls.def` + Python script generates
 `nt_constants_gen.h`, `dispatcher_gen.c`, `thunk_list_gen.c`.
 
@@ -443,8 +546,9 @@ Recommended: `include/nt_syscalls.def` + Python script generates
 
 ### Default Handler
 
-Change `default` case from `raise(SIGSEGV)` to return `STATUS_NOT_IMPLEMENTED`.
-Many Windows apps check NTSTATUS and fall back gracefully.
+Change `default` case from `INLINE_SYSCALL_KILL(getpid(), SIGSEGV)` to return
+`STATUS_NOT_IMPLEMENTED`. Many Windows apps check NTSTATUS and fall back
+gracefully.
 
 ### NT Status Codes
 
@@ -454,9 +558,10 @@ Add: `STATUS_NOT_IMPLEMENTED` (0xC00000B7), `STATUS_FILE_NOT_FOUND`,
 ### Approach
 
 1. **Safety net** — `STATUS_NOT_IMPLEMENTED`, add NTSTATUS codes
-2. **Auto-generation** — `.def` file + Python generator
-3. **P0 syscalls** — implement in priority order
-4. **P1 syscalls** — follow as needed
+2. **P0-A quick wins** — 4 trivial syscalls (1h each)
+3. **P0-B sync infra** — enables real CriticalSection (§4)
+4. **Auto-generation** — `.def` file + Python generator
+5. **P0-C/D** — follow as needed
 
 ### Complexity: High
 
@@ -471,14 +576,17 @@ None.
 ### Current State
 
 No `HeapAlloc`/`HeapFree`. `PEB->ProcessHeap` is zeroed. CRT crashes on any
-dynamic allocation.
+dynamic allocation through Windows heap APIs. The current `malloc`/`calloc`/
+`free` implementations (in `src/stubs/crt_stdlib.c`) use `sysv_mmap` per
+allocation — functional but not tied to any Windows heap API.
 
 **Key:** Heap functions are **library functions in ntdll.dll**, not NT syscalls.
 Must be `WINE_STUB` (ms_abi), not dispatcher handlers.
 
 ### PEB ProcessHeap
 
-`PEB->ProcessHeap` at offset `0x030` (Windows 10+ x64). Must add:
+`PEB->ProcessHeap` at offset `0x030` (Windows 10+ x64). Currently not set
+in `teb_peb.c` and not defined in `nt_constants.h`. Must add:
 
 ```c
 #define PEB_PROCESS_HEAP  0x030
@@ -542,12 +650,22 @@ real `EnterCriticalSection`/`LeaveCriticalSection`.
 
 ---
 
-## 8. No Filesystem I/O
+## 8. Limited Filesystem I/O
 
 ### Current State
 
-Only console I/O. `NtOpenFile` is minimal (ASCII-only, no create). **No `NtCreateFile`**
-— the syscall most Windows programs use for file operations.
+`NtOpenFile` **is implemented** (in `src/stubs/ntdll_io.c`): extracts path
+from `OBJECT_ATTRIBUTES→ObjectName→UNICODE_STRING`, performs UTF-16→UTF-8
+ASCII conversion, calls `openat()`, stores result in handle table. Supports
+`GENERIC_READ` and `GENERIC_WRITE` access modes.
+
+`NtReadFile` and `NtWriteFile` are implemented and work through the handle
+table (stdin/stdout/stderr pre-mapped, plus any files opened via `NtOpenFile`).
+
+**`NtCreateFile` is NOT implemented** — this is the syscall most Windows
+programs use for file operations (it combines open + create with rich
+semantics). `NtQueryAttributesFile`, `NtSetInformationFile`, and
+`NtQueryDirectoryFile` are also not implemented.
 
 ### Investigation
 
@@ -568,6 +686,12 @@ Only console I/O. `NtOpenFile` is minimal (ASCII-only, no create). **No `NtCreat
 **Other needed handlers:** `NtQueryAttributesFile` (stat),
 `NtSetInformationFile` (ftruncate/fcntl), `NtQueryDirectoryFile` (getdents).
 
+**Current NtOpenFile limitations:**
+- ASCII-only path conversion (non-ASCII characters become `?`)
+- No share mode enforcement
+- No FILE_CREATE semantics (always opens existing or falls back to `/dev/null`)
+- No `ShareAccess` parameter handling
+
 ### Approach
 
 **Option A (Full):** Path translation + `NtCreateFile` + attributes + directory.
@@ -580,7 +704,7 @@ Only console I/O. `NtOpenFile` is minimal (ASCII-only, no create). **No `NtCreat
 
 ### Prerequisites
 
-Benefits from ordinal import support (§10). Needs dispatcher registration (§6).
+Benefits from ordinal import support. Needs dispatcher registration (§6).
 
 ### Risks
 
@@ -593,13 +717,31 @@ Benefits from ordinal import support (§10). Needs dispatcher registration (§6)
 
 ---
 
-## 9. Single-thread SEH
+## 9. Shared-TEB Threading Model
 
 ### Current State
 
-One static SEH frame for the entire process. `NtCreateThreadEx` creates a
-pthread but shares the same TEB (and same SEH chain). Guest `__try/__except`
-handlers cannot be per-thread.
+`NtCreateThreadEx` **is implemented** and creates real Linux threads via
+`clone()` with `CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|SIGCHLD`
+(in `src/stubs/ntdll_objects.c`). The thread uses a wrapper function that
+extracts the start routine and argument from a temporary mmap'd page, then
+calls the entry point directly.
+
+**Limitation:** All threads share the **same TEB** and the **same GS base**.
+The clone'd thread inherits the parent's address space (CLONE_VM) and the
+same GS base register. This means:
+
+- SEH chain is shared — `__try/__except` cannot be per-thread
+- TEB self-reference (`gs:[0x08]` and `gs:[0x30]`) points to the same
+  TEB for all threads
+- No per-thread stack isolation — each thread uses kernel-allocated default
+  stack (the `stack_size` parameter is acknowledged but not yet implemented)
+- `NtGetContextThread` and `NtSetContextThread` are stubs (zero out / no-op)
+- `NtTerminateThread` is not implemented — threads exit via `INLINE_SYSCALL_EXIT(0)`
+  which terminates the **entire process**
+
+Thread tracking uses `wine_thread_t` with `tid` (clone PID) and `suspended`
+flag. Threads are stored in `threads[MAX_THREADS]` array (MAX_THREADS=32).
 
 ### Investigation
 
@@ -617,20 +759,22 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 ### Approach
 
 **Option A** is the most authentic. Requires:
-- `NtCreateThreadEx` to actually create threads (not just stub)
-- Per-thread TEB allocation via `mmap()`
+- `NtCreateThreadEx` to allocate per-thread TEB via `mmap()`
 - GS base switching via `arch_prctl(ARCH_SET_GS)` (thread-local)
+- Custom stack allocation (using `stack_size` parameter)
 - Signal handler must identify which thread's TEB to use
+- `NtTerminateThread` to kill only the target thread
+- `NtGetContextThread` / `NtSetContextThread` to work with per-thread state
 - `__C_specific_handler` to walk per-thread SEH chain
 
 ### Complexity: High
 
 ### Prerequisites
 
-- `NtCreateThreadEx` must work (exists but is stubbed)
-- `NtGetContextThread` / `NtSetContextThread` must work with multiple threads
+- `NtSetEvent` / `NtWaitForSingleObject` for thread synchronization
+- Real `CRITICAL_SECTION` (§4) for thread-safe data structures
+- `NtTerminateThread` for per-thread termination
 - TLS (§3) for per-thread state
-- CriticalSection (§4) for thread synchronization
 
 ### Risks
 
@@ -639,6 +783,7 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 | Multi-threading race conditions | High | Careful locking; thorough testing |
 | Signal handler thread identification | Medium | `arch_prctl(ARCH_GET_GS)` to recover TEB |
 | Windows x64 table-based exception handling | High | `__C_specific_handler` must parse `.xdata` tables |
+| GS base switch corrupts glibc TLS | Critical | Switch back to Linux TLS for any libc call |
 
 ---
 
@@ -648,15 +793,21 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 |-----------|---------|------------|
 | §1 Relocation | §2 Dynamic Loading | None |
 | §2 Dynamic Loading | §5 Toolchain (DLL loading) | §1 (optional) |
-| §3 TLS | §12 SEH | None |
-| §4 Sync | §7 Heap, §8 File I/O | Syscall handlers |
+| §3 TLS | §9 Threading | None |
+| §4 Sync | §7 Heap, §9 Threading | Syscall handlers (§6) |
 | §5 Toolchain | — | §7 Heap |
 | §6 Syscall | §4 Sync, §8 File I/O | None |
 | §7 Heap | §5 Toolchain | §4 Sync |
 | §8 File I/O | Real applications | §6 Syscall |
-| §9 SEH | Exception safety | §3, §4 |
+| §9 Threading | Exception safety, real apps | §3, §4 |
 
 ---
 
-*Generated by deep-thinker investigation on 2026-05-04.
-Source files per section: see individual investigation documents.*
+*Updated: 2026-05-05.
+Source files: `src/stubs/ntdll_io.c`, `src/stubs/ntdll_memory.c`,
+`src/stubs/ntdll_objects.c`, `src/stubs/ntdll_process.c`,
+`src/stubs/ntdll_handle.c`, `src/stubs/kernel32_*.c`,
+`src/stubs/crt_*.c`, `src/syscall/dispatcher.c`,
+`src/syscall/thunk_gen.c`, `src/loader/teb_peb.c`,
+`src/loader/guest_setup.c`, `include/nt_constants.h`,
+`include/ntdll.h`, `include/kernel32.h`.*
