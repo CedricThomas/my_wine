@@ -45,6 +45,7 @@ typedef uint64_t        BOOL;
 #define STATUS_ACCESS_VIOLATION     0xC0000005
 #define STATUS_BUFFER_TOO_SMALL     0xC0000023
 #define STATUS_MEMORY_NOT_AVAILABLE 0xC0000098
+#define STATUS_NOT_IMPLEMENTED      0xC00000B7
 
 // --- NT Syscall Handler Signatures ---
 // x86_64 Windows calling convention: first 4 args in RCX, RDX, R8, R9;
@@ -100,6 +101,33 @@ NTSTATUS handler_NtCreateThreadEx(PVOID *thread_handle, ULONG desired_access, PV
 
 // NtOpenFile (0x4F)
 NTSTATUS handler_NtOpenFile(PVOID *file_handle, ULONG desired_access, PVOID object_attributes, PVOID io_status_block, ULONG share_access, ULONG dispose);
+
+// NtQuerySystemTime (0x09)
+NTSTATUS handler_NtQuerySystemTime(PVOID ft_ptr);
+
+// NtDelayExecution (0x1A)
+NTSTATUS handler_NtDelayExecution(BOOL alarm_pending, PVOID timeout_ptr);
+
+// NtReleaseMutex (0x1E)
+NTSTATUS handler_NtReleaseMutex(HANDLE handle, BOOL alertable);
+
+// NtCreateMutex (0x44)
+NTSTATUS handler_NtCreateMutex(PVOID *mutex_handle, ULONG desired_access, PVOID object_attributes);
+
+// NtQueryPerformanceCounter (0x55)
+NTSTATUS handler_NtQueryPerformanceCounter(PVOID counter_ptr);
+
+// NtQueryPerformanceFrequency (0x56)
+NTSTATUS handler_NtQueryPerformanceFrequency(PVOID frequency_ptr);
+
+// NtSetEvent (0x5C)
+NTSTATUS handler_NtSetEvent(HANDLE handle, PVOID previous_state);
+
+// NtResetEvent (0x5E)
+NTSTATUS handler_NtResetEvent(HANDLE handle, PVOID previous_state);
+
+// NtWaitForSingleObject (0x00)
+NTSTATUS handler_NtWaitForSingleObject(HANDLE handle, BOOL alertable, PVOID timeout_ptr);
 
 /* ── Windows struct definitions (packed) ─────────────────── */
 #pragma pack(push, 1)
