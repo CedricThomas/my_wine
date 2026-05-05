@@ -102,6 +102,31 @@
         _synct_rax; \
     })
 
+/* ── sys_mmap ────────────────────────────────────────────────── */
+
+#define INLINE_SYSCALL_MMAP(addr, len, prot, flags, fd, offset) \
+    ({ \
+        long _synct_rax; \
+        __asm__ volatile("syscall" \
+            : "=a"(_synct_rax) \
+            : "a"(__NR_mmap), "D"(addr), "S"((size_t)(len)), \
+              "d"(prot), "r"(flags), "r"(fd), "r"((off_t)(offset)) \
+            : "rcx", "r11", "cc"); \
+        (void *)_synct_rax; \
+    })
+
+/* ── sys_mprotect ───────────────────────────────────────────── */
+
+#define INLINE_SYSCALL_MPROTECT(addr, len, prot) \
+    ({ \
+        long _synct_rax; \
+        __asm__ volatile("syscall" \
+            : "=a"(_synct_rax) \
+            : "a"(__NR_mprotect), "D"(addr), "S"((size_t)(len)), "d"(prot) \
+            : "rcx", "r11", "cc"); \
+        _synct_rax; \
+    })
+
 /* ── sys_munmap ─────────────────────────────────────────────── */
 
 #define INLINE_SYSCALL_MUNMAP(addr, len) \
@@ -159,6 +184,19 @@
             : "=a"(_synct_rax) \
             : "a"(__NR_kill), "D"(pid), "S"(sig) \
             : "rcx", "r11", "cc"); \
+        _synct_rax; \
+    })
+
+/* ── sys_clone ──────────────────────────────────────────────── */
+
+#define INLINE_SYSCALL_CLONE(flags, child_stack, parent_tid, child_tid, fn, arg) \
+    ({ \
+        long _synct_rax; \
+        __asm__ volatile("syscall" \
+            : "=a"(_synct_rax) \
+            : "a"(__NR_clone), "D"(flags), "S"(child_stack), \
+              "d"(parent_tid), "r"(child_tid), "r"(fn), "r"(arg) \
+            : "rcx", "r11", "cc", "memory"); \
         _synct_rax; \
     })
 

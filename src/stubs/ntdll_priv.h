@@ -11,7 +11,6 @@
 #include "include/ntdll.h"
 #include "include/pe.h"
 #include <stddef.h>
-#include <pthread.h>
 
 /* ── Handle Table ──────────────────────────────────────────────── */
 
@@ -74,7 +73,7 @@ extern int event_count;
 #define MAX_THREADS 32
 
 typedef struct {
-    pthread_t tid;
+    int tid;     /* clone() returns PID of child */
     int suspended;
 } wine_thread_t;
 

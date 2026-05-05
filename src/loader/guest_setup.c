@@ -318,19 +318,22 @@ void cleanup_guest(void *teb, void *stack_base)
         /* Unmap PEB first (it's separate from TEB, stored at teb+0x60) */
         void *peb = *(void **)((char *)teb + TEB_PEB_PTR);
         if (peb) {
-            if (munmap(peb, PAGE_SIZE) != 0) {
-                perror("cleanup_guest: munmap PEB");
+            if (INLINE_SYSCALL_MUNMAP(peb, PAGE_SIZE) != 0) {
+                const char msg[] = "ERROR: cleanup_guest: munmap PEB failed\n";
+                INLINE_SYSCALL_WRITE_ERR(msg, sizeof(msg) - 1);
             }
         }
         /* Unmap TEB */
-        if (munmap(teb, PAGE_SIZE) != 0) {
-            perror("cleanup_guest: munmap TEB");
+        if (INLINE_SYSCALL_MUNMAP(teb, PAGE_SIZE) != 0) {
+            const char msg[] = "ERROR: cleanup_guest: munmap TEB failed\n";
+            INLINE_SYSCALL_WRITE_ERR(msg, sizeof(msg) - 1);
         }
     }
 
     if (stack_base && g_stack_size > 0) {
-        if (munmap(stack_base, g_stack_size) != 0) {
-            perror("cleanup_guest: munmap stack");
+        if (INLINE_SYSCALL_MUNMAP(stack_base, g_stack_size) != 0) {
+            const char msg[] = "ERROR: cleanup_guest: munmap stack failed\n";
+            INLINE_SYSCALL_WRITE_ERR(msg, sizeof(msg) - 1);
         }
     }
 

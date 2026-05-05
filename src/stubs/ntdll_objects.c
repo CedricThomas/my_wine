@@ -4,13 +4,22 @@
  * NtCreateEvent, NtCreateThreadEx, NtGetContextThread, NtSetContextThread
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#define _GNU_SOURCE
+
 #include <stdint.h>
-#include <pthread.h>
+#include <stddef.h>
+#include <unistd.h>
+#include <sched.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <signal.h>
+#include "../syscalls_inline.h"
 #include "handler_abi.h"
 #include "ntdll_priv.h"
+
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096
+#endif
 
 /* ── Event / Thread storage ────────────────────────────────────── */
 
@@ -59,14 +68,16 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
     return STATUS_SUCCESS;
 }
 
-static void *thread_wrapper(void *arg)
+static void thread_wrapper(void *arg)
 {
     uint64_t routine = (uint64_t)(uintptr_t)((void **)arg)[0];
     uint64_t param   = (uint64_t)(uintptr_t)((void **)arg)[1];
-    free(arg);
+    /* munmap the args page — safe since we extracted values above */
+    (void)INLINE_SYSCALL_MUNMAP(arg, PAGE_SIZE);
     void (*fn)(void *) = (void (*)(void *))routine;
     fn((void *)(uintptr_t)param);
-    return NULL;
+    /* Exit this thread — clone'd thread terminates with exit() */
+    INLINE_SYSCALL_EXIT(0);
 }
 
 HANDLER
@@ -87,21 +98,33 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
     if (thread_count >= MAX_THREADS)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
-    /* Prepare arguments for the wrapper */
-    void **args = malloc(sizeof(void *) * 2);
+    /* Prepare arguments for the wrapper — use mmap instead of malloc */
+    void **args = (void **)INLINE_SYSCALL_MMAP(NULL, PAGE_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if ((long)(uintptr_t)args < 0)
+        return STATUS_MEMORY_NOT_AVAILABLE;
     args[0] = (void *)(uintptr_t)start_routine;
     args[1] = (void *)(uintptr_t)argument;
 
-    /* Use default pthread stack (custom stack allocation + immediate munmap
-       after pthread_create was a race — the thread could segfault on a freed
-       stack.  Stack size parameter is acknowledged but not yet implemented.) */
+    /* Use default clone stack (custom stack allocation via stack_size
+       parameter is acknowledged but not yet implemented.) */
     (void)stack_size;
 
-    pthread_t tid;
-    int ret = pthread_create(&tid, NULL, thread_wrapper, args);
+    /* Use clone() syscall directly — no pthread, no glibc.
+     * The clone'd thread inherits the same address space (CLONE_VM)
+     * and same GS base. It will share the parent's TEB, which is
+     * acceptable in the single-process model. */
+    long tid = INLINE_SYSCALL_CLONE(
+        CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | SIGCHLD,
+        0,   /* child_stack = 0 → kernel allocates default stack */
+        NULL, /* parent_tid */
+        NULL, /* child_tid */
+        thread_wrapper, args
+    );
 
-    if (ret != 0) {
-        free(args);
+    if (tid < 0) {
+        (void)INLINE_SYSCALL_MUNMAP(args, PAGE_SIZE);
         return STATUS_UNSUCCESSFUL;
     }
 
@@ -120,12 +143,12 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
     }
 
     if (handle == 0) {
-        pthread_detach(tid);
+        INLINE_SYSCALL_KILL(tid, SIGKILL);
         return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
     int slot = thread_count++;
-    threads[slot].tid       = tid;
+    threads[slot].tid       = (pthread_t)(uintptr_t)tid;
     threads[slot].suspended = (create_flags & 4) ? 1 : 0; /* CREATE_SUSPENDED */
 
     if (thread_handle != 0)
@@ -140,7 +163,7 @@ uint64_t handler_NtGetContextThread(uint64_t thread_handle, uint64_t context)
     (void)thread_handle;
     /* Windows CONTEXT is 500+ bytes; zero it out as placeholder */
     if (context != 0)
-        memset((void *)(uintptr_t)context, 0, 544);
+        __builtin_memset((void *)(uintptr_t)context, 0, 544);
     return STATUS_SUCCESS;
 }
 

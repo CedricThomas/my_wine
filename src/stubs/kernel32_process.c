@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 
-#include <stdio.h>
 #include "kernel32_priv.h"
 #include "include/debug.h"
 
@@ -50,9 +49,23 @@ void *SetUnhandledExceptionFilter(void *callback)
 WINE_STUB
 void Sleep(uint32_t dwMilliseconds)
 {
+    /* Inline formatting — avoids glibc sprintf which accesses vDSO via GS. */
     char buf[64];
-    int len = sprintf(buf, "TRACE: Sleep(%u)\n", dwMilliseconds);
-    DEBUG_WRITE_ERR(buf, (size_t)len);
+    int i = 0;
+    if (debug_is_enabled()) {
+        const char prefix[] = "TRACE: Sleep(";
+        for (int j = 0; j < (int)(sizeof(prefix) - 1); j++) buf[i++] = prefix[j];
+        /* Write dwMilliseconds as decimal string */
+        char tmp[16];
+        int t = 0;
+        uint32_t v = dwMilliseconds;
+        do { tmp[t++] = '0' + (v % 10); v /= 10; } while (v > 0);
+        while (t > 0) buf[i++] = tmp[--t];
+        buf[i++] = ')';
+        buf[i++] = '\n';
+    }
+    if (i > 0)
+        INLINE_SYSCALL_WRITE_ERR(buf, (size_t)i);
 
     struct timespec ts;
     ts.tv_sec  = dwMilliseconds / 1000;
