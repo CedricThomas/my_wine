@@ -48,5 +48,6 @@
 
 #define PEB_BEING_DEBUGGED   0x002  /* BeingDebugged flag */
 #define PEB_IMAGE_BASE       0x008  /* ImageBaseAddress */
+#define PEB_PROCESS_HEAP     0x030  /* ProcessHeap */
 
 #endif /* MY_WINE_NT_CONSTANTS_H */

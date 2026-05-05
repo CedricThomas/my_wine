@@ -18,6 +18,7 @@
 #include "include/nt_constants.h"
 #include "loader_priv.h"
 #include "include/debug.h"
+#include "../heap/wine_heap.h"
 
 void *g_stack_base = NULL;
 size_t g_stack_size = 0;
@@ -74,6 +75,10 @@ void *setup_teb_peb(void)
 
     /* Set BeingDebugged = 0 in PEB at offset PEB_BEING_DEBUGGED */
     *(uint8_t *)((char *)peb + PEB_BEING_DEBUGGED) = 0;
+
+    /* Initialize process heap and store in PEB at PEB_PROCESS_HEAP */
+    void *ph = init_process_heap();
+    *(void **)((char *)peb + PEB_PROCESS_HEAP) = ph;
 
     /*
      * Do NOT set GS base here. The GS base should remain pointing to
