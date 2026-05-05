@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include "include/syscall/thunk_gen.h"
 #include "include/syscall/dispatcher_entry.h"
@@ -59,7 +60,7 @@ static const uint16_t nt_syscall_list[] = {
 static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatcher_addr)
 {
     if (dispatcher_addr == NULL) {
-        fprintf(stderr, "wine: fatal: dispatcher address is NULL\n");
+        fprintf(stderr, "wine: fatal: dispatcher address is NULL, cannot generate thunks\n");
         abort();
     }
 
@@ -81,10 +82,11 @@ static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatch
     loc[9] = 0xE8;
     int64_t raw_disp = (int64_t)(uintptr_t)dispatcher_addr - (int64_t)(uintptr_t)(loc + 14);
     if (raw_disp > INT32_MAX || raw_disp < INT32_MIN) {
-        fprintf(stderr, "wine: fatal: dispatcher displacement %lld out of range for near call (must be within ±2GB)\n", (long long)raw_disp);
+        fprintf(stderr, "wine: fatal: dispatcher displacement %lld out of int32_t range (ASLR issue?)\n", (long long)raw_disp);
         abort();
     }
     int32_t disp = (int32_t)raw_disp;
+    DEBUG("wine: thunk[%d] dispatcher=0x%lx disp=%d", syscall_number, (unsigned long)dispatcher_addr, disp);
     loc[10] = (uint8_t)(disp & 0xFF);
     loc[11] = (uint8_t)((disp >> 8) & 0xFF);
     loc[12] = (uint8_t)((disp >> 16) & 0xFF);
@@ -117,7 +119,7 @@ void **generate_all_thunks(void)
     void *dispatcher = wine_dispatcher_addr();
     printf("wine: dispatcher at %p\n", dispatcher);
     if (dispatcher == NULL) {
-        fprintf(stderr, "wine: fatal: cannot resolve __wine_dispatcher\n");
+        fprintf(stderr, "wine: fatal: __wine_dispatcher symbol not found\n");
         return NULL;
     }
 
