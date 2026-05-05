@@ -496,6 +496,54 @@ uint64_t c_dispatch_syscall(uint64_t nr)
         break;
     }
 
+    case NT_SYSCALL_SET_EVENT: /* NtSetEvent */
+    {
+        uint64_t h_prev = 0;
+        void *p_prev = NULL;
+        int status = read_guest_ptr(arg2, &h_prev, &p_prev, "previous_state");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtSetEvent(arg1, (PVOID)&h_prev);
+        if (p_prev) *(uint64_t *)p_prev = h_prev;
+        break;
+    }
+
+    case NT_SYSCALL_RESET_EVENT: /* NtResetEvent */
+    {
+        uint64_t h_prev = 0;
+        void *p_prev = NULL;
+        int status = read_guest_ptr(arg2, &h_prev, &p_prev, "previous_state");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtResetEvent(arg1, (PVOID)&h_prev);
+        if (p_prev) *(uint64_t *)p_prev = h_prev;
+        break;
+    }
+
+    case NT_SYSCALL_WAIT_FOR_SINGLE_OBJECT: /* NtWaitForSingleObject */
+    {
+        uint64_t h_timeout = 0;
+        void *p_timeout = NULL;
+        int status = read_guest_ptr(arg3, &h_timeout, &p_timeout, "timeout_ptr");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtWaitForSingleObject(arg1, arg2, (PVOID)&h_timeout);
+        if (p_timeout) *(uint64_t *)p_timeout = h_timeout;
+        break;
+    }
+
+    case NT_SYSCALL_CREATE_MUTEX: /* NtCreateMutex */
+    {
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "mutex_handle");
+        if (status != 0) return (uint64_t)status;
+        result = handler_NtCreateMutex(&h_handle, arg2, arg3);
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
+        break;
+    }
+
+    case NT_SYSCALL_RELEASE_MUTEX: /* NtReleaseMutex */
+        result = handler_NtReleaseMutex(arg1, arg2);
+        break;
+
     default:
         {
             char buf[39];
@@ -800,6 +848,54 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
         if (p_freq) *(uint64_t *)p_freq = h_freq;
         break;
     }
+
+    case NT_SYSCALL_SET_EVENT: /* NtSetEvent */
+    {
+        uint64_t h_prev = 0;
+        void *p_prev = NULL;
+        int status = read_guest_ptr(arg2, &h_prev, &p_prev, "previous_state");
+        if (status != 0) return status;
+        result = handler_NtSetEvent(arg1, (PVOID)&h_prev);
+        if (p_prev) *(uint64_t *)p_prev = h_prev;
+        break;
+    }
+
+    case NT_SYSCALL_RESET_EVENT: /* NtResetEvent */
+    {
+        uint64_t h_prev = 0;
+        void *p_prev = NULL;
+        int status = read_guest_ptr(arg2, &h_prev, &p_prev, "previous_state");
+        if (status != 0) return status;
+        result = handler_NtResetEvent(arg1, (PVOID)&h_prev);
+        if (p_prev) *(uint64_t *)p_prev = h_prev;
+        break;
+    }
+
+    case NT_SYSCALL_WAIT_FOR_SINGLE_OBJECT: /* NtWaitForSingleObject */
+    {
+        uint64_t h_timeout = 0;
+        void *p_timeout = NULL;
+        int status = read_guest_ptr(arg3, &h_timeout, &p_timeout, "timeout_ptr");
+        if (status != 0) return status;
+        result = handler_NtWaitForSingleObject(arg1, arg2, (PVOID)&h_timeout);
+        if (p_timeout) *(uint64_t *)p_timeout = h_timeout;
+        break;
+    }
+
+    case NT_SYSCALL_CREATE_MUTEX: /* NtCreateMutex */
+    {
+        uint64_t h_handle = 0;
+        void *p_handle = NULL;
+        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "mutex_handle");
+        if (status != 0) return status;
+        result = handler_NtCreateMutex(&h_handle, arg2, arg3);
+        if (p_handle) *(uint64_t *)p_handle = h_handle;
+        break;
+    }
+
+    case NT_SYSCALL_RELEASE_MUTEX: /* NtReleaseMutex */
+        result = handler_NtReleaseMutex(arg1, arg2);
+        break;
 
     default:
         {
