@@ -64,6 +64,26 @@ int QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount);
 __attribute__((ms_abi))
 int QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency);
 
+/* ── Synchronization ────────────────────────────────────────── */
+
+__attribute__((ms_abi))
+void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, const char *lpName);
+
+__attribute__((ms_abi))
+int SetEvent(void *hEvent);
+
+__attribute__((ms_abi))
+int ResetEvent(void *hEvent);
+
+__attribute__((ms_abi))
+uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds);
+
+__attribute__((ms_abi))
+void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName);
+
+__attribute__((ms_abi))
+int ReleaseMutex(void *hMutex);
+
 /* ── Additional kernel32 stubs ──────────────────────────────── */
 
 /* Critical Section functions */
