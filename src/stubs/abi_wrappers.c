@@ -44,7 +44,7 @@ void *sysv_calloc(size_t n, size_t s)
     void *p = INLINE_SYSCALL_MMAP(NULL, page_align(total),
         PROT_READ | PROT_WRITE,
         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (p != NULL && p != (void *)-1)
+    if (p != NULL && p != MAP_FAILED)
         __builtin_memset(p, 0, total);
     return p;
 }
