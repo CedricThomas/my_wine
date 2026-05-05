@@ -171,21 +171,12 @@ static void *setup_seh_and_thunks(void)
     return guest_seh_frame;
 }
 
-/* ── Step 3: Guest state (GS base, TEB SEH, PE re-parse) ───── */
+/* ── Step 3a: PE header re-parse ── */
 
-static void setup_guest_state(void *teb, uint64_t entry_abs, void *seh_frame,
-                              IMAGE_NT_HEADERS64 **out_nt,
-                              IMAGE_SECTION_HEADER **out_sections)
+static void parse_pe_headers(uint64_t entry_abs,
+                             IMAGE_NT_HEADERS64 **out_nt,
+                             IMAGE_SECTION_HEADER **out_sections)
 {
-    /* Re-set GS base */
-    if (set_gs_base(teb) != 0) {
-        fprintf(stderr, "my_wine: cannot set GS base, aborting\n");
-        _exit(1);
-    }
-
-    /* Point TEB gs:[0x00] to our SEH frame */
-    *(void **)((uint8_t *)teb + TEB_SEH_CHAIN) = seh_frame;
-
     /* Re-parse PE headers from entry_abs to get nt_headers + sections */
     uint64_t image_base = entry_abs & ~0xFFFFFUL;
     void *base = (void *)(uintptr_t)image_base;
@@ -199,6 +190,20 @@ static void setup_guest_state(void *teb, uint64_t entry_abs, void *seh_frame,
 
     *out_nt = nt;
     *out_sections = sections;
+}
+
+/* ── Step 3b: Finalize guest state (GS base + TEB SEH) ── */
+
+static void finalize_guest_state(void *teb, void *seh_frame)
+{
+    /* Re-set GS base */
+    if (set_gs_base(teb) != 0) {
+        fprintf(stderr, "my_wine: cannot set GS base, aborting\n");
+        _exit(1);
+    }
+
+    /* Point TEB gs:[0x00] to our SEH frame */
+    *(void **)((uint8_t *)teb + TEB_SEH_CHAIN) = seh_frame;
 }
 
 /* ── Step 4: Final patches ───────────────────────────────────── */
@@ -269,11 +274,14 @@ __attribute__((noreturn)) void setup_guest_and_run(
 
     IMAGE_NT_HEADERS64 *nt = NULL;
     IMAGE_SECTION_HEADER *sections = NULL;
-    setup_guest_state(teb, entry_abs, seh_frame, &nt, &sections);
+
+    parse_pe_headers(entry_abs, &nt, &sections);
 
     uint64_t image_base = entry_abs & ~0xFFFFFUL;
     void *base = (void *)(uintptr_t)image_base;
     apply_final_patches(base, nt, sections);
+
+    finalize_guest_state(teb, seh_frame);
 
     jump_to_guest(entry_abs, stack_top, guest_argv, guest_envp);
 }
