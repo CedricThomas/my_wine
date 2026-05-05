@@ -4,6 +4,10 @@
 #include <string.h>
 #include <sys/mman.h>
 
+// ── Debug global flag ──────────────────────────────────────────
+// Set from main() by scanning envp for MY_WINE_DEBUG
+int g_debug_enabled = 0;
+
 // ── format_hex ──────────────────────────────────────────────────
 
 void format_hex(char *buf, int buf_size, uint64_t val) {

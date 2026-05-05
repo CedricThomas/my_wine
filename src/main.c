@@ -28,6 +28,19 @@ extern char **environ;  // from libc, for guest envp
 
 /* ── Helpers ─────────────────────────────────────────────────── */
 
+/* Scan char** envp for "KEY=..." and return the value (after '=')
+ * or NULL if not found. */
+static const char *envp_lookup(char *const envp[], const char *key)
+{
+    size_t key_len = strlen(key);
+    for (int i = 0; envp[i] != NULL; i++) {
+        if (strncmp(envp[i], key, key_len) == 0 && envp[i][key_len] == '=') {
+            return envp[i] + key_len + 1;
+        }
+    }
+    return NULL;
+}
+
 /* Pre-seed argc/argv/envp in .bss using COFF-derived offsets
  * from g_crt_ctx. Explicit mprotect ensures .bss is writable. */
 static void seed_bss_vars(void *base,
@@ -92,6 +105,11 @@ int main(int argc, char *argv[])
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <pe_binary>\n", argv[0]);
         return 1;
+    }
+
+    /* 0. Parse MY_WINE_DEBUG from environ; set global debug flag before GS switch */
+    if (envp_lookup(environ, "MY_WINE_DEBUG") != NULL) {
+        g_debug_enabled = 1;
     }
 
     /* 1. Map the PE image (open file, parse headers, copy sections, set protections) */

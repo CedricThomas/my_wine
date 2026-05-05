@@ -150,4 +150,16 @@
         _synct_rax; \
     })
 
+/* ── sys_kill ───────────────────────────────────────────────── */
+
+#define INLINE_SYSCALL_KILL(pid, sig) \
+    ({ \
+        long _synct_rax; \
+        __asm__ volatile("syscall" \
+            : "=a"(_synct_rax) \
+            : "a"(__NR_kill), "D"(pid), "S"(sig) \
+            : "rcx", "r11", "cc"); \
+        _synct_rax; \
+    })
+
 #endif /* MY_WINE_SYSCALLS_INLINE_H */
