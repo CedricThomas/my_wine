@@ -117,18 +117,27 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
 
     /* HEAP_ZERO_MEMORY = 0x00000008 */
     void *ptr;
+    size_t old_size = 0;
+
     pthread_mutex_lock(&heap->mutex);
     if (lpMem) {
+        old_size = dlmalloc_usable_size(lpMem);
         ptr = dlrealloc(lpMem, (size_t)dwBytes);
     } else {
+        /* lpMem == NULL → treat as fresh HeapAlloc */
         ptr = dlmalloc((size_t)dwBytes);
     }
     pthread_mutex_unlock(&heap->mutex);
 
-    if (ptr && (dwFlags & 0x00000008)) { /* HEAP_ZERO_MEMORY — zero only the new portion */
-        /* For simplicity, zero the entire block (dlrealloc preserves old data) */
-        /* A proper implementation would only zero the new bytes */
-        memset(ptr, 0, (size_t)dwBytes);
+    if (ptr && (dwFlags & 0x00000008)) { /* HEAP_ZERO_MEMORY */
+        if (dwBytes > old_size) {
+            /* Only zero the newly allocated portion (old data preserved) */
+            memset((char *)ptr + old_size, 0, (size_t)dwBytes - old_size);
+        } else if (lpMem == NULL) {
+            /* Fresh allocation (lpMem was NULL) — zero the entire block */
+            memset(ptr, 0, (size_t)dwBytes);
+        }
+        /* If dwBytes <= old_size and lpMem != NULL: nothing to zero (data preserved) */
     }
 
     return ptr;

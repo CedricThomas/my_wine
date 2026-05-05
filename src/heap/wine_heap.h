@@ -9,6 +9,7 @@
 void *dlmalloc(size_t bytes);
 void dlfree(void *mem);
 void *dlrealloc(void *mem, size_t new_size);
+size_t dlmalloc_usable_size(const void *mem);
 
 /* Process heap */
 void *init_process_heap(void);
