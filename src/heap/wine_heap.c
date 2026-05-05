@@ -14,6 +14,9 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* HEAP_ZERO_MEMORY flag */
+#define HEAP_ZERO_MEMORY 0x00000008
+
 /* Global process heap */
 void *g_process_heap = NULL;
 
@@ -64,13 +67,12 @@ void *HeapAlloc(void *hHeap, uint32_t dwFlags, uint64_t dwBytes)
         return NULL;
     }
 
-    /* HEAP_ZERO_MEMORY = 0x00000008 */
     void *ptr;
     pthread_mutex_lock(&heap->mutex);
     ptr = dlmalloc((size_t)dwBytes);
     pthread_mutex_unlock(&heap->mutex);
 
-    if (ptr && (dwFlags & 0x00000008)) { /* HEAP_ZERO_MEMORY */
+    if (ptr && (dwFlags & HEAP_ZERO_MEMORY)) {
         memset(ptr, 0, (size_t)dwBytes);
     }
 
@@ -91,7 +93,7 @@ int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem)
     }
 
     if (lpMem == NULL) {
-        return 0;
+        return 1;  /* Windows: HeapFree(heap, 0, NULL) is a valid no-op */
     }
 
     pthread_mutex_lock(&heap->mutex);
@@ -115,7 +117,6 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
         return NULL;
     }
 
-    /* HEAP_ZERO_MEMORY = 0x00000008 */
     void *ptr;
     size_t old_size = 0;
 
@@ -129,7 +130,7 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
     }
     pthread_mutex_unlock(&heap->mutex);
 
-    if (ptr && (dwFlags & 0x00000008)) { /* HEAP_ZERO_MEMORY */
+    if (ptr && (dwFlags & HEAP_ZERO_MEMORY)) {
         if (dwBytes > old_size) {
             /* Only zero the newly allocated portion (old data preserved) */
             memset((char *)ptr + old_size, 0, (size_t)dwBytes - old_size);
@@ -182,15 +183,18 @@ void *GetProcessHeap(void)
 /*
  * HeapSize(hHeap, dwFlags, lpMem)
  * Returns the size of the allocation or -1 on error.
- * We return -1 as a stub since dlmalloc doesn't easily expose block size.
  */
 WINE_STUB
 uint64_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem)
 {
-    (void)hHeap;
+    wine_heap_t *heap = (wine_heap_t *)hHeap;
+
+    if (!heap || !heap->is_valid || lpMem == NULL) {
+        return (uint64_t)-1;
+    }
+
     (void)dwFlags;
-    (void)lpMem;
-    return (uint64_t)-1; /* Cannot determine size — matches Windows behavior for invalid params */
+    return (uint64_t)dlmalloc_usable_size(lpMem);
 }
 
 /*
