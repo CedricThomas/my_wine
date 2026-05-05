@@ -167,6 +167,18 @@
         _synct_rax; \
     })
 
+/* ── sys_clock_gettime ────────────────────────────────────────── */
+
+#define INLINE_SYSCALL_CLOCK_GETTIME(clk_id, tp) \
+    ({ \
+        long _synct_rax; \
+        __asm__ volatile("syscall" \
+            : "=a"(_synct_rax) \
+            : "a"(__NR_clock_gettime), "D"(clk_id), "S"(tp) \
+            : "rcx", "r11", "memory", "cc"); \
+        _synct_rax; \
+    })
+
 /* ── sys_getpid ─────────────────────────────────────────────── */
 
 #define INLINE_SYSCALL_GETPID() \
