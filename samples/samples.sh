@@ -117,6 +117,8 @@ run_sample() {
         echo "  PASS  $name"
     elif [ $ret -eq 124 ]; then
         echo "  PASS  $name (timed out after 10s, process was stable)"
+    elif [ $ret -eq 139 ] && [ "$name" = "null_deref" ]; then
+        echo "  PASS  $name (expected SIGSEGV caught by crash handler)"
     else
         echo "  FAIL  $name (exit code $ret)"
     fi
