@@ -267,12 +267,52 @@ typedef struct {
 
 ### Mapping into Memory
 
-Each section is mapped by calling `mmap` with a virtual address
-derived from its RVA and a protection mode derived from its
-Characteristics:
+The loader maps the PE image into memory via `map_image()` in
+`image_mapper.c`. The process:
+
+1. **Open the PE file** on disk and `mmap` it read-only (`MAP_PRIVATE`).
+2. **Parse headers** (DOS header, NT headers, section table) from
+   the file mapping using `parse_dos_header()`, `parse_nt_headers()`,
+   and `parse_sections()` from `pe_headers.c`.
+3. **Map the image region** with `mmap` at the preferred `ImageBase`:
+   ```c
+   mmap((void *)image_base, image_size,
+        PROT_READ|PROT_WRITE|PROT_EXEC,
+        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
+   ```
+   If `MAP_FIXED` fails (e.g., the address range is already in use),
+   fall back to `MAP_STACK`:
+   ```c
+   mmap(NULL, image_size,
+        PROT_READ|PROT_WRITE|PROT_EXEC,
+        MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK, -1, 0);
+   ```
+4. **Copy raw section data** from the file mapping into the image:
+   for each section with `SizeOfRawData > 0`, `memcpy` from
+   `file_base + PointerToRawData` to `image_base + VirtualAddress`.
+   Sections with `SizeOfRawData == 0` (like `.bss`) are already
+   zero-filled by the anonymous `mmap`.
+5. **Copy PE headers** (`SizeOfHeaders` bytes) from file_base into
+   the image base, so the PE headers live at the same virtual addresses
+   within the mapped image.
+6. **Set per-section protections** with `mprotect`: decode the
+   `Characteristics` bits (`IMAGE_SCN_MEM_READ`, `IMAGE_SCN_MEM_WRITE`,
+   `IMAGE_SCN_MEM_EXECUTE`) and translate to `PROT_READ | PROT_WRITE | PROT_EXEC`.
+7. **Unmap** the original file mapping (no longer needed).
 
 ```
-  mmap(image_base + VirtualAddress, VirtualSize, PROT from Characteristics)
+  mmap(image_base, SizeOfImage, RWX, MAP_FIXED)
+
+  For each section with SizeOfRawData > 0:
+    memcpy(image_base + VirtualAddress,
+           file_base + PointerToRawData,
+           SizeOfRawData)
+
+  memcpy(image_base, file_base, SizeOfHeaders)
+
+  For each section:
+    mprotect(image_base + VirtualAddress, page-aligned size,
+             PROT from Characteristics)
 ```
 
 | Section | PROT flags |
@@ -313,8 +353,6 @@ File Layout (disk)                  Memory Layout (RVA-aligned)
   each starts at `image_base + VirtualAddress`, padded to page size
 - **.bss**: `PointerToRawData` and `SizeOfRawData` may both be zero;
   the loader allocates `VirtualSize` bytes and fills them with zeros
-
-See [architecture.md](architecture.md) §1.1 for the mapping process.
 
 ---
 
@@ -381,38 +419,62 @@ typedef struct _IMAGE_IMPORT_BY_NAME {
 } IMAGE_IMPORT_BY_NAME;
 ```
 
-### IAT Patching
+### IAT Patching in my_wine
 
 Before the loader runs, the IAT is a copy of the ILT — each entry
-points to the same lookup data. During loading:
+points to the same lookup data. During loading, my_wine patches every
+IAT entry so guest code jumps to the right target. The resolution
+happens in two passes (`import_resolve.c`):
 
-1. The loader reads each `IMAGE_IMPORT_DESCRIPTOR`, resolves the DLL
-   name, and loads the DLL.
-2. For each ILT entry, the loader looks up the function (by name
-   or ordinal) in the DLL's export table.
-3. The corresponding IAT entry is **patched** with the actual
-   function address.
+**Pass 1** — Walk each `IMAGE_IMPORT_DESCRIPTOR`, read each ILT entry,
+look up the function name in my_wine's static `import_table`
+(`import_table.c`), and write the resolved address into the IAT
+(`FirstThunk`). The `import_table` maps DLL+function names to
+concrete addresses:
 
-Guest code calls through the IAT:
+- **kernel32.dll** / **msvcrt.dll** imports → **stub functions** written
+  in C (e.g., `GetStdHandle`, `WriteFile`, `__iob_func`, `malloc`)
+- **ntdll.dll** imports → **dynamically generated 23-byte thunks**
+  (`thunk_gen.c`) that call `__wine_dispatcher` to execute the
+  corresponding NT syscall
 
-```asm
-  call [IAT_entry]    ; jumps to the resolved function address
+Each thunk is 23 bytes of machine code living in a single `mmap`d
+executable blob:
+
+```
+  Offset 0-1:   push rdi          (save original RDI)
+  Offset 2-8:   mov rdi, imm32    (set NT syscall number)
+  Offset 9-18:  mov rax, imm64    (load dispatcher address, absolute)
+  Offset 19-20: call rax          (enter dispatcher via indirect call)
+  Offset 21:    pop rdi           (restore original RDI)
+  Offset 22:    ret               (return to guest caller)
 ```
 
-The IAT lives in a writable section (`.idata` or `.data`) so the
-loader can patch it. The ILT remains read-only.
+The absolute indirect call (`mov rax; call rax`) is used instead of a
+relative call (`E8 displacement`) to handle ASLR — the thunk blob and
+dispatcher can be more than 2 GB apart when independently randomized.
 
-### Import Chain Flow
+**Pass 2** — Scan `.text` for `ff 25 disp32` (RIP-relative jump thunks)
+that may reference IAT addresses not covered by Pass 1 (non-standard
+import layouts). Uses four matching strategies to patch any remaining
+mismatches.
 
 ```
 DataDirectory[IMPORT] ──► IMAGE_IMPORT_DESCRIPTOR ──► DLL name ("ntdll.dll")
                               │
                               ├── OriginalFirstThunk ──► ILT (lookup thunks) ──► function names/ordinals
                               │
-                              └── FirstThunk ──────────► IAT (writable) ──► [patched by loader]
+                              └── FirstThunk ──────────► IAT (writable) ──► patched to stub or thunk
 ```
 
-See [architecture.md §1.2](architecture.md) for the import resolution process.
+Guest code calls through the IAT:
+
+```asm
+  call [IAT_entry]    ; jumps to our stub function or 23-byte thunk
+```
+
+The IAT lives in a writable section (`.idata` or `.data`) so the
+loader can patch it. The ILT remains read-only.
 
 ---
 
@@ -465,27 +527,23 @@ If no section contains the RVA, the address is in the header region
 (RVA < first section's VirtualAddress) — the file offset equals the
 RVA directly (headers start at file offset 0).
 
-### C Pseudocode
+### C Implementation
+
+The `rva_to_offset()` helper in `pe_priv.h` implements this:
 
 ```c
-uint32_t rva_to_file_offset(const IMAGE_SECTION_HEADER *sections,
-                            int num_sections, uint32_t rva)
+static inline int rva_to_offset(const IMAGE_NT_HEADERS64 *nt,
+                                const IMAGE_SECTION_HEADER *sections,
+                                uint32_t rva, size_t file_size)
 {
-    /* Header region: before any section's VA */
-    if (rva < sections[0].VirtualAddress) {
-        return rva;  /* headers start at file offset 0 */
+    for (each section) {
+        if (rva >= sec->VirtualAddress && rva < sec->VirtualAddress + sec->VirtualSize)
+            return sec->PointerToRawData + (rva - sec->VirtualAddress);
     }
-
-    for (int i = 0; i < num_sections; i++) {
-        if (rva >= sections[i].VirtualAddress &&
-            rva < sections[i].VirtualAddress + sections[i].VirtualSize) {
-            return sections[i].PointerToRawData +
-                   (rva - sections[i].VirtualAddress);
-        }
-    }
-
-    /* RVA not in any section — invalid */
-    return 0;
+    /* Header region: before first section */
+    if (rva < nt->OptionalHeader.SizeOfHeaders)
+        return (int)rva;
+    return -1;  /* not mappable */
 }
 ```
 
@@ -536,9 +594,6 @@ converts it before jumping:
   entry_address = ImageBase + AddressOfEntryPoint
 ```
 
-In my_wine, this is resolved to the actual guest address after
-mapping.
-
 ### What Does It Point To?
 
 For **mingw-w64** compiled executables, `AddressOfEntryPoint`
@@ -551,22 +606,72 @@ function). This is not `main()` itself — the CRT startup:
 
 This is the same startup chain used on native Windows.
 
+**Bypassing the CRT:** my_wine can optionally skip the CRT startup
+entirely. In `main.c`, the loader parses the COFF symbol table
+(`parse_symbol_table_from_file()`) and looks up `main` via
+`lookup_symbol_rva()`. If found, it computes `ImageBase + main_RVA`
+and jumps directly to `main()`, bypassing `mainCRTStartup`.
+This avoids the complexity of stubbing CRT initialization functions
+but requires the `.bss` variables (`_argc`, `_argv`, `_environ`) to
+be pre-seeded manually (done in `main.c` via `seed_bss_vars()`).
+
 ### my_wine Reaches the Entry Point Via `run_guest.S`
 
-In my_wine, the guest entry point is reached through a **naked
-assembly trampoline** (`run_guest.S`). After `fork()`, the child
-process:
+my_wine uses a **single-process model** — there is no `fork()`, no
+child process. The loader and guest run in the same process. After
+all setup is complete, control transfers to the PE entry point
+through `run_guest()`, a naked assembly trampoline (`run_guest.S`).
 
-1. Maps all sections via `mmap`
-2. Patches the IAT
-3. Patches `.refptr` entries
-4. Jumps to the entry point via a naked assembly function
-   (no prologue, no epilogue — just a direct `jmp`)
+The trampoline is **naked** (no prologue, no epilogue) because any
+stack adjustment or register saving would corrupt the guest's
+expected state. The guest believes it was started by the Windows
+loader and expects the stack and registers in a specific configuration.
 
-The naked function is critical: any stack adjustment or register
-saving would corrupt the guest's expected state. The guest believes
-it was started by the Windows loader and expects the stack and
-registers in a specific configuration.
+`run_guest` remaps the System V calling convention (used by the C
+loader) to the Microsoft x64 calling convention (expected by the
+guest):
+
+| SysV (C caller) | → | MS x64 (guest) |
+|---|---|---|
+| `rdi` = entry function | → | `call *rdi` |
+| `rsi` = guest stack top | → | `rsp` (switch stack) |
+| `rcx` = guest_argv | → | `rdx` (arg2) |
+| `r8`  = guest_envp | → | `r8` (arg3, already in place) |
+| `r9`  = ExitProcess fn | → | saved in `r15` (callee-saved) |
+
+The trampoline sets `rcx = 1` (argc), passes `guest_argv` and
+`guest_envp`, and calls the entry function. After entry returns,
+it routes the exit code through `ExitProcess` (saved in `r15`):
+
+```asm
+run_guest:
+    mov %rsi, %rsp           # switch to guest stack
+    mov %r9, %r15            # save ExitProcess in callee-saved r15
+    mov %rcx, %r9            # save guest_argv (rcx overwritten)
+    mov $1, %rcx             # argc = 1
+    mov %r9, %rdx            # guest_argv → rdx
+    call *%rdi               # call entry()  (e.g., mainCRTStartup or main)
+    mov %rax, %rcx           # exit code = main()'s return value
+    call *%r15               # ExitProcess(exit_code)
+    hlt                      # should not reach here
+```
+
+`ExitProcess` calls `NtTerminateProcess`, which dispatches through
+the syscall dispatcher and exits the process. The trampoline never
+returns.
+
+The guest setup pipeline (in `guest_setup.c`) executes in this order
+before calling `run_guest`:
+
+1. Install signal handlers (`SIGSEGV`, `SIGILL`, etc.)
+2. Set up alternate signal stack
+3. Generate all syscall thunks (`generate_all_thunks()`)
+4. Set up UNIX stack for syscall dispatch
+5. Re-parse PE headers from the mapped image
+6. Apply final patches (`__acrt_iob_func`)
+7. Set GS base to TEB
+8. Wire SEH chain into TEB
+9. Jump to entry via `run_guest`
 
 ### DLLs Have No Entry Point
 
@@ -574,8 +679,6 @@ registers in a specific configuration.
 an entry point in the same way executables do. my_wine only handles
 executables, so a zero entry point indicates a malformed or
 unsupported binary.
-
-See [architecture.md §2](architecture.md) for the guest execution flow (fork model).
 
 ---
 
@@ -589,18 +692,22 @@ my_wine uses them:
 | `e_lfanew` (DOS Header) | File offset to PE signature | `pe_headers.c` — find NT headers |
 | `Machine` (File Header) | Target architecture (0x8664 = x64) | `pe_headers.c` — validate x86_64 |
 | `NumberOfSections` (File Header) | Count of sections in the PE | `pe_headers.c` — parse section table |
+| `PointerToSymbolTable` (File Header) | File offset to COFF symbol table | `pe_symbols.c` — look up `main`, refptrs |
 | `SizeOfImage` (Optional Header) | Total mapped size in bytes | `image_mapper.c` — mmap size |
 | `SectionAlignment` (Optional Header) | Memory alignment (typically 4K) | `image_mapper.c` — section alignment |
 | `FileAlignment` (Optional Header) | File alignment (typically 512B) | `pe_headers.c` — section parsing |
-| `AddressOfEntryPoint` (Optional Header) | RVA of code entry point | `entry.c` — jump target |
+| `AddressOfEntryPoint` (Optional Header) | RVA of code entry point | `main.c` — default jump target (or bypass via COFF) |
+| `SizeOfHeaders` (Optional Header) | Size of PE headers to copy | `image_mapper.c` — copy headers into image |
 | `DataDirectory[IMPORT]` (Optional Header) | RVA of import descriptor table | `pe_imports.c`, `import_resolve.c` |
+| `ImageBase` (Optional Header) | Preferred load address | `image_mapper.c` — mmap target |
+| `SizeOfStackReserve/Commit` (Optional Header) | Stack sizing | `teb_peb.c` — allocate guest stack |
 
 ---
 
 ## Related Documents
 
 - [Onboarding](onboarding.md) — Reading order and project guide
-- [Architecture](architecture.md) — How it works: data flow, fork model, syscall interception
-- [Rationale](rationale.md) — Why fork, why seccomp, requirements, limitations
+- [Architecture](architecture.md) — How it works: data flow, syscall interception
+- [Rationale](rationale.md) — Design decisions, requirements, limitations
 - [CRT refptr Patching](refptr.md) — Deep-dive into .refptr section handling
 - [README](../README.md) — Build, run, quick start
