@@ -157,4 +157,8 @@ gen-crt-offsets:
 	@echo "Generating CRT offsets from current mingw-w64 toolchain..."
 	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed, using hardcoded fallback"; exit 0; }
 
-.PHONY: all clean fclean re tests run-test samples run-sample gen-crt-offsets $(BUILDDIR)
+gen-dispatcher:
+	@echo "Generating dispatcher switch bodies..."
+	@python3 scripts/gen_dispatcher.py --generate
+
+.PHONY: all clean fclean re tests run-test samples run-sample gen-crt-offsets gen-dispatcher $(BUILDDIR)

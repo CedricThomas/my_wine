@@ -220,6 +220,35 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
     return 0;
 }
 
+/* ── Dispatch helpers ─────────────────────────────────────────── */
+
+/*
+ * dispatch_ptr_inout — read a guest-space pointer (inout),
+ * set result to error status on failure.
+ *
+ * Used by c_dispatch_syscall. Sets *result to the NTSTATUS error
+ * and returns -1 so the caller can break out of the switch.
+ *
+ * @guest_arg  the guest arg register value (pointer in guest space)
+ * @ptr_val    output: value read from guest ptr
+ * @ptr_out    output: host pointer for write-back
+ * @name       for error messages
+ * @result     output: set to error NTSTATUS on failure
+ *
+ * @return 0 on success, -1 on error.
+ */
+static int dispatch_ptr_inout(uint64_t guest_arg, uint64_t *ptr_val,
+                               void **ptr_out, const char *name,
+                               uint64_t *result)
+{
+    int status = read_guest_ptr(guest_arg, ptr_val, ptr_out, name);
+    if (status != 0) {
+        *result = (uint64_t)status;
+        return -1;
+    }
+    return 0;
+}
+
 /* ── C dispatcher (single-process, no ucontext) ────────────────── */
 
 /*
@@ -354,8 +383,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_ft_val = 0;
         void *p_ft = NULL;
-        int status = read_guest_ptr(arg1, &h_ft_val, &p_ft, "filetime_ptr");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg1, &h_ft_val, &p_ft, "filetime_ptr", &result) != 0) break;
         result = handler_NtQuerySystemTime((PVOID)&h_ft_val);
         if (p_ft) *(uint64_t *)p_ft = h_ft_val;
         break;
@@ -365,8 +393,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_timeout = 0;
         void *p_timeout = NULL;
-        int status = read_guest_ptr(arg2, &h_timeout, &p_timeout, "timeout_ptr");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg2, &h_timeout, &p_timeout, "timeout_ptr", &result) != 0) break;
         result = handler_NtDelayExecution(arg1, (PVOID)&h_timeout);
         if (p_timeout) *(uint64_t *)p_timeout = h_timeout;
         break;
@@ -412,8 +439,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_handle = 0;
         void *p_handle = NULL;
-        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "event_handle");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg1, &h_handle, &p_handle, "event_handle", &result) != 0) break;
         result = handler_NtCreateEvent(&h_handle, arg2, arg3, arg4,
                                        read_guest_stack(1));
         if (p_handle) *(uint64_t *)p_handle = h_handle;
@@ -443,8 +469,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_handle = 0;
         void *p_handle = NULL;
-        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "thread_handle");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg1, &h_handle, &p_handle, "thread_handle", &result) != 0) break;
         result = handler_NtCreateThreadEx(&h_handle, arg2, arg3, arg4,
                                           read_guest_stack(1),
                                           read_guest_stack(2),
@@ -478,8 +503,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_counter = 0;
         void *p_counter = NULL;
-        int status = read_guest_ptr(arg1, &h_counter, &p_counter, "counter_ptr");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg1, &h_counter, &p_counter, "counter_ptr", &result) != 0) break;
         result = handler_NtQueryPerformanceCounter((PVOID)&h_counter);
         if (p_counter) *(uint64_t *)p_counter = h_counter;
         break;
@@ -489,8 +513,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_freq = 0;
         void *p_freq = NULL;
-        int status = read_guest_ptr(arg1, &h_freq, &p_freq, "frequency_ptr");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg1, &h_freq, &p_freq, "frequency_ptr", &result) != 0) break;
         result = handler_NtQueryPerformanceFrequency((PVOID)&h_freq);
         if (p_freq) *(uint64_t *)p_freq = h_freq;
         break;
@@ -500,8 +523,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_prev = 0;
         void *p_prev = NULL;
-        int status = read_guest_ptr(arg2, &h_prev, &p_prev, "previous_state");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg2, &h_prev, &p_prev, "previous_state", &result) != 0) break;
         result = handler_NtSetEvent(arg1, (PVOID)&h_prev);
         if (p_prev) *(uint64_t *)p_prev = h_prev;
         break;
@@ -511,8 +533,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_prev = 0;
         void *p_prev = NULL;
-        int status = read_guest_ptr(arg2, &h_prev, &p_prev, "previous_state");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg2, &h_prev, &p_prev, "previous_state", &result) != 0) break;
         result = handler_NtResetEvent(arg1, (PVOID)&h_prev);
         if (p_prev) *(uint64_t *)p_prev = h_prev;
         break;
@@ -522,8 +543,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_timeout = 0;
         void *p_timeout = NULL;
-        int status = read_guest_ptr(arg3, &h_timeout, &p_timeout, "timeout_ptr");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg3, &h_timeout, &p_timeout, "timeout_ptr", &result) != 0) break;
         result = handler_NtWaitForSingleObject(arg1, arg2, (PVOID)&h_timeout);
         if (p_timeout) *(uint64_t *)p_timeout = h_timeout;
         break;
@@ -533,8 +553,7 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     {
         uint64_t h_handle = 0;
         void *p_handle = NULL;
-        int status = read_guest_ptr(arg1, &h_handle, &p_handle, "mutex_handle");
-        if (status != 0) return (uint64_t)status;
+        if (dispatch_ptr_inout(arg1, &h_handle, &p_handle, "mutex_handle", &result) != 0) break;
         result = handler_NtCreateMutex(&h_handle, arg2, arg3);
         if (p_handle) *(uint64_t *)p_handle = h_handle;
         break;
