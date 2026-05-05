@@ -196,10 +196,13 @@
 #define INLINE_SYSCALL_CLONE(flags, child_stack, parent_tid, child_tid, fn, arg) \
     ({ \
         long _synct_rax; \
+        register long _r10 asm("r10") = (long)(child_tid); \
+        register long _r8 asm("r8") = (long)(fn); \
+        register long _r9 asm("r9") = (long)(arg); \
         __asm__ volatile("syscall" \
             : "=a"(_synct_rax) \
             : "a"(__NR_clone), "D"(flags), "S"(child_stack), \
-              "d"(parent_tid), "r"(child_tid), "r"(fn), "r"(arg) \
+              "d"(parent_tid), "r"(_r10), "r"(_r8), "r"(_r9) \
             : "rcx", "r11", "cc", "memory"); \
         _synct_rax; \
     })
