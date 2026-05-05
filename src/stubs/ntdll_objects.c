@@ -102,7 +102,7 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
     void **args = (void **)INLINE_SYSCALL_MMAP(NULL, PAGE_SIZE,
         PROT_READ | PROT_WRITE,
         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if ((long)(uintptr_t)args < 0)
+    if (args == MAP_FAILED)
         return STATUS_MEMORY_NOT_AVAILABLE;
     args[0] = (void *)(uintptr_t)start_routine;
     args[1] = (void *)(uintptr_t)argument;

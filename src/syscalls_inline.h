@@ -113,7 +113,7 @@
             : "a"(__NR_mmap), "D"(addr), "S"((size_t)(len)), \
               "d"(prot), "r"(flags), "r"(fd), "r"((off_t)(offset)) \
             : "rcx", "r11", "cc"); \
-        _synct_rax >= -4095L ? (void *)_synct_rax : MAP_FAILED; \
+        _synct_rax < 0 ? MAP_FAILED : (void *)_synct_rax; \
     })
 
 /* ── sys_mprotect ───────────────────────────────────────────── */
