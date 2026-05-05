@@ -1,29 +1,132 @@
 # nt_syscalls.def — Source of truth for dispatcher auto-generation
-# Format: SYSCALL_NUM  SyscallName  handler_function  pattern_type
-# Pattern types: simple | validate | inout | multi
+# Each syscall is a block: header line, handler:, optional args:, call:
+# Blank lines separate blocks. Comments start with #.
+#
+# arg formats:
+#   ptr(wb) argN as h_name     → generator creates uint64_t h_name, void *p_name
+#   ptr(ro) argN name "label"  → read_guest_ptr(argN, ...) validation (register source)
+#   ptr(ro) h_name name "label"→ read_guest_ptr(h_name, ...) validation (stack local source)
+#   stack N as h_name          → generator creates uint64_t h_name = STACK(N)
+#
+# call line: references locals as &h_name (wb), h_name (stack/ro value),
+#   argN (direct register), STACK(N) (inline stack read), raw (first ptr(ro) from reg)
 
-0x05  NtCallbackReturn          handler_NtCallbackReturn         simple
-0x07  NtQueryInformationProcess handler_NtQueryInformationProcess multi
-0x09  NtQuerySystemTime         handler_NtQuerySystemTime        inout
-0x0F  NtClose                   handler_NtClose                  simple
-0x18  NtAllocateVirtualMemory   handler_NtAllocateVirtualMemory  multi
-0x19  NtFreeVirtualMemory       handler_NtFreeVirtualMemory      multi
-0x1A  NtDelayExecution          handler_NtDelayExecution         inout
-0x1E  NtReleaseMutex            handler_NtReleaseMutex           simple
-0x24  NtGetContextThread        handler_NtGetContextThread       validate
-0x26  NtSetContextThread        handler_NtSetContextThread       validate
-0x28  NtMapViewOfSection        handler_NtMapViewOfSection       multi
-0x29  NtUnmapViewOfSection      handler_NtUnmapViewOfSection     simple
-0x2A  NtTerminateProcess        handler_NtTerminateProcess       simple
-0x3C  NtReadFile                handler_NtReadFile               multi
-0x3D  NtWriteFile               handler_NtWriteFile              multi
-0x44  NtCreateMutex             handler_NtCreateMutex            inout
-0x48  NtCreateEvent             handler_NtCreateEvent            inout
-0x4A  NtCreateSection           handler_NtCreateSection          multi
-0x4E  NtCreateThreadEx          handler_NtCreateThreadEx         inout
-0x4F  NtOpenFile                handler_NtOpenFile               multi
-0x55  NtQueryPerformanceCounter handler_NtQueryPerformanceCounter inout
-0x56  NtQueryPerformanceFrequency handler_NtQueryPerformanceFrequency inout
-0x5C  NtSetEvent                handler_NtSetEvent               inout
-0x5E  NtResetEvent              handler_NtResetEvent             inout
-0x03  NtWaitForSingleObject     handler_NtWaitForSingleObject    inout
+0x05  NtCallbackReturn
+handler: handler_NtCallbackReturn
+call: handler_NtCallbackReturn()
+
+0x07  NtQueryInformationProcess
+handler: handler_NtQueryInformationProcess
+args: stack 1 as h_retLen | ptr(ro) arg3 buffer "buffer" | ptr(ro) h_retLen return_length "return_length"
+call: handler_NtQueryInformationProcess(arg1, arg2, raw, arg4, h_retLen)
+
+0x0F  NtClose
+handler: handler_NtClose
+call: handler_NtClose(arg1)
+
+0x18  NtAllocateVirtualMemory
+handler: handler_NtAllocateVirtualMemory
+args: ptr(wb) arg2 as h_baseAddr | ptr(wb) arg4 as h_regionSz
+call: handler_NtAllocateVirtualMemory(arg1, &h_baseAddr, arg3, &h_regionSz, STACK(1), STACK(2))
+
+0x19  NtFreeVirtualMemory
+handler: handler_NtFreeVirtualMemory
+args: ptr(wb) arg2 as h_baseAddr | ptr(wb) arg3 as h_regionSz
+call: handler_NtFreeVirtualMemory(arg1, &h_baseAddr, &h_regionSz, arg4)
+
+0x24  NtGetContextThread
+handler: handler_NtGetContextThread
+args: ptr(ro) arg2 context "context"
+call: handler_NtGetContextThread(arg1, arg2)
+
+0x26  NtSetContextThread
+handler: handler_NtSetContextThread
+args: ptr(ro) arg2 context "context"
+call: handler_NtSetContextThread(arg1, arg2)
+
+0x28  NtMapViewOfSection
+handler: handler_NtMapViewOfSection
+args: ptr(wb) arg3 as h_baseAddr | stack 1 as h_sectionOff | stack 2 as h_viewSz | ptr(wb) h_sectionOff as h_sectionOff "section_offset" | ptr(wb) h_viewSz as h_viewSz "view_size"
+call: handler_NtMapViewOfSection(arg1, arg2, &h_baseAddr, arg4, STACK(1), &h_sectionOff, &h_viewSz, STACK(4), STACK(5), STACK(6))
+
+0x29  NtUnmapViewOfSection
+handler: handler_NtUnmapViewOfSection
+call: handler_NtUnmapViewOfSection(arg1, arg2)
+
+0x2A  NtTerminateProcess
+handler: handler_NtTerminateProcess
+call: handler_NtTerminateProcess(arg1, arg2)
+
+0x3C  NtReadFile
+handler: handler_NtReadFile
+args: stack 1 as h_buffer | stack 4 as h_bytesRead | ptr(ro) h_buffer buffer "buffer" | ptr(ro) h_bytesRead bytes_read "bytes_read"
+call: handler_NtReadFile(arg1, arg2, arg3, arg4, h_buffer, STACK(2), STACK(3), h_bytesRead)
+
+0x3D  NtWriteFile
+handler: handler_NtWriteFile
+args: stack 1 as h_buffer | stack 4 as h_bytesWritten | ptr(ro) h_buffer buffer "buffer" | ptr(ro) h_bytesWritten bytes_written "bytes_written"
+call: handler_NtWriteFile(arg1, arg2, arg3, arg4, h_buffer, STACK(2), STACK(3), h_bytesWritten)
+
+0x44  NtCreateMutex
+handler: handler_NtCreateMutex
+args: ptr(wb) arg1 as h_handle
+call: handler_NtCreateMutex(&h_handle, arg2, arg3)
+
+0x48  NtCreateEvent
+handler: handler_NtCreateEvent
+args: ptr(wb) arg1 as h_handle
+call: handler_NtCreateEvent(&h_handle, arg2, arg3, arg4, STACK(1))
+
+0x4A  NtCreateSection
+handler: handler_NtCreateSection
+args: ptr(wb) arg1 as h_handle | ptr(wb) arg4 as h_maxSz
+call: handler_NtCreateSection(&h_handle, arg2, arg3, &h_maxSz, STACK(1), STACK(2), STACK(3))
+
+0x4E  NtCreateThreadEx
+handler: handler_NtCreateThreadEx
+args: ptr(wb) arg1 as h_handle
+call: handler_NtCreateThreadEx(&h_handle, arg2, arg3, arg4, STACK(1), STACK(2), STACK(3), STACK(4), STACK(5), STACK(6), STACK(7))
+
+0x4F  NtOpenFile
+handler: handler_NtOpenFile
+args: ptr(wb) arg1 as h_handle | ptr(ro) arg3 object_attributes "object_attributes" | ptr(ro) arg4 io_status_block "io_status_block"
+call: handler_NtOpenFile(&h_handle, arg2, arg3, arg4, STACK(1), STACK(2))
+
+0x55  NtQueryPerformanceCounter
+handler: handler_NtQueryPerformanceCounter
+args: ptr(wb) arg1 as h_counter
+call: handler_NtQueryPerformanceCounter((PVOID)&h_counter)
+
+0x56  NtQueryPerformanceFrequency
+handler: handler_NtQueryPerformanceFrequency
+args: ptr(wb) arg1 as h_freq
+call: handler_NtQueryPerformanceFrequency((PVOID)&h_freq)
+
+0x5C  NtSetEvent
+handler: handler_NtSetEvent
+args: ptr(wb) arg2 as h_prev
+call: handler_NtSetEvent(arg1, (PVOID)&h_prev)
+
+0x5E  NtResetEvent
+handler: handler_NtResetEvent
+args: ptr(wb) arg2 as h_prev
+call: handler_NtResetEvent(arg1, (PVOID)&h_prev)
+
+0x09  NtQuerySystemTime
+handler: handler_NtQuerySystemTime
+args: ptr(wb) arg1 as h_ftVal
+call: handler_NtQuerySystemTime((PVOID)&h_ftVal)
+
+0x1A  NtDelayExecution
+handler: handler_NtDelayExecution
+args: ptr(wb) arg2 as h_timeout
+call: handler_NtDelayExecution(arg1, (PVOID)&h_timeout)
+
+0x1E  NtReleaseMutex
+handler: handler_NtReleaseMutex
+call: handler_NtReleaseMutex(arg1, arg2)
+
+0x03  NtWaitForSingleObject
+handler: handler_NtWaitForSingleObject
+args: ptr(wb) arg3 as h_timeout
+call: handler_NtWaitForSingleObject(arg1, arg2, (PVOID)&h_timeout)
