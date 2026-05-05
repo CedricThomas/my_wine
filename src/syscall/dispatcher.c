@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
-#include <signal.h>
-#include <stdio.h>
+#define SIGSEGV 11
 #include <stdint.h>
 #include <sys/ucontext.h>
 

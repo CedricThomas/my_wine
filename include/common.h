@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include "debug.h"
 
+/* Global debug flag: set from envp in main() */
+extern int g_debug_enabled;
+
 // Memory page constants
 #define PAGE_SIZE         4096
 #define PAGE_MASK         (PAGE_SIZE - 1)

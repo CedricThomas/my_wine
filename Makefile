@@ -102,10 +102,10 @@ run-test: tests
 	@bash scripts/run_tests.sh $(TEST)
 
 # Per-test object groups
-TEST_parse_OBJS = $(PE_OBJS)
-TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS)
-TEST_teb_peb_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o
-TEST_syscall_dispatch_OBJS = $(TEST_SYSCALL_OBJS)
+TEST_parse_OBJS = $(PE_OBJS) $(BUILDDIR)/debug.o
+TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/debug.o
+TEST_teb_peb_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o $(BUILDDIR)/debug.o
+TEST_syscall_dispatch_OBJS = $(TEST_SYSCALL_OBJS) $(BUILDDIR)/debug.o
 
 define TEST_RULE
 $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
@@ -113,10 +113,10 @@ $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
 	@$(CC) $(CFLAGS) -I include -o $$@ $$^ $(LDFLAGS)
 endef
 
-$(eval $(call TEST_RULE,parse,$(PE_OBJS)))
-$(eval $(call TEST_RULE,import_resolution,$(TEST_IMPORT_OBJS)))
-$(eval $(call TEST_RULE,teb_peb,$(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o))
-$(eval $(call TEST_RULE,syscall_dispatch,$(TEST_SYSCALL_OBJS)))
+$(eval $(call TEST_RULE,parse,$(TEST_parse_OBJS)))
+$(eval $(call TEST_RULE,import_resolution,$(TEST_import_resolution_OBJS)))
+$(eval $(call TEST_RULE,teb_peb,$(TEST_teb_peb_OBJS)))
+$(eval $(call TEST_RULE,syscall_dispatch,$(TEST_syscall_dispatch_OBJS)))
 
 # ── Auto-generated header dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))

@@ -8,6 +8,10 @@
 // Set from main() by scanning envp for MY_WINE_DEBUG
 int g_debug_enabled = 0;
 
+// Override debug_check_fn (weak in debug.c) to check g_debug_enabled
+static int debug_enabled(void) { return g_debug_enabled; }
+int (*debug_check_fn)(void) = &debug_enabled;
+
 // ── format_hex ──────────────────────────────────────────────────
 
 void format_hex(char *buf, int buf_size, uint64_t val) {

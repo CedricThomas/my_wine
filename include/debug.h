@@ -7,10 +7,8 @@
 /*
  * Debug Output Macros
  *
- * Controlled by the global g_debug_enabled (set from MY_WINE_DEBUG
- * env var in main.c before any guest code runs).
- * When non-zero, debug output is enabled.
- * When zero, all debug output is a no-op.
+ * Controlled by the global debug flag. When enabled, debug output is active.
+ * When disabled (default), all debug output is a no-op.
  *
  * Usage:
  *   DEBUG("value = %d", val);
@@ -21,21 +19,34 @@
  * always be visible regardless of the debug setting.
  */
 
-/* Set from main.c by scanning envp for MY_WINE_DEBUG.
- * Weak symbol: defaults to 0 when common.o isn't linked (tests). */
-extern __attribute__((weak)) int g_debug_enabled;
+/*
+ * debug_is_enabled() checks if debug output is active.
+ *
+ * Uses a weak function pointer (debug_check_fn) that defaults to a safe
+ * disabled state. In my_wine, common.c overrides the pointer to check
+ * g_debug_enabled. In test binaries (with debug.c), the pointer points
+ * to the default handler → returns 0, no crash.
+ *
+ * The weak pointer's address is in .data.rel.ro (valid to read).
+ * Only its *value* is 0 when undefined, and we check for that.
+ */
+extern int (*debug_check_fn)(void) __attribute__((weak));
+
+static inline int debug_is_enabled(void) {
+    if (debug_check_fn) return debug_check_fn();
+    return 0;
+}
 
 /*
  * DEBUG(fmt, ...)
  *
- * Prints a formatted message to stderr only when
- * g_debug_enabled is set.
+ * Prints a formatted message to stderr only when debug is enabled.
  * Automatically appends a newline. Safe for use anywhere in regular
  * code (not signal handlers).
  */
 #define DEBUG(fmt, ...)                                               \
     do {                                                              \
-        if (g_debug_enabled) {                                        \
+        if (debug_is_enabled()) {                                     \
             fprintf(stderr, fmt "\n", ##__VA_ARGS__);                 \
         }                                                             \
     } while (0)
@@ -44,13 +55,13 @@ extern __attribute__((weak)) int g_debug_enabled;
  * DEBUG_WRITE_ERR(msg, len)
  *
  * Writes `len` bytes from `msg` to stderr using write().
- * Only active when g_debug_enabled is set.
+ * Only active when debug is enabled.
  * Signal-safe: uses write() instead of printf, so it can be used
  * inside signal handlers without risk of deadlock.
  */
 #define DEBUG_WRITE_ERR(msg, len)                                     \
     do {                                                              \
-        if (g_debug_enabled) {                                        \
+        if (debug_is_enabled()) {                                     \
             write(STDERR_FILENO, (msg), (len));                       \
         }                                                             \
     } while (0)
