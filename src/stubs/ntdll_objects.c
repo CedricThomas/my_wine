@@ -13,6 +13,7 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <signal.h>
+#include <pthread.h>
 #include "../syscalls_inline.h"
 #include "handler_abi.h"
 #include "ntdll_priv.h"
@@ -61,6 +62,7 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
     events[slot].handle   = (int)handle;
     events[slot].signaled = (initial_state != 0) ? 1 : 0;
     events[slot].event_type = (int)event_type;
+    pthread_cond_init(&events[slot].cond, NULL);
 
     if (event_handle != 0)
         *event_handle = handle;
