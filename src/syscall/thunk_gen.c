@@ -58,6 +58,11 @@ static const uint16_t nt_syscall_list[] = {
  */
 static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatcher_addr)
 {
+    if (dispatcher_addr == NULL) {
+        fprintf(stderr, "wine: fatal: dispatcher address is NULL\n");
+        abort();
+    }
+
     /* push rdi — 2 bytes: 41 57 (REX.B + push rdi) */
     loc[0] = 0x41;
     loc[1] = 0x57;
@@ -74,7 +79,12 @@ static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatch
     /* call __wine_dispatcher — 5 bytes: E8 XX XX XX XX
      * RIP after the 5-byte call = loc + 14, so displacement is relative to that */
     loc[9] = 0xE8;
-    int32_t disp = (uint8_t *)dispatcher_addr - (loc + 14);
+    int64_t raw_disp = (int64_t)(uintptr_t)dispatcher_addr - (int64_t)(uintptr_t)(loc + 14);
+    if (raw_disp > INT32_MAX || raw_disp < INT32_MIN) {
+        fprintf(stderr, "wine: fatal: dispatcher displacement %lld out of range for near call (must be within ±2GB)\n", (long long)raw_disp);
+        abort();
+    }
+    int32_t disp = (int32_t)raw_disp;
     loc[10] = (uint8_t)(disp & 0xFF);
     loc[11] = (uint8_t)((disp >> 8) & 0xFF);
     loc[12] = (uint8_t)((disp >> 16) & 0xFF);
@@ -105,6 +115,11 @@ void **generate_all_thunks(void)
     thunk_blob_size = alloc;
 
     void *dispatcher = wine_dispatcher_addr();
+    printf("wine: dispatcher at %p\n", dispatcher);
+    if (dispatcher == NULL) {
+        fprintf(stderr, "wine: fatal: cannot resolve __wine_dispatcher\n");
+        return NULL;
+    }
 
     for (int i = 0; i < NUM_NT_SYSCALLS; i++) {
         uint16_t nr = nt_syscall_list[i];
