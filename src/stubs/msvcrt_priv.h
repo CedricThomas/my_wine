@@ -114,7 +114,7 @@ size_t wine_strlen(const void *s);
 WINE_STUB_STATIC
 int wine_strncmp(const void *s1, const void *s2, size_t n);
 WINE_STUB_STATIC
-void wine_signal(int sig, void (*handler)(int));
+int wine_signal(int sig, void (*handler)(int));
 #endif
 
 /* ── __msvcrt_* function pointer exports ─────────────────── */

@@ -27,6 +27,8 @@ struct guest_regs {
     uint64_t rdx;       /* guest input arg 2 */
     uint64_t r8;        /* guest input arg 3 */
     uint64_t r9;        /* guest input arg 4 */
+    uint64_t rdi;       /* guest callee-saved (clobbered by thunk) */
+    uint64_t rsi;       /* guest callee-saved (clobbered by dispatcher) */
     uint64_t rsp;       /* original guest RSP at dispatch time */
     uint64_t ret_addr;  /* return address pushed by the thunk call */
     uint64_t rax;       /* output: result for guest */

@@ -50,9 +50,8 @@ void _cexit(void)
 WINE_STUB_STATIC
 void wine__exit(int code)
 {
-    /* Call Linux sys_exit directly */
-    syscall(__NR_exit, code);
-    __builtin_unreachable();
+    /* Call Linux sys_exit directly via inline syscall (post-GS safe) */
+    INLINE_SYSCALL_EXIT(code);
 }
 
 /* Helper: format "LABEL=0xNNNNNNNNNNNNNNNN\n" and write to fd */
@@ -139,13 +138,15 @@ size_t wine_strlen(const void *s)
 WINE_STUB_STATIC
 int wine_strncmp(const void *s1, const void *s2, size_t n)
 {
-    return strncmp(s1, s2, n);
+    return __builtin_strncmp(s1, s2, n);
 }
 
 WINE_STUB_STATIC
-void wine_signal(int sig, void (*handler)(int))
+int wine_signal(int sig, void (*handler)(int))
 {
-    signal(sig, handler);
+    (void)sig;
+    (void)handler;
+    return -1; /* SIG_ERR — signal handling not needed post-GS */
 }
 
 /* ── Expose function pointers for import table ─────────────── */

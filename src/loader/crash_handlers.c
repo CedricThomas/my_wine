@@ -40,16 +40,15 @@ void seh_crash_handler(void *exception_record, void *establisher_frame,
     (void)context_record;
     (void)dispatcher_context;
 
-    /* Dump info via syscall (stderr) */
+    /* Dump info via inline syscall (post-GS safe) */
     { const char t[] = "SEV: SEH handler invoked (exception in guest code)\n";
-      syscall(__NR_write, 2, t, sizeof(t)-1); }
+      INLINE_SYSCALL_WRITE(2, t, sizeof(t)-1); }
 
     /* Extract exit code from exception record if possible, else use 0xC0000005 (ACCESS_VIOLATION) */
     uint64_t exit_code = 0xC0000005;
 
-    /* Call NtTerminateProcess to exit cleanly */
-    syscall(__NR_exit, (int)(exit_code & 0xFF));
-    __builtin_unreachable();
+    /* Call sys_exit directly (post-GS safe) */
+    INLINE_SYSCALL_EXIT((int)(exit_code & 0xFF));
 }
 
 /**
