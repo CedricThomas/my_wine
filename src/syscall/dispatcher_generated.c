@@ -286,7 +286,8 @@ switch (nr) {
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
     }
     result = STATUS_NOT_IMPLEMENTED;
-    break;}
+    break;
+}
 #elif defined(DISPATCHER_LEGACY_BODY)
 switch (nt_nr) {
     case 0x05: /* NtCallbackReturn */
@@ -565,7 +566,8 @@ switch (nt_nr) {
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
     }
     result = STATUS_NOT_IMPLEMENTED;
-    break;}
+    break;
+}
 #else
 #error "Define DISPATCHER_C_BODY or DISPATCHER_LEGACY_BODY before including this file"
 #endif

@@ -256,7 +256,7 @@ def gen_switch_body(syscalls, variant):
         cases.append(gen_case(entry, variant))
     cases.append("")
     cases.append(gen_default(variant))
-    return "\n".join(cases)
+    return "\n".join(cases) + "\n"
 
 
 def generate_output():
