@@ -104,9 +104,9 @@ The pipeline in `src/main.c` (`main()`) runs 10 steps:
 
 6. **`setup_stack()`** in `src/loader/teb_peb.c` — Allocates the guest stack according to the PE's `SizeOfStackReserve` / `SizeOfStackCommit` (minimum 512KB committed for CRT startup).
 
-6. **`seed_bss_vars()`** in `src/main.c` — Pre-seeds `argc`, `argv`, `envp` in the PE's `.bss` section at COFF-derived offsets.
+7. Zero `.data` section and `seed_bss_vars()` in `src/main.c` — Zero the `.data` section and pre-seed `argc`, `argv`, `envp` in the PE's `.bss` section at COFF-derived offsets.
 
-7. **`run_guest_entry()`** in `src/loader/entry.c` — Calls `setup_guest_and_run()` from `guest_setup.c`.
+8. **`run_guest_entry()`** in `src/loader/entry.c` — Calls `setup_guest_and_run()` from `guest_setup.c`.
 
 ### Guest setup (single process, `src/loader/guest_setup.c`)
 

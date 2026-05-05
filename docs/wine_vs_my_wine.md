@@ -10,11 +10,11 @@ executables on Linux) with fundamentally different strategies.
 | Dimension | Wine | my_wine |
 |-----------|------|---------|
 | **Goal** | Full Windows compatibility layer | Minimal PE loader for research/education |
-| **Size** | ~2 million lines of C | ~5,000 lines of C |
-| **CRT support** | Complete reimplementations of msvcrt, ucrtbase, vcruntime140, kernel32, ntdll, advapi32, user32, gdi32, … (100+ DLLs) | Minimal stubs for msvcrt, kernel32, ntdll |
+| **Size** | ~2 million lines of C | ~8,500 lines of C (~67 source files) |
+| **CRT support** | Complete reimplementations of msvcrt, ucrtbase, vcruntime140, kernel32, ntdll, advapi32, user32, gdi32, … (100+ DLLs) | Minimal stubs for msvcrt, kernel32, ntdll — static import table (~60 entries) |
 | **Target toolchains** | Any toolchain that produces valid PE (MSVC, mingw-w64, clang-mingw, Delphi, Borland, …) | mingw-w64 + GCC + msvcrt only |
-| **Threading** | Full — pthreads mapped to Windows threads, with per-thread TEB/PEB, TLS, APCs, jobs | Stubbed — `NtCreateThreadEx` creates a pthread but shares the parent TEB |
-| **Filesystem** | Full VFS with DOS device mapping, case-insensitive lookup, symlink translation, registry-backed paths | Console I/O only (`/dev/stdout`, `/dev/stderr`); minimal `NtOpenFile` with ASCII path conversion |
+| **Threading** | Full — pthreads mapped to Windows threads, per-thread TEB, TLS, APCs, jobs | Real threads via `clone()` syscall (CLONE_VM\|CLONE_FS\|CLONE_FILES), but shares parent's TEB (no per-thread TEB) |
+| **Filesystem** | Full VFS with DOS device mapping, case-insensitive lookup, symlink translation, registry-backed paths | `NtOpenFile` with ASCII path conversion; handle table (256 entries, stdin/stdout/stderr pre-initialized at 0x7FFFFFFF/0x7FFFFFFE/0x7FFFFFFD) |
 | **GUI** | Full Win32 GUI — X11/Wayland backend, DDraw, OpenGL, D3D | None — console-only |
 | **License** | LGPL | Educational/research (no license) |
 
@@ -60,15 +60,27 @@ my_wine maintains a **static C array** of known import names:
 ```c
 // src/loader/import_table.c (simplified)
 import_entry_t import_table[] = {
-    { "ntdll.dll",    "NtWriteFile",         (void *)handler_NtWriteFile },
-    { "ntdll.dll",    "NtTerminateProcess",  (void *)handler_NtTerminateProcess },
-    { "kernel32.dll", "GetStdHandle",        (void *)GetStdHandle },
-    { "kernel32.dll", "ExitProcess",         (void *)ExitProcess },
-    { "msvcrt.dll",   "__getmainargs",       (void *)__getmainargs_stub },
-    { "msvcrt.dll",   "__iob_func",          (void *)__iob_func_stub },
-    { "msvcrt.dll",   "fprintf",             (void *)wine_fprintf },
-    { "msvcrt.dll",   "malloc",              (void *)wine_malloc },
-    // ... ~60 entries total, all keyed to msvcrt.dll / ntdll.dll / kernel32.dll
+    /* ntdll — 16 NT syscall handlers */
+    { "ntdll.dll", "NtWriteFile",         (void*)handler_NtWriteFile },
+    { "ntdll.dll", "NtReadFile",          (void*)handler_NtReadFile },
+    { "ntdll.dll", "NtClose",             (void*)handler_NtClose },
+    { "ntdll.dll", "NtAllocateVirtualMemory", (void*)handler_NtAllocateVirtualMemory },
+    { "ntdll.dll", "NtFreeVirtualMemory", (void*)handler_NtFreeVirtualMemory },
+    { "ntdll.dll", "NtCreateSection",     (void*)handler_NtCreateSection },
+    { "ntdll.dll", "NtMapViewOfSection",  (void*)handler_NtMapViewOfSection },
+    { "ntdll.dll", "NtCreateThreadEx",    (void*)handler_NtCreateThreadEx },
+    { "ntdll.dll", "NtCreateEvent",       (void*)handler_NtCreateEvent },
+    { "ntdll.dll", "NtOpenFile",          (void*)handler_NtOpenFile },
+    /* kernel32 — ~16 functions */
+    { "kernel32.dll", "GetStdHandle",     (void*)GetStdHandle },
+    { "kernel32.dll", "WriteFile",        (void*)WriteFile },
+    { "kernel32.dll", "ExitProcess",      (void*)ExitProcess },
+    /* msvcrt — startup + data + dynamic from host libc */
+    { "msvcrt.dll", "__getmainargs",      (void*)__getmainargs },
+    { "msvcrt.dll", "__iob_func",         (void*)__iob_func },
+    { "msvcrt.dll", "fprintf",            NULL },  /* filled from host msvcrt.dll */
+    { "msvcrt.dll", "malloc",             NULL },  /* filled from host msvcrt.dll */
+    // ... ~60 entries total, all keyed to ntdll.dll / kernel32.dll / msvcrt.dll
 };
 ```
 
@@ -93,9 +105,20 @@ PE expects. But the size differs across CRTs:
 matching the expected size. `msvcrt.dll` uses 48 bytes; `ucrtbase.dll`
 uses the correct larger size.
 
-**my_wine's approach (current):** Single `__wine_iob` array with 48-byte
-entries. If UCRT code reads beyond offset 48, it gets whatever happens to
-be in memory.
+**my_wine's approach (current):** Single `__wine_iob` union with 48-byte
+`wine_FILE` entries (3 × 48 = 144 bytes total, stored as `char bytes[144]`).
+Matches msvcrt.dll's FILE size exactly.
+
+```c
+// src/stubs/msvcrt_priv.h
+typedef union {
+    wine_FILE f[3];      // 3 × 48 bytes = 144 bytes
+    char      bytes[144];
+} iob_union;
+```
+
+If UCRT code reads beyond offset 48, it gets whatever happens to be in
+memory.
 
 **Quick fix for UCRT:** Zero-pad each `__wine_iob` entry to 96 bytes.
 Most UCRT code only reads within the first 48 bytes, and the rest being 0
@@ -134,14 +157,15 @@ mainCRTStartup (in the PE itself)
 ```
 
 **Critical implication:** my_wine must understand the CRT's internal data
-layout (`.refptr`, `.bss` offsets, `__acrt_iob_func` wrapper) to make
-this work. Wine doesn't — it just provides the DLL the PE imports.
+layout (`.refptr`, `.bss` offsets, `__acrt_iob_func`
+wrapper) to make this work. Wine doesn't — it just provides the DLL
+the PE imports.
 
 ---
 
 ## 4. Syscall Interception
 
-### 4.1 Wine: Single Process with Stack Switching
+### 4.1 Wine: Dispatcher + wineserver IPC
 
 Wine runs everything in a **single process**. Windows code executes on its
 own stack, and when it needs kernel services, it calls through Wine's
@@ -149,7 +173,7 @@ dispatcher which either handles the call in-process or communicates with
 `wineserver` (a separate process) for cross-process operations:
 
 ```
-Windows app → Wine DLL → dispatcher → (in-process handler or wineserver IPC) → Linux kernel
+Windows app → Wine DLL → dispatcher → (in-process handler OR wineserver IPC) → Linux kernel
 ```
 
 - A single process runs both the PE code and the Wine library code
@@ -161,28 +185,32 @@ Windows app → Wine DLL → dispatcher → (in-process handler or wineserver IP
 
 ### 4.2 my_wine: Direct Dispatch via `__wine_dispatcher`
 
-my_wine uses a **single process** approach similar to Wine: the PE runs
-inline, and NT syscalls are intercepted through a direct C dispatcher
-rather than kernel-level traps:
+my_wine uses a **single process** with **no wineserver**: the PE
+runs inline, and NT syscalls are intercepted through a direct C dispatcher:
 
 ```
-Windows app → __wine_dispatcher() → C handler → Linux kernel
-Linux syscall → passes through directly → Linux kernel
+Windows app → thunk → __wine_dispatcher (assembly) → c_dispatch_syscall (C) → handler → Linux syscall
 ```
 
 - The PE runs in the same process — no fork, no separate child
 - Each Windows thread has its own stack, managed by the loader
-- NT syscalls from the PE land in `__wine_dispatcher()` via the IAT or
-  inline redirection, which dispatches directly to C handlers
+- NT syscalls from the PE land in thunks (generated at load time), which
+  call `__wine_dispatcher()` (assembly, stack-switching entry point)
+- `__wine_dispatcher` saves guest registers to the global `__wine_guest_regs`
+  struct, switches to a pre-allocated UNIX stack, and calls
+  `c_dispatch_syscall()` (C, reads from `__wine_guest_regs`)
+- `c_dispatch_syscall` decodes the syscall number and dispatches to C
+  handlers, which call Linux syscalls directly via `INLINE_SYSCALL_*` macros
 - Linux syscalls pass through unchanged (not intercepted)
 - No seccomp, no SIGSYS, no kernel module — just function calls
 
 **Similarities to Wine:** single process, stack switching, direct call to
-dispatcher. The control flow is now much closer to Wine's model.
+dispatcher.
 
 **Differences from Wine:** my_wine has no `wineserver` (no separate IPC
 process), no SUD (Syscall User Dispatch), and no full syscall table — only
-the handful of NT syscalls we explicitly implement.
+the ~16 NT syscalls we explicitly implement. No wineserver means no
+cross-process coordination; everything stays in-process.
 
 ---
 
@@ -219,32 +247,60 @@ DLL loading (`LoadLibraryA` returns NULL). No module list. No PEB Ldr.
 Full thread implementation:
 
 - Each Windows thread → Linux pthread
-- Per-thread TEB (Thread Environment Block) with its own SEH chain
+- **Per-thread TEB** (Thread Environment Block) with its own SEH chain
 - Per-thread TLS (Thread Local Storage) with proper initialization
 - `arch_prctl(ARCH_SET_GS)` sets GS base per-thread
 - APCs (Asynchronous Procedure Calls) implemented via signals
 
 ### 6.2 my_wine
 
-Stubbed threading:
+Real threads with shared TEB:
 
-- `NtCreateThreadEx` creates a pthread but shares the **parent's TEB**
+- `NtCreateThreadEx` creates a **real thread** using `clone()` syscall
+  with `CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|SIGCHLD` flags
+  (via `INLINE_SYSCALL_CLONE` macro). This creates a Linux thread that
+  shares the address space, file descriptors, and signal handlers with
+  the parent.
+- A `thread_wrapper()` function serves as the clone entry point — it
+  unwraps the target function and argument, calls the thread function,
+  then exits with `INLINE_SYSCALL_EXIT(0)`.
+- **Shares the parent's TEB** — no per-thread TEB. All threads see the
+  same GS base and TEB contents.
+- Thread tracking: `wine_thread_t { tid, suspended }` with `MAX_THREADS = 32`
+  and `threads[]` array in `src/stubs/ntdll_objects.c`.
 - No per-thread SEH, no per-thread TLS
 - GS base is set once (for the main thread only)
-- Signal handler can't distinguish which thread's context it's in
 
 ---
 
-## 7. Summary: Design Philosophy
+## 7. Current NT Syscall Coverage
+
+my_wine implements **16 unique NT syscall handlers**:
+
+| Category | Handlers |
+|----------|----------|
+| **Process** | `NtTerminateProcess`, `NtCallbackReturn`, `NtQueryInformationProcess` |
+| **File I/O** | `NtWriteFile`, `NtReadFile`, `NtOpenFile`, `NtClose` |
+| **Memory** | `NtAllocateVirtualMemory`, `NtFreeVirtualMemory` |
+| **Sections/Views** | `NtCreateSection`, `NtMapViewOfSection`, `NtUnmapViewOfSection` |
+| **Threading** | `NtCreateThreadEx`, `NtGetContextThread`, `NtSetContextThread` |
+| **Events** | `NtCreateEvent` |
+
+---
+
+## 8. Summary: Design Philosophy
 
 | | Wine | my_wine |
 |---|------|---------|
 | **Philosophy** | "Implement everything the PE might need" | "Implement the minimum to make this PE run" |
-| **Process model** | Single process + wineserver (IPC) | Single process (no separate IPC process) |
-| **Dispatch** | Stack switching + dispatcher + wineserver | Stack switching + direct dispatcher (no wineserver) |
-| **Approach** | Full API reimplementation per DLL | Static stub table + direct dispatch |
-| **Syscall table** | Full — every NT syscall has a handler | Minimal — only the NT syscalls we implement |
+| **Process model** | Single process + wineserver (IPC) | Single process (no IPC) |
+| **Dispatch** | Dispatcher → in-process handler or wineserver IPC | Thunk → `__wine_dispatcher` (asm) → `c_dispatch_syscall` (C) → handler → direct Linux syscall |
+| **Approach** | Full API reimplementation per DLL | Static stub table (~60 entries) + direct dispatch |
+| **Syscall table** | Full — every NT syscall has a handler | ~16 NT syscalls explicitly implemented |
+| **Thread model** | Per-thread TEB, full TLS | Shared TEB (all threads share parent's TEB via CLONE_VM) |
 | **Toolchain support** | Automatic (implements the DLL, not the toolchain) | Manual (add DLL names to the table) |
+| **Handle table** | Full handle management via wineserver | 256-entry array, stdin/stdout/stderr at fixed special values |
+| **GUI** | Full Win32 GUI | Console-only |
 | **Code per feature** | Thousands of lines per DLL | Dozens of lines per stub |
 | **Maintenance burden** | High (many features, many edge cases) | Low (small surface area) |
 | **When to use** | Production, real applications | Research, education, experimentation |

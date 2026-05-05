@@ -16,8 +16,8 @@ control.
 The loader performs all heavy lifting first:
 
 - **Load PE** — open file, parse headers, `mmap` image at preferred base
-- **Resolve imports** — walk ILT/IAT, patch IAT with our stub addresses
-- **Patch .refptr** — rewrite CRT global pointers to our stubs
+- **Resolve imports** — walk ILT/IAT, patch IAT with our thunk addresses
+- **Patch .refptr** — rewrite CRT global pointers to our stubs (in `main()`)
 - **Setup TEB/PEB** — allocate and initialize Windows-expected structures
 
 Then, instead of forking, the loader **switches to the guest stack** and
@@ -29,14 +29,14 @@ handles all syscalls via our dispatcher.
 After setup, the loader:
 
 - Switches `RSP` to a dedicated guest stack (a `mmap`-allocated page)
-- Sets up `GS` base for the TEB
+- Sets up `GS` base for the TEB (via `arch_prctl(ARCH_SET_GS)` with FSGSBASE fallback)
 - Jumps to the entry point
 
 When the guest executes a syscall, it enters our dispatcher via a direct
 call (not via seccomp). The dispatcher runs on the **UNIX stack**, reads
-arguments from the Windows x64 ABI registers, dispatches to the
-appropriate handler, writes the result back to `RAX`, then switches back
-to the guest stack and returns.
+arguments from the global `__wine_guest_regs` struct, dispatches to the
+appropriate handler, writes the result back to `__wine_guest_regs.rax`,
+then switches back to the guest stack and returns.
 
 ### No Fork Needed
 
@@ -54,21 +54,24 @@ for a simpler architecture that is closer to Wine's approach.
 ### Single Process Flow
 
 ```
-UNIX loader                  Guest code
-─────────────                ──────────
-- Load PE file               (not yet running)
+UNIX loader                 Guest code
+─────────────               ──────────
+- Load PE file              (not yet running)
 - Parse headers
 - Resolve imports
+- Patch .refptr
 - Setup TEB/PEB
+- Setup SEH + generate thunks
+- Patch __acrt_iob_func
 - Switch to guest stack
-- Jump to entry point  →     Guest code runs
-                             call NtWriteFile
-                             │
-                             ▼
-                   Switch to UNIX stack
-                   handle_syscall()
-                   Switch to guest stack
-                             Guest continues...
+- Jump to entry point  →   Guest code runs
+                           call NtWriteFile
+                           │
+                           ▼
+                 Switch to UNIX stack
+                 c_dispatch_syscall()
+                 Switch to guest stack
+                           Guest continues...
 ```
 
 ### Why Not Fork?
@@ -100,46 +103,96 @@ numbers are all `< 0x400`. The gap between `0x400` and `0xF000` is
 unused on x86_64.
 
 ```
-  syscall number < 0xF000  →  Linux kernel executes directly
+  syscall number < 0x400   →  Linux kernel executes directly
   syscall number >= 0xF000 →  intercepted by our dispatcher
 ```
 
+Linux syscalls pass through to the kernel without ever reaching our
+dispatcher. Our stubs call Linux syscalls directly (via inline syscall
+instructions), not through the dispatcher.
+
 ### Direct Call, Not Seccomp
 
-Each NT syscall has a **dispatcher entry** in our code. The IAT in the
-PE is patched to point to these entries instead of the original import
-targets.
+Each NT syscall has a **generated thunk** in our code. The IAT in the
+PE is patched to point to these thunks instead of the original import
+targets. Thunks are generated at runtime in `thunk_gen.c` and live in a
+single `mmap`'d executable blob.
 
 Unlike the seccomp + SIGSYS approach, there is no kernel trap. The
 guest directly enters our C code via a call instruction. The dispatcher
 runs on the UNIX stack, not the guest stack.
 
-### Stack Switching
+### Thunk Layout
 
-The key mechanism is **stack switching**:
+Each thunk is 23 bytes, using an **absolute indirect call** (not a
+relative call) to avoid displacement overflow when the thunk blob and
+dispatcher are more than 2 GB apart due to ASLR:
 
 ```asm
-; c_dispatch_syscall() — src/syscall/dispatcher.c
-switch_to_unix_stack:
-    mov  rax, [gs:0x10]     ; save guest RSP from TEB
-    mov  rsp, <unix_stack>  ; switch to UNIX stack
-    call handle_syscall     ; run on UNIX stack, System V ABI
-    mov  [gs:0x10], rsp     ; restore guest RSP into TEB
-    mov  rsp, rax           ; switch back to guest stack
-    ret                      ; return to guest code
+  push rdi                     ; 41 57   (save original RDI, 2 bytes)
+  mov  rdi, imm32(NT_NR)      ; 48 C7 C7 XX XX XX XX  (set syscall nr, 7 bytes)
+  mov  rax, imm64(dispatcher) ; 48 B8 XX XX XX XX XX XX XX XX  (load dispatcher addr, 10 bytes)
+  call rax                     ; FF D0  (indirect call, 2 bytes)
+  pop  rdi                     ; 5F     (restore original RDI, 1 byte)
+  ret                          ; C3     (return to guest caller, 1 byte)
+```
+
+### Stack Switching
+
+The key mechanism is **stack switching** via `dispatcher_entry_asm.S`:
+
+```asm
+__wine_dispatcher:
+    /* Save guest state to __wine_guest_regs (global struct, RIP-relative) */
+    mov (%rsp), %rax
+    mov %rax, __wine_guest_regs+RET_ADDR_OFF(%rip)
+    mov %rsp, __wine_guest_regs+RSP_OFF(%rip)
+    mov %rcx, __wine_guest_regs+RCX_OFF(%rip)
+    mov %rdx, __wine_guest_regs+RDX_OFF(%rip)
+    mov %r8,  __wine_guest_regs+R8_OFF(%rip)
+    mov %r9,  __wine_guest_regs+R9_OFF(%rip)
+    mov %rsi, __wine_guest_regs+RSI_OFF(%rip)
+    ; RDI is NOT saved here — the thunk push/pop rdi wraps the call
+
+    /* Switch to UNIX stack */
+    mov unix_stack_ptr_val(%rip), %rsp
+    sub $8, %rsp                    ; ABI stack alignment
+
+    /* Call C dispatcher (RDI already = syscall_nr) */
+    call c_dispatch_syscall
+
+    /* Save result to __wine_guest_regs.rax */
+    mov %rax, __wine_guest_regs+RAX_OFF(%rip)
+
+    /* Switch back to guest stack, restore guest registers */
+    mov __wine_guest_regs+RSP_OFF(%rip), %rsp
+    mov __wine_guest_regs+RCX_OFF(%rip), %rcx
+    mov __wine_guest_regs+RDX_OFF(%rip), %rdx
+    mov __wine_guest_regs+R8_OFF(%rip), %r8
+    mov __wine_guest_regs+R9_OFF(%rip), %r9
+    mov __wine_guest_regs+RSI_OFF(%rip), %rsi
+    mov __wine_guest_regs+RAX_OFF(%rip), %rax
+
+    ret     ; returns to thunk's `pop rdi`, then thunk's `ret` to guest
 ```
 
 The sequence is:
 
-1. **Save guest RSP** — read from the TEB (at `GS:0x10`)
-2. **Switch to UNIX stack** — set `RSP` to our pre-allocated UNIX stack
-3. **Call handler** — `handle_syscall()` runs with full C ABI on the
-   UNIX stack; it reads arguments from the Windows x64 ABI registers
-   (`RCX`, `RDX`, `R8`, `R9`), dispatches to the appropriate handler,
-   and writes the result back to `RAX`
-4. **Restore guest RSP** — write current `RSP` back into the TEB
+1. **Save guest registers** — all guest registers (RCX, RDX, R8, R9, RSI,
+   RSP, return address) are saved to the global `__wine_guest_regs` struct
+   using RIP-relative addressing. RDI is handled by the thunk's push/pop.
+2. **Switch to UNIX stack** — set `RSP` to `unix_stack_ptr_val - 8` (aligned
+   for System V ABI `call`)
+3. **Call handler** — `c_dispatch_syscall(nr)` runs with full C ABI on the
+   UNIX stack; it reads arguments from `__wine_guest_regs.rcx/rdx/r8/r9`
+   plus the guest stack (for args 5+) via `__wine_guest_regs.rsp`,
+   dispatches to the appropriate handler, and writes the result to
+   `__wine_guest_regs.rax`
+4. **Restore guest registers** — all saved registers are restored from
+   `__wine_guest_regs`
 5. **Switch back** — set `RSP` to the saved guest stack pointer
-6. **Return** — `ret` goes back to guest code; the result is in `RAX`
+6. **Return** — `ret` goes to the thunk's `pop rdi`, then the thunk's `ret`
+   returns to the guest caller; the result is in `RAX`
 
 Because the UNIX side runs on its own stack, it can use the full C ABI
 safely — no risk of clobbering guest stack data.
@@ -176,14 +229,6 @@ called with the System V ABI (`rdi`/`rsi`/`rdx`/`rcx`/`r8`/`r9`).
 Guest code calls our dispatcher directly — there is no `libc` boundary
 to hook.
 
-### Linux Syscalls Pass Through
-
-Linux syscalls (`< 0x400`) are never intercepted by our dispatcher.
-They execute directly by the kernel. This means the guest can still use
-standard Linux facilities (reading `/dev/null`, basic memory operations)
-without going through our handler. Our stubs call Linux syscalls
-directly, not through the dispatcher.
-
 See [architecture.md §§2,3](architecture.md) for the full syscall
 dispatch flow.
 
@@ -191,57 +236,71 @@ dispatch flow.
 
 ## 3. Why .refptr patching
 
-GCC/MinGW generates a `.refptr` section in the PE's `.data` segment
-containing pointers to CRT globals (`__argc`, `__argv`, `__envp`, etc.).
-In our Linux environment these pointers resolve to garbage — the PE's
-own `.data` at its preferred base has no CRT globals. We must redirect
-them to our Linux-side stubs (`ctor_list_stub`, `dtor_list_stub`, etc.).
+GCC/MinGW generates `.refptr` entries in the PE's data sections
+containing pointers to CRT globals (`__CTOR_LIST__`, `__DTOR_LIST__`,
+`__imp___initenv`, etc.). In our Linux environment these pointers
+resolve to garbage — the PE's own `.data` at its preferred base has no
+real CRT globals. We must redirect them to our Linux-side stubs.
 
-### Two Strategies
+### Three-Layer Patching
 
-We support two approaches for locating the `.refptr` entries:
+Patching is done in `crt_refptrs.c` during `main()` (the loader phase),
+before the guest ever runs. Three layers are used, each falling through
+to the next for symbols the previous layer did not find:
 
-#### COFF Symbol Table Lookup
+#### Layer 1: COFF Symbol Table Lookup
 
-When the PE retains its symbol table, we can dynamically discover
-the exact offsets of each `.refptr` entry by name. This is the
-preferred approach — it works regardless of linker ordering.
+When the PE retains its COFF symbol table, we discover the exact RVAs of
+`.refptr` entries by name. This is the preferred approach — it works
+regardless of linker ordering.
 
 ```c
-// src/stubs/crt_refptrs.c — runs in parent before fork
-struct external *ext = coff_get_external(pe);
-for (uint16_t i = 0; i < ext->NumberOfSymbols; i++) {
-    uint8_t *sym = sym_buf + i * SYMBOL_SIZE;
-    const char *name = get_symbol_name(sym, sym_buf, ext);
-    if (strcmp(name, "__imp___argc") == 0
-        || strcmp(name, "__imp___argv") == 0
-        || strcmp(name, "__imp___environ") == 0) {
-        // patch the pointer at sym->Value in .data
-    }
+// src/stubs/crt_offset_discovery.c — find_symbol_rva_from_file()
+uint64_t find_symbol_rva_from_file(const char *file_path,
+                                   IMAGE_NT_HEADERS64 *nt,
+                                   IMAGE_SECTION_HEADER *sections,
+                                   const char *name)
+{
+    // Open PE file, mmap it, walk COFF symbol table
+    // Prefer .rdata$.refptr.NAME and .refptr.NAME prefixes
+    // Prefer section-bound symbols over absolute
 }
 ```
 
-#### Hardcoded Offsets (Fallback)
+The `patch_crt_refptrs()` function in `crt_refptrs.c` iterates over a
+`refptr_mappings[]` table (e.g. `__CTOR_LIST__` → `&ctor_list_stub`) and
+looks up each symbol's RVA from the COFF table, then patches the pointer
+at that location.
 
-When the symbol table is stripped, we fall back to known offsets.
-These are determined empirically from the MinGW linker layout:
+#### Layer 2: Data Section Scan for .bss Pointers
 
-- `__argc` at offset `0x018`
-- `__argv` at offset `0x020`
-- `__environ` at offset `0x028`
+Some mingw-w64 builds don't include certain CRT symbols in the COFF
+symbol table (only in DWARF debug info). For symbols that Layer 1 missed,
+we scan `.rdata` and `.data` sections for 8-byte values that point into
+`.bss`, and patch them to our stubs.
 
 ```c
-// Fallback when symbols are stripped
-const struct { const char *name; uint32_t offset; void *stub; } fallbacks[] = {
-    { "__argc",     0x018, &argc_stub },
-    { "__argv",     0x020, &argv_stub },
-    { "__environ",  0x028, &environ_stub },
-    // ...
-};
+// src/stubs/crt_refptrs.c — fallback data scan
+for each entry in .rdata/.data at 8-byte boundaries:
+    if entry value points into .bss:
+        match to next unpatched .bss mapping
+        patch to stub
 ```
 
-This approach is fragile (depends on linker version and CRT layout)
-but covers the common case of stripped release builds.
+#### Layer 3: .text Pattern Scan for __imp___initenv
+
+For `__imp___initenv` specifically, if Layers 1 and 2 did not find it,
+we scan `.text` for the two-level indirection pattern
+(`mov rax, [rip+disp32]` followed by `mov rax, [rax]` + write to `[rax]`)
+and patch the discovered target. This handles builds where `__imp___initenv`
+is entirely absent from the COFF symbol table.
+
+```c
+// src/stubs/crt_offset_discovery.c — scan_text_for_refptrs()
+for each instruction in .text:
+    if pattern matches "mov reg, [rip+disp]" + deref + store:
+        patch target to __imp___initenv_stub
+```
 
 ### `__acrt_iob_func` Patch
 
@@ -250,26 +309,27 @@ wrapper: it clobbers the upper 32 bits of `RCX`. This causes
 undefined behavior when `printf`-family functions use it to
 access the `iob` array.
 
-We fix this with a 15-byte overwrite at the function's entry point:
+We fix this with a 15-byte overwrite at the function's entry point
+in `guest_setup.c` during guest setup (not in the loader phase):
 
 ```asm
-; Replace the buggy wrapper with a direct return of our iob array
+; Replace the wrapper with a direct return of our iob array base
 movabs rax, <__wine_iob_data()>   ; 48 B8 xx xx xx xx xx xx xx xx  (10 bytes)
-ret                               ; C3                              (1 byte)
-; + 4 NOPs for alignment padding  ; 90 90 90 90                    (4 bytes)
+ret                               ; C3                               (1 byte)
+NOP NOP NOP NOP                   ; 90 90 90 90                      (4 bytes)
 ```
 
-This must be done in the **child** process because
-`__wine_iob_data()` returns a child-specific address that does not
-exist in the parent. The implementation lives in
-`src/loader/entry.c`.
+The implementation lives in `src/loader/guest_setup.c` in
+`patch_acrt_iob()`, which is called from `apply_final_patches()`
+inside `setup_guest_and_run()`. It finds the `.text` jmp-thunk
+whose IAT target resolves to `__iob_func` and overwrites it.
 
 ### Summary
 
 | What | Where | When |
 |------|-------|------|
-| `.refptr` redirection | `src/stubs/crt_refptrs.c` | Parent, before `fork()` |
-| `__acrt_iob_func` patch | `src/loader/entry.c` | Child, before entry point |
+| `.refptr` redirection | `src/stubs/crt_refptrs.c` | `main()` (loader phase) |
+| `__acrt_iob_func` patch | `src/loader/guest_setup.c` | Guest setup (before entry) |
 
 See [CRT refptr Patching](refptr.md) for full implementation details.
 
@@ -280,15 +340,21 @@ See [CRT refptr Patching](refptr.md) for full implementation details.
 | Requirement | Why |
 |---|---|
 | Linux x86_64 | We use the GS segment for TEB access and the x86_64 syscall ABI. No other architecture is supported. |
-| GCC | We need GCC-specific attributes: `__attribute__((ms_abi))` for Windows x64 calling convention, `__attribute__((force_align_arg_pointer))` for stack alignment, `__attribute__((naked))` for trampoline assembly. |
+| GCC | We need GCC-specific attributes: `__attribute__((ms_abi))` for Windows x64 calling convention, `__attribute__((force_align_arg_pointer))` for stack alignment. |
 | Docker + mingw-w64 | Cross-compilation to PE format via `x86_64-w64-mingw32-gcc`. Used for building sample Windows binaries, not for the loader itself. |
 | `-mno-red-zone` | The Windows x64 ABI has no red zone. Without this flag, GCC assumes a 128-byte red zone below RSP, which conflicts with stack switching and guest stack operations. |
 | `-fno-stack-protector` | Stack canaries require `__stack_chk_fail` from glibc, which the guest process can't call. Disabling them prevents crashes from missing glibc symbols. |
 | `-fno-exceptions` | No C++ exception handling is needed. Disabling avoids generating unwind tables and reducing code size. |
-| `-ldl` | Needed for `dlsym` in test builds. Not required for the loader itself. |
-| `arch_prctl(ARCH_SET_GS)` | We set the GS base to point to the TEB. This requires `arch_prctl` syscall (not FSGSBASE instructions). |
+| `-lrt -lpthread -ldl` | Link-time dependencies: `librt` for timer/realtime, `libpthread` for threading (NtCreateThreadEx), `libdl` for `dlsym` in test builds. |
+| `arch_prctl(ARCH_SET_GS)` | We set the GS base to point to the TEB. Implemented in `gs_base.c` with `arch_prctl` first, falling back to `wrgsbase`/`rdgsbase` FSGSBASE instructions. |
 
-The compiler flags (`-mno-red-zone`, `-fno-stack-protector`, `-fno-exceptions`) are applied via `SPECIAL_CFLAGS` in the Makefile to `loader/`, `stubs/`, and `syscall/` files.
+The compiler flags (`-mno-red-zone`, `-fno-stack-protector`, `-fno-exceptions`)
+are applied via `SPECIAL_CFLAGS` in the Makefile to `main.c`, `common.c`,
+`entry.c`, `teb_peb.c`, `guest_setup.c`, `crash_handlers.c`, `gs_base.c`,
+`thunk_gen.c`, `dispatcher.c`, `dispatcher_entry_asm.S`, and all stub files.
+
+The `WINE_STUB` macro (`__attribute__((ms_abi, force_align_arg_pointer))`)
+is used for all functions called from guest PE code.
 
 ---
 
