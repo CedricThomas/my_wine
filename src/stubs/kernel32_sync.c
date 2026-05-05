@@ -80,7 +80,6 @@ uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 
     int64_t timeout_100ns;
     if (dwMilliseconds == 0xFFFFFFFF) {
-        timeout_100ns = 0; /* We pass NULL for infinite; handle in wrapper */
         uint64_t status = handler_NtWaitForSingleObject(handle, 0, 0);
         if (status == 0) return 0; /* WAIT_OBJECT_0 */
         if (status == 0x00000080UL) return 0x00000102UL; /* WAIT_TIMEOUT */
