@@ -108,10 +108,13 @@
 #define INLINE_SYSCALL_MMAP(addr, len, prot, flags, fd, offset) \
     ({ \
         long _synct_rax; \
+        register long _r10 asm("r10") = (long)(flags); \
+        register long _r8 asm("r8") = (long)(fd); \
+        register long _r9 asm("r9") = (long)(offset); \
         __asm__ volatile("syscall" \
             : "=a"(_synct_rax) \
             : "a"(__NR_mmap), "D"(addr), "S"((size_t)(len)), \
-              "d"(prot), "r"(flags), "r"(fd), "r"((off_t)(offset)) \
+              "d"(prot), "r"(_r10), "r"(_r8), "r"(_r9) \
             : "rcx", "r11", "cc"); \
         _synct_rax < 0 ? MAP_FAILED : (void *)_synct_rax; \
     })
