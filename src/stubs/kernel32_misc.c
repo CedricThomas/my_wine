@@ -40,8 +40,21 @@ void EnterCriticalSection(CRITICAL_SECTION *cs)
         cs->OwningThread = getpid();
         return;
     }
-    // Slow path (placeholder — will be filled in task-2)
-    // TODO: handle contention via LockSemaphore
+    // CAS failed — contention
+    if (cs->OwningThread == (uint64_t)getpid()) {
+        // Recursive entry by same thread
+        cs->RecursionCount++;
+        return;
+    }
+    // Slow path: wait for the owner to release
+    if (cs->LockSemaphore == 0) {
+        // Lazy-create event (initially non-signaled, auto-reset)
+        handler_NtCreateEvent(&cs->LockSemaphore, 0, 0, 0, 0);
+    }
+    handler_NtWaitForSingleObject(cs->LockSemaphore, 0, 0);
+    cs->LockCount = 0;
+    cs->RecursionCount = 1;
+    cs->OwningThread = getpid();
 }
 
 WINE_STUB
@@ -52,13 +65,21 @@ void LeaveCriticalSection(CRITICAL_SECTION *cs)
     if (cs->RecursionCount == 0) {
         cs->LockCount = -1;
         cs->OwningThread = 0;
+        if (cs->LockSemaphore != 0) {
+            handler_NtSetEvent(cs->LockSemaphore, 0);
+        }
     }
 }
 
 WINE_STUB
 void DeleteCriticalSection(CRITICAL_SECTION *cs)
 {
-    (void)cs;
+    if (!cs) return;
+    if (cs->LockSemaphore != 0) {
+        handler_NtClose(cs->LockSemaphore);
+        cs->LockSemaphore = 0;
+    }
+    __builtin_memset(cs, 0, sizeof(*cs));
 }
 
 /* ── GetLastError ───────────────────────────────────────────── */
