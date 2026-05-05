@@ -19,13 +19,15 @@ ROOT_SRC     = $(sort $(shell find src/   -maxdepth 1 -name '*.c'))
 STUBS_SRC    = $(sort $(shell find src/stubs   -maxdepth 1 -name '*.c'))
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c'))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c'))
+HEAP_SRC     = $(sort $(shell find src/heap    -maxdepth 1 -name '*.c'))
 
 ROOT_OBJS    = $(patsubst src/%.c,$(BUILDDIR)/%.o,$(ROOT_SRC))
 STUBS_OBJS   = $(patsubst src/stubs/%.c,$(BUILDDIR)/%.o,$(STUBS_SRC))
 LOADER_OBJS  = $(patsubst src/loader/%.c,$(BUILDDIR)/%.o,$(LOADER_SRC))
 SYSCALL_OBJS = $(patsubst src/syscall/%.c,$(BUILDDIR)/%.o,$(SYSCALL_SRC))
+HEAP_OBJS    = $(patsubst src/heap/%.c,$(BUILDDIR)/%.o,$(HEAP_SRC))
 
-OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o
+OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o
 
 # ── Named object groups for test targets ────────────────────────
 PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
@@ -35,7 +37,7 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o $(BUILDDIR)/ordinal_table.o
 
 # Shared objects used by import-resolution and teb_peb tests
-TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) \
+TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) $(HEAP_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o
 
@@ -46,7 +48,7 @@ STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o, $(STUBS_OBJS))
 TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_NO_CRT_OBJS) $(BUILDDIR)/common.o
 
 # ── vpath ───────────────────────────────────────────────────────
-vpath %.c src src/stubs src/loader src/syscall
+vpath %.c src src/stubs src/loader src/syscall src/heap
 vpath %.S src src/syscall
 
 # ── Per-target CFLAGS overrides ─────────────────────────────────
@@ -57,6 +59,7 @@ SPECIAL_OBJS = main.o common.o entry.o teb_peb.o guest_setup.o crash_handlers.o 
 	thunk_gen.o dispatcher.o dispatcher_entry_asm.o
 $(foreach obj,$(SPECIAL_OBJS),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
+$(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
 # ── Targets ─────────────────────────────────────────────────────
 

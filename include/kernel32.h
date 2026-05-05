@@ -105,6 +105,29 @@ void LeaveCriticalSection(CRITICAL_SECTION *cs);
 __attribute__((ms_abi))
 void DeleteCriticalSection(CRITICAL_SECTION *cs);
 
+/* ── Heap management ─────────────────────────────────────────── */
+
+__attribute__((ms_abi))
+void *HeapCreate(uint32_t flOptions, uint64_t dwInitialSize, uint64_t dwMaximumSize);
+
+__attribute__((ms_abi))
+void *HeapAlloc(void *hHeap, uint32_t dwFlags, uint64_t dwBytes);
+
+__attribute__((ms_abi))
+int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem);
+
+__attribute__((ms_abi))
+void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes);
+
+__attribute__((ms_abi))
+void *GetProcessHeap(void);
+
+__attribute__((ms_abi))
+int HeapDestroy(void *hHeap);
+
+__attribute__((ms_abi))
+uint64_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem);
+
 /* Error handling */
 __attribute__((ms_abi))
 uint32_t GetLastError(void);
