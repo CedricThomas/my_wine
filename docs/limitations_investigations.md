@@ -771,7 +771,7 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 
 ### Prerequisites
 
-- `NtSetEvent` / `NtWaitForSingleObject` for thread synchronization
+- `NtSetEvent` / `NtWaitForSingleObject` for thread synchronization — syscall handlers (§6)
 - Real `CRITICAL_SECTION` (§4) for thread-safe data structures
 - `NtTerminateThread` for per-thread termination
 - TLS (§3) for per-thread state

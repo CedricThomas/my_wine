@@ -56,7 +56,7 @@ High-level directory layout (not the full tree from README):
 | `src/main.c` | Entry point: 10-step pipeline orchestrator | Read first |
 | `src/loader/` | Image mapping, import resolution, TEB/PEB, guest setup, entry | `main.c` → `loader/` |
 | `src/stubs/` | Windows API stub implementations (ntdll, kernel32, msvcrt) | `ntdll_*.c`, `kernel32_*.c`, `crt_*.c` |
-| `src/syscall/` | Thunk generation, dispatcher entry, UNIX stack management, NT syscall dispatcher | `thunk_gen.c`, `dispatcher_entry.c`, `dispatcher.c` |
+| `src/syscall/` | Thunk generation, dispatcher entry, UNIX stack management, NT syscall dispatcher | `thunk_gen.c`, `dispatcher_entry_asm.S`, `dispatcher_entry.c`, `dispatcher.c` |
 | `src/pe_*.c` | PE format parsing (headers, imports, symbols, RIP scan | `pe_headers.c` |
 | `src/run_guest.S` | Naked assembly trampoline — switches to guest stack and jumps to PE entry | — |
 | `include/` | Public headers (PE structs, ABI macros, syscall constants) | `pe.h`, `pe_parser.h`, `nt_constants.h`, `wine_abi.h`, `syscall/*.h` |
@@ -90,7 +90,7 @@ Step-by-step source code walkthrough showing the execution flow.
 
 ### Loader phase (single process, before guest runs)
 
-The pipeline in `src/main.c` (`main()`) runs 10 steps:
+The pipeline in `src/main.c` (`main()`) runs its loading pipeline:
 
 1. **`map_image()`** in `src/loader/image_mapper.c` — Opens the PE file, maps it read-only, parses DOS/NT headers, maps the image at the preferred base address, copies section data, sets per-section protections via `mprotect`.
 

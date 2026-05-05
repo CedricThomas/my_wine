@@ -126,8 +126,8 @@ $(eval $(call TEST_RULE,syscall_dispatch,$(TEST_syscall_dispatch_OBJS)))
 # See: samples/samples.sh
 #
 #   make samples              build all samples
-#   make samples NAME=foo     build one sample
-#   make run-sample NAME=foo  build + run under ./my_wine
+#   make samples SAMPLE=foo     build one sample
+#   make run-sample SAMPLE=foo  build + run under ./my_wine
 
 SAMPLE ?=
 
