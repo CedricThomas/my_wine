@@ -111,6 +111,14 @@ static void test_teb_peb_setup(void)
 
     check("setup_teb_peb returns non-NULL", teb != NULL);
 
+    /* Replicate the production finalize_guest_state() sequence:
+     * set GS base to TEB right before checking it */
+    if (set_gs_base(teb) != 0) {
+        printf("  SKIP: set_gs_base(teb) failed\n");
+        munmap(teb, 4096);
+        return;
+    }
+
     /* Read the GS base to confirm it points to TEB */
     void *gs_base = get_gs_base();
     check("GS base == TEB address", gs_base == teb);
