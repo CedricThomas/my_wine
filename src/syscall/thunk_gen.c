@@ -34,13 +34,13 @@
  */
 
 #define THUNK_SIZE 23        /* 2+7+10+2+1+1 bytes: push+mov+rax+call+pop+ret */
-#define NUM_NT_SYSCALLS 16
+#define NUM_NT_SYSCALLS 20
 
 static void *thunk_blob = NULL;    /* single mmap'd executable region */
 static size_t thunk_blob_size = 0;
 
 typedef void (*thunk_fn)(void);
-static thunk_fn thunk_array[0x50] = { 0 };
+static thunk_fn thunk_array[0x60] = { 0 };
 
 static const uint16_t nt_syscall_list[] = {
     NT_SYSCALL_CALLBACK_RETURN, NT_SYSCALL_QUERY_INFO_PROCESS,
@@ -50,7 +50,9 @@ static const uint16_t nt_syscall_list[] = {
     NT_SYSCALL_TERMINATE_PROCESS,
     NT_SYSCALL_READ_FILE, NT_SYSCALL_WRITE_FILE,
     NT_SYSCALL_CREATE_EVENT, NT_SYSCALL_CREATE_SECTION,
-    NT_SYSCALL_CREATE_THREAD_EX, NT_SYSCALL_OPEN_FILE
+    NT_SYSCALL_CREATE_THREAD_EX, NT_SYSCALL_OPEN_FILE,
+    NT_SYSCALL_QUERY_SYSTEM_TIME, NT_SYSCALL_DELAY_EXECUTION,
+    NT_SYSCALL_QUERY_PERFORMANCE_COUNTER, NT_SYSCALL_QUERY_PERFORMANCE_FREQUENCY
 };
 
 /*
