@@ -384,14 +384,18 @@ static void test_unhandled_syscalls(void)
 
 /* ── Helper: create a test event for sync tests ─────────────── */
 
-static uint64_t create_test_event(int initial_state)
+static uint64_t create_test_event(uint64_t initial_state)
 {
     uint64_t handle = 0;
+    /* Windows x64 ABI: [RSP+0]=return addr, [RSP+8]=arg5
+     * We need RSP 8-byte-aligned; allocate a small aligned buffer
+     * with the value at offset 8 (index 1). */
+    alignas(8) uint64_t stack_frame[2] = {0, initial_state};
     __wine_guest_regs.rcx = (uint64_t)&handle;
     __wine_guest_regs.rdx = 0x10000000; /* desired_access */
     __wine_guest_regs.r8 = 0;           /* object_attributes = NULL */
     __wine_guest_regs.r9 = 0;           /* event_type = Notification */
-    __wine_guest_regs.rsp = (uint64_t)&initial_state; /* initial_state on stack */
+    __wine_guest_regs.rsp = (uint64_t)stack_frame;
     c_dispatch_syscall(0x48); /* NtCreateEvent */
     return handle;
 }
