@@ -62,6 +62,60 @@ static void format_trace_syscall(char *buf, uint64_t nr)
     buf[i] = '\0';
 }
 
+/* Format "dispatcher: invalid RSP 0xXXXXXXXX in read_guest_stack\n" */
+static void format_err_invalid_rsp(char *buf, uint64_t rsp)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const char p[] = "dispatcher: invalid RSP 0x";
+    const char s[] = " in read_guest_stack\n";
+    int i;
+    for (i = 0; p[i]; i++) buf[i] = p[i];
+    for (int k = 7; k >= 0; k--) buf[i++] = hex[(rsp >> (k * 4)) & 0xF];
+    for (int j = 0; s[j]; j++) buf[i++] = s[j];
+    buf[i] = '\0';
+}
+
+/* Format "dispatcher: RSP 0xXXXXXXXX failed guest-ptr check\n" */
+static void format_err_rsp_check(char *buf, uint64_t rsp)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const char p[] = "dispatcher: RSP 0x";
+    const char s[] = " failed guest-ptr check\n";
+    int i;
+    for (i = 0; p[i]; i++) buf[i] = p[i];
+    for (int k = 7; k >= 0; k--) buf[i++] = hex[(rsp >> (k * 4)) & 0xF];
+    for (int j = 0; s[j]; j++) buf[i++] = s[j];
+    buf[i] = '\0';
+}
+
+/* Format "dispatcher: invalid guest ptr 0xXXXXXXXX at NAME\n" */
+static void format_err_guest_ptr(char *buf, int buf_size, uint64_t ptr, const char *name)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const char p[] = "dispatcher: invalid guest ptr 0x";
+    const char m[] = " at ";
+    int i = 0;
+    for (int j = 0; p[j]; j++) buf[i++] = p[j];
+    for (int k = 7; k >= 0; k--) buf[i++] = hex[(ptr >> (k * 4)) & 0xF];
+    for (int j = 0; m[j]; j++) buf[i++] = m[j];
+    int n = 0;
+    while (name[n] && i < buf_size - 2) { buf[i++] = name[n++]; }
+    buf[i++] = '\n';
+    buf[i] = '\0';
+}
+
+/* Format "my_wine: unhandled syscall 0xXXXXXXXX\n" */
+static void format_err_unhandled_syscall(char *buf, uint64_t nr)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const char p[] = "my_wine: unhandled syscall 0x";
+    int i;
+    for (i = 0; p[i]; i++) buf[i] = p[i];
+    for (int k = 7; k >= 0; k--) buf[i++] = hex[(nr >> (k * 4)) & 0xF];
+    buf[i++] = '\n';
+    buf[i] = '\0';
+}
+
 /*
  * read_guest_stack — read an argument from the guest stack.
  *
@@ -82,13 +136,15 @@ static inline uint64_t read_guest_stack(int index)
     uintptr_t rsp = (uintptr_t)__wine_guest_regs.rsp;
 
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
-        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
-                (unsigned long)rsp);
+        char buf[56];
+        format_err_invalid_rsp(buf, (uint64_t)rsp);
+        INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return 0;
     }
     if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
-        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
-                (unsigned long)rsp);
+        char buf[51];
+        format_err_rsp_check(buf, (uint64_t)rsp);
+        INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return 0;
     }
     uint64_t *stack = (uint64_t *)(uintptr_t)rsp;
@@ -118,15 +174,17 @@ static inline uint64_t read_guest_stack_ctx(ucontext_t *ctx, int index)
 
     /* Validate RSP is in a reasonable user-space range */
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
-        fprintf(stderr, "dispatcher: invalid RSP 0x%lx in read_guest_stack\n",
-                (unsigned long)rsp);
+        char buf[56];
+        format_err_invalid_rsp(buf, (uint64_t)rsp);
+        INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return 0;
     }
 
     /* Additional guard: RSP must pass our guest-ptr validator */
     if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
-        fprintf(stderr, "dispatcher: RSP 0x%lx failed guest-ptr check\n",
-                (unsigned long)rsp);
+        char buf[51];
+        format_err_rsp_check(buf, (uint64_t)rsp);
+        INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return 0;
     }
 
@@ -154,8 +212,9 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
         return 0;
     }
     if (!is_valid_guest_ptr(guest_ptr, 8)) {
-        fprintf(stderr, "dispatcher: invalid guest ptr 0x%lx at %s\n",
-                (unsigned long)guest_ptr, name);
+        char buf[64];
+        format_err_guest_ptr(buf, sizeof(buf), guest_ptr, name);
+        INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return STATUS_ACCESS_VIOLATION;
     }
     if (out_val) *out_val = *(uint64_t *)(uintptr_t)guest_ptr;
@@ -396,8 +455,11 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     }
 
     default:
-        fprintf(stderr, "my_wine: unhandled syscall 0x%lX\n",
-                (unsigned long)nr);
+        {
+            char buf[39];
+            format_err_unhandled_syscall(buf, nr);
+            INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
+        }
         INLINE_SYSCALL_KILL(INLINE_SYSCALL_GETPID(), SIGSEGV);
     }
 
@@ -653,8 +715,11 @@ int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
     }
 
     default:
-        fprintf(stderr, "my_wine: unhandled syscall 0x%lX\n",
-                (unsigned long)syscall_number);
+        {
+            char buf[39];
+            format_err_unhandled_syscall(buf, syscall_number);
+            INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
+        }
         INLINE_SYSCALL_KILL(INLINE_SYSCALL_GETPID(), SIGSEGV);
     }
 
