@@ -19,19 +19,21 @@ Each section contains:
 | [1](#1-no-relocation-support) | No Relocation Support | Medium | None |
 | [2](#2-no-dynamic-loading) | No Dynamic Loading | High | None |
 | [3](#3-no-tls-support) | No TLS Support | Medium | None |
-| [4](#4-stubbed-synchronization-primitives) | Stubbed Synchronization | Medium | Events (syscall) |
+| [4](#4-synchronization-primitives) | Synchronization Primitives | ✅ Implemented | Events (syscall) |
 | [5](#5-only-mingw-w64-executables) | Only mingw-w64 Executables | High | Heap (§7) |
 | [6](#6-limited-syscall-handlers) | Limited Syscall Handlers | High | None |
-| [7](#7-no-heap-management) | No Heap Management | Medium | CriticalSection (§4) |
+| [7](#7-heap-management) | Heap Management | ✅ Implemented | CriticalSection (§4) |
 | [8](#8-limited-filesystem-io) | Limited Filesystem I/O | High | Syscall handlers (§6) |
 | [9](#9-shared-teb-threading) | Shared-TEB Threading Model | High | Per-thread TEB (§4) |
 
 ### Current Capabilities Summary
 
-The project currently has **16 NT syscall handlers**, **handle table with 256
+The project currently has **25 NT syscall handlers**, **handle table with 256
 entries** (stdin/stdout/stderr pre-initialized), **thread creation via
-NtCreateThreadEx** (clone with shared address space), and **full CRT startup
-chain** (mainCRTStartup → __getmainargs → _initterm → main).
+NtCreateThreadEx** (clone with shared address space), **real CRITICAL_SECTION**
+(CAS fast-path + event slow-path), **heap management** (dlmalloc backend with
+HeapCreate/Alloc/Free/ReAlloc/Destroy/Size, PEB.ProcessHeap wired), and **full
+CRT startup chain** (mainCRTStartup → __getmainargs → _initterm → main).
 
 **Implemented syscalls** (from `include/nt_constants.h`):
 
@@ -49,17 +51,28 @@ chain** (mainCRTStartup → __getmainargs → _initterm → main).
 | `NtTerminateProcess` | `0x2A` | ✅ Working (INLINE_SYSCALL_EXIT) |
 | `NtReadFile` | `0x3C` | ✅ Working (handle→FD, direct read) |
 | `NtWriteFile` | `0x3D` | ✅ Working (handle→FD, direct write) |
-| `NtCreateEvent` | `0x48` | ✅ Basic (no wait/signal) |
+| `NtCreateEvent` | `0x48` | ✅ Working (with NtSetEvent/NtResetEvent) |
+| `NtCreateMutex` | `0x44` | ✅ Working (pthread_mutex) |
 | `NtCreateSection` | `0x4A` | ✅ Working (file-backed and anonymous) |
 | `NtCreateThreadEx` | `0x4E` | ✅ Working (clone() with CLONE_VM\|CLONE_FS\|CLONE_FILES\|CLONE_SIGHAND\|SIGCHLD) |
+| `NtDelayExecution` | `0x1A` | ✅ Working (nanosleep) |
 | `NtOpenFile` | `0x4F` | ✅ Working (UTF-16→UTF-8 ASCII conversion, handle table integration) |
+| `NtQueryPerformanceCounter` | `0x55` | ✅ Working (clock_gettime CLOCK_MONOTONIC) |
+| `NtQueryPerformanceFrequency` | `0x56` | ✅ Working (constant return) |
+| `NtQuerySystemTime` | `0x09` | ✅ Working (clock_gettime CLOCK_REALTIME) |
+| `NtReleaseMutex` | `0x1E` | ✅ Working (pthread_mutex_unlock) |
+| `NtResetEvent` | `0x5E` | ✅ Working (clear signaled flag) |
+| `NtSetEvent` | `0x5C` | ✅ Working (pthread_cond_signal) |
+| `NtWaitForSingleObject` | `0x00` | ✅ Working (pthread_cond_wait) |
 
 **Implemented kernel32 stubs:**
 GetStdHandle, WriteFile, ReadFile, ExitProcess, Sleep, VirtualProtect,
-VirtualQuery, lstrlenA, InitializeCriticalSection, EnterCriticalSection,
-LeaveCriticalSection, DeleteCriticalSection, GetLastError, TlsGetValue,
-GetStartupInfoA, SetUnhandledExceptionFilter, __C_specific_handler,
-GetProcAddress, LoadLibraryA, GetModuleHandleA.
+VirtualQuery, lstrlenA, InitializeCriticalSection, EnterCriticalSection
+(CAS fast-path + event slow-path), LeaveCriticalSection, DeleteCriticalSection,
+GetLastError, TlsGetValue, GetStartupInfoA, SetUnhandledExceptionFilter,
+__C_specific_handler, GetProcAddress, LoadLibraryA, GetModuleHandleA,
+SetEvent, ResetEvent, WaitForSingleObject, CreateMutex, ReleaseMutex,
+HeapCreate, HeapAlloc, HeapFree, HeapReAlloc, HeapDestroy, GetProcessHeap, HeapSize.
 
 **Implemented msvcrt/CRT stubs:**
 __getmainargs, __iob_func, fprintf, fwrite, malloc, calloc, free, memcpy,
@@ -69,12 +82,12 @@ __lconv_init, __setusermatherr.
 
 ### Recommended Implementation Order
 
-By dependency graph (leaf nodes first):
+By dependency graph (leaf nodes first; completed items marked ✅):
 
 ```
-Phase 1:  §6 (more syscalls) → §8 (full file I/O)
+Phase 1:  §6 (P0-C/D: NtCreateFile, NtProtectVirtualMemory, NtTerminateThread, NtWaitForMultipleObjects) → §8 (full file I/O)
 Phase 2:  §1
-Phase 3:  §4 (real CriticalSection) → §7 (heap)
+Phase 3:  §4 (real CriticalSection) ✅ + §7 (heap) ✅
 Phase 4 (need §1): §2 (dynamic loading) → §5 (toolchain)
 Phase 5 (need §3, §4, §6): §9 (per-thread TEB)
 Phase 6:  §3 (TLS)
@@ -288,25 +301,34 @@ None. Independent.
 
 ---
 
-## 4. Stubbed Synchronization Primitives
+## 4. Synchronization Primitives
 
 ### Current State
 
-`InitializeCriticalSection` zeros the struct, `EnterCriticalSection`
-increments `LockCount`, `LeaveCriticalSection` decrements `RecursionCount`,
-`DeleteCriticalSection` is a no-op. These are **simplistic counters with no
-real mutual exclusion** (in `src/stubs/kernel32_misc.c`).
+**✅ Implemented.** `CRITICAL_SECTION` uses the correct **40-byte layout** matching
+Windows x64 (`src/stubs/kernel32_misc.c`).
 
-`NtCreateEvent` is implemented (allocates handle table slot + event struct)
-but `NtSetEvent`, `NtResetEvent`, and `NtWaitForSingleObject` are not
-implemented. Events exist in the handle table but cannot be waited on or
-signaled.
+- `InitializeCriticalSection` zeroes the struct, sets `LockCount = -1`
+- `EnterCriticalSection` uses a **CAS fast-path**
+  (`__atomic_compare_exchange_n` on `LockCount`) for uncontended entry;
+  recursive entry by the owning thread is handled inline
+- **Slow path** (contention): lazily creates a kernel EVENT via
+  `NtCreateEvent`, resets it via `NtResetEvent`, waits via
+  `NtWaitForSingleObject`, then retries CAS in a loop
+- `LeaveCriticalSection` restores `LockCount = -1` and signals via
+  `NtSetEvent` when recursion count reaches 0
+- `DeleteCriticalSection` closes the semaphore handle via `NtClose`
 
-**Critical header bug** (`include/kernel32.h`): `CRITICAL_SECTION` is
-**28 bytes with misnamed fields**. **Correct layout is 40 bytes:**
+`NtCreateEvent`, `NtSetEvent`, `NtResetEvent`, `NtWaitForSingleObject`,
+`NtCreateMutex`, and `NtReleaseMutex` are all **implemented** (in
+`src/stubs/ntdll_synchronization.c`). Events support auto-reset and
+manual-reset modes with proper signaling via `pthread_cond_signal`.
+
+**Header layout** (`include/kernel32.h`): `CRITICAL_SECTION` was previously
+**28 bytes with misnamed fields**. **✅ Fixed to correct 40-byte layout:**
 
 ```c
-// Current (WRONG — 28 bytes, missing LockSemaphore):
+// Previous (WRONG — 28 bytes, missing LockSemaphore):
 typedef struct {
     void *DebugInfo;      // 0x00, 8 bytes
     int   LockCount;      // 0x08, 4 bytes
@@ -315,13 +337,13 @@ typedef struct {
     void *SpinCount;      // 0x18, 8 bytes ← WRONG: should be LockSemaphore then SpinCount
 } CRITICAL_SECTION;       // total 28 bytes ← WRONG
 
-// Correct (40 bytes):
+// Current (CORRECT — 40 bytes):
 typedef struct _RTL_CRITICAL_SECTION {
-    void    *DebugInfo;         // 0x00, 8 bytes  — NULL or -1
+    void    *DebugInfo;         // 0x00, 8 bytes  — NULL
     LONG    LockCount;          // 0x08, 4 bytes  — -1=free, 0=owned, >0=contention
     LONG    RecursionCount;     // 0x0C, 4 bytes  — re-entry depth
     HANDLE  OwningThread;       // 0x10, 8 bytes  — thread ID
-    HANDLE  LockSemaphore;      // 0x18, 8 bytes  — kernel handle (EVENT) ← MISSING
+    HANDLE  LockSemaphore;      // 0x18, 8 bytes  — kernel handle (EVENT)
     ULONG_PTR SpinCount;        // 0x20, 8 bytes  — spin iterations
 } RTL_CRITICAL_SECTION;         // total 40 bytes
 ```
@@ -342,7 +364,7 @@ if (InterlockedIncrement(&cs->LockCount) != 0) {
 Signal-safe atomics (`__atomic_add_fetch`, `__atomic_compare_exchange_n`)
 compile to `LOCK XADD` / `CMPXCHG` — no kernel transition.
 
-**Extended `handle_entry_t`** needed for non-FD objects (events, mutexes, etc.):
+**Extended `handle_entry_t`** ✅ implemented — supports non-FD objects (events, mutexes, etc.):
 
 ```c
 typedef struct {
@@ -354,12 +376,12 @@ typedef struct {
 
 ### Approach
 
-**Phase A (Foundation):** Fix `CRITICAL_SECTION` header (40 bytes), extend
-`handle_entry_t`, add `pthread_mutex_t` + `pthread_cond_t` to `wine_event_t`,
-implement `NtSetEvent` and `NtWaitForSingleObject`.
+**Phase A (Foundation):** ✅ Done — `CRITICAL_SECTION` header fixed to 40 bytes,
+`handle_entry_t` extended, `pthread_mutex_t` + `pthread_cond_t` in `wine_event_t`,
+`NtSetEvent` and `NtWaitForSingleObject` implemented.
 
-**Phase B (Core):** `InitializeCriticalSection`, `EnterCriticalSection`,
-`LeaveCriticalSection`, `DeleteCriticalSection`.
+**Phase B (Core):** ✅ Done — `InitializeCriticalSection`, `EnterCriticalSection`
+(CAS fast-path + event slow-path), `LeaveCriticalSection`, `DeleteCriticalSection`.
 
 **Phase C (Extended):** `TryEnterCriticalSection`, `InitializeCriticalSectionEx`.
 
@@ -369,8 +391,8 @@ implement `NtSetEvent` and `NtWaitForSingleObject`.
 
 ### Prerequisites
 
-`NtCreateEvent` exists. Need `NtSetEvent`, `NtResetEvent`, and
-`NtWaitForSingleObject`.
+All required syscalls (`NtCreateEvent`, `NtSetEvent`, `NtResetEvent`,
+`NtWaitForSingleObject`, `NtCreateMutex`, `NtReleaseMutex`) are **implemented**.
 
 ### Risks
 
@@ -466,10 +488,10 @@ Heap (§7) — `malloc`/`calloc`/`free` are imported from `ucrtbase.dll`.
 
 ### Current State
 
-**16 NT syscalls** are implemented. Unsupported syscalls cause
+**25 NT syscalls** are implemented. Unsupported syscalls cause
 `INLINE_SYSCALL_KILL(getpid(), SIGSEGV)` (the default case in `dispatcher.c`).
 
-All 16 are listed in the [Current Capabilities Summary](#current-capabilities-summary).
+All 25 are listed in the [Current Capabilities Summary](#current-capabilities-summary).
 
 ### P0 Missing Syscalls (blocks most real applications)
 
@@ -477,19 +499,10 @@ All 16 are listed in the [Current Capabilities Summary](#current-capabilities-su
 
 | Syscall | NT # | Linux Mapping |
 |---------|------|---------------|
-| `NtWaitForSingleObject` | `0x00` | futex / pthread_cond_wait |
-| `NtQuerySystemTime` | `0x09` | clock_gettime(CLOCK_REALTIME) |
-| `NtDelayExecution` | `0x1A` | nanosleep() |
 | `NtTerminateThread` | `0x1D` | pthread_exit / kill |
-| `NtReleaseMutex` | `0x1E` | pthread_mutex_unlock |
-| `NtCreateMutex` | `0x44` | pthread_mutex_init |
 | `NtProtectVirtualMemory` | `0x4D` | mprotect() |
-| `NtQueryPerformanceCounter` | `0x55` | clock_gettime(CLOCK_MONOTONIC) |
-| `NtQueryPerformanceFrequency` | `0x56` | Return constant |
 | `NtWaitForMultipleObjects` | `0x58` | ppoll() |
 | `NtCreateFile` | `0x59` | openat() + path parsing |
-| `NtSetEvent` | `0x5C` | pthread_cond_signal |
-| `NtResetEvent` | `0x5E` | Clear flag |
 | `NtQueryAttributesFile` | `0x3B` | stat() |
 
 **NOTE:** Earlier versions of this document incorrectly listed
@@ -500,7 +513,7 @@ the Windows x86_64 syscall table.
 
 ### Priority Subsets
 
-**P0-A (Quick wins — trivial syscalls):**
+**P0-A (Quick wins — ✅ implemented):**
 
 | Syscall | NT # | Implementation |
 |---------|------|---------------|
@@ -509,7 +522,7 @@ the Windows x86_64 syscall table.
 | `NtQueryPerformanceFrequency` | `0x56` | Return constant |
 | `NtDelayExecution` | `0x1A` | nanosleep() (already used by Sleep stub) |
 
-**P0-B (Sync infrastructure — enables CriticalSection + heap):**
+**P0-B (Sync infrastructure — ✅ implemented, enables CriticalSection + heap):**
 
 | Syscall | NT # | Implementation |
 |---------|------|---------------|
@@ -558,8 +571,8 @@ Add: `STATUS_NOT_IMPLEMENTED` (0xC00000B7), `STATUS_FILE_NOT_FOUND`,
 ### Approach
 
 1. **Safety net** — `STATUS_NOT_IMPLEMENTED`, add NTSTATUS codes
-2. **P0-A quick wins** — 4 trivial syscalls (1h each)
-3. **P0-B sync infra** — enables real CriticalSection (§4)
+2. **P0-A quick wins** — ✅ Done: 4 trivial syscalls
+3. **P0-B sync infra** — ✅ Done: enables real CriticalSection (§4)
 4. **Auto-generation** — `.def` file + Python generator
 5. **P0-C/D** — follow as needed
 
@@ -571,38 +584,39 @@ None.
 
 ---
 
-## 7. No Heap Management
+## 7. Heap Management
 
 ### Current State
 
-No `HeapAlloc`/`HeapFree`. `PEB->ProcessHeap` is zeroed. CRT crashes on any
-dynamic allocation through Windows heap APIs. The current `malloc`/`calloc`/
-`free` implementations (in `src/stubs/crt_stdlib.c`) use `sysv_mmap` per
-allocation — functional but not tied to any Windows heap API.
+**✅ Implemented.** Heap management backed by [dlmalloc](https://github.com/WebAssembly/wasi-libc/blob/main/dlmalloc/src/malloc.c)
+(public domain, ~12KB) in `src/heap/dlmalloc.c`. The `MMAP`/`MMUNMAP` hooks
+are overridden to use `sysv_mmap`/`INLINE_SYSCALL_MUNMAP` — the same low-level
+mmap calls used elsewhere in the project.
 
-**Key:** Heap functions are **library functions in ntdll.dll**, not NT syscalls.
-Must be `WINE_STUB` (ms_abi), not dispatcher handlers.
+**Implemented API surface** (in `src/heap/wine_heap.c`):
 
-### PEB ProcessHeap
+| Function | Status | Notes |
+|----------|--------|-------|
+| `HeapCreate` | ✅ | Creates `wine_heap_t` via mmap, initializes `pthread_mutex_t` |
+| `HeapAlloc` | ✅ | Lock → `dlmalloc` → unlock; supports `HEAP_ZERO_MEMORY` |
+| `HeapFree` | ✅ | Lock → `dlfree` → unlock; `NULL` pointer is valid no-op |
+| `HeapReAlloc` | ✅ | `dlrealloc`; zeros new portion when `HEAP_ZERO_MEMORY` set |
+| `HeapDestroy` | ✅ | Invalidates heap, destroys mutex, unmaps struct via `INLINE_SYSCALL_MUNMAP` |
+| `GetProcessHeap` | ✅ | Returns `g_process_heap` (created in `init_process_heap()`) |
+| `HeapSize` | ✅ | Returns `dlmalloc_usable_size` |
 
-`PEB->ProcessHeap` at offset `0x030` (Windows 10+ x64). Currently not set
-in `teb_peb.c` and not defined in `nt_constants.h`. Must add:
+**PEB.ProcessHeap** wired up in `src/loader/teb_peb.c`: `PEB_PROCESS_HEAP`
+(`0x030`) is set to the process heap handle returned by `init_process_heap()`.
 
-```c
-#define PEB_PROCESS_HEAP  0x030
-```
+**Key:** Heap functions are **library functions** (not NT syscalls). All
+implemented as `WINE_STUB` (ms_abi) in `src/heap/wine_heap.c`. Registered in
+`src/loader/import_table.c` and `src/loader/ordinal_table.c`.
 
-### Three Options
+### Implementation
 
-| Option | Approach | Lines | Risk | Verdict |
-|--------|----------|-------|------|---------|
-| A: mmap-per-allocation | `mmap` per `HeapAlloc` | ~20 | High — catastrophic fragmentation | ❌ |
-| **B: dlmalloc + mmap hooks** | Public domain, configurable | ~200 | **Low** | **✅ Recommended** |
-| C: Custom page-based allocator | Free-list, block merge | 500-800 | Medium — allocator bugs | Future |
-
-**Recommendation: Option B.** Drop [dlmalloc.c](https://github.com/WebAssembly/wasi-libc/blob/main/dlmalloc/src/malloc.c)
-(public domain, ~12KB) into `src/heap/`. Override `MMAP`/`MMUNMAP` to use our
-`sysv_mmap`/`INLINE_SYSCALL_MUNMAP`. Wrap in `wine_heap_t` with mutex.
+**Option B chosen and implemented:** dlmalloc dropped into `src/heap/dlmalloc.c`,
+`MMAP`/`MMUNMAP` overridden to use `sysv_mmap`/`INLINE_SYSCALL_MUNMAP`.
+Wrapped in `wine_heap_t` with `pthread_mutex_t` for thread safety.
 
 ```
 HeapAlloc(heap, flags, size)  ← WINE_STUB
@@ -613,28 +627,27 @@ HeapAlloc(heap, flags, size)  ← WINE_STUB
 
 ### Phased Implementation
 
-**Phase 1** (~4h): `PEB_PROCESS_HEAP` constant, dlmalloc, `wine_heap.c` shim,
+**Phase 1:** ✅ Done — `PEB_PROCESS_HEAP` constant, dlmalloc, `wine_heap.c` shim,
 `HeapCreate`/`HeapAlloc`/`HeapFree`, process heap init.
 
-**Phase 2** (~2h): `HeapReAlloc`, `HeapDestroy`, `GetProcessHeap`,
-`HeapSize`, `HeapLock`/`HeapUnlock`.
+**Phase 2:** ✅ Done — `HeapReAlloc`, `HeapDestroy`, `GetProcessHeap`,
+`HeapSize`.
 
-**Phase 3** (~2h): `HeapWalk`, `HeapSetInformation`, `HeapValidate`,
-real `EnterCriticalSection`/`LeaveCriticalSection`.
+**Phase 3:** `HeapWalk`, `HeapSetInformation`, `HeapValidate`,
+`HeapLock`/`HeapUnlock`.
 
 ### Complexity: Medium
 
 ### Prerequisites
 
-`CRITICAL_SECTION` must be upgraded from no-op to real `pthread_mutex`
-(already linked via `-lpthread`).
+✅ `CRITICAL_SECTION` is implemented with real locking (CAS fast-path + event slow-path).
 
 ### Risks
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
 | dlmalloc MMAP conflicts with PE mapping | Low | dlmalloc uses anonymous mmap |
-| Thread safety before real CriticalSection | Medium | Use `pthread_mutex_t` directly |
+| Thread safety | Low | ✅ Mitigated — uses `pthread_mutex_t` directly |
 
 ### Files
 
@@ -794,10 +807,10 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 | §1 Relocation | §2 Dynamic Loading | None |
 | §2 Dynamic Loading | §5 Toolchain (DLL loading) | §1 (optional) |
 | §3 TLS | §9 Threading | None |
-| §4 Sync | §7 Heap, §9 Threading | Syscall handlers (§6) |
+| §4 Sync | ✅ Done — enables §7 Heap, §9 Threading | ✅ Syscall handlers (§6 P0-A/B) |
 | §5 Toolchain | — | §7 Heap |
-| §6 Syscall | §4 Sync, §8 File I/O | None |
-| §7 Heap | §5 Toolchain | §4 Sync |
+| §6 Syscall | §4 Sync (✅ P0-A/B), §8 File I/O | None |
+| §7 Heap | ✅ Done — enables §5 Toolchain | ✅ §4 Sync |
 | §8 File I/O | Real applications | §6 Syscall |
 | §9 Threading | Exception safety, real apps | §3, §4, §6 |
 
