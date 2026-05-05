@@ -154,19 +154,17 @@ fclean: clean
 re: fclean
 	@$(MAKE) all
 
+# ── Auto-generation ─────────────────────────────────────────────
+# Dispatcher switch bodies from include/nt_syscalls.def
+src/syscall/dispatcher_generated.c: include/nt_syscalls.def scripts/gen_dispatcher.py
+	@python3 scripts/gen_dispatcher.py --generate
+$(BUILDDIR)/dispatcher.o: src/syscall/dispatcher_generated.c
+
 gen-crt-offsets:
 	@echo "Generating CRT offsets from current mingw-w64 toolchain..."
 	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed, using hardcoded fallback"; exit 0; }
 
-gen-dispatcher:
-	@echo "Generating dispatcher switch bodies..."
-	@python3 scripts/gen_dispatcher.py --generate
-
-# Dispatcher auto-generation — generated .c lives alongside dispatcher.c
-src/syscall/dispatcher_generated.c: include/nt_syscalls.def scripts/gen_dispatcher.py
-	@python3 scripts/gen_dispatcher.py --generate
-
-# Ensure dispatcher.o depends on the generated file
-$(BUILDDIR)/dispatcher.o: src/syscall/dispatcher_generated.c
+gen-dispatcher: src/syscall/dispatcher_generated.c
+	@echo "Generated dispatcher switch bodies."
 
 .PHONY: all clean fclean re tests run-test samples run-sample gen-crt-offsets gen-dispatcher $(BUILDDIR)

@@ -12,3 +12,12 @@ my_wine
 
 # Auto-generated files
 include/crt_offsets_generated.h
+src/syscall/dispatcher_generated.c
+
+# Python
+__pycache__/
+*.pyc
+
+# Python artifacts
+__pycache__/
+*.pyc
