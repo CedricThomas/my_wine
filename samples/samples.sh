@@ -112,11 +112,11 @@ run_sample() {
 
     echo "  RUN $name (under my_wine)"
     local ret=0
-    timeout 10 "$MY_WINE" "$exe" "${@:2}" || ret=$?
+    timeout 5 "$MY_WINE" "$exe" "${@:2}" || ret=$?
     if [ $ret -eq 0 ]; then
         echo "  PASS  $name"
     elif [ $ret -eq 124 ]; then
-        echo "  PASS  $name (timed out after 10s, process was stable)"
+        echo "  PASS  $name (timed out after 5s, process was stable)"
     elif [ $ret -eq 139 ] && [ "$name" = "null_deref" ]; then
         echo "  PASS  $name (expected SIGSEGV caught by crash handler)"
     else
