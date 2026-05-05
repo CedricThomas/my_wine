@@ -27,15 +27,15 @@
 #define NT_SYSCALL_CREATE_SECTION        0x4A  /* NtCreateSection */
 #define NT_SYSCALL_CREATE_THREAD_EX      0x4E  /* NtCreateThreadEx */
 #define NT_SYSCALL_OPEN_FILE             0x4F  /* NtOpenFile */
-#define NT_SYSCALL_QUERY_SYSTEM_TIME         0x09  /* NtQuerySystemTime */
-#define NT_SYSCALL_DELAY_EXECUTION           0x1A  /* NtDelayExecution */
-#define NT_SYSCALL_RELEASE_MUTEX             0x1E  /* NtReleaseMutex */
-#define NT_SYSCALL_CREATE_MUTEX              0x44  /* NtCreateMutex */
+#define NT_SYSCALL_QUERY_SYSTEM_TIME      0x09  /* NtQuerySystemTime */
+#define NT_SYSCALL_DELAY_EXECUTION        0x1A  /* NtDelayExecution */
+#define NT_SYSCALL_RELEASE_MUTEX          0x1E  /* NtReleaseMutex */
+#define NT_SYSCALL_CREATE_MUTEX           0x44  /* NtCreateMutex */
 #define NT_SYSCALL_QUERY_PERFORMANCE_COUNTER 0x55  /* NtQueryPerformanceCounter */
 #define NT_SYSCALL_QUERY_PERFORMANCE_FREQUENCY 0x56 /* NtQueryPerformanceFrequency */
-#define NT_SYSCALL_SET_EVENT                 0x5C  /* NtSetEvent */
-#define NT_SYSCALL_RESET_EVENT               0x5E  /* NtResetEvent */
-#define NT_SYSCALL_WAIT_FOR_SINGLE_OBJECT    0x00  /* NtWaitForSingleObject */
+#define NT_SYSCALL_SET_EVENT              0x5C  /* NtSetEvent */
+#define NT_SYSCALL_RESET_EVENT            0x5E  /* NtResetEvent */
+#define NT_SYSCALL_WAIT_FOR_SINGLE_OBJECT 0x00  /* NtWaitForSingleObject */
 
 /* ── TEB field offsets (x86_64 Windows) ───────────────────────── */
 

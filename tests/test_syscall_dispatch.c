@@ -352,6 +352,36 @@ static void test_nt_delay_execution(void)
     test_syscall_one(0x1A, "NtDelayExecution(10ms relative)", STATUS_SUCCESS);
 }
 
+/* ── Test: Unhandled syscalls return STATUS_NOT_IMPLEMENTED ─── */
+
+static void test_unhandled_syscalls(void)
+{
+    printf("\n--- Unhandled syscalls (STATUS_NOT_IMPLEMENTED) ---\n");
+
+    __wine_guest_regs.rcx = 0;
+    __wine_guest_regs.rdx = 0;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+
+    /* 0xFF is not a registered syscall number */
+    uint64_t result = c_dispatch_syscall(0xFF);
+    check("Unhandled syscall 0xFF → STATUS_NOT_IMPLEMENTED",
+          result == STATUS_NOT_IMPLEMENTED);
+    check("RAX set to STATUS_NOT_IMPLEMENTED",
+          __wine_guest_regs.rax == STATUS_NOT_IMPLEMENTED);
+
+    /* 0x99 is not a registered syscall number */
+    result = c_dispatch_syscall(0x99);
+    check("Unhandled syscall 0x99 → STATUS_NOT_IMPLEMENTED",
+          result == STATUS_NOT_IMPLEMENTED);
+
+    /* 0x3F is between existing syscall numbers but unhandled */
+    result = c_dispatch_syscall(0x3F);
+    check("Unhandled syscall 0x3F → STATUS_NOT_IMPLEMENTED",
+          result == STATUS_NOT_IMPLEMENTED);
+}
+
 /* ── Main ───────────────────────────────────────────────────── */
 
 int main(void)
@@ -378,6 +408,7 @@ int main(void)
     test_nt_query_performance_counter();
     test_nt_query_performance_frequency();
     test_nt_delay_execution();
+    test_unhandled_syscalls();
 
     /* ── Summary ──────────────────────────────────────────── */
     printf("\n========================================\n");
