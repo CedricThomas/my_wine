@@ -2,11 +2,14 @@
  * dispatcher_entry.S — Wine-style stack-switching dispatcher entry
  *
  * Called via `call __wine_dispatcher` from generated thunks.
- * On entry: RDI = syscall number, [RSP] = return address (pushed by thunk),
- *           RCX/RDX/R8/R9 = guest args, RDI/RSI = callee-saved, RSP = guest stack pointer.
+ * On entry: RDI = syscall number, [RSP] = return address (pushed by thunk's call),
+ *           [RSP+8] = original RDI (pushed by thunk's `push rdi`),
+ *           [RSP+16] = guest caller's return address (pushed by guest's call to imported func),
+ *           RCX/RDX/R8/R9 = guest args, RSI = callee-saved, RSP = guest stack pointer.
  *
- * Saves all guest state to __wine_guest_regs global struct, switches
- * to UNIX stack, calls c_dispatch_syscall(), restores state, returns.
+ * Saves all guest state EXCEPT RDI (the thunk handles RDI save/restore with push/pop
+ * so the dispatcher's `ret` lands on the thunk's `pop rdi`).
+ * Switches to UNIX stack, calls c_dispatch_syscall(), restores state, returns.
  *
  * NO RED ZONE — this function must not be compiled with red zone,
  * as the guest stack is still active during stack switch.
@@ -49,8 +52,8 @@ __wine_dispatcher:
     mov %r8,  __wine_guest_regs+R8_OFF(%rip)
     mov %r9,  __wine_guest_regs+R9_OFF(%rip)
 
-    /* Guest callee-saved registers (clobbered by thunk/dispatcher) */
-    mov %rdi, __wine_guest_regs+RDI_OFF(%rip)
+    /* Guest callee-saved register (clobbered by C dispatcher) */
+    /* RDI is NOT saved here — the thunk push/pop rdi wraps the call. */
     mov %rsi, __wine_guest_regs+RSI_OFF(%rip)
 
     /* ── Switch to UNIX stack ── */
@@ -81,16 +84,12 @@ __wine_dispatcher:
     mov __wine_guest_regs+RDX_OFF(%rip), %rdx
     mov __wine_guest_regs+R8_OFF(%rip), %r8
     mov __wine_guest_regs+R9_OFF(%rip), %r9
-    mov __wine_guest_regs+RDI_OFF(%rip), %rdi
+    /* RDI is NOT restored here — the thunk's `pop rdi` after our `ret` handles it. */
     mov __wine_guest_regs+RSI_OFF(%rip), %rsi
     mov __wine_guest_regs+RAX_OFF(%rip), %rax
 
-    /* Pop the thunk's return address from guest stack (pushed by thunk's `call`).
-     * After this, the guest caller's original return address is at [RSP],
-     * so the subsequent `ret` returns directly to the guest caller.
+    /* Return to the thunk's `pop rdi` (at loc+14, pushed by the thunk's `call`).
+     * The thunk then does: pop rdi (restores original), ret (returns to guest caller).
      */
-    add $8, %rsp
-
-    /* Return to guest caller */
 
     ret
