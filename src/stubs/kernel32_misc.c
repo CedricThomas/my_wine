@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 
-#include <unistd.h>
 #include "kernel32_priv.h"
 
 /* Thread-local last-error code */
@@ -12,88 +11,6 @@ WINE_STUB
 int lstrlenA(const char *lpString)
 {
     return (int)__builtin_strlen(lpString);
-}
-
-/* ── Critical Section stubs ─────────────────────────────────── */
-
-WINE_STUB
-void InitializeCriticalSection(CRITICAL_SECTION *cs)
-{
-    if (cs) {
-        cs->DebugInfo = NULL;
-        cs->LockCount = -1;
-        cs->RecursionCount = 0;
-        cs->OwningThread = 0;
-        cs->LockSemaphore = 0;
-        cs->SpinCount = 0;
-    }
-}
-
-WINE_STUB
-void EnterCriticalSection(CRITICAL_SECTION *cs)
-{
-    if (!cs) return;
-    int32_t expected = -1;
-    if (__atomic_compare_exchange_n(&cs->LockCount, &expected, 0, false,
-                                     __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
-        cs->RecursionCount = 1;
-        cs->OwningThread = getpid();
-        return;
-    }
-    // CAS failed — contention
-    if (cs->OwningThread == (uint64_t)getpid()) {
-        // Recursive entry by same thread
-        cs->RecursionCount++;
-        return;
-    }
-    // Slow path: loop until we win the CAS after being woken.
-    // Each iteration: create event if needed, reset it (so we don't
-    // consume another thread's pending signal), wait, then retry CAS.
-    for (;;) {
-        if (cs->LockSemaphore == 0) {
-            // Lazy-create event (initially non-signaled, auto-reset)
-            handler_NtCreateEvent(&cs->LockSemaphore, 0, 0, 0, 0);
-        }
-        // Reset event first so we wait on a clean state.
-        // If event is already unsignaled this is a no-op / harmless error.
-        handler_NtResetEvent(cs->LockSemaphore, 0);
-        handler_NtWaitForSingleObject(cs->LockSemaphore, 0, 0);
-        // Wake up — try to atomically claim the lock.
-        expected = -1;
-        if (__atomic_compare_exchange_n(&cs->LockCount, &expected, 0, false,
-                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
-            cs->RecursionCount = 1;
-            cs->OwningThread = getpid();
-            return;
-        }
-        // CAS failed — another thread took it between signal and here.
-        // Loop back: reset + wait for the next release.
-    }
-}
-
-WINE_STUB
-void LeaveCriticalSection(CRITICAL_SECTION *cs)
-{
-    if (!cs) return;
-    cs->RecursionCount--;
-    if (cs->RecursionCount == 0) {
-        cs->LockCount = -1;
-        cs->OwningThread = 0;
-        if (cs->LockSemaphore != 0) {
-            handler_NtSetEvent(cs->LockSemaphore, 0);
-        }
-    }
-}
-
-WINE_STUB
-void DeleteCriticalSection(CRITICAL_SECTION *cs)
-{
-    if (!cs) return;
-    if (cs->LockSemaphore != 0) {
-        handler_NtClose(cs->LockSemaphore);
-        cs->LockSemaphore = 0;
-    }
-    __builtin_memset(cs, 0, sizeof(*cs));
 }
 
 /* ── GetLastError ───────────────────────────────────────────── */
