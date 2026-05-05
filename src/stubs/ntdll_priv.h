@@ -11,6 +11,7 @@
 #include "include/ntdll.h"
 #include "include/pe.h"
 #include <stddef.h>
+#include <pthread.h>
 
 /* ── Handle Table ──────────────────────────────────────────────── */
 
@@ -63,10 +64,28 @@ typedef struct {
     int handle;
     int signaled;
     int event_type; // 0 = Notification, 1 = Synchronization
+    pthread_cond_t cond;
 } wine_event_t;
 
 extern wine_event_t events[MAX_EVENTS];
 extern int event_count;
+
+/* ── Mutex Tracking ────────────────────────────────────────────── */
+
+#define MAX_MUTEXES 64
+
+typedef struct {
+    int            handle;
+    pthread_mutex_t mutex;
+    int            locked;  /* track if currently locked */
+} wine_mutex_t;
+
+extern wine_mutex_t mutexes[MAX_MUTEXES];
+extern int mutex_count;
+
+/* ── Synchronization Globals ────────────────────────────────────── */
+
+extern pthread_mutex_t events_global_mutex;
 
 /* ── Thread Tracking ───────────────────────────────────────────── */
 
