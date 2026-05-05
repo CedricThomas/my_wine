@@ -34,7 +34,7 @@ void EnterCriticalSection(CRITICAL_SECTION *cs)
 {
     if (!cs) return;
     int32_t expected = -1;
-    if (__atomic_compare_exchange_n(&cs->LockCount, &expected, 0, 0,
+    if (__atomic_compare_exchange_n(&cs->LockCount, &expected, 0, false,
                                      __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
         cs->RecursionCount = 1;
         cs->OwningThread = getpid();
@@ -46,15 +46,29 @@ void EnterCriticalSection(CRITICAL_SECTION *cs)
         cs->RecursionCount++;
         return;
     }
-    // Slow path: wait for the owner to release
-    if (cs->LockSemaphore == 0) {
-        // Lazy-create event (initially non-signaled, auto-reset)
-        handler_NtCreateEvent(&cs->LockSemaphore, 0, 0, 0, 0);
+    // Slow path: loop until we win the CAS after being woken.
+    // Each iteration: create event if needed, reset it (so we don't
+    // consume another thread's pending signal), wait, then retry CAS.
+    for (;;) {
+        if (cs->LockSemaphore == 0) {
+            // Lazy-create event (initially non-signaled, auto-reset)
+            handler_NtCreateEvent(&cs->LockSemaphore, 0, 0, 0, 0);
+        }
+        // Reset event first so we wait on a clean state.
+        // If event is already unsignaled this is a no-op / harmless error.
+        handler_NtResetEvent(cs->LockSemaphore, 0);
+        handler_NtWaitForSingleObject(cs->LockSemaphore, 0, 0);
+        // Wake up — try to atomically claim the lock.
+        expected = -1;
+        if (__atomic_compare_exchange_n(&cs->LockCount, &expected, 0, false,
+                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+            cs->RecursionCount = 1;
+            cs->OwningThread = getpid();
+            return;
+        }
+        // CAS failed — another thread took it between signal and here.
+        // Loop back: reset + wait for the next release.
     }
-    handler_NtWaitForSingleObject(cs->LockSemaphore, 0, 0);
-    cs->LockCount = 0;
-    cs->RecursionCount = 1;
-    cs->OwningThread = getpid();
 }
 
 WINE_STUB
