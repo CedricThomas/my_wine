@@ -95,32 +95,25 @@ switching**. When guest code calls an NT syscall, it jumps to our
 dispatcher, which switches to the UNIX stack, handles the call, then
 switches back.
 
-### Wine-Style Offset Scheme
+### How Interception Works
 
-NT syscalls use `0xF000 + nr` as their syscall number. This follows
-the Wine convention (`WINE_SYSCALL_OFFSET = 0xF000`). Linux syscall
-numbers are all `< 0x400`. The gap between `0x400` and `0xF000` is
-unused on x86_64.
+Each NT syscall has a **dynamically generated 23-byte thunk** (in
+`thunk_gen.c`) that is wired into the PE's IAT during import resolution.
+The thunks live in a single `mmap`'d executable blob.
 
-```
-  syscall number < 0x400   →  Linux kernel executes directly
-  syscall number >= 0xF000 →  intercepted by our dispatcher
-```
+The thunk loads the **raw NT syscall number** (e.g. `0x3D` for
+`NtWriteFile`) into `RDI` and calls `__wine_dispatcher` via absolute
+indirect call. The IAT is patched to point to these thunks — so when
+guest code calls `NtWriteFile`, it jumps to the thunk, which calls our
+dispatcher.
 
-Linux syscalls pass through to the kernel without ever reaching our
-dispatcher. Our stubs call Linux syscalls directly (via inline syscall
-instructions), not through the dispatcher.
+Linux syscalls (numbers `< 0x400`) pass through directly to the kernel
+— they are never intercepted because the guest never calls them through
+the dispatcher. Our stubs call Linux syscalls directly (via inline
+syscall instructions) without going through `__wine_dispatcher`.
 
-### Direct Call, Not Seccomp
-
-Each NT syscall has a **generated thunk** in our code. The IAT in the
-PE is patched to point to these thunks instead of the original import
-targets. Thunks are generated at runtime in `thunk_gen.c` and live in a
-single `mmap`'d executable blob.
-
-Unlike the seccomp + SIGSYS approach, there is no kernel trap. The
-guest directly enters our C code via a call instruction. The dispatcher
-runs on the UNIX stack, not the guest stack.
+The dispatcher is reached **only** via IAT-patched thunk calls, not via
+any syscall number detection or kernel trap.
 
 ### Thunk Layout
 
