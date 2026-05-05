@@ -8,7 +8,6 @@
  */
 
 #include <stdio.h>
-#include <dlfcn.h>
 #include <sys/mman.h>
 #include "include/syscall/dispatcher_entry.h"
 #include "include/debug.h"
@@ -46,11 +45,13 @@ void cleanup_unix_stack(void)
     }
 }
 
+/* Weak reference to the assembly dispatcher entry point.
+ * Resolves to NULL (not a link error) in test builds where
+ * dispatcher_entry_asm.S is not linked. */
+extern __attribute__((weak)) void __wine_dispatcher(void);
+
 /* Return the address of the assembly dispatcher for thunk generation */
 void *wine_dispatcher_addr(void)
 {
-    /* Use dlsym so this works even when dispatcher_entry_asm.S is not
-     * linked (e.g. in test builds). Returns NULL if the symbol is absent. */
-    void *handle = dlsym(RTLD_DEFAULT, "__wine_dispatcher");
-    return handle;
+    return (void *)__wine_dispatcher;
 }
