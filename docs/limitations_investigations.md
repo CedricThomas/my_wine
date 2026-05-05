@@ -306,7 +306,7 @@ None. Independent.
 ### Current State
 
 **✅ Implemented.** `CRITICAL_SECTION` uses the correct **40-byte layout** matching
-Windows x64 (`src/stubs/kernel32_misc.c`).
+Windows x64 (`src/stubs/kernel32_sync.c`).
 
 - `InitializeCriticalSection` zeroes the struct, sets `LockCount = -1`
 - `EnterCriticalSection` uses a **CAS fast-path**

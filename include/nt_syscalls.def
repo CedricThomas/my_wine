@@ -1,45 +1,29 @@
-# ── NT Syscall Definition File ──────────────────────────────────
-# Used by scripts/gen_dispatcher.py to regenerate dispatcher.c
-#
-# Format: SYSCALL_NUM  SYSCALL_NAME  HANDLER  PATTERN  [DETAILS...]
-#
-# PATTERN values:
-#   simple  — direct handler call, no guest-ptr dereferencing
-#   validate — read_guest_ptr for validation only (no write-back)
-#   inout   — read_guest_ptr → handler → write-back (single ptr)
-#   inout2  — two inout ptrs
-#   multi   — complex multi-ptr + stack pattern (inline body)
-#
-# DETAIL columns depend on pattern:
-#   simple:   arg_expr
-#   validate: ptr_arg expr ptr_name
-#   inout:    ptr_arg var_name ptr_display_name handler_args
-#   inout2:   ptr_arg1 var1 name1 ptr_arg2 var2 name2 handler_args
-#   multi:    (no details — generated inline)
-# ────────────────────────────────────────────────────────────────
+# nt_syscalls.def — Source of truth for dispatcher auto-generation
+# Format: SYSCALL_NUM  SyscallName  handler_function  pattern_type
+# Pattern types: simple | validate | inout | multi
 
-0x05  NtCallbackReturn            handler_NtCallbackReturn              simple  ()
-0x07  NtQueryInformationProcess   handler_NtQueryInformationProcess     multi
-0x0F  NtClose                     handler_NtClose                       simple  (arg1)
-0x18  NtAllocateVirtualMemory     handler_NtAllocateVirtualMemory       multi
-0x19  NtFreeVirtualMemory         handler_NtFreeVirtualMemory           multi
-0x24  NtGetContextThread          handler_NtGetContextThread            validate  arg2  context
-0x26  NtSetContextThread          handler_NtSetContextThread            validate  arg2  context
-0x28  NtMapViewOfSection          handler_NtMapViewOfSection            multi
-0x29  NtUnmapViewOfSection        handler_NtUnmapViewOfSection          simple  (arg1, arg2)
-0x09  NtQuerySystemTime           handler_NtQuerySystemTime             inout  arg1  h_ft_val  filetime_ptr  ((PVOID)&h_ft_val)
-0x1A  NtDelayExecution            handler_NtDelayExecution              inout  arg2  h_timeout  timeout_ptr  (arg1, (PVOID)&h_timeout)
-0x2A  NtTerminateProcess          handler_NtTerminateProcess            simple  (arg1, arg2)
-0x3C  NtReadFile                  handler_NtReadFile                    multi
-0x3D  NtWriteFile                 handler_NtWriteFile                   multi
-0x48  NtCreateEvent               handler_NtCreateEvent                 inout  arg1  h_handle  event_handle  (&h_handle, arg2, arg3, arg4, STACK(1))
-0x4A  NtCreateSection             handler_NtCreateSection               multi
-0x4E  NtCreateThreadEx            handler_NtCreateThreadEx              inout  arg1  h_handle  thread_handle  (&h_handle, arg2, arg3, arg4, STACK(1), STACK(2), STACK(3), STACK(4), STACK(5), STACK(6), STACK(7))
-0x4F  NtOpenFile                  handler_NtOpenFile                    multi
-0x55  NtQueryPerformanceCounter   handler_NtQueryPerformanceCounter     inout  arg1  h_counter  counter_ptr  ((PVOID)&h_counter)
-0x56  NtQueryPerformanceFrequency handler_NtQueryPerformanceFrequency   inout  arg1  h_freq  frequency_ptr  ((PVOID)&h_freq)
-0x5C  NtSetEvent                  handler_NtSetEvent                    inout  arg2  h_prev  previous_state  (arg1, (PVOID)&h_prev)
-0x5E  NtResetEvent                handler_NtResetEvent                  inout  arg2  h_prev  previous_state  (arg1, (PVOID)&h_prev)
-0x03  NtWaitForSingleObject       handler_NtWaitForSingleObject         inout  arg3  h_timeout  timeout_ptr  (arg1, arg2, (PVOID)&h_timeout)
-0x44  NtCreateMutex               handler_NtCreateMutex                 inout  arg1  h_handle  mutex_handle  (&h_handle, arg2, arg3)
-0x1E  NtReleaseMutex              handler_NtReleaseMutex                simple  (arg1, arg2)
+0x05  NtCallbackReturn          handler_NtCallbackReturn         simple
+0x07  NtQueryInformationProcess handler_NtQueryInformationProcess multi
+0x09  NtQuerySystemTime         handler_NtQuerySystemTime        inout
+0x0F  NtClose                   handler_NtClose                  simple
+0x18  NtAllocateVirtualMemory   handler_NtAllocateVirtualMemory  multi
+0x19  NtFreeVirtualMemory       handler_NtFreeVirtualMemory      multi
+0x1A  NtDelayExecution          handler_NtDelayExecution         inout
+0x1E  NtReleaseMutex            handler_NtReleaseMutex           simple
+0x24  NtGetContextThread        handler_NtGetContextThread       validate
+0x26  NtSetContextThread        handler_NtSetContextThread       validate
+0x28  NtMapViewOfSection        handler_NtMapViewOfSection       multi
+0x29  NtUnmapViewOfSection      handler_NtUnmapViewOfSection     simple
+0x2A  NtTerminateProcess        handler_NtTerminateProcess       simple
+0x3C  NtReadFile                handler_NtReadFile               multi
+0x3D  NtWriteFile               handler_NtWriteFile              multi
+0x44  NtCreateMutex             handler_NtCreateMutex            inout
+0x48  NtCreateEvent             handler_NtCreateEvent            inout
+0x4A  NtCreateSection           handler_NtCreateSection          multi
+0x4E  NtCreateThreadEx          handler_NtCreateThreadEx         inout
+0x4F  NtOpenFile                handler_NtOpenFile               multi
+0x55  NtQueryPerformanceCounter handler_NtQueryPerformanceCounter inout
+0x56  NtQueryPerformanceFrequency handler_NtQueryPerformanceFrequency inout
+0x5C  NtSetEvent                handler_NtSetEvent               inout
+0x5E  NtResetEvent              handler_NtResetEvent             inout
+0x03  NtWaitForSingleObject     handler_NtWaitForSingleObject    inout
