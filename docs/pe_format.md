@@ -692,7 +692,7 @@ my_wine uses them:
 | `e_lfanew` (DOS Header) | File offset to PE signature | `pe_headers.c` — find NT headers |
 | `Machine` (File Header) | Target architecture (0x8664 = x64) | `pe_headers.c` — validate x86_64 |
 | `NumberOfSections` (File Header) | Count of sections in the PE | `pe_headers.c` — parse section table |
-| `PointerToSymbolTable` (File Header) | File offset to COFF symbol table | `pe_symbols.c` — look up `main`, refptrs |
+| `PointerToSymbolTable` (File Header) | File offset to COFF symbol table | `pe_symbols.c, main.c` — look up `main`, refptrs |
 | `SizeOfImage` (Optional Header) | Total mapped size in bytes | `image_mapper.c` — mmap size |
 | `SectionAlignment` (Optional Header) | Memory alignment (typically 4K) | `image_mapper.c` — section alignment |
 | `FileAlignment` (Optional Header) | File alignment (typically 512B) | `pe_headers.c` — section parsing |
