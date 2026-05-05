@@ -35,7 +35,7 @@
 #define NT_SYSCALL_QUERY_PERFORMANCE_FREQUENCY 0x56 /* NtQueryPerformanceFrequency */
 #define NT_SYSCALL_SET_EVENT              0x5C  /* NtSetEvent */
 #define NT_SYSCALL_RESET_EVENT            0x5E  /* NtResetEvent */
-#define NT_SYSCALL_WAIT_FOR_SINGLE_OBJECT 0x00  /* NtWaitForSingleObject */
+#define NT_SYSCALL_WAIT_FOR_SINGLE_OBJECT 0x03  /* NtWaitForSingleObject */
 
 /* ── TEB field offsets (x86_64 Windows) ───────────────────────── */
 

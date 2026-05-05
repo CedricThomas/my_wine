@@ -40,6 +40,6 @@
 0x56  NtQueryPerformanceFrequency handler_NtQueryPerformanceFrequency   inout  arg1  h_freq  frequency_ptr  ((PVOID)&h_freq)
 0x5C  NtSetEvent                  handler_NtSetEvent                    inout  arg2  h_prev  previous_state  (arg1, (PVOID)&h_prev)
 0x5E  NtResetEvent                handler_NtResetEvent                  inout  arg2  h_prev  previous_state  (arg1, (PVOID)&h_prev)
-0x00  NtWaitForSingleObject       handler_NtWaitForSingleObject         inout  arg3  h_timeout  timeout_ptr  (arg1, arg2, (PVOID)&h_timeout)
+0x03  NtWaitForSingleObject       handler_NtWaitForSingleObject         inout  arg3  h_timeout  timeout_ptr  (arg1, arg2, (PVOID)&h_timeout)
 0x44  NtCreateMutex               handler_NtCreateMutex                 inout  arg1  h_handle  mutex_handle  (&h_handle, arg2, arg3)
 0x1E  NtReleaseMutex              handler_NtReleaseMutex                simple  (arg1, arg2)

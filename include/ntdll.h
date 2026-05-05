@@ -127,7 +127,7 @@ NTSTATUS handler_NtSetEvent(HANDLE handle, PVOID previous_state);
 // NtResetEvent (0x5E)
 NTSTATUS handler_NtResetEvent(HANDLE handle, PVOID previous_state);
 
-// NtWaitForSingleObject (0x00)
+// NtWaitForSingleObject (0x03)
 NTSTATUS handler_NtWaitForSingleObject(HANDLE handle, BOOL alertable, PVOID timeout_ptr);
 
 /* ── Windows struct definitions (packed) ─────────────────── */

@@ -63,7 +63,7 @@ CRT startup chain** (mainCRTStartup → __getmainargs → _initterm → main).
 | `NtReleaseMutex` | `0x1E` | ✅ Working (pthread_mutex_unlock) |
 | `NtResetEvent` | `0x5E` | ✅ Working (clear signaled flag) |
 | `NtSetEvent` | `0x5C` | ✅ Working (pthread_cond_signal) |
-| `NtWaitForSingleObject` | `0x00` | ✅ Working (pthread_cond_wait) |
+| `NtWaitForSingleObject` | `0x03` | ✅ Working (pthread_cond_wait) |
 
 **Implemented kernel32 stubs:**
 GetStdHandle, WriteFile, ReadFile, ExitProcess, Sleep, VirtualProtect,
@@ -526,7 +526,7 @@ the Windows x86_64 syscall table.
 
 | Syscall | NT # | Implementation |
 |---------|------|---------------|
-| `NtWaitForSingleObject` | `0x00` | futex / pthread_cond_wait |
+| `NtWaitForSingleObject` | `0x03` | futex / pthread_cond_wait |
 | `NtSetEvent` | `0x5C` | pthread_cond_signal |
 | `NtResetEvent` | `0x5E` | Clear flag |
 | `NtCreateMutex` | `0x44` | pthread_mutex_init |

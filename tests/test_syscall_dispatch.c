@@ -432,11 +432,11 @@ static void test_nt_reset_event(void)
     check("Previous state was 1 (signaled)", prev_state == 1);
 }
 
-/* ── Test: NtWaitForSingleObject (0x00) ───────────────────── */
+/* ── Test: NtWaitForSingleObject (0x03) ───────────────────── */
 
 static void test_nt_wait_for_single_object(void)
 {
-    printf("\n--- NtWaitForSingleObject (0x00) ---\n");
+    printf("\n--- NtWaitForSingleObject (0x03) ---\n");
 
     /* Test 1: Unsignaled event + timeout=0 → STATUS_TIMEOUT */
     uint64_t handle = create_test_event(0); /* unsignaled */
@@ -446,7 +446,7 @@ static void test_nt_wait_for_single_object(void)
     __wine_guest_regs.r8 = (uint64_t)&timeout_val; /* timeout_ptr */
     __wine_guest_regs.r9 = 0;
     __wine_guest_regs.rsp = 0;
-    uint64_t result = c_dispatch_syscall(0x00);
+    uint64_t result = c_dispatch_syscall(0x03);
     check("Wait on unsignaled event (timeout=0) → STATUS_TIMEOUT (0x80)",
           result == STATUS_TIMEOUT);
 
@@ -457,7 +457,7 @@ static void test_nt_wait_for_single_object(void)
     __wine_guest_regs.r8 = 0; /* timeout_ptr = NULL (infinite) */
     __wine_guest_regs.r9 = 0;
     __wine_guest_regs.rsp = 0;
-    test_syscall_one(0x00, "NtWaitForSingleObject (signaled, no timeout)", STATUS_SUCCESS);
+    test_syscall_one(0x03, "NtWaitForSingleObject (signaled, no timeout)", STATUS_SUCCESS);
 
     /* Test 3: Invalid handle → STATUS_INVALID_HANDLE */
     __wine_guest_regs.rcx = 0xDEADBEEF;
@@ -465,7 +465,7 @@ static void test_nt_wait_for_single_object(void)
     __wine_guest_regs.r8 = 0;
     __wine_guest_regs.r9 = 0;
     __wine_guest_regs.rsp = 0;
-    result = c_dispatch_syscall(0x00);
+    result = c_dispatch_syscall(0x03);
     check("Wait on invalid handle → STATUS_INVALID_HANDLE",
           result == STATUS_INVALID_HANDLE);
 }

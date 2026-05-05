@@ -83,7 +83,7 @@ uint64_t handler_NtResetEvent(uint64_t handle, uint64_t previous_state)
     return STATUS_SUCCESS;
 }
 
-/* ── NtWaitForSingleObject (0x00) ────────────────────────────────
+/* ── NtWaitForSingleObject (0x03) ────────────────────────────────
  *
  * Wait for an event to be signaled, with optional timeout.
  * arg1: handle
