@@ -45,6 +45,7 @@ typedef uint64_t        BOOL;
 #define STATUS_ACCESS_VIOLATION     0xC0000005
 #define STATUS_BUFFER_TOO_SMALL     0xC0000023
 #define STATUS_MEMORY_NOT_AVAILABLE 0xC0000098
+#define STATUS_TIMEOUT              0x00000080
 #define STATUS_NOT_IMPLEMENTED      0xC00000B7
 
 // --- NT Syscall Handler Signatures ---

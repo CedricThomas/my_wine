@@ -382,6 +382,135 @@ static void test_unhandled_syscalls(void)
           result == STATUS_NOT_IMPLEMENTED);
 }
 
+/* ── Helper: create a test event for sync tests ─────────────── */
+
+static uint64_t create_test_event(int initial_state)
+{
+    uint64_t handle = 0;
+    __wine_guest_regs.rcx = (uint64_t)&handle;
+    __wine_guest_regs.rdx = 0x10000000; /* desired_access */
+    __wine_guest_regs.r8 = 0;           /* object_attributes = NULL */
+    __wine_guest_regs.r9 = 0;           /* event_type = Notification */
+    __wine_guest_regs.rsp = (uint64_t)&initial_state; /* initial_state on stack */
+    c_dispatch_syscall(0x48); /* NtCreateEvent */
+    return handle;
+}
+
+/* ── Test: NtSetEvent (0x5C) ───────────────────────────────── */
+
+static void test_nt_set_event(void)
+{
+    printf("\n--- NtSetEvent (0x5C) ---\n");
+    uint64_t handle = create_test_event(0); /* unsignaled */
+    uint64_t prev_state = 0;
+    __wine_guest_regs.rcx = handle;
+    __wine_guest_regs.rdx = (uint64_t)&prev_state;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x5C, "NtSetEvent", STATUS_SUCCESS);
+    check("Previous state was 0 (unsignaled)", prev_state == 0);
+}
+
+/* ── Test: NtResetEvent (0x5E) ─────────────────────────────── */
+
+static void test_nt_reset_event(void)
+{
+    printf("\n--- NtResetEvent (0x5E) ---\n");
+    uint64_t handle = create_test_event(1); /* signaled */
+    uint64_t prev_state = 0xFFFFFFFF;
+    __wine_guest_regs.rcx = handle;
+    __wine_guest_regs.rdx = (uint64_t)&prev_state;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x5E, "NtResetEvent", STATUS_SUCCESS);
+    check("Previous state was 1 (signaled)", prev_state == 1);
+}
+
+/* ── Test: NtWaitForSingleObject (0x00) ───────────────────── */
+
+static void test_nt_wait_for_single_object(void)
+{
+    printf("\n--- NtWaitForSingleObject (0x00) ---\n");
+
+    /* Test 1: Unsignaled event + timeout=0 → STATUS_TIMEOUT */
+    uint64_t handle = create_test_event(0); /* unsignaled */
+    int64_t timeout_val = 0;
+    __wine_guest_regs.rcx = handle;
+    __wine_guest_regs.rdx = 0;       /* alertable = FALSE */
+    __wine_guest_regs.r8 = (uint64_t)&timeout_val; /* timeout_ptr */
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    uint64_t result = c_dispatch_syscall(0x00);
+    check("Wait on unsignaled event (timeout=0) → STATUS_TIMEOUT (0x80)",
+          result == STATUS_TIMEOUT);
+
+    /* Test 2: Signaled event + NULL timeout → STATUS_SUCCESS (with brief wait) */
+    uint64_t handle2 = create_test_event(1); /* signaled */
+    __wine_guest_regs.rcx = handle2;
+    __wine_guest_regs.rdx = 0;
+    __wine_guest_regs.r8 = 0; /* timeout_ptr = NULL (infinite) */
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x00, "NtWaitForSingleObject (signaled, no timeout)", STATUS_SUCCESS);
+
+    /* Test 3: Invalid handle → STATUS_INVALID_HANDLE */
+    __wine_guest_regs.rcx = 0xDEADBEEF;
+    __wine_guest_regs.rdx = 0;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    result = c_dispatch_syscall(0x00);
+    check("Wait on invalid handle → STATUS_INVALID_HANDLE",
+          result == STATUS_INVALID_HANDLE);
+}
+
+/* ── Test: NtCreateMutex (0x44) ───────────────────────────── */
+
+static void test_nt_create_mutex(void)
+{
+    printf("\n--- NtCreateMutex (0x44) ---\n");
+    uint64_t handle = 0;
+    __wine_guest_regs.rcx = (uint64_t)&handle; /* mutex_handle ptr */
+    __wine_guest_regs.rdx = 0x100000;          /* desired_access */
+    __wine_guest_regs.r8 = 0;                  /* object_attributes = NULL */
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    test_syscall_one(0x44, "NtCreateMutex", STATUS_SUCCESS);
+    check("Mutex handle is non-zero", handle != 0);
+}
+
+/* ── Test: NtReleaseMutex (0x1E) ──────────────────────────── */
+
+static void test_nt_release_mutex(void)
+{
+    printf("\n--- NtReleaseMutex (0x1E) ---\n");
+    uint64_t handle = 0;
+    __wine_guest_regs.rcx = (uint64_t)&handle;
+    __wine_guest_regs.rdx = 0x100000;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    c_dispatch_syscall(0x44); /* NtCreateMutex */
+
+    /* ReleaseMutex on a mutex that hasn't been locked → STATUS_INVALID_HANDLE */
+    __wine_guest_regs.rcx = handle;
+    __wine_guest_regs.rdx = 0;
+    __wine_guest_regs.r8 = 0;
+    __wine_guest_regs.r9 = 0;
+    __wine_guest_regs.rsp = 0;
+    uint64_t result = c_dispatch_syscall(0x1E);
+    check("NtReleaseMutex on unlocked mutex → STATUS_INVALID_HANDLE",
+          result == STATUS_INVALID_HANDLE);
+
+    /* ReleaseMutex on invalid handle → STATUS_INVALID_HANDLE */
+    __wine_guest_regs.rcx = 0xDEADBEEF;
+    result = c_dispatch_syscall(0x1E);
+    check("NtReleaseMutex on invalid handle → STATUS_INVALID_HANDLE",
+          result == STATUS_INVALID_HANDLE);
+}
+
 /* ── Main ───────────────────────────────────────────────────── */
 
 int main(void)
@@ -409,6 +538,11 @@ int main(void)
     test_nt_query_performance_frequency();
     test_nt_delay_execution();
     test_unhandled_syscalls();
+    test_nt_set_event();
+    test_nt_reset_event();
+    test_nt_wait_for_single_object();
+    test_nt_create_mutex();
+    test_nt_release_mutex();
 
     /* ── Summary ──────────────────────────────────────────── */
     printf("\n========================================\n");
