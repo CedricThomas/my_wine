@@ -18,6 +18,7 @@
 
 #include <asm/unistd_64.h>
 #include <stddef.h>
+#include <sys/mman.h>
 
 /* ── Write to stderr (fd 2) ─────────────────────────────────── */
 
@@ -112,7 +113,7 @@
             : "a"(__NR_mmap), "D"(addr), "S"((size_t)(len)), \
               "d"(prot), "r"(flags), "r"(fd), "r"((off_t)(offset)) \
             : "rcx", "r11", "cc"); \
-        (void *)_synct_rax; \
+        _synct_rax >= -4095L ? (void *)_synct_rax : MAP_FAILED; \
     })
 
 /* ── sys_mprotect ───────────────────────────────────────────── */
