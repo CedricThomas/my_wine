@@ -144,6 +144,7 @@ clean:
 	@echo "  CLEAN build artifacts"
 	rm -rf $(BUILDDIR)
 	rm -f include/crt_offsets_generated.h
+	rm -f src/syscall/dispatcher_generated.c
 
 fclean: clean
 	@echo "  FCLEAN end targets"
@@ -160,5 +161,12 @@ gen-crt-offsets:
 gen-dispatcher:
 	@echo "Generating dispatcher switch bodies..."
 	@python3 scripts/gen_dispatcher.py --generate
+
+# Dispatcher auto-generation — generated .c lives alongside dispatcher.c
+src/syscall/dispatcher_generated.c: include/nt_syscalls.def scripts/gen_dispatcher.py
+	@python3 scripts/gen_dispatcher.py --generate
+
+# Ensure dispatcher.o depends on the generated file
+$(BUILDDIR)/dispatcher.o: src/syscall/dispatcher_generated.c
 
 .PHONY: all clean fclean re tests run-test samples run-sample gen-crt-offsets gen-dispatcher $(BUILDDIR)
