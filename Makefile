@@ -18,7 +18,7 @@ BUILDDIR = build
 ROOT_SRC     = $(sort $(shell find src/   -maxdepth 1 -name '*.c'))
 STUBS_SRC    = $(sort $(shell find src/stubs   -maxdepth 1 -name '*.c'))
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c'))
-SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c'))
+SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
 HEAP_SRC     = $(sort $(shell find src/heap    -maxdepth 1 -name '*.c'))
 
 ROOT_OBJS    = $(patsubst src/%.c,$(BUILDDIR)/%.o,$(ROOT_SRC))
