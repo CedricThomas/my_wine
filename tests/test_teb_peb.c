@@ -73,6 +73,7 @@ static int can_set_gs_base(void)
 
     void *got = get_gs_base();
     if (got != page) {
+        set_gs_base(NULL);
         munmap(page, 4096);
         return 0;
     }
@@ -149,6 +150,11 @@ static void test_teb_peb_setup(void)
         check("PEB.BeingDebugged == 0", being_debugged == 0);
     }
 
+    /* Restore GS base to NULL first — before munmap — to avoid
+     * any window where GS points to freed memory (e.g. vDSO reads)
+     * during printf/check calls below. Mirrors can_set_gs_base(). */
+    set_gs_base(NULL);
+
     /* Cleanup: munmap PEB then TEB */
     if (peb != NULL) {
         int rc_peb = munmap(peb, 4096);
@@ -156,9 +162,6 @@ static void test_teb_peb_setup(void)
     }
     int rc_teb = munmap(teb, 4096);
     check("munmap TEB succeeds", rc_teb == 0);
-
-    /* Restore GS base to 0 to avoid corrupting the test runner */
-    set_gs_base(NULL);
 }
 
 /* ── Test: stack setup ─────────────────────────────────────── */
