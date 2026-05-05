@@ -76,7 +76,7 @@ Phase 1:  §6 (more syscalls) → §8 (full file I/O)
 Phase 2:  §1
 Phase 3:  §4 (real CriticalSection) → §7 (heap)
 Phase 4 (need §1): §2 (dynamic loading) → §5 (toolchain)
-Phase 5 (need §4): §9 (per-thread TEB)
+Phase 5 (need §3, §4, §6): §9 (per-thread TEB)
 Phase 6:  §3 (TLS)
 ```
 
@@ -799,7 +799,7 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 | §6 Syscall | §4 Sync, §8 File I/O | None |
 | §7 Heap | §5 Toolchain | §4 Sync |
 | §8 File I/O | Real applications | §6 Syscall |
-| §9 Threading | Exception safety, real apps | §3, §4 |
+| §9 Threading | Exception safety, real apps | §3, §4, §6 |
 
 ---
 

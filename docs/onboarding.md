@@ -102,15 +102,15 @@ The pipeline in `src/main.c` (`main()`) runs 10 steps:
 
 5. **`setup_teb_peb()`** in `src/loader/teb_peb.c` — Allocates and populates the TEB and PEB via `mmap`; sets TEB self-referential pointers and PEB image base. Does NOT set GS base yet (deferred until guest_setup.c to avoid corrupting glibc TLS).
 
-6. **`setup_stack()`** in `src/loader/teb_peb.c` — Allocates the guest stack according to the PE's `SizeOfStackReserve` / `SizeOfStackCommit` (minimum 512KB committed for CRT startup).
+6. **`setup_stack()`** in `src/loader/teb_peb.c` — Allocated and called from `main.c` (step in loader pipeline). Allocates the guest stack according to the PE's `SizeOfStackReserve` / `SizeOfStackCommit` (minimum 512KB committed for CRT startup). **Note:** this function is called from `main.c`, not from `guest_setup.c`.
 
 7. Zero `.data` section and `seed_bss_vars()` in `src/main.c` — Zero the `.data` section and pre-seed `argc`, `argv`, `envp` in the PE's `.bss` section at COFF-derived offsets.
 
-8. **`run_guest_entry()`** in `src/loader/entry.c` — Calls `setup_guest_and_run()` from `guest_setup.c`.
+8. **`run_guest_entry()`** in `src/loader/entry.c` — Thin wrapper that delegates to `setup_guest_and_run()` in `guest_setup.c`, completing the handoff from loader to guest setup.
 
 ### Guest setup (single process, `src/loader/guest_setup.c`)
 
-`setup_guest_and_run()` performs all the final initialization before jumping to guest code:
+`setup_guest_and_run()` performs all the remaining initialization before jumping to guest code — the steps deferred from the main pipeline because they must happen after `setup_stack()` is called from `main.c` (step 7 above):
 
 1. **`setup_signal_handlers()`** (from `crash_handlers.c`) — Installs SIGSEGV and SIGILL crash handlers.
 2. **`setup_seh_and_thunks()`** — Creates the static SEH frame, calls `generate_all_thunks()` (from `src/syscall/thunk_gen.c`) to produce all syscall thunks, and calls `setup_unix_stack()` (from `src/syscall/dispatcher_entry.c`) to allocate the 128KB UNIX stack used during syscall dispatch.
@@ -140,21 +140,21 @@ For the full flow diagram, see [Architecture](architecture.md) §1.
 
 Practical advice for new contributors:
 
-- **Build a sample** with `make samples NAME=hello_world` to get a test binary.
+- **Build a sample** with `make samples SAMPLE=hello_world` to get a test binary.
 - **Run with** `./my_wine samples/hello_world/hello_world.exe` to see it working.
 - **Add a new stub:** Create a function with the `WINE_STUB` attribute (defined in `include/wine_abi.h` — this gives `ms_abi` calling convention + `force_align_arg_pointer`), add an entry to `src/loader/import_table.c`, and if it's a syscall handler, add a case to `c_dispatch_syscall()` in `src/syscall/dispatcher.c`.
 - **Note:** All stubs use `ms_abi` (Microsoft x64 calling convention: RCX, RDX, R8, R9 for the first four args), not the Linux System V ABI. The `WINE_STUB` macro handles this — never forget it on stub functions.
 - **Run tests** with `make run-test` after any changes.
 - **Debug tip:** Start with `hello_world` as your test case — it's the simplest PE and exercises the core flow.
 - **Understanding a new import:** Search the PE's import table for the function name, then check `src/loader/import_table.c` to see if it's already registered. If not, add a `WINE_STUB` function and a dispatcher case.
-- **Adding a new sample:** Create a C file in `samples/`, add it to `samples/samples.sh`, and run `make samples NAME=your_sample` to cross-compile it.
+- **Adding a new sample:** Create a C file in `samples/`, add it to `samples/samples.sh`, and run `make samples SAMPLE=your_sample` to cross-compile it.
 
 ### Useful Commands
 
 - **`make`** — Build everything: loader binary, all sample Windows binaries, and all test binaries.
 - **`make samples`** — Build all sample Windows binaries (requires Docker for mingw-w64 cross-compilation).
-- **`make samples NAME=<name>`** — Build a single sample binary.
-- **`make run-sample NAME=<name>`** — Build + run a sample under `./my_wine`.
+- **`make samples SAMPLE=<name>`** — Build a single sample binary.
+- **`make run-sample SAMPLE=<name>`** — Build + run a sample under `./my_wine`.
 - **`make tests`** — Build the loader and all test binaries.
 - **`make run-test`** — Run all tests. Use `make run-test TEST=<name>` to filter (e.g. `TEST=parse`).
 - **`make fclean`** — Deep clean: remove build directory, generated headers, loader binary, and all sample `.exe` files.
@@ -166,7 +166,7 @@ Practical advice for new contributors:
 
 ### Testing Workflow
 
-1. Build the sample you'll test: `make samples NAME=hello_world`
+1. Build the sample you'll test: `make samples SAMPLE=hello_world`
 2. Run it: `./my_wine samples/hello_world/hello_world.exe`
 3. If it crashes, run under `gdb` or `strace` to get more info.
 4. After any changes, rebuild with `make` and re-run the sample.
