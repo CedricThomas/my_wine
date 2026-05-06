@@ -1,11 +1,20 @@
-# Object files
-*.o
-
 # Build directory
 build/
 
+# Object files (defense in depth, already covered by build/)
+*.o
+
+# Dependency files
+*.d
+
+# GDB debug scripts
+*.gdb
+
 # Windows executables
 *.exe
+
+# Windows libraries
+*.dll
 
 # Main binary
 my_wine
@@ -15,9 +24,5 @@ include/crt_offsets_generated.h
 src/syscall/dispatcher_generated.c
 
 # Python
-__pycache__/
-*.pyc
-
-# Python artifacts
 __pycache__/
 *.pyc
