@@ -1,0 +1,529 @@
+================================================================================
+  QUALITY REPORT — my_wine PE Loader
+  Generated: 2026-05-06
+  Scope: src/ + include/ (excludes musl_src/, dispatcher_generated.c, tests/)
+================================================================================
+
+================================================================================
+SECTION 1: ARCHITECTURAL ISSUES
+================================================================================
+
+[FINDING A1] — Monolithic loader_priv.h — shared state sprawl
+Severity: HIGH
+Files: src/loader/loader_priv.h (lines 1–177)
+Description:
+  loader_priv.h declares 50+ symbols spanning 8+ modules (image_mapper,
+  import_resolve, import_table, ordinal_table, teb_peb, crash_handlers,
+  entry, guest_setup, gs_base, module_list, export_table, peb_ldr).
+  This creates a god-header: any loader module can access any other's
+  globals and functions. The file has no module boundaries — everything
+  is one flat namespace.
+
+  Specific shared globals that blur module boundaries:
+    - g_image_base, g_pe_path (image_mapper) accessible from import_resolve
+    - g_stack_base, g_stack_size (teb_peb) accessible from entry
+    - import_table[] (import_table) accessible from import_resolve
+    - g_peb_ldr (peb_ldr) accessible from multiple modules
+
+Suggested fix:
+  Split into per-module headers (e.g., loader/image_mapper.h,
+  loader/import_resolve.h) that only export what's needed. Keep
+  loader_priv.h as the internal aggregator that #includes those.
+
+---
+
+[FINDING A2] — import_resolve.c is a multipurpose file (import resolution + DLL loading + path finding)
+Severity: HIGH
+Files: src/loader/import_resolve.c (lines 1–597)
+Description:
+  This 597-line file handles three distinct responsibilities:
+  1. Import name resolution (pass 1 & pass 2 thunk patching) — lines 1–370
+  2. DLL path searching (find_dll_path, hand-rolled string helpers) — lines 370–508
+  3. DLL loading (load_dll with map/relocate/register/resolve chain) — lines 510–597
+
+  This violates Single Responsibility. DLL loading should be in its own
+  module (e.g., dll_loader.c). The hand-rolled string helpers
+  (dll_strcasecmp, dll_copy_str, etc.) are also duplicated in module_list.c.
+
+Suggested fix:
+  - Extract DLL path finding → src/loader/dll_path.c
+  - Extract DLL loading → src/loader/dll_loader.c
+  - Keep import_resolve.c focused on IAT resolution only
+
+---
+
+[FINDING A3] — main() is the process orchestrator — excessive responsibility
+Severity: MEDIUM
+Files: src/main.c (lines 1–221)
+Description:
+  main() performs 10+ sequential steps: parse env, map image, init imports,
+  patch refptrs, resolve imports, setup TEB/PEB, setup stack, zero .data,
+  pre-seed BSS, build guest argv, lookup symbol, and run. Each step
+  represents a different subsystem. The function is 221 lines and contains
+  inline logic for section finding and mprotect.
+
+  While the actual heavy lifting is delegated, main() still holds the
+  knowledge of the full startup sequence. This is acceptable for a loader
+  of this size, but the numbered comments ("1.", "2.", etc.) and
+  interleaved concerns (BSS seeding mixed with stack setup) suggest
+  this would benefit from a startup_phases() function that wraps the
+  sequence.
+
+Suggested fix:
+  Wrap the 10 steps into a single init_loader() function so main()
+  becomes a 10-line entry point. This enables cleaner testing and
+  potential future restart/reload paths.
+
+---
+
+[FINDING A4] — ntdll_priv.h declares globals shared across all handler modules
+Severity: MEDIUM
+Files: src/msvcrt/ntdll_priv.h (lines 1–107)
+Description:
+  This header declares arrays (handle_table, sections, views, events,
+  mutexes, threads) and their counters as external globals. Every
+  ntdll handler file that includes this header can read/write all of
+  them. No synchronization mechanism (mutex, atomic) is used to
+  protect concurrent access. For the single-process model this is
+  acceptable, but it makes the code fragile if multi-process support
+  is ever added.
+
+Suggested fix:
+  Use accessor functions (get_handle_table(), alloc_section(), etc.)
+  with internal locks. Or at minimum, document that these are single-
+  thread globals.
+
+---
+
+[FINDING A5] — PE section table offset computation duplicated in 5 files
+Severity: MEDIUM
+Files: src/main.c:123-124, src/loader/guest_setup.c:184-189,
+       src/loader/import_resolve.c:219-222,
+       src/loader/image_mapper.c:149-152, src/pe_rip_scan.c
+Description:
+  The expression to compute section table offset from image base:
+    pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
+    nt.FileHeader.SizeOfOptionalHeader
+  appears verbatim (or nearly so) in at least 5 source files. pe_priv.h
+  provides compute_section_table_offset() but it takes (dos, nt) params
+  and works with file offsets, not image offsets. A version for in-memory
+  image access does not exist.
+
+Suggested fix:
+  Add a function to pe_priv.h:
+    static inline IMAGE_SECTION_HEADER *get_image_sections(void *image_base,
+                                                            IMAGE_NT_HEADERS64 *nt);
+  And use it everywhere instead of the inline calculation.
+
+---
+
+================================================================================
+SECTION 2: CODE SMELLS
+================================================================================
+
+[FINDING B1] — Duplication: dll_strcasecmp, dll_copy_str, dll_memset in two files
+Severity: HIGH
+Files: src/loader/import_resolve.c:36-39, src/loader/module_list.c:23-34
+Description:
+  Both import_resolve.c and module_list.c define identical (or near-identical)
+  implementations of dll_strcasecmp(), dll_copy_str(), dll_memset().
+
+  import_resolve.c also defines: dll_strlen(), dll_strncmp(), dll_strchr(),
+  dll_build_path(), dll_path_exists() — none of which are shared with
+  module_list.c.
+
+  Total ~8 hand-rolled string/memory functions duplicated across 2 files.
+
+Suggested fix:
+  Create src/loader/loader_utils.h with these functions. Include from both
+  modules. Consider using __builtin_memcpy, __builtin_strlen etc. which
+  don't access vDSO, instead of hand-rolled loops.
+
+---
+
+[FINDING B2] — Long function: find_symbol_rva_from_file()
+Severity: MEDIUM
+Files: src/msvcrt/crt_offset_discovery.c (lines 114–260, ~146 lines)
+Description:
+  This function opens a file, mmaps it, parses COFF symbols, and searches
+  for symbol names. It contains 4+ symbol matching strategies (refptr prefix,
+  exact match, substring fallback) with extensive debug logging sprinkled
+  throughout. The debug output alone is ~30 lines.
+
+Suggested fix:
+  Split into: open_and_map_symbols() + find_matching_symbol() +
+  compute_rva_from_symbol(). Move debug output behind DEBUG() macro.
+
+---
+
+[FINDING B3] — Dead/unused code: handle_syscall() in dispatcher.c
+Severity: LOW
+Files: src/syscall/dispatcher.c (lines ~200+)
+Description:
+  handle_syscall() is a legacy ucontext-based dispatcher kept "for backward
+  compatibility with existing tests." It is a complete duplicate of
+  c_dispatch_syscall() with the only difference being register source
+  (ctx->uc_mcontext.gregs vs __wine_guest_regs). This doubles maintenance
+  burden: every new syscall added must be handled in both paths.
+
+Suggested fix:
+  Extract the common switch body (already done via dispatcher_generated.c
+  inclusion) — this is already done. However the two wrapper functions
+  still have duplicated preamble (trace output, arg extraction). Consider
+  a single dispatcher_core() that takes register values as parameters.
+
+---
+
+[FINDING B4] — Large import_table[] with mixed static/dynamic entries
+Severity: LOW
+Files: src/loader/import_table.c (lines 27–128)
+Description:
+  The import_table[] array mixes three categories:
+  1. ntdll syscall handlers (resolved via thunk lookup)
+  2. kernel32 stubs (our C implementations)
+  3. msvcrt functions — half statically known, half dynamically filled
+
+  The dynamic entries (NULL address) are filled by init_msvcrt_imports()
+  at runtime. The mix of resolved and unresolved entries in one flat
+  table means binary search works for both but the intent is unclear.
+
+Suggested fix:
+  Document the three tiers clearly. Or use a struct with resolution
+  strategy field (THUNK / STUB / DYNAMIC) for clarity.
+
+---
+
+================================================================================
+SECTION 3: MAGIC NUMBERS
+================================================================================
+
+[FINDING C1] — Page size 4096/4095 hardcoded in multiple files
+Severity: MEDIUM
+Files:
+  src/main.c:69-70     (4095)
+  src/loader/guest_setup.c:181  (0xFFFFF)
+  src/loader/teb_peb.c:40,61,135,143-144  (4096, 4095)
+  src/loader/image_mapper.c:181 (4095)
+Description:
+  While PAGE_SIZE=4096 and PAGE_MASK=4095 are defined in include/common.h,
+  the literal values 4095 and 4096 appear directly in 4+ source files.
+  src/main.c uses bare 4095. src/loader/teb_peb.c uses bare 4096/4095.
+  src/loader/image_mapper.c uses bare 4095. guest_setup.c uses 0xFFFFF.
+
+  These should all use PAGE_SIZE/PAGE_MASK/PAGE_ALIGN_MASK from common.h
+  for consistency and maintainability.
+
+Suggested fix:
+  Replace all bare 4096/4095/0xFFFFF with PAGE_SIZE/PAGE_MASK.
+  Add #include "include/common.h" where missing.
+
+---
+
+[FINDING C2] — CRT BSS offset 0x30 hardcoded
+Severity: MEDIUM
+Files: src/msvcrt/crt_refptrs.c:112-114
+Description:
+  The 'initialized' flag at offset 0x30 from .bss start is hardcoded:
+    *(uint32_t *)((char *)image_base + g_crt_ctx.bss_vaddr + 0x30) = 1;
+  This is a mingw-w64-specific offset. If the CRT layout changes between
+  mingw-w64 versions, this silently does the wrong thing.
+
+Suggested fix:
+  Define as named constant: #define CRT_BSS_INITIALIZED 0x30
+  Or discover it via COFF symbol lookup for __native_startup_state.
+
+---
+
+[FINDING C3] — DLL base allocator start 0x60000000 (1.5GB)
+Severity: LOW
+Files: src/loader/import_resolve.c:27
+Description:
+  g_dll_base_next = 0x60000000 is hardcoded. The comment explains this
+  is to keep DLLs below 4GB to avoid GCC ms_abi truncation. However
+  the value itself is not defined as a constant and is not easily
+  configurable.
+
+Suggested fix:
+  Define as: #define DLL_ALLOC_BASE 0x60000000
+
+---
+
+[FINDING C4] — Windows access flags 0x80000000 / 0x40000000
+Severity: MEDIUM
+Files: src/msvcrt/ntdll_io.c:70-71
+Description:
+  GENERIC_READ (0x80000000) and GENERIC_WRITE (0x40000000) are
+  defined inline in the handler function. These are Windows API
+  constants that should be defined in a shared header.
+
+Suggested fix:
+  Add to include/nt_constants.h:
+    #define GENERIC_READ  0x80000000
+    #define GENERIC_WRITE 0x40000000
+
+---
+
+[FINDING C5] — Error codes hardcoded in kernel32_misc.c
+Severity: LOW
+Files: src/msvcrt/kernel32_misc.c:66,78,118,134,155
+Description:
+  Magic values: 87 (ERROR_INVALID_PARAMETER), 1 (ERROR_FALSE),
+  122 (ERROR_INSUFFICIENT_BUFFER) are used as bare integers.
+
+Suggested fix:
+  Define in include/nt_constants.h:
+    #define ERROR_INVALID_PARAMETER      87
+    #define ERROR_SUCCESS                0
+    #define ERROR_INSUFFICIENT_BUFFER   122
+    #define ERROR_ACCESS_DENIED          5
+
+---
+
+[FINDING C6] — Exit codes 139 (SIGSEGV) and 134 (SIGABRT) hardcoded
+Severity: LOW
+Files: src/loader/crash_handlers.c:97, src/msvcrt/crt_stdlib.c:102
+Description:
+  crash_handlers.c uses 139 for SIGSEGV exit code. crt_stdlib.c uses 134
+  for SIGABRT exit code. These are conventional (128+signal) but bare.
+
+Suggested fix:
+  Define: #define EXIT_SIGSEGV 139  #define EXIT_SIGABRT 134
+
+---
+
+[FINDING C7] — 0xC0000005 ACCESS_VIOLATION hardcoded
+Severity: LOW
+Files: src/loader/crash_handlers.c:39
+Description:
+  The SEH crash handler hardcodes 0xC0000005 as exit code. Should be
+  a named NTSTATUS constant.
+
+Suggested fix:
+  Use STATUS_ACCESS_VIOLATION from include/nt_constants.h (already defined
+  as 0xC0000005 there — just use the name).
+
+---
+
+[FINDING C8] — WINE_FILE_SIZE 48 hardcoded as struct size
+Severity: LOW
+Files: src/msvcrt/msvcrt_priv.h:52
+Description:
+  WINE_FILE_SIZE = 48 is used to define the size of wine_FILE struct.
+  This is derived from the MSVCRT FILE layout. If the struct definition
+  changes, the constant must be updated manually.
+
+Suggested fix:
+  Use sizeof(wine_FILE) instead of WINE_FILE_SIZE where possible, or
+  add a compile-time assert: _Static_assert(sizeof(wine_FILE) == 48, ...);
+
+---
+
+================================================================================
+SECTION 4: NON-FUTURE-PROOF IMPLEMENTATIONS
+================================================================================
+
+[FINDING D1] — x86_64-only assumption (no architecture abstraction)
+Severity: HIGH
+Files: include/nt_constants.h (all TEB/PEB offsets),
+       src/syscall/syscalls_inline.h (inline asm syscalls),
+       src/syscall/thunk_gen.c (x86 opcodes),
+       src/loader/gs_base.c (arch-specific GS base),
+       include/pe.h (IMAGE_FILE_MACHINE_AMD64 check)
+Description:
+  The entire codebase assumes x86_64:
+  - TEB/PEB offsets are x86_64-specific (different on ARM64)
+  - Inline syscall macros use x86 syscall instruction with specific regs
+  - Thunk generation writes x86 machine code
+  - GS segment usage for TEB is x86-specific (ARM64 uses TCB)
+  - PE validation checks Machine == AMD64
+
+  This means the code will never run on ARM64 Windows PE or IA-64.
+
+Suggested fix:
+  For a minimal loader this is reasonable, but add a compile-time
+  #error if not x86_64 to make the limitation explicit. Consider
+  architecture abstraction layer for TEB offsets and syscall numbers.
+
+---
+
+[FINDING D2] — Syscall numbers tied to specific Windows versions
+Severity: HIGH
+Files: include/nt_constants.h (lines 1–46),
+       src/loader/ordinal_table.c (lines 13–176)
+Description:
+  NT syscall numbers (e.g., NtAllocateVirtualMemory=0x18, NtClose=0x0F)
+  are specific to a particular Windows version. The comments say
+  "Windows 10/11 x64" but different Windows versions (8.1, Server 2012,
+  11 24H2) have different syscall numbers. The ordinal table is also
+  version-specific.
+
+  If a PE compiled against a different Windows version is loaded,
+  syscall dispatch will silently invoke the wrong handler.
+
+Suggested fix:
+  - Make syscall numbers configurable (e.g., from a .def file that can
+    be regenerated per Windows version)
+  - The current approach (nt_syscalls.def + gen_dispatcher.py) is
+    partially correct but the file is undocumented
+  - Add version detection and warning in import_resolve.c
+
+---
+
+[FINDING D3] — Page size hardcoded to 4096, not queried from OS
+Severity: MEDIUM
+Files: include/common.h:9, src/syscall/abi_wrappers.h:6
+Description:
+  PAGE_SIZE is hardcoded to 4096. While this is correct for all modern
+  x86_64 Linux kernels, it's not portable. If this code were to run on
+  a system with 64K pages (e.g., some ARM servers), it would fail.
+
+Suggested fix:
+  Query page size at startup via sysconf(_SC_PAGESIZE) or getpagesize(),
+  and use the runtime value. For the syscall-safe path, accept the
+  4096 assumption but document it clearly.
+
+---
+
+[FINDING D4] — CRT offset discovery tied to specific mingw-w64 layout
+Severity: MEDIUM
+Files: src/msvcrt/crt_offset_discovery.c (full file)
+Description:
+  The CRT offset discovery mechanism assumes a specific mingw-w64 CRT
+  layout. It looks for symbols like _argc, __argc, _environ, __envp
+  in .bss at specific offsets. The text-scanning fallback (mov rip+disp
+  pattern matching) is also specific to how mingw-w64 generates .refptr
+  references.
+
+  This would not work with MSVC-compiled PE files, which use a
+  completely different CRT layout and initialization sequence.
+
+Suggested fix:
+  Document the mingw-w64-only limitation. Consider making the offset
+  generation script (gen_crt_offsets.sh) part of the build process
+  so it adapts to the local toolchain.
+
+---
+
+[FINDING D5] — No PE32 (32-bit) support
+Severity: MEDIUM
+Files: src/pe_headers.c:62-65
+Description:
+  parse_nt_headers() only accepts IMAGE_NT_OPTIONAL_HDR64_MAGIC (0x20B).
+  PE32 binaries (0x10B magic) are rejected. A 32-bit Windows executable
+  will fail to load with "Invalid NT headers".
+
+  This is a reasonable limitation for a minimal loader, but it should
+  be documented. Consider emitting a clearer error message.
+
+Suggested fix:
+  Add a check in parse_nt_headers that returns a distinct error code for
+  PE32 vs invalid headers, so the error message can say "PE32 not
+  supported (only PE32+)" instead of "Invalid NT headers".
+
+---
+
+================================================================================
+SECTION 5: BAD DESIGNS
+================================================================================
+
+[FINDING E1] — Thread-unsafe global state
+Severity: MEDIUM
+Files: src/loader/import_resolve.c (g_dll_base_next),
+       src/msvcrt/ntdll_priv.h (handle_table, sections, events, mutexes, threads),
+       src/msvcrt/crt_globals.c (g_crt_ctx, __imp___initenv_stub),
+       src/msvcrt/kernel32_priv.h (g_last_error)
+Description:
+  Multiple globals are written without synchronization:
+  - g_dll_base_next is modified in load_dll() — if two threads load DLLs
+    simultaneously, they'll allocate overlapping addresses
+  - g_crt_ctx is written during patch_crt_refptrs() and read in
+    __getmainargs() — data race if another thread accesses it
+  - g_last_error is __thread in kernel32_priv.h (good), but the
+    handle_table, sections, events, mutexes are all process-global
+
+Suggested fix:
+  For single-process model: document the limitation.
+  For future multi-process support: add spinlocks or use atomic operations
+  for g_dll_base_next. Protect handle_table with a mutex.
+
+---
+
+[FINDING E2] — Silent failures on critical resource allocation
+Severity: MEDIUM
+Files: src/loader/crash_handlers.c:108-114
+Description:
+  setup_signal_handlers() silently continues if mmap for the signal
+  stack fails:
+    if (sigstack_mem == MAP_FAILED) {
+        /* Fallback: handlers will run on the current stack */
+    }
+  This means crash handlers may run on a potentially-corrupted guest
+  stack, defeating the entire purpose of the alternate signal stack.
+
+Suggested fix:
+  At minimum, emit a warning via direct syscall. Consider making this
+  a hard error if the alternate stack cannot be allocated.
+
+---
+
+[FINDING E3] — refptr_patch_arg is a single global struct
+Severity: LOW
+Files: src/msvcrt/crt_refptrs.c:42-46
+Description:
+  refptr_patch_arg is a static global struct used to pass data to
+  the with_mprotect_rw callback. This means apply_refptr_patch() is
+  not reentrant — if two threads call it simultaneously, the second
+  call will overwrite the first's data.
+
+Suggested fix:
+  For single-threaded use this is acceptable, but consider passing a
+  per-call allocation instead. The callback already takes void *arg.
+
+---
+
+[FINDING E4] — find_dll_path uses environ directly (not syscall-safe)
+Severity: LOW
+Files: src/loader/import_resolve.c:455-468
+Description:
+  find_dll_path() iterates over environ to find WINE_DLL_PATH. This
+  is safe before GS switch (when glibc is still functional), but if
+  called after GS→TEB switch (from a WINE_STUB context), environ may
+  not be valid.
+
+  The function is documented as "syscall-safe" but environ access is
+  not async-signal-safe or GS-switch-safe.
+
+Suggested fix:
+  Accept the environ pointer as a parameter, or cache WINE_DLL_PATH
+  before the GS switch.
+
+---
+
+================================================================================
+================================================================================
+SUMMARY
+================================================================================
+
+Total findings: 26
+
+  HIGH   : 5  (A1, A2, B1, D1, D2)
+  MEDIUM : 11 (A3, A4, A5, B2, C1, C2, D3, D4, E1, E2, E3)
+  LOW    : 9  (B3, B4, C3, C4, C5, C6, C7, C8, E4)
+
+By category:
+  Architectural issues : 5  (A1-A5)
+  Code smells          : 4  (B1-B4)
+  Magic numbers        : 8  (C1-C8)
+  Non-future-proof     : 5  (D1-D5)
+  Bad designs          : 4  (E1-E4)
+
+Recommended priority for fixes:
+  1. B1  — Deduplicate dll_* string helpers (high impact, low risk)
+  2. C1  — Replace bare 4096/4095 with PAGE_SIZE/PAGE_MASK
+  3. A2  — Split import_resolve.c into 3 files
+  4. A5  — Centralize section table offset computation
+  5. C4  — Move GENERIC_READ/WRITE to nt_constants.h
+
+================================================================================
+END OF REPORT
+================================================================================
