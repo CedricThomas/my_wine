@@ -17,6 +17,7 @@
 #include <fcntl.h>
 
 #include "include/pe.h"
+#include "include/nt_constants.h"
 #include "include/debug.h"
 #include "loader_priv.h"
 
@@ -135,6 +136,14 @@ void *map_image(const char *path,
                               nt.FileHeader.SizeOfOptionalHeader;
             sections = (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
         }
+    }
+
+    /* Apply base relocations (needed when actual base != preferred ImageBase) */
+    if (apply_relocations(base, &nt) != 0) {
+        DEBUG("Failed to apply relocations");
+        munmap(file_base, file_size);
+        close(fd);
+        return NULL;
     }
 
     /* 6. Set per-section protections */
