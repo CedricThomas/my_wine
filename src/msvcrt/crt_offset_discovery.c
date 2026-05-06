@@ -297,11 +297,15 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         uint64_t rva = compute_rva_from_symbol(&symbols[i], nt, sections);
 
         /* Prefer section-bound symbols. If we already have one, skip.
-         * For absolute symbols (sec=0), remember as fallback only. */
-        if (symbols[i].SectionNumber > 0 && !has_section_match) {
+         * For absolute symbols (sec=0), remember as fallback only.
+         * Guard with rva != 0: compute_rva_from_symbol returns 0 for
+         * invalid section numbers, and we must not let those overwrite
+         * or block valid matches (preserves original behavior where
+         * section_num bounds were checked inline). */
+        if (rva != 0 && symbols[i].SectionNumber > 0 && !has_section_match) {
             best_rva = rva;
             has_section_match = 1;
-        } else if (symbols[i].SectionNumber == 0 && !has_section_match) {
+        } else if (rva != 0 && symbols[i].SectionNumber == 0 && !has_section_match) {
             best_rva = rva;
         }
     }
