@@ -386,10 +386,7 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
             const char *segments[DLL_PATH_MAX_SEGMENTS];
             int seg_count = 0;
 
-            size_t env_len = dll_strlen(g_wine_dll_path);
-            if (env_len >= sizeof(path_buf)) env_len = sizeof(path_buf) - 1;
-            dll_copy_str(path_buf, g_wine_dll_path, env_len);
-            path_buf[env_len] = '\0';
+            dll_copy_str(path_buf, g_wine_dll_path, sizeof(path_buf));
 
             char *p = path_buf;
             while (seg_count < DLL_PATH_MAX_SEGMENTS && p != NULL) {
