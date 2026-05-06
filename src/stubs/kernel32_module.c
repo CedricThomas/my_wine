@@ -17,37 +17,26 @@ static char g_dll_path[512];
 WINE_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
-    DEBUG("LoadLibraryA: entry, name=%s", lpLibFileName);
-    
     if (lpLibFileName == NULL) {
-        DEBUG("LoadLibraryA: returning NULL (name is NULL)");
         return FORCE_PTR_RETURN(NULL);
     }
 
     loaded_module_t *mod = find_module_by_name_safe(lpLibFileName);
     if (mod != NULL) {
         mod->load_count++;
-        DEBUG("LoadLibraryA: cached module, base=%p", mod->base);
         return FORCE_PTR_RETURN(mod->base);
     }
 
     if (!find_dll_path(lpLibFileName, g_dll_path, sizeof(g_dll_path))) {
-        DEBUG("LoadLibraryA: find_dll_path failed for '%s'", lpLibFileName);
         return FORCE_PTR_RETURN(NULL);
     }
-    DEBUG("LoadLibraryA: found path '%s'", g_dll_path);
 
     mod = load_dll(g_dll_path, 0);
-    DEBUG("LoadLibraryA: load_dll returned mod=%p", mod);
     if (mod == NULL) {
-        DEBUG("LoadLibraryA: returning NULL (load_dll failed)");
         return FORCE_PTR_RETURN(NULL);
     }
-    DEBUG("LoadLibraryA: mod->base=%p", mod->base);
-    
-    void *result = mod->base;
-    DEBUG("LoadLibraryA: returning result=%p", result);
-    return FORCE_PTR_RETURN(result);
+
+    return FORCE_PTR_RETURN(mod->base);
 }
 
 void *_LoadLibraryA(const char *lpLibFileName)
