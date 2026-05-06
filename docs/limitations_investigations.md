@@ -85,13 +85,18 @@ __lconv_init, __setusermatherr.
 By dependency graph (leaf nodes first; completed items marked ✅):
 
 ```
-Phase 1:  §6 (P0-C/D: NtCreateFile, NtProtectVirtualMemory, NtTerminateThread, NtWaitForMultipleObjects) → §8 (full file I/O)
-Phase 2:  §1
-Phase 3:  §4 (real CriticalSection) ✅ + §7 (heap) ✅
-Phase 4 (need §1): §2 (dynamic loading) → §5 (toolchain)
-Phase 5 (need §3, §4, §6): §9 (per-thread TEB)
-Phase 6:  §3 (TLS)
+Phase 1:  §1 (Relocations, Medium) → §2 (Dynamic Loading, High)
+Phase 2:  §6 P0-C/D (NtCreateFile, NtProtectVirtualMemory, NtTerminateThread, NtWaitForMultipleObjects)
+Phase 3:  §8 (full file I/O, needs §6 P0-C)
+Phase 4:  §3 (TLS, Medium) + §9 (per-thread TEB, needs §3 + §6 P0-D)
+Phase 5:  §5 (MSVC toolchain, needs §2 + §7 ✅)
 ```
+
+**Most impactful next target: §1 (Relocations) → §2 (Dynamic Loading).**
+Dynamic loading is the single biggest feature gap — without it, no DLL
+loading, no real Windows apps that depend on DLLs, and MSVC support is
+blocked. Relocations (Medium complexity, no prerequisites) are the key
+unlock for Dynamic Loading.
 
 ---
 
@@ -488,8 +493,13 @@ Heap (§7) — `malloc`/`calloc`/`free` are imported from `ucrtbase.dll`.
 
 ### Current State
 
-**25 NT syscalls** are implemented. Unsupported syscalls cause
-`INLINE_SYSCALL_KILL(getpid(), SIGSEGV)` (the default case in `dispatcher.c`).
+**25 NT syscalls** are implemented. **Dispatcher auto-generation** is
+**✅ implemented** (`include/nt_syscalls.def` + `scripts/gen_dispatcher.py`
+→ `src/syscall/dispatcher_generated.c`). Adding a new syscall = **1 line in .def + 1 handler function**.
+
+**Default handler: ✅ changed** from `INLINE_SYSCALL_KILL(getpid(), SIGSEGV)`
+to returning `STATUS_NOT_IMPLEMENTED` (`0xC00000B7`). Many Windows apps
+check NTSTATUS and fall back gracefully.
 
 All 25 are listed in the [Current Capabilities Summary](#current-capabilities-summary).
 
@@ -548,33 +558,29 @@ the Windows x86_64 syscall table.
 
 ### Auto-Generation
 
-Current: **four manual edits across three files** per syscall (dispatcher.c
-case, handler in ntdll_*.c, thunk in thunk_gen.c, header declaration in
-ntdll.h).
-
-Recommended: `include/nt_syscalls.def` + Python script generates
-`nt_constants_gen.h`, `dispatcher_gen.c`, `thunk_list_gen.c`.
-
-**ptr_flags encoding:** Bit-field where each bit marks an output pointer arg.
+**✅ Implemented.** `include/nt_syscalls.def` (declarative format with
+`handler:`, `args:`, `call:` directives) + `scripts/gen_dispatcher.py`
+generates `src/syscall/dispatcher_generated.c` with both `c_dispatcher`
+and legacy `handle_syscall` switch bodies. Adding a new syscall = **1 line
+in .def + 1 handler function**. Zero Python edits.
 
 ### Default Handler
 
-Change `default` case from `INLINE_SYSCALL_KILL(getpid(), SIGSEGV)` to return
-`STATUS_NOT_IMPLEMENTED`. Many Windows apps check NTSTATUS and fall back
-gracefully.
+**✅ Implemented.** Changed from `INLINE_SYSCALL_KILL` to returning
+`STATUS_NOT_IMPLEMENTED` (`0xC00000B7` in `include/ntdll.h`).
 
 ### NT Status Codes
 
-Add: `STATUS_NOT_IMPLEMENTED` (0xC00000B7), `STATUS_FILE_NOT_FOUND`,
-`STATUS_END_OF_FILE`, `STATUS_NO_MORE_ENTRIES`, `STATUS_PENDING`, etc.
+**✅ `STATUS_NOT_IMPLEMENTED`** added. More codes may be needed for file
+I/O (`STATUS_FILE_NOT_FOUND`, `STATUS_END_OF_FILE`, etc.).
 
 ### Approach
 
-1. **Safety net** — `STATUS_NOT_IMPLEMENTED`, add NTSTATUS codes
+1. **Safety net** — ✅ Done: `STATUS_NOT_IMPLEMENTED` + NTSTATUS code
 2. **P0-A quick wins** — ✅ Done: 4 trivial syscalls
 3. **P0-B sync infra** — ✅ Done: enables real CriticalSection (§4)
-4. **Auto-generation** — `.def` file + Python generator
-5. **P0-C/D** — follow as needed
+4. **Auto-generation** — ✅ Done: .def file + Python generator
+5. **P0-C/D** — Follow as needed
 
 ### Complexity: High
 
@@ -816,11 +822,12 @@ tail; guest `__try/__except` prepends frames on stack. Requires proper
 
 ---
 
-*Updated: 2026-05-05.
+*Updated: 2026-05-05 (dispatcher auto-gen + default handler completed).
 Source files: `src/stubs/ntdll_io.c`, `src/stubs/ntdll_memory.c`,
 `src/stubs/ntdll_objects.c`, `src/stubs/ntdll_process.c`,
 `src/stubs/ntdll_handle.c`, `src/stubs/kernel32_*.c`,
 `src/stubs/crt_*.c`, `src/syscall/dispatcher.c`,
-`src/syscall/thunk_gen.c`, `src/loader/teb_peb.c`,
-`src/loader/guest_setup.c`, `include/nt_constants.h`,
-`include/ntdll.h`, `include/kernel32.h`.*
+`src/syscall/dispatcher_generated.c`, `src/syscall/thunk_gen.c`,
+`src/loader/teb_peb.c`, `src/loader/guest_setup.c`,
+`include/nt_constants.h`, `include/ntdll.h`, `include/kernel32.h`,
+`include/nt_syscalls.def`, `scripts/gen_dispatcher.py`.*
