@@ -22,6 +22,7 @@
 #include "module_list.h"
 #include "peb_ldr.h"
 #include "../syscall/syscalls_inline.h"
+#include "loader_utils.h"
 
 /* For extern environ — avoid getenv() in syscall-safe path */
 extern char **environ;
@@ -30,23 +31,6 @@ extern char **environ;
 
 #define DLL_ALLOC_BASE 0x60000000  /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
 static uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
-
-/* ── Hand-rolled helpers (no glibc) ─────────────────────────────── */
-
-static int dll_strcasecmp(const char *a, const char *b)
-{
-    while (*a && *b) {
-        unsigned char ca = *a, cb = *b;
-        if (ca >= 'A' && ca <= 'Z') ca += 32;
-        if (cb >= 'A' && cb <= 'Z') cb += 32;
-        if (ca != cb) return (int)ca - (int)cb;
-        a++; b++;
-    }
-    unsigned char ca = *a, cb = *b;
-    if (ca >= 'A' && ca <= 'Z') ca += 32;
-    if (cb >= 'A' && cb <= 'Z') cb += 32;
-    return (int)ca - (int)cb;
-}
 
 /* Case-insensitive string equality */
 static int strci_equal(const char *a, const char *b)
@@ -375,68 +359,6 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
     return 0;
 }
 
-/* ───────────────────────────────────────────────────────────── */
-/* Syscall-safe helpers for find_dll_path                      */
-/* No glibc — suitable for WINE_STUB context without GS switch  */
-/* ───────────────────────────────────────────────────────────── */
-
-static void dll_copy_str(char *dst, const char *src, size_t len)
-{
-    size_t i;
-    for (i = 0; i < len; i++)
-        dst[i] = src[i];
-}
-
-static size_t dll_strlen(const char *s)
-{
-    size_t len = 0;
-    while (s[len]) len++;
-    return len;
-}
-
-static int dll_strncmp(const char *a, const char *b, size_t n)
-{
-    size_t i;
-    for (i = 0; i < n; i++) {
-        if (a[i] != b[i]) return (unsigned char)a[i] - (unsigned char)b[i];
-        if (a[i] == '\0') return 0;
-    }
-    return 0;
-}
-
-static const char *dll_strchr(const char *s, int c)
-{
-    while (*s) {
-        if (*s == (char)c) return s;
-        s++;
-    }
-    return NULL;
-}
-
-static int dll_build_path(char *dst, size_t dst_size,
-                          const char *dir, const char *name)
-{
-    size_t d_len = dll_strlen(dir);
-    size_t n_len = dll_strlen(name);
-    if (d_len + 1 + n_len + 1 > dst_size)
-        return -1;
-    dll_copy_str(dst, dir, d_len);
-    dst[d_len] = '/';
-    dll_copy_str(dst + d_len + 1, name, n_len);
-    dst[d_len + 1 + n_len] = '\0';
-    return 0;
-}
-
-static int dll_path_exists(const char *p)
-{
-    long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, p, O_RDONLY);
-    if (fd >= 0) {
-        INLINE_SYSCALL_CLOSE(fd);
-        return 1;
-    }
-    return 0;
-}
-
 int find_dll_path(const char *dll_name, char *path, size_t path_size)
 {
     /* --- Try current directory --- */
@@ -474,7 +396,7 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
 
             size_t env_len = dll_strlen(env_val);
             if (env_len >= sizeof(path_buf)) env_len = sizeof(path_buf) - 1;
-            dll_copy_str(path_buf, env_val, env_len);
+            __builtin_memcpy(path_buf, env_val, env_len);
             path_buf[env_len] = '\0';
 
             char *p = path_buf;
