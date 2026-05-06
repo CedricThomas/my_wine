@@ -43,4 +43,8 @@ else
 	timeout 5 ./"$BUILDDIR"/test_relocations
 fi
 
+# test_module_registry
+echo "=== Running test_module_registry ==="
+timeout 5 ./"$BUILDDIR"/test_module_registry
+
 echo "=== Tests completed ==="

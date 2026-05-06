@@ -61,11 +61,11 @@ static wchar_t *ascii_to_utf16(const char *src)
     return buf;
 }
 
-/* Create a UNICODE_STRING from an ASCII source.
+/* Create a PEB_UNICODE_STRING from an ASCII source.
  * Buffers are malloc'd and must be freed by the caller. */
-static UNICODE_STRING create_unicode_string(const char *src)
+static PEB_UNICODE_STRING create_unicode_string(const char *src)
 {
-    UNICODE_STRING us;
+    PEB_UNICODE_STRING us;
     size_t len = strlen(src);
     us.Buffer = ascii_to_utf16(src);
     if (!us.Buffer) {
