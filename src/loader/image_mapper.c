@@ -187,3 +187,8 @@ void *map_image(const char *path,
 }
 
 const char *get_pe_path(void) { return g_pe_path; }
+void set_pe_path(const char *path)
+{
+    strncpy(g_pe_path, path, sizeof(g_pe_path));
+    g_pe_path[sizeof(g_pe_path) - 1] = '\0';
+}

@@ -410,9 +410,20 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
  */
 loaded_module_t *load_dll(const char *path, int depth)
 {
+    /* Save main PE globals — map_image overwrites them with the DLL's values */
+    void *saved_image_base = g_image_base;
+    char saved_pe_path[512];
+    strncpy(saved_pe_path, get_pe_path(), sizeof(saved_pe_path) - 1);
+    saved_pe_path[sizeof(saved_pe_path) - 1] = '\0';
+
     /* Map the DLL */
     IMAGE_NT_HEADERS64 nt_copy;
     void *base = map_image(path, NULL, &nt_copy, NULL);
+
+    /* Restore main PE globals */
+    g_image_base = saved_image_base;
+    set_pe_path(saved_pe_path);
+
     if (base == NULL) {
         fprintf(stderr, "  ERROR: map_image failed for '%s'\n", path);
         return NULL;
