@@ -101,7 +101,8 @@ TEST ?=
 
 tests: my_wine $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
-		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry
+		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
+		$(BUILDDIR)/test_export_parsing
 
 run-test: tests
 	@echo "==== Running tests ===="
@@ -119,6 +120,10 @@ TEST_relocations_OBJS = $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o \
 TEST_module_registry_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o \
 	$(BUILDDIR)/peb_ldr.o $(BUILDDIR)/module_list.o $(BUILDDIR)/debug.o
 
+# Export parsing test
+TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o \
+	$(BUILDDIR)/debug.o $(PE_OBJS)
+
 define TEST_RULE
 $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
 	@echo "  LD $$@"
@@ -131,6 +136,7 @@ $(eval $(call TEST_RULE,teb_peb,$(TEST_teb_peb_OBJS)))
 $(eval $(call TEST_RULE,syscall_dispatch,$(TEST_syscall_dispatch_OBJS)))
 $(eval $(call TEST_RULE,relocations,$(TEST_relocations_OBJS)))
 $(eval $(call TEST_RULE,module_registry,$(TEST_module_registry_OBJS)))
+$(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 
 # ── Auto-generated header dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))

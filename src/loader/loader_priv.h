@@ -137,6 +137,9 @@ void cleanup_unix_stack(void);
 /* ── module_list.c ─────────────────────────────────────────── */
 #include "module_list.h"  /* for loaded_module_t type */
 
+/* ── export_table.c ────────────────────────────────────────── */
+#include "export_table.h"  /* for EXPORT_CACHE type */
+
 /* ── peb_ldr.c ─────────────────────────────────────────────── */
 /* Full definitions in peb_ldr.h */
 #include "peb_ldr.h"
