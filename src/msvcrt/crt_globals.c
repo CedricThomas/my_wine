@@ -8,6 +8,13 @@
 
 /* ── Global variables ──────────────────────────────────────── */
 
+/*
+ * SINGLE-THREAD ONLY: these CRT globals are not safe for concurrent access.
+ * g_crt_ctx is written during patch_crt_refptrs() and read in __getmainargs().
+ * No synchronization is applied. If multi-threaded support is added, protect
+ * with a mutex or use atomic operations for read/write access.
+ */
+
 int __msvcrt_app_type = 0;
 int _commode = 0;
 int _fmode = 0;
