@@ -47,4 +47,8 @@ fi
 echo "=== Running test_module_registry ==="
 timeout 5 ./"$BUILDDIR"/test_module_registry
 
+# test_export_parsing
+echo "=== Running test_export_parsing ==="
+timeout 5 ./"$BUILDDIR"/test_export_parsing
+
 echo "=== Tests completed ==="

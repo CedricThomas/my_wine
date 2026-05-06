@@ -66,7 +66,8 @@ $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
 all: my_wine samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
-	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry
+	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
+	$(BUILDDIR)/test_export_parsing
 
 my_wine: $(OBJS)
 	@echo "==== Link my_wine ===="
