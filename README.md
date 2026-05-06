@@ -251,24 +251,44 @@ architectural walkthrough.
 
 ## Known Limitations
 
-- **Single-thread SEH** — the Structured Exception Handling chain is
-  set up globally; there is no per-thread cleanup or walk support.
-- **No relocation support** — the PE must be loadable at its preferred
-  image base. If the base is unavailable, a fallback `MAP_STACK` mapping
-  is attempted, but relocations are never applied.
-- **No dynamic loading** — `LoadLibraryA` is stubbed (returns `NULL`).
-  Only the DLLs referenced in the static import table are resolved at
-  load time.
-- **No TLS support** — thread-local storage is not implemented;
-  `TlsGetValue` returns `NULL`. `__dyn_tls_init_callback` is stubbed.
-- **Stubbed synchronization primitives** — `InitializeCriticalSection`,
-  `EnterCriticalSection`, `LeaveCriticalSection`, and
-  `DeleteCriticalSection` are no-op or single-thread stubs. They do
-  not provide real mutual exclusion.
-- **Only works with mingw-w64 compiled executables** — the loader
-  assumes the specific CRT layout and import patterns produced by
-  mingw-w64 with GCC. MSVC-compiled binaries or other toolchains may
-  not work.
+- **Shared-TEB threading model** — all threads share the same TEB and GS
+  base. No per-thread SEH, no per-thread TLS, no `NtTerminateThread`.
+  `NtGetContextThread`/`NtSetContextThread` are stubs.
+- **No TLS support** — `TlsGetValue` returns `NULL`;
+  `__declspec(thread)` is not supported.
+- **No `NtCreateFile`** — only `NtOpenFile` is implemented.
+  `CreateFileA`/`CreateFileW` are not registered.
+- **No `NtTerminateThread`** — threads exit via `INLINE_SYSCALL_EXIT(0)`
+  which kills the entire process.
+- **No `NtProtectVirtualMemory`** — `VirtualProtect` is a kernel32 stub
+  using `mprotect`, but the NT syscall is unregistered.
+- **No `NtWaitForMultipleObjects`** — only `NtWaitForSingleObject` is
+  implemented.
+- **No `NtQueryAttributesFile`** — no file attribute queries.
+- **No Unicode conversion** — `MultiByteToWideChar`/`WideCharToMultiByte`
+  return `0`. `NtOpenFile` handles ASCII only.
+- **Missing kernel32 stubs** — `CreateFileA/W`, `CloseHandle`,
+  `GetTickCount`, `GetModuleFileNameA/W`, `GetFileAttributesA/W`,
+  `GetStartupInfoW`, `GetModuleHandleW`, `SetUnhandledExceptionFilter`
+  are not registered.
+- **Only mingw-w64 executables** — the loader assumes the specific CRT
+  layout and import patterns produced by mingw-w64 with GCC.
+
+### Capabilities
+
+PE loading (preferred base + MAP_STACK fallback), base relocations (DIR64),
+import resolution (Pass 1 IAT + Pass 2 thunk scanning), dynamic loading
+(`LoadLibraryA`/`FreeLibraryA`), export table parsing + lookup,
+module registry + PEB LDR, TEB/PEB + GS base, heap management (musl malloc
+backend with `HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap`),
+synchronization (CRITICAL_SECTION, Events, Mutexes), thread creation
+(`NtCreateThreadEx` via `clone()`), 25 NT syscall handlers (auto-generated
+from `nt_syscalls.def`), file I/O (`NtOpenFile`, `NtReadFile`, `NtWriteFile`),
+virtual memory (`NtAllocate/FreeVirtualMemory`, `NtCreateSection`,
+`NtMapViewOfSection`), time (`NtQuerySystemTime`,
+`NtQueryPerformanceCounter/Frequency`, `NtDelayExecution`), CRT startup
+(`__getmainargs`, `_initterm`, `__iob_func`, `__acrt_iob_func`),
+ordinal imports (ntdll/kernel32/msvcrt), SEH + POSIX signal crash handlers.
 
 ---
 

@@ -353,19 +353,45 @@ is used for all functions called from guest PE code.
 
 ## 5. Limitations
 
-| Limitation | Rationale |
+### What my_wine supports
+
+| Feature | Status | Files |
+|---|---|---|
+| PE loading (preferred base + MAP_STACK fallback) | ✅ | `image_mapper.c` |
+| Base relocations (DIR64) | ✅ | `relocations.c` |
+| Import resolution (Pass 1 IAT + Pass 2 thunk scanning) | ✅ | `import_resolve.c` |
+| Dynamic loading (`LoadLibraryA`/`FreeLibraryA`) | ✅ | `kernel32_module.c`, `import_resolve.c` |
+| Export table parsing + lookup (name & ordinal) | ✅ | `export_table.c` |
+| Module registry + PEB LDR (3 doubly-linked lists) | ✅ | `module_list.c`, `peb_ldr.c` |
+| TEB / PEB + GS base setup | ✅ | `teb_peb.c`, `gs_base.c` |
+| Heap management (`HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap`) | ✅ | `wine_heap.c` (musl malloc backend) |
+| Synchronization (CRITICAL_SECTION, Events, Mutexes) | ✅ | `kernel32_sync.c`, `ntdll_synchronization.c` |
+| Thread creation (`NtCreateThreadEx` via `clone()`) | ✅ | `ntdll_objects.c` |
+| 25 NT syscall handlers | ✅ | `nt_syscalls.def` → `dispatcher_generated.c` |
+| File I/O (`NtOpenFile`, `NtReadFile`, `NtWriteFile`) | ✅ | `ntdll_io.c` |
+| Virtual memory (`NtAllocate/FreeVirtualMemory`, `NtCreateSection`, `NtMapViewOfSection`) | ✅ | `ntdll_memory.c` |
+| Time (`NtQuerySystemTime`, `NtQueryPerformanceCounter/Frequency`, `NtDelayExecution`) | ✅ | `ntdll_time.c` |
+| CRT startup (`__getmainargs`, `_initterm`, `__iob_func`, `__acrt_iob_func`) | ✅ | `crt_startup.c`, `crt_stdio.c` |
+| Ordinal imports (ntdll/kernel32/msvcrt) | ✅ | `ordinal_table.c` |
+| SEH + POSIX signal crash handlers | ✅ | `crash_handlers.c` |
+| Dispatcher auto-generation (`.def` + Python generator) | ✅ | `nt_syscalls.def`, `gen_dispatcher.py` |
+
+### What is not supported
+
+| Limitation | Impact |
 |---|---|
-| **Guest crashes kill the loader** | The single-process model means a guest SIGSEGV terminates the entire process. There is no parent to collect diagnostics. This is the accepted trade-off for simplicity and a closer match to Wine's approach. |
-| **No nested syscall dispatch** | When our stubs call Linux syscalls (e.g., `write(2)` from `handler_NtWriteFile`), they go directly to the kernel, not through the dispatcher. Nested NT syscall dispatch is not supported. |
-| **No relocation support** | We don't implement relocation processing. A `MAP_STACK` fallback exists but relocations are never applied. |
-| **No dynamic loading** | `LoadLibraryA` returns `NULL`. Runtime DLL loading would require a full PE loading path at runtime. |
-| **No TLS support** | `TlsGetValue` returns `NULL`; `__dyn_tls_init_callback` is stubbed. Per-thread slot management and callback invocation add complexity for minimal gain in single-threaded targets. |
-| **Stubbed synchronization** | CriticalSection ops are no-ops. Full sync support adds significant complexity for minimal gain in single-threaded targets. |
-| **Only mingw-w64 executables** | We assume mingw-w64 CRT layout and import patterns. MSVC binaries have different CRT structures and import conventions. |
-| **Limited syscall handlers** | Only NT syscalls we explicitly implement work. Unsupported syscalls cause `STATUS_NOT_IMPLEMENTED` in the dispatcher. |
-| **No heap management** | No `HeapAlloc`/`HeapFree` — only limited virtual memory via `mmap`. A full Windows-compatible allocator is out of scope. |
-| **No filesystem I/O** | Only console I/O via `NtWriteFile`/`NtReadFile`. File I/O requires Windows-to-Linux path mapping and Windows file semantics. |
-| **Single-thread SEH** | The SEH chain is global; no per-thread cleanup. Per-thread SEH requires thread-aware exception chain management. |
+| **Guest crashes kill the loader** | Single-process model: SIGSEGV terminates everything. No parent to collect diagnostics. |
+| **No nested syscall dispatch** | Stubs call Linux syscalls directly. Cannot dispatch NT syscall from within a stub. |
+| **No TLS** | `TlsGetValue` returns `NULL`; `__declspec(thread)` is not supported. |
+| **No `NtCreateFile`** | Only `NtOpenFile` is implemented. `CreateFileA`/`CreateFileW` are not in the import table. |
+| **No `NtProtectVirtualMemory`** | `VirtualProtect` is a kernel32 stub using `mprotect`, but the NT syscall is unregistered. |
+| **No `NtTerminateThread`** | Threads exit via `INLINE_SYSCALL_EXIT(0)` which kills the entire process. |
+| **No `NtWaitForMultipleObjects`** | Only `NtWaitForSingleObject` is implemented. |
+| **No `NtQueryAttributesFile`** | No `stat()`-equivalent for file attribute queries. |
+| **Shared-TEB threading model** | All threads share the same TEB and GS base. No per-thread SEH, no per-thread TLS. `NtGetContextThread`/`NtSetContextThread` are stubs. |
+| **No Unicode conversion** | `MultiByteToWideChar`/`WideCharToMultiByte` return `0`. `NtOpenFile` only handles ASCII. |
+| **Missing kernel32 stubs** | `CreateFileA/W`, `CloseHandle`, `GetTickCount`, `GetModuleFileNameA/W`, `GetFileAttributesA/W`, `GetStartupInfoW`, `GetModuleHandleW`, `SetUnhandledExceptionFilter` are not registered. |
+| **Only mingw-w64 executables** | CRT layout and import patterns are specific to mingw-w64 + GCC. MSVC binaries are not supported. |
 
 ---
 

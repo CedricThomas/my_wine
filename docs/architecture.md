@@ -82,9 +82,14 @@ Deep-dive into how my_wine loads and runs a PE binary on Linux.
 6. **Copy headers** — the DOS header, PE signature, and section table
    are copied into the image. Section pointers are re-pointed into the
    live image.
-7. **Set per-section protections** — `mprotect` each section to match
+7. **Apply base relocations** — `apply_relocations()` walks the
+   `.reloc` directory and patches `DIR64` entries (add delta to
+   64-bit pointers) when actual base ≠ preferred `ImageBase`. No-Op
+   if loaded at preferred base. Fails if `RELOCS_STRIPPED` and
+   base differs.
+8. **Set per-section protections** — `mprotect` each section to match
    its `IMAGE_SCN_MEM_READ`/`WRITE`/`EXECUTE` characteristics.
-8. **Unmap file** — the original file mapping is discarded.
+9. **Unmap file** — the original file mapping is discarded.
 
 ### 1.2 Import Resolution → Stub Functions
 
@@ -92,9 +97,21 @@ The import resolver (`src/loader/import_resolve.c`) works in two passes:
 
 - **Pass 1** — Walk the `IMAGE_IMPORT_DESCRIPTOR` chain. For each
   descriptor, resolve each `IMAGE_THUNK_DATA64` entry (by name or
-  ordinal) against our `import_table` (sorted for `bsearch`). Write
+  ordinal) using a three-tier resolver:
+  1. Lookup in our stub `import_table` (binary search).
+  2. Lookup in loaded module exports (`lookup_export`).
+  3. Return `NULL` (unresolved).  Write
   the resolved function address into the descriptor's `FirstThunk`
   (the IAT).
+
+- **Dynamic loading** — `LoadLibraryA` (in `kernel32_module.c`) calls
+  `load_dll()` (in `import_resolve.c`) which: maps the DLL via
+  `map_image_at()` at a controlled base below 4 GB, applies
+  relocations, registers in the module list + PEB LDR, resolves
+  imports recursively (up to `MAX_IMPORT_DEPTH`), and parses the
+  export table. `FreeLibraryA` decrements the load count and unmaps
+  the image when it reaches zero. `GetProcAddress` uses
+  `lookup_export()` with binary search on the export cache.
 
 - **Pass 2** — Scan `.text` for `ff 25` (`jmp *disp32(%rip)`)
   instructions. Collect and deduplicate unique IAT target addresses.
@@ -123,7 +140,10 @@ The import resolver (`src/loader/import_resolve.c`) works in two passes:
 
   PEB (Process Environment Block)
   ├── [PEB_BEING_DEBUGGED  (0x002)] BeingDebugged = 0
-  └── [PEB_IMAGE_BASE      (0x008)] ImageBaseAddress → mapped image
+  ├── [PEB_IMAGE_BASE      (0x008)] ImageBaseAddress → mapped image
+  ├── [PEB_LDR             (0x018)] → PEB_LDR_DATA
+  │   └── Three doubly-linked lists (load, memory, initialization order)
+  └── [PEB_PROCESS_HEAP    (0x030)] → default process heap (musl malloc)
 ```
 
 All TEB and PEB offsets are defined as named constants (`TEB_*`,
@@ -398,6 +418,15 @@ Linux primitives:
 | `NtCreateEvent` | pseudo handle allocation |
 | `NtCreateThreadEx` | `clone()` real threads |
 | `NtOpenFile` | `open()` with attribute parsing |
+| `NtQuerySystemTime` | `clock_gettime(CLOCK_REALTIME)` → FILETIME |
+| `NtQueryPerformanceCounter` | `clock_gettime(CLOCK_MONOTONIC)` |
+| `NtQueryPerformanceFrequency` | constant `10^7` |
+| `NtDelayExecution` | `nanosleep()` |
+| `NtCreateMutex` | `pthread_mutex_init()` |
+| `NtSetEvent` | `pthread_cond_broadcast()` |
+| `NtResetEvent` | clear signaled flag |
+| `NtWaitForSingleObject` | spin-sleep loop with timeout |
+| `NtReleaseMutex` | `pthread_mutex_unlock()` |
 
 File handles are pseudo-handles: `STD_OUTPUT_HANDLE` (0x7FFFFFFE)
 maps to Linux fd 1, `STD_ERROR_HANDLE` (0x7FFFFFFD) to fd 2.
@@ -641,7 +670,13 @@ Note: the UNIX stack is cleaned up by `cleanup_unix_stack()` in
 | `src/syscall/thunk_gen.c` | 23-byte thunk generation with absolute indirect call |
 | `src/loader/crash_handlers.c` | SEH + POSIX signal handlers (SIGSEGV, SIGILL, SIGABRT, SIGFPE, SIGBUS, SIGTRAP) |
 | `src/loader/gs_base.c` | `set_gs_base()` — arch_prctl → wrgsbase fallback |
-| `src/loader/import_resolve.c` | `resolve_imports()` — pass 1 (ILT/IAT walk) + pass 2 (`.text` scan with 4 strategies) |
+| `src/loader/import_resolve.c` | `resolve_imports()` — pass 1 (ILT/IAT walk) + pass 2 (`.text` scan with 4 strategies); `load_dll()` + `find_dll_path()` + `resolve_module_imports()` |
+| `src/loader/relocations.c` | `apply_relocations()` — DIR64 base relocation patches |
+| `src/loader/module_list.c` | Module registry — `add_module`, `find_module_by_name/addr`, `remove_module` |
+| `src/loader/export_table.c` | `parse_export_table()`, `lookup_export()` (binary search), `lookup_export_by_ordinal()` |
+| `src/loader/peb_ldr.c` | PEB_LDR_DATA management — `ldr_add_module`, `ldr_remove_module`, three linked lists |
+| `src/loader/ordinal_table.c` | Ordinal import name lookup (ntdll/kernel32/msvcrt) |
+| `src/heap/wine_heap.c` | `HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap` (musl malloc backend) |
 
 ---
 
