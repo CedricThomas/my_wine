@@ -1,14 +1,16 @@
 # Architectural Issues
 
-> From quality_report.log, generated 2026-05-06
+> From quality_report.log, generated 2026-05-06, updated 2026-05-07
+> Status verified against current codebase.
 
 ---
 
 ## Findings
 
-[FINDING A1] — Monolithic loader_priv.h — shared state sprawl
+### [FINDING A1] — Monolithic loader_priv.h — shared state sprawl
+- **Status**: ❌ OPEN
 - **Severity**: HIGH
-- **Files**: src/loader/loader_priv.h (lines 1–177)
+- **Files**: src/loader/loader_priv.h (176 lines, 50+ symbols)
 - **Description**: loader_priv.h declares 50+ symbols spanning 8+ modules (image_mapper, import_resolve, import_table, ordinal_table, teb_peb, crash_handlers, entry, guest_setup, gs_base, module_list, export_table, peb_ldr). This creates a god-header: any loader module can access any other's globals and functions. The file has no module boundaries — everything is one flat namespace.
 
   Specific shared globals that blur module boundaries:
@@ -21,15 +23,16 @@
 
 ---
 
-[FINDING A2] — import_resolve.c is a multipurpose file (import resolution + DLL loading + path finding)
+### [FINDING A2] — import_resolve.c is a multipurpose file (import resolution + DLL loading + path finding)
+- **Status**: ❌ OPEN
 - **Severity**: HIGH
-- **Files**: src/loader/import_resolve.c (lines 1–597)
-- **Description**: This 597-line file handles three distinct responsibilities:
+- **Files**: src/loader/import_resolve.c (594 lines)
+- **Description**: This file handles three distinct responsibilities:
   1. Import name resolution (pass 1 & pass 2 thunk patching) — lines 1–370
   2. DLL path searching (find_dll_path, hand-rolled string helpers) — lines 370–508
   3. DLL loading (load_dll with map/relocate/register/resolve chain) — lines 510–597
 
-  This violates Single Responsibility. DLL loading should be in its own module (e.g., dll_loader.c). The hand-rolled string helpers (dll_strcasecmp, dll_copy_str, etc.) are also duplicated in module_list.c.
+  This violates Single Responsibility. DLL loading should be in its own module (e.g., dll_loader.c).
 
 - **Suggested Fix**:
   - Extract DLL path finding → src/loader/dll_path.c
@@ -38,35 +41,36 @@
 
 ---
 
-[FINDING A3] — main() is the process orchestrator — excessive responsibility
+### [FINDING A3] — main() is the process orchestrator — excessive responsibility
+- **Status**: ❌ OPEN
 - **Severity**: MEDIUM
-- **Files**: src/main.c (lines 1–221)
-- **Description**: main() performs 10+ sequential steps: parse env, map image, init imports, patch refptrs, resolve imports, setup TEB/PEB, setup stack, zero .data, pre-seed BSS, build guest argv, lookup symbol, and run. Each step represents a different subsystem. The function is 221 lines and contains inline logic for section finding and mprotect.
+- **Files**: src/main.c (230 lines)
+- **Description**: main() performs 10+ sequential steps: parse env, map image, init imports, patch refptrs, resolve imports, setup TEB/PEB, setup stack, zero .data, pre-seed BSS, build guest argv, lookup symbol, and run. Each step represents a different subsystem. The function is 230 lines and contains inline logic for section finding and mprotect.
 
-  While the actual heavy lifting is delegated, main() still holds the knowledge of the full startup sequence. This is acceptable for a loader of this size, but the numbered comments ("1.", "2.", etc.) and interleaved concerns (BSS seeding mixed with stack setup) suggest this would benefit from a startup_phases() function that wraps the sequence.
-
-- **Suggested Fix**: Wrap the 10 steps into a single init_loader() function so main() becomes a 10-line entry point. This enables cleaner testing and potential future restart/reload paths.
+- **Suggested Fix**: Wrap the 10 steps into a single `init_loader()` function so main() becomes a ~10-line entry point. This enables cleaner testing and potential future restart/reload paths.
 
 ---
 
-[FINDING A4] — ntdll_priv.h declares globals shared across all handler modules
+### [FINDING A4] — ntdll_priv.h declares globals shared across all handler modules
+- **Status**: ❌ OPEN
 - **Severity**: MEDIUM
-- **Files**: src/msvcrt/ntdll_priv.h (lines 1–107)
-- **Description**: This header declares arrays (handle_table, sections, views, events, mutexes, threads) and their counters as external globals. Every ntdll handler file that includes this header can read/write all of them. No synchronization mechanism (mutex, atomic) is used to protect concurrent access. For the single-process model this is acceptable, but it makes the code fragile if multi-process support is ever added.
+- **Files**: src/msvcrt/ntdll_priv.h (12 extern declarations)
+- **Description**: This header declares arrays (handle_table, sections, views, events, mutexes, threads) and their counters as external globals. Every ntdll handler file that includes this header can read/write all of them. No synchronization mechanism (mutex, atomic) is used to protect concurrent access.
 
 - **Suggested Fix**: Use accessor functions (get_handle_table(), alloc_section(), etc.) with internal locks. Or at minimum, document that these are single-thread globals.
 
 ---
 
-[FINDING A5] — PE section table offset computation duplicated in 5 files
+### [FINDING A5] — PE section table offset computation duplicated in 5 files
+- **Status**: ❌ OPEN
 - **Severity**: MEDIUM
-- **Files**: src/main.c:123-124, src/loader/guest_setup.c:184-189, src/loader/import_resolve.c:219-222, src/loader/image_mapper.c:149-152, src/pe_rip_scan.c
+- **Files**: src/main.c:133-134, src/loader/guest_setup.c:190-191, src/loader/import_resolve.c:221-222, src/loader/image_mapper.c:107-108,151-152
 - **Description**: The expression to compute section table offset from image base:
-  ```
+  ```c
   pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
   nt.FileHeader.SizeOfOptionalHeader
   ```
-  appears verbatim (or nearly so) in at least 5 source files. pe_priv.h provides compute_section_table_offset() but it takes (dos, nt) params and works with file offsets, not image offsets. A version for in-memory image access does not exist.
+  appears verbatim (or nearly so) in 5 source files. pe_priv.h provides compute_section_table_offset() but it takes (dos, nt) params and works with file offsets, not image offsets.
 
 - **Suggested Fix**: Add a function to pe_priv.h:
   ```c
@@ -110,19 +114,17 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
 
 ### Task 2: Split import_resolve.c into 3 focused files
 - **Related Finding(s)**: A2
-- **Impact**: Reduces a 597-line multipurpose file into three single-responsibility modules (~200 lines each); improves readability and enables independent testing
+- **Impact**: Reduces a 594-line multipurpose file into three single-responsibility modules (~200 lines each); improves readability and enables independent testing
 - **Files to create**:
   - src/loader/dll_path.c
   - src/loader/dll_path.h
   - src/loader/dll_loader.c
   - src/loader/dll_loader.h
 - **Files to modify**:
-  - src/loader/import_resolve.c — strip DLL path search (lines 370–508) and DLL loading (lines 510–597); keep only IAT resolution
-  - src/loader/dll_path.h — export find_dll_path(), path_exists(), and string helpers
-  - src/loader/dll_loader.h — export load_dll()
+  - src/loader/import_resolve.c — strip DLL path search and DLL loading; keep only IAT resolution
   - src/loader/loader_priv.h — add #include for new headers
 - **Steps**:
-  1. Identify the exact boundary lines for import resolution (1–370), path finding (370–508), and DLL loading (510–597)
+  1. Identify the exact boundary lines for import resolution, path finding, and DLL loading
   2. Extract path finding code + string helpers into dll_path.c/dll_path.h
   3. Extract DLL loading code into dll_loader.c/dll_loader.h
   4. Remove extracted code from import_resolve.c; add #include for new headers
@@ -139,9 +141,8 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
 - **Files to create**: (none)
 - **Files to modify**:
   - src/main.c — extract startup steps into init_loader(); main() calls init_loader() and exits
-  - src/loader/loader_priv.h (or new header) — declare init_loader() if called from other modules
 - **Steps**:
-  1. Identify the 10 sequential steps in main() by their numbered comments
+  1. Identify the sequential steps in main()
   2. Wrap the body of main() (everything after argument parsing) into `static int init_loader(int argc, char **argv)`
   3. Simplify main() to: parse args → call init_loader() → return
   4. Remove numbered step comments; replace with inline comments in init_loader()
@@ -179,7 +180,6 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
   - src/loader/guest_setup.c — replace inline calculation
   - src/loader/import_resolve.c — replace inline calculation
   - src/loader/image_mapper.c — replace inline calculation
-  - src/pe_rip_scan.c — replace inline calculation
 - **Steps**:
   1. Implement `static inline IMAGE_SECTION_HEADER *get_image_sections(void *image_base, IMAGE_NT_HEADERS64 *nt)` in pe_priv.h
   2. Find all 5 locations of the inline calculation
