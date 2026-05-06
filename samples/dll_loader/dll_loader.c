@@ -41,8 +41,8 @@ int main(void)
     const char *msg = greet_fn();
     printf("OK: dll_greeting() = \"%s\"\n", msg);
     
-    BOOL freed = FreeLibraryA(hDll);
-    printf("OK: FreeLibraryA -> %d\n", freed);
+    BOOL freed = FreeLibrary(hDll);
+    printf("OK: FreeLibrary -> %d\n", freed);
     
     printf("\n=== ALL TESTS PASSED ===\n");
     return 0;

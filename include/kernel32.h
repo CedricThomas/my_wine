@@ -42,6 +42,9 @@ void *GetModuleHandleA(const char *lpModuleName);
 __attribute__((ms_abi))
 int FreeLibraryA(void *hModule);
 
+/* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
+#define FreeLibrary FreeLibraryA
+
 __attribute__((ms_abi))
 __attribute__((noreturn))
 void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode);

@@ -49,6 +49,9 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "GetProcAddress", (void*)GetProcAddress },
     { "kernel32.dll", "LoadLibraryA", (void*)LoadLibraryA },
     { "kernel32.dll", "GetModuleHandleA", (void*)GetModuleHandleA },
+    /* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
+    { "kernel32.dll", "FreeLibrary", (void*)FreeLibraryA },
+    { "kernel32.dll", "FreeLibraryA", (void*)FreeLibraryA },,
     { "kernel32.dll", "GetProcessHeap", (void*)GetProcessHeap },
     { "kernel32.dll", "lstrlenA", (void*)lstrlenA },
     { "kernel32.dll", "DeleteCriticalSection", (void*)DeleteCriticalSection },
