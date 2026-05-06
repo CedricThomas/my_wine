@@ -5,11 +5,7 @@
 #include <pthread.h>
 #include <stddef.h>
 
-/* External dlmalloc interface — defined in dlmalloc.c */
-void *dlmalloc(size_t bytes);
-void dlfree(void *mem);
-void *dlrealloc(void *mem, size_t new_size);
-size_t dlmalloc_usable_size(const void *mem);
+/* musl backend interface (externs in wine_heap.c) */
 
 /* Process heap */
 void *init_process_heap(void);

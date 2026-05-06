@@ -1,8 +1,8 @@
 /*
- * wine_heap.c — Heap management with dlmalloc backend
+ * wine_heap.c — Heap management with musl malloc backend
  *
  * Real implementations for HeapCreate, HeapAlloc, HeapFree, HeapReAlloc,
- * GetProcessHeap, HeapDestroy, HeapSize backed by dlmalloc.
+ * GetProcessHeap, HeapDestroy, HeapSize backed by musl oldmalloc.
  */
 
 #define _GNU_SOURCE
@@ -16,6 +16,12 @@
 
 /* HEAP_ZERO_MEMORY flag */
 #define HEAP_ZERO_MEMORY 0x00000008
+
+/* musl backend */
+extern void *musl_malloc(size_t);
+extern void  musl_free(void *);
+extern void *musl_realloc(void *, size_t);
+extern size_t musl_malloc_usable_size(void *);
 
 /* Global process heap */
 void *g_process_heap = NULL;
@@ -35,7 +41,7 @@ void *HeapCreate(uint32_t flOptions, uint64_t dwInitialSize, uint64_t dwMaximumS
 {
     wine_heap_t *heap;
 
-    /* Allocate the heap structure via mmap (not dlmalloc — it doesn't exist yet) */
+    /* Allocate the heap structure via mmap (not musl — it doesn't exist yet) */
     void *mem = INLINE_SYSCALL_MMAP(NULL, sizeof(wine_heap_t),
                                      PROT_READ | PROT_WRITE,
                                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -69,7 +75,7 @@ void *HeapAlloc(void *hHeap, uint32_t dwFlags, uint64_t dwBytes)
 
     void *ptr;
     pthread_mutex_lock(&heap->mutex);
-    ptr = dlmalloc((size_t)dwBytes);
+    ptr = musl_malloc((size_t)dwBytes);
     pthread_mutex_unlock(&heap->mutex);
 
     if (ptr && (dwFlags & HEAP_ZERO_MEMORY)) {
@@ -97,7 +103,7 @@ int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem)
     }
 
     pthread_mutex_lock(&heap->mutex);
-    dlfree(lpMem);
+    musl_free(lpMem);
     pthread_mutex_unlock(&heap->mutex);
 
     (void)dwFlags;
@@ -122,11 +128,11 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
 
     pthread_mutex_lock(&heap->mutex);
     if (lpMem) {
-        old_size = dlmalloc_usable_size(lpMem);
-        ptr = dlrealloc(lpMem, (size_t)dwBytes);
+        old_size = musl_malloc_usable_size(lpMem);
+        ptr = musl_realloc(lpMem, (size_t)dwBytes);
     } else {
         /* lpMem == NULL → treat as fresh HeapAlloc */
-        ptr = dlmalloc((size_t)dwBytes);
+        ptr = musl_malloc((size_t)dwBytes);
     }
     pthread_mutex_unlock(&heap->mutex);
 
@@ -194,7 +200,7 @@ uint64_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem)
     }
 
     (void)dwFlags;
-    return (uint64_t)dlmalloc_usable_size(lpMem);
+    return (uint64_t)musl_malloc_usable_size(lpMem);
 }
 
 /*

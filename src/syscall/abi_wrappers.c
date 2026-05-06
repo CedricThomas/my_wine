@@ -17,59 +17,32 @@
  * after GS has been switched to TEB. They MUST NOT use glibc, because
  * glibc accesses vDSO via GS-relative offsets and will crash.
  *
- * All memory management uses mmap/munmap (page-sized allocations).
- * All string ops use compiler builtins (no vDSO).
+ * Memory management uses musl oldmalloc (arena-based, mmap-backed).
+ * String ops use compiler builtins (no vDSO).
  */
 
-/* malloc header: stored just before the returned pointer */
-typedef struct {
-    size_t mmap_size;  /* total mmap'd size (page-aligned) */
-} malloc_hdr_t;
-
-/* Round up to page size */
-static inline size_t page_align(size_t s)
-{
-    return (s + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
-}
+/* musl backend (defined in src/heap/musl_malloc_wrapper.c) */
+extern void *musl_malloc(size_t);
+extern void  musl_free(void *);
+extern void *musl_calloc(size_t, size_t);
+extern void *musl_realloc(void *, size_t);
 
 __attribute__((sysv_abi))
 void *sysv_malloc(size_t s)
 {
-    if (s == 0) s = 1;
-    /* We need space for the header + the requested data, both page-aligned overall */
-    size_t total = page_align(sizeof(malloc_hdr_t) + s);
-    void *p = INLINE_SYSCALL_MMAP(NULL, total,
-        PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (p == NULL || p == MAP_FAILED) return NULL;
-    malloc_hdr_t *hdr = (malloc_hdr_t *)p;
-    hdr->mmap_size = total;
-    return (void *)(hdr + 1);
+    return musl_malloc(s);
 }
 
 __attribute__((sysv_abi))
 void *sysv_calloc(size_t n, size_t s)
 {
-    size_t total_req = n * s;
-    if (total_req == 0) total_req = 1;
-    size_t total = page_align(sizeof(malloc_hdr_t) + total_req);
-    void *p = INLINE_SYSCALL_MMAP(NULL, total,
-        PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (p == NULL || p == MAP_FAILED) return NULL;
-    malloc_hdr_t *hdr = (malloc_hdr_t *)p;
-    hdr->mmap_size = total;
-    void *user_ptr = (void *)(hdr + 1);
-    __builtin_memset(user_ptr, 0, total_req);
-    return user_ptr;
+    return musl_calloc(n, s);
 }
 
 __attribute__((sysv_abi))
 void sysv_free(void *p)
 {
-    if (p == NULL) return;
-    malloc_hdr_t *hdr = (malloc_hdr_t *)((uintptr_t)p - sizeof(malloc_hdr_t));
-    (void)INLINE_SYSCALL_MUNMAP(hdr, hdr->mmap_size);
+    musl_free(p);
 }
 
 __attribute__((sysv_abi))
