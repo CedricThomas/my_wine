@@ -285,10 +285,6 @@ def generate_output():
         " * Contains the switch bodies for both dispatcher entry points.\n"
         " * Included from dispatcher.c via #define + #include.\n"
         " */\n"
-        "\n"
-        "#ifndef DISPATCHER_GENERATED_C\n"
-        "#define DISPATCHER_GENERATED_C\n"
-        "\n"
         "#if defined(DISPATCHER_C_BODY)\n"
         "switch (nr) {\n"
         + c_body +
@@ -300,8 +296,6 @@ def generate_output():
         "#else\n"
         '#error "Define DISPATCHER_C_BODY or DISPATCHER_LEGACY_BODY before including this file"\n'
         "#endif\n"
-        "\n"
-        "#endif /* DISPATCHER_GENERATED_C */\n"
     )
 
 
