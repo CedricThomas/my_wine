@@ -132,6 +132,21 @@ int main(void)
     out(msg);
     out("\"\r\n");
 
+    /* 5b. GetProcAddress("printmethod") + call */
+    typedef int (*printmethod_fn)(const char *);
+    printmethod_fn print_fn = (printmethod_fn)GetProcAddress(hDll, "printmethod");
+    if (print_fn == NULL) {
+        out("FAIL: GetProcAddress(printmethod) returned NULL\r\n");
+        ExitProcess(1);
+    }
+    int rc = print_fn("Hello from printmethod!");
+    if (rc != 0) {
+        lstrcpyA(buf, "FAIL: printmethod returned non-zero\r\n");
+        out(buf);
+        ExitProcess(1);
+    }
+    out("OK: printmethod succeeded\r\n");
+
     /* 6. FreeLibrary */
     BOOL freed = FreeLibrary(hDll);
 
