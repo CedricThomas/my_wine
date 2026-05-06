@@ -49,6 +49,8 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "GetProcAddress", (void*)GetProcAddress },
     { "kernel32.dll", "LoadLibraryA", (void*)LoadLibraryA },
     { "kernel32.dll", "GetModuleHandleA", (void*)GetModuleHandleA },
+    { "kernel32.dll", "GetCommandLineA", (void*)GetCommandLineA },
+    { "kernel32.dll", "GetEnvironmentStringsA", (void*)GetEnvironmentStringsA },
     /* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
     { "kernel32.dll", "FreeLibrary", (void*)FreeLibraryA },
     { "kernel32.dll", "FreeLibraryA", (void*)FreeLibraryA },
@@ -80,6 +82,9 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "TlsGetValue", (void*)TlsGetValue },
     { "kernel32.dll", "VirtualProtect", (void*)VirtualProtect },
     { "kernel32.dll", "VirtualQuery", (void*)VirtualQuery },
+    { "kernel32.dll", "IsDBCSLeadByteEx", (void*)IsDBCSLeadByteEx },
+    { "kernel32.dll", "MultiByteToWideChar", (void*)MultiByteToWideChar },
+    { "kernel32.dll", "WideCharToMultiByte", (void*)WideCharToMultiByte },
     { "msvcrt.dll", "__C_specific_handler", (void*)__C_specific_handler },
     /* msvcrt functions (statically known) */
     { "msvcrt.dll", "__getmainargs", (void*)__getmainargs },
@@ -108,6 +113,15 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "strlen", NULL },
     { "msvcrt.dll", "strncmp", NULL },
     { "msvcrt.dll", "vfprintf", NULL },
+    { "msvcrt.dll", "___lc_codepage_func", NULL },
+    { "msvcrt.dll", "___mb_cur_max_func", NULL },
+    { "msvcrt.dll", "_errno", NULL },
+    { "msvcrt.dll", "_lock", NULL },
+    { "msvcrt.dll", "_unlock", NULL },
+    { "msvcrt.dll", "fputc", NULL },
+    { "msvcrt.dll", "localeconv", NULL },
+    { "msvcrt.dll", "strerror", NULL },
+    { "msvcrt.dll", "wcslen", NULL },
     { NULL, NULL, NULL }
 };
 

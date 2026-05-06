@@ -168,7 +168,10 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
     size_t str_off = sym_ptr + sym_table_size;
     if (str_off + 4 <= (size_t)st.st_size) {
         uint32_t str_size = *((const uint32_t *)((char *)file_map + str_off));
-        if (str_off + 4 + str_size <= (size_t)st.st_size && str_size > 0) {
+        /* Allow small overhang (up to 64 bytes) for string table that extends
+         * past the file. Some PE tools include padding in the size field. */
+        size_t str_end = str_off + 4 + str_size;
+        if (str_end <= (size_t)st.st_size + 64 && str_size > 0) {
             string_table = (char *)file_map + str_off + 4;
         }
     }
@@ -181,13 +184,32 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
     uint64_t best_rva = 0;
     int has_section_match = 0;
 
+    fprintf(stderr, "DBG_COFF: '%s' scanning %u symbols\n", name, sym_count);
     for (uint32_t i = 0; i < sym_count; i++) {
         const IMAGE_SYMBOL *sym = &symbols[i];
         const char *sym_name = get_symbol_name(sym, string_table);
         if (!sym_name) continue;
         size_t sym_name_len = strlen(sym_name);
 
+        if (i < 3) {
+            fprintf(stderr, "DBG_COFF: sym[%u] = '%.*s' sect=%d\n",
+                    i, (int)sym_name_len, sym_name, sym->SectionNumber);
+        }
+
+        /* Debug: show symbols that contain CTOR or DTOR */
+        if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
+            fprintf(stderr, "DBG_COFF: sym[%u] = '%s' sect=%d val=%u\n",
+                    i, sym_name, (int)sym->SectionNumber, (unsigned)sym->Value);
+        }
+
+        /* Debug: show all symbols containing CTOR or DTOR */
+        if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
+            fprintf(stderr, "DBG_COFF_SYM: idx=%u name='%.*s' sect=%d val=%u type=%d\n",
+                    i, (int)sym_name_len, sym_name, (int)sym->SectionNumber, sym->Value, sym->Type);
+        }
+
         int matched = 0;
+        int is_refptr = 0;
         /* Prefer .refptr entries over bare symbol names.
          * mingw-w64 COFF tables often have bare "mingw_app_type" in .idata
          * (wrong address) and ".rdata$.refptr.mingw_app_type" / ".refptr.mingw_app_type"
@@ -195,19 +217,17 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
          * always find the right entry before the bare-name fallback. */
         const char *prefix = ".rdata$.refptr.";
         size_t plen = strlen(prefix);
-        if (sym_name_len > plen &&
+        if (sym_name_len == plen + strlen(name) &&
             strncmp(sym_name, prefix, plen) == 0 &&
-            strncmp(sym_name + plen, name, sym_name_len - plen) == 0 &&
-            name[sym_name_len - plen] == '\0') {
+            strncmp(sym_name + plen, name, sym_name_len - plen) == 0) {
             matched = 1;
         }
         if (!matched) {
             const char *prefix2 = ".refptr.";
             size_t plen2 = strlen(prefix2);
-            if (sym_name_len > plen2 &&
+            if (sym_name_len == plen2 + strlen(name) &&
                 strncmp(sym_name, prefix2, plen2) == 0 &&
-                strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0 &&
-                name[sym_name_len - plen2] == '\0') {
+                strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0) {
                 matched = 1;
             }
         }
@@ -219,16 +239,26 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
             }
         }
         if (!matched) {
-            /* Substring fallback: the COFF string table may have truncated
-             * entries like "ta$.refptr.mingw_app_type" where the target name
-             * appears as a substring. Only match if the name is long enough
-             * (>8 chars) to avoid false positives on short symbols. */
+            /* Substring fallback */
             if (sym_name_len > 8 && strstr(sym_name, name) != NULL) {
                 matched = 1;
+                if (strstr(sym_name, ".refptr.")) {
+                    is_refptr = 1;
+                }
+                if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
+                    fprintf(stderr, "DBG_COFF_SUB: sym[%u] '%.*s' matched '%s' as substring\n",
+                            i, (int)sym_name_len, sym_name, name);
+                }
             }
         }
 
         if (!matched) continue;
+
+        if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
+            fprintf(stderr, "DBG_COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d\n",
+                    i, (int)sym_name_len, sym_name, sym->SectionNumber, sym->Value,
+                    nt->FileHeader.NumberOfSections, has_section_match);
+        }
 
         int32_t section_num = sym->SectionNumber;
 
@@ -247,6 +277,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         }
     }
 
+    fprintf(stderr, "DBG_COFF: '%s' -> rva=0x%lx\n", name, (unsigned long)best_rva);
     munmap(file_map, st.st_size);
     return best_rva;
 }

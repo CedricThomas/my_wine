@@ -95,6 +95,17 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
     /* Discover CRT offsets (argc/argv/envp) from COFF symbol table */
     discover_crt_offsets(file_path, nt, sections);
 
+    /* Set the 'initialized' flag to 1 to skip CRT startup (__do_global_ctors).
+     * This is at a fixed offset within .bss (0x30 from .bss start) in mingw-w64 builds.
+     * Without this, __main calls __do_global_ctors which can crash due to
+     * unpatched __DTOR_LIST__ refptrs or other CRT issues. */
+    if (bss_sec) {
+        uint32_t *initialized_ptr = (uint32_t *)((char *)image_base +
+                                                  g_crt_ctx.bss_vaddr + 0x30);
+        *initialized_ptr = 1;
+        DEBUG("patch_crt_refptrs: set initialized=1 at %p", (void *)initialized_ptr);
+    }
+
     uint64_t image_size = nt->OptionalHeader.SizeOfImage;
     int patched_any = 0;
     int patched_initenv = 0;

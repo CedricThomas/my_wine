@@ -2,6 +2,13 @@
 
 #include "kernel32_priv.h"
 
+/*
+ * _acmdln is defined in crt_globals.c. We use a weak declaration so that
+ * build targets that exclude crt_*.o (e.g. test_syscall_dispatch) don't
+ * get an undefined reference. When weak, _acmdln is NULL if not linked.
+ */
+extern char *_acmdln __attribute__((weak));
+
 /* Thread-local last-error code */
 __thread uint32_t g_last_error = 0;
 
@@ -154,6 +161,73 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
     mbi->Type = MEM_PRIVATE;
 
     return sizeof(MEMORY_BASIC_INFORMATION);
+}
+
+/* ── GetCommandLineA ───────────────────────────────────────── */
+/*
+ * Returns the command-line string for the current process.
+ * In our runtime, _acmdln is set from main.c before the PE entry.
+ * _acmdln is a weak symbol — may be NULL in build targets that don't
+ * link crt_globals.o.
+ */
+WINE_STUB
+const char *GetCommandLineA(void)
+{
+    return _acmdln ? _acmdln : "";
+}
+
+/* ── GetEnvironmentStringsA ────────────────────────────────── */
+/*
+ * Returns the environment block for the current process.
+ * Returns NULL — most PE startup code only reads this to verify
+ * the environment is accessible, and the CRT uses __initenv instead.
+ */
+WINE_STUB
+char *GetEnvironmentStringsA(void)
+{
+    return NULL;
+}
+
+/* ── IsDBCSLeadByteEx ──────────────────────────────────────── */
+WINE_STUB
+int IsDBCSLeadByteEx(uint16_t code_page, uint8_t byte)
+{
+    (void)code_page;
+    (void)byte;
+    return 0;
+}
+
+/* ── MultiByteToWideChar ───────────────────────────────────── */
+WINE_STUB
+int MultiByteToWideChar(uint32_t code_page, uint32_t dw_flags,
+                        const char *lpMultiByteStr, int cbMultiByteChar,
+                        void *lpWideCharStr, int cchWideChar)
+{
+    (void)code_page;
+    (void)dw_flags;
+    (void)lpMultiByteStr;
+    (void)cbMultiByteChar;
+    (void)lpWideCharStr;
+    (void)cchWideChar;
+    return 0;
+}
+
+/* ── WideCharToMultiByte ───────────────────────────────────── */
+WINE_STUB
+int WideCharToMultiByte(uint32_t code_page, uint32_t dw_flags,
+                        const void *lpWideCharStr, int cchWideChar,
+                        char *lpMultiByteStr, int cbMultiByteChar,
+                        void *lpDefaultChar, void *lpUsedDefaultChar)
+{
+    (void)code_page;
+    (void)dw_flags;
+    (void)lpWideCharStr;
+    (void)cchWideChar;
+    (void)lpMultiByteStr;
+    (void)cbMultiByteChar;
+    (void)lpDefaultChar;
+    (void)lpUsedDefaultChar;
+    return 0;
 }
 
 /* ── __C_specific_handler ──────────────────────────────────── */

@@ -136,6 +136,17 @@ extern void *__msvcrt__exit;
 extern void *__msvcrt_abort;
 extern void *__msvcrt_signal;
 
+/* Additional CRT stubs (defined in crt_misc.c) */
+extern void *__msvcrt___lc_codepage_func;
+extern void *__msvcrt___mb_cur_max_func;
+extern void *__msvcrt__errno_func;
+extern void *__msvcrt__lock;
+extern void *__msvcrt__unlock;
+extern void *__msvcrt_fputc;
+extern void *__msvcrt_localeconv;
+extern void *__msvcrt_strerror;
+extern void *__msvcrt_wcslen;
+
 /* ── Refptr patching (defined in crt_refptrs.c) ─────────── */
 
 typedef struct {

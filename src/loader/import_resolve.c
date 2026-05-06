@@ -141,6 +141,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
             }
 
             if (addr != NULL) {
+                fprintf(stderr, "    DBG_PASS1: %s!%s -> %p\n", dll_name, func_name_for_debug, addr);
                 DEBUG("    Resolved %s -> %p", func_name_for_debug, addr);
                 iath[i].AddressOfData = (uint64_t)(uintptr_t)addr;
             } else {
@@ -184,7 +185,7 @@ static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
 {
     IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
     uint64_t import_dir_va = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    uint64_t import_dir_end = import_dir_va + opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+    uint64_t import_dir_end = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
 
     int matched = 0;
     for (int t = 0; t < num_targets; t++) {
@@ -192,11 +193,14 @@ static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
         uint64_t *target_ptr = (uint64_t *)((char *)base + target);
         uint64_t current_val = *target_ptr;
 
-        if (strategy_resolved_overlap(current_val, flat, num_flat) ||
+        int did_match = strategy_resolved_overlap(current_val, flat, num_flat) ||
             strategy_ilt_value_match(target_ptr, current_val, target, flat, num_flat) ||
             strategy_ilt_offset_match(target_ptr, target, current_val,
                                       import_dir_va, import_dir_end, flat, num_flat) ||
-            strategy_positional(target_ptr, target, t, flat, num_flat)) {
+            strategy_positional(target_ptr, target, t, flat, num_flat);
+        fprintf(stderr, "    DBG_PASS2: target=0x%lx val=0x%lx -> patched=%d final=0x%lx\n",
+                (unsigned long)target, (unsigned long)current_val, did_match, (unsigned long)*target_ptr);
+        if (did_match) {
             matched++;
         }
     }

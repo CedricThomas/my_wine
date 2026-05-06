@@ -28,4 +28,13 @@ void init_msvcrt_imports(void)
     set_import("strlen",   __msvcrt_strlen);
     set_import("strncmp",  __msvcrt_strncmp);
     set_import("vfprintf", __msvcrt_vfprintf);
+    set_import("___lc_codepage_func", __msvcrt___lc_codepage_func);
+    set_import("___mb_cur_max_func",  __msvcrt___mb_cur_max_func);
+    set_import("_errno",    __msvcrt__errno_func);
+    set_import("_lock",     __msvcrt__lock);
+    set_import("_unlock",   __msvcrt__unlock);
+    set_import("fputc",     __msvcrt_fputc);
+    set_import("localeconv", __msvcrt_localeconv);
+    set_import("strerror",  __msvcrt_strerror);
+    set_import("wcslen",    __msvcrt_wcslen);
 }

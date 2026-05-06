@@ -40,6 +40,27 @@ __attribute__((ms_abi))
 void *GetModuleHandleA(const char *lpModuleName);
 
 __attribute__((ms_abi))
+const char *GetCommandLineA(void);
+
+__attribute__((ms_abi))
+char *GetEnvironmentStringsA(void);
+
+/* Character conversion / DBCS */
+__attribute__((ms_abi))
+int IsDBCSLeadByteEx(uint16_t code_page, uint8_t byte);
+
+__attribute__((ms_abi))
+int MultiByteToWideChar(uint32_t code_page, uint32_t dw_flags,
+                        const char *lpMultiByteStr, int cbMultiByteChar,
+                        void *lpWideCharStr, int cchWideChar);
+
+__attribute__((ms_abi))
+int WideCharToMultiByte(uint32_t code_page, uint32_t dw_flags,
+                        const void *lpWideCharStr, int cchWideChar,
+                        char *lpMultiByteStr, int cbMultiByteChar,
+                        void *lpDefaultChar, void *lpUsedDefaultChar);
+
+__attribute__((ms_abi))
 int FreeLibraryA(void *hModule);
 
 /* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
