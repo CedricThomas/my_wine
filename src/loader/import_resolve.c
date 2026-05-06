@@ -17,6 +17,7 @@
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
+#include "include/nt_constants.h"
 #include "loader_priv.h"
 #include "include/debug.h"
 #include "export_table.h"
@@ -424,6 +425,14 @@ loaded_module_t *load_dll(const char *path, int depth)
         remove_module(mod);
         munmap(base, img_nt->OptionalHeader.SizeOfImage);
         return NULL;
+    }
+
+    /* Parse exports if not already done. resolve_module_imports skips
+     * export parsing for DLLs with no imports, but we still need the
+     * cache so GetProcAddress works on export-only DLLs. */
+    if (mod->export_cache == NULL &&
+        img_nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress != 0) {
+        mod->export_cache = parse_export_table(base, img_nt);
     }
 
     DEBUG("Loaded DLL: %s at %p", name, base);

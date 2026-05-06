@@ -195,6 +195,10 @@ case "$MODE" in
             exit 0
         fi
         for name in $samples; do
+            # dll_loader depends on dll_sample (uses exportlib.dll)
+            if [ "$name" = "dll_loader" ]; then
+                build_sample "dll_sample"
+            fi
             build_sample "$name"
         done
         ;;

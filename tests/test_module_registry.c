@@ -632,12 +632,7 @@ static void test_api_load_and_lookup(void)
     void *main_handle = GetModuleHandleA(NULL);
     check("GetModuleHandleA(NULL) returns the main module base", main_handle == base);
 
-    /* Parse exports manually — resolve_module_imports returns early for
-     * DLLs with no imports, so export_cache is never populated. */
-    loaded_module_t *mod = find_module_by_name("tdll.dll");
-    if (mod != NULL) {
-        mod->export_cache = parse_export_table(base, mod->nt);
-    }
+    /* load_dll now auto-populates export_cache for export-only DLLs. */
 
     /* GetProcAddress for a valid export */
     void *addr = GetProcAddress(base, "ExportFunc");
