@@ -55,6 +55,51 @@ build_sample() {
         return
     fi
 
+    # Check for .def file (DLL marker)
+    local def
+    def=$(find "$src_dir" -name '*.def' | head -1)
+    if [ -n "$def" ]; then
+        local dll_base
+        dll_base=$(basename "$def" .def)
+        local out_dll="$src_dir/${dll_base}.dll"
+
+        # Check if rebuild needed
+        local need_build=0
+        if [ ! -f "$out_dll" ]; then
+            need_build=1
+        else
+            for src in $srcs; do
+                if [ "$src" -nt "$out_dll" ]; then
+                    need_build=1
+                    break
+                fi
+            done
+        fi
+
+        if [ "$need_build" -eq 0 ]; then
+            return
+        fi
+
+        ensure_image
+
+        local in_container_srcs
+        in_container_srcs=$(echo "$srcs" | sed "s|$PROJECT_DIR|/project|g")
+
+        echo "  CC  $name (mingw-dll)"
+        docker run --rm \
+            -v "$PROJECT_DIR:/project:ro" \
+            -v "$src_dir:/out" \
+            "$IMAGE_NAME" \
+            x86_64-w64-mingw32-gcc \
+            -Wall -Wextra -O2 -shared \
+            -Wl,/project${def#$PROJECT_DIR} \
+            -o "/out/${dll_base}.dll" \
+            $in_container_srcs 2>&1 || { echo "  FAIL $name"; return 1; }
+
+        echo "  OK  $name -> ${dll_base}.dll"
+        return
+    fi
+
     # Check if rebuild needed
     local need_build=0
     if [ ! -f "$out" ]; then
@@ -110,6 +155,16 @@ run_sample() {
         return 1
     fi
 
+    # If running dll_loader, ensure exportlib.dll is copied into its dir
+    if [ "$name" = "dll_loader" ]; then
+        local dll_src="$SAMPLES_DIR/dll_sample/exportlib.dll"
+        if [ ! -f "$dll_src" ]; then
+            echo "  ERR: exportlib.dll not built. Build dll_sample first."
+            return 1
+        fi
+        cp "$dll_src" "$SAMPLES_DIR/dll_loader/"
+    fi
+
     echo "  RUN $name (under my_wine)"
     local ret=0
     timeout 5 "$MY_WINE" "$exe" "${@:2}" || ret=$?
@@ -146,6 +201,10 @@ case "$MODE" in
     run)
         samples=$(discover_samples "$TARGET")
         for name in $samples; do
+            # If running dll_loader, ensure dll_sample is built first
+            if [ "$name" = "dll_loader" ]; then
+                build_sample "dll_sample"
+            fi
             build_sample "$name"
             echo ""
             run_sample "$name" "${@:3}"
