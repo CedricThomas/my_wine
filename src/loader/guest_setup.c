@@ -196,9 +196,10 @@ static void parse_pe_headers(uint64_t entry_abs,
 
 static void finalize_guest_state(void *teb, void *seh_frame)
 {
-    /* Save host GS base before switching to TEB */
-    __asm__ volatile("rdgsbase %0" : "=r"(g_host_gs_base));
-    g_host_gs_base &= ~(uintptr_t)0xFF;  /* Clear low bits that some CPUs set */
+    /* Save host GS base so it can be restored by call_on_unix_stack */
+    uintptr_t host_gs;
+    __asm__ volatile("rdgsbase %0" : "=r"(host_gs));
+    g_host_gs_base = host_gs;
 
     /* Re-set GS base */
     if (set_gs_base(teb) != 0) {

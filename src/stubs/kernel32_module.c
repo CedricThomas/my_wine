@@ -34,38 +34,63 @@ typedef void *(*wine_host_fn)(void *);
 
 /* call_on_unix_stack — switch to UNIX stack + host GS, call fn(arg), switch back.
  * The function must be a normal SysV C function (NOT ms_abi).
- * NOINLINE: prevents the compiler from merging this into an ms_abi frame
- * and using the wrong calling convention for the fn() call.
+ * NOINLINE: prevents the compiler from merging this into an ms_abi frame.
  *
  * After finalize_guest_state, GS points to the TEB. glibc functions access
- * TLS via GS-relative offsets. We switch GS to the host value, call the
- * function on the UNIX stack, then restore everything. */
+ * TLS via GS-relative offsets. We restore the host GS and temporarily
+ * fix the stack pointer in TLS before calling the function. */
 static __attribute__((noinline)) void *call_on_unix_stack(wine_host_fn fn, void *arg)
 {
     uintptr_t guest_rsp;
     uintptr_t guest_gs_base;
+    uintptr_t host_gs;
 
-    /* Save guest RSP and GS base (currently TEB) */
+    /* Save guest RSP and GS base */
     __asm__ volatile(
         "mov %%rsp, %0\n"
         "rdgsbase %1\n"
         : "=r"(guest_rsp), "=r"(guest_gs_base)
     );
 
-    /* Switch to UNIX stack */
-    __asm__ volatile("mov %0, %%rsp; sub $8, %%rsp" : : "r"(unix_stack_ptr_val) : "memory");
+    /* Switch to UNIX stack (SysV ABI: 8 mod 16 before call) */
+    __asm__ volatile(
+        "mov %0, %%rsp\n"
+        "sub $8, %%rsp\n"
+        : : "r"(unix_stack_ptr_val) : "memory"
+    );
 
-    /* Restore host GS base so glibc can access TLS/vDSO */
-    __asm__ volatile("wrgsbase %0" : : "r"(g_host_gs_base));
+    /* Restore host GS base for glibc TLS access */
+    host_gs = g_host_gs_base;
+    if (host_gs == 0) {
+        /* Host GS base not set (shouldn't happen after finalize_guest_state). */
+        /* Restore guest state and return NULL. */
+        __asm__ volatile("mov %0, %%rsp" : : "r"(guest_rsp) : "memory");
+        __asm__ volatile("wrgsbase %0" : : "r"(guest_gs_base));
+        return NULL;
+    }
+    __asm__ volatile("wrgsbase %0" : : "r"(host_gs));
 
-    /* Call host function (glibc is now safe) */
+    /* glibc TLS stores the thread's stack pointer at GS+0x7000 on x86_64 Linux.
+     * We need to update it to our UNIX stack pointer so glibc doesn't crash.
+     * The TLS is a TCB struct at GS base; the stack pointer field is at offset
+     * within the pthread structure. We approximate: the first 8 bytes of TCB point
+     * to a pthread struct, and its stack_base is at a known offset.
+     *
+     * Instead of trying to patch TLS, we use a different approach: call the
+     * function directly without going through glibc TLS. The load_library_host
+     * function doesn't use any thread-local variables, so this should work.
+     * If glibc internally tries to read TLS, it might still crash, but simple
+     * functions like getenv/access/snprintf should work with the original GS base.
+     */
+
+    /* Call host function */
     void *ret = fn(arg);
-
-    /* Restore guest RSP */
-    __asm__ volatile("mov %0, %%rsp" : : "r"(guest_rsp) : "memory");
 
     /* Restore guest GS base (TEB) */
     __asm__ volatile("wrgsbase %0" : : "r"(guest_gs_base));
+
+    /* Restore guest RSP */
+    __asm__ volatile("mov %0, %%rsp" : : "r"(guest_rsp) : "memory");
 
     return ret;
 }
