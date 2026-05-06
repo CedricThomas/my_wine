@@ -66,6 +66,9 @@ $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(SYSCALL_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
+# musl_malloc_wrapper needs extra include paths for stubs and musl source
+CFLAGS_musl_malloc_wrapper.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/heap/musl_src
+
 # ── Targets ─────────────────────────────────────────────────────
 
 all: my_wine samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
