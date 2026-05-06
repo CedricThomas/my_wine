@@ -21,6 +21,8 @@
 #include "src/loader/peb_ldr.h"
 #include "src/loader/export_table.h"
 #include "include/kernel32.h"
+#include "include/common.h"
+#include "include/common.h"
 
 /* Forward declarations for functions used in tests */
 void *setup_teb_peb(void);
@@ -610,7 +612,7 @@ static void test_api_load_and_lookup(void)
     }
 
     /* Set WINE_DLL_PATH to /tmp so find_dll_path can locate tdll.dll */
-    setenv("WINE_DLL_PATH", "/tmp", 1);
+    set_wine_dll_path("/tmp");
 
     /* Load the DLL */
     void *base = _LoadLibraryA("tdll.dll");
@@ -670,7 +672,7 @@ static void test_api_free_library(void)
     }
 
     /* Set WINE_DLL_PATH to /tmp */
-    setenv("WINE_DLL_PATH", "/tmp", 1);
+    set_wine_dll_path("/tmp");
 
     /* Load the DLL */
     void *base = _LoadLibraryA("tdll.dll");
@@ -724,7 +726,7 @@ static void test_api_duplicate_load(void)
     }
 
     /* Set WINE_DLL_PATH to /tmp */
-    setenv("WINE_DLL_PATH", "/tmp", 1);
+    set_wine_dll_path("/tmp");
 
     /* Load the DLL twice */
     void *base1 = _LoadLibraryA("tdll.dll");

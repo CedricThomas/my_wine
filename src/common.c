@@ -12,6 +12,16 @@ int g_debug_enabled = 0;
 // Populated in main() before GS switch so find_dll_path is syscall-safe
 char g_wine_dll_path[WINE_DLL_PATH_MAX] = {0};
 
+void set_wine_dll_path(const char *path)
+{
+    if (path == NULL) {
+        g_wine_dll_path[0] = '\0';
+        return;
+    }
+    strncpy(g_wine_dll_path, path, sizeof(g_wine_dll_path) - 1);
+    g_wine_dll_path[sizeof(g_wine_dll_path) - 1] = '\0';
+}
+
 // Override debug_check_fn (weak in debug.c) to check g_debug_enabled
 static int debug_enabled(void) { return g_debug_enabled; }
 int (*debug_check_fn)(void) = &debug_enabled;
