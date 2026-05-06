@@ -132,7 +132,7 @@ void **generate_all_thunks(void)
     thunk_blob_size = alloc;
 
     void *dispatcher = wine_dispatcher_addr();
-    printf("wine: dispatcher at %p\n", dispatcher);
+    fprintf(stderr, "wine: dispatcher at %p\n", dispatcher);
     if (dispatcher == NULL) {
         fprintf(stderr, "wine: fatal: __wine_dispatcher symbol not found\n");
         return NULL;

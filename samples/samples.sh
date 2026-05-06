@@ -255,8 +255,13 @@ run_sample() {
     echo "  RUN $name (under my_wine, expect exit=$expected_exit, timeout=${timeout_sec}s)"
 
     # Run with timeout; capture exit code without triggering set -e
+    # Suppress my_wine debug logs (DBG_*) on stderr unless DEBUG is set
     local ret=0
-    timeout "$timeout_sec" "$MY_WINE" "$exe" || ret=$?
+    if [ -n "${DEBUG:-}" ]; then
+        timeout "$timeout_sec" "$MY_WINE" "$exe" || ret=$?
+    else
+        timeout "$timeout_sec" "$MY_WINE" "$exe" 2>/dev/null || ret=$?
+    fi
 
     if [ "$ret" -eq "$expected_exit" ]; then
         echo "  PASS  $name (exit=$ret, expected=$expected_exit)"
