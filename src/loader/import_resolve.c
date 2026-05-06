@@ -531,11 +531,22 @@ loaded_module_t *load_dll(const char *path, int depth)
         saved_pe_path[0] = '\0';
     }
 
-    /* Round g_dll_base_next to page alignment */
-    g_dll_base_next = (g_dll_base_next + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
+    /* Atomically reserve a page-aligned base for this DLL using CAS loop.
+     * This prevents two threads from mapping at the same address.
+     * We reserve at least PAGE_SIZE upfront; the rest is advanced after mapping. */
+    uintptr_t alloc_base;
+    do {
+        uintptr_t expected = __atomic_load_n(&g_dll_base_next, __ATOMIC_SEQ_CST);
+        uintptr_t rounded = (expected + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
+        uintptr_t desired = rounded + PAGE_SIZE;  /* reserve minimum one page */
+        if (__atomic_compare_exchange_n(&g_dll_base_next, &expected, desired,
+                                        false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+            alloc_base = rounded;
+            break;
+        }
+    } while (1);
 
-    /* Map the DLL at a controlled base below 4GB to avoid GCC ms_abi truncation */
-    uintptr_t alloc_base = g_dll_base_next;
+    /* Map the DLL at the reserved base below 4GB to avoid GCC ms_abi truncation */
     IMAGE_NT_HEADERS64 nt_copy;
     void *base = map_image_at(path, NULL, &nt_copy, NULL, alloc_base);
 
@@ -548,10 +559,12 @@ loaded_module_t *load_dll(const char *path, int depth)
         return NULL;
     }
 
-    /* Advance g_dll_base_next past this DLL's image, rounded up to page alignment */
-    size_t dll_size = nt_copy.OptionalHeader.SizeOfImage;
-    size_t aligned = (dll_size + (PAGE_SIZE - 1)) & ~(size_t)(PAGE_SIZE - 1);
-    __atomic_add_fetch(&g_dll_base_next, aligned, __ATOMIC_SEQ_CST);
+    /* Advance g_dll_base_next past the actual DLL size.
+     * We already reserved PAGE_SIZE atomically above, so only add the remainder. */
+    uintptr_t dll_size = (nt_copy.OptionalHeader.SizeOfImage + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
+    if (dll_size > PAGE_SIZE) {
+        __atomic_add_fetch(&g_dll_base_next, dll_size - PAGE_SIZE, __ATOMIC_SEQ_CST);
+    }
 
     /* Extract NT headers from image memory */
     IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
