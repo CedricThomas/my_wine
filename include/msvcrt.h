@@ -41,6 +41,8 @@ void *__p__fmode(void);
 /* IO buffers */
 __attribute__((ms_abi))
 void *__iob_func(void);
+__attribute__((ms_abi))
+void *__acrt_iob_func(void);
 
 /* Locale */
 __attribute__((ms_abi))

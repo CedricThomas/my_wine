@@ -90,6 +90,7 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "__getmainargs", (void*)__getmainargs },
     { "msvcrt.dll", "__initenv", (void*)__initenv },
     { "msvcrt.dll", "__iob_func", (void*)__iob_func },
+    { "msvcrt.dll", "__acrt_iob_func", (void*)__acrt_iob_func },
     { "msvcrt.dll", "__lconv_init", (void*)__lconv_init },
     { "msvcrt.dll", "__set_app_type", (void*)__set_app_type },
     { "msvcrt.dll", "__setusermatherr", (void*)__setusermatherr },

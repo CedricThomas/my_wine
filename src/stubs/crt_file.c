@@ -41,3 +41,13 @@ void *__iob_func(void)
 {
     return __wine_iob.bytes;
 }
+
+/*
+ * __acrt_iob_func: same as __iob_func but for newer UCRT-based PE files.
+ * Returns the base of the FILE array.
+ */
+WINE_STUB
+void *__acrt_iob_func(void)
+{
+    return __wine_iob.bytes;
+}
