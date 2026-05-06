@@ -141,6 +141,7 @@ void *map_image(const char *path,
     /* Apply base relocations (needed when actual base != preferred ImageBase) */
     if (apply_relocations(base, &nt) != 0) {
         DEBUG("Failed to apply relocations");
+        munmap(base, image_size);
         munmap(file_base, file_size);
         close(fd);
         return NULL;
@@ -166,6 +167,7 @@ void *map_image(const char *path,
 
         if (mprotect((char *)base + sections[i].VirtualAddress, size, prot) != 0) {
             perror("mprotect");
+            munmap(base, image_size);
             munmap(file_base, file_size);
             close(fd);
             return NULL;
