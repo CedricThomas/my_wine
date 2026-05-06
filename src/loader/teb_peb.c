@@ -19,6 +19,8 @@
 #include "loader_priv.h"
 #include "include/debug.h"
 #include "../heap/wine_heap.h"
+#include "peb_ldr.h"
+#include "module_list.h"
 
 void *g_stack_base = NULL;
 size_t g_stack_size = 0;
@@ -79,6 +81,29 @@ void *setup_teb_peb(void)
     /* Initialize process heap and store in PEB at PEB_PROCESS_HEAP */
     void *ph = init_process_heap();
     *(void **)((char *)peb + PEB_PROCESS_HEAP) = ph;
+
+    /* Initialize module registry and PEB LDR */
+    init_module_list();
+    g_peb_ldr = init_peb_ldr();
+    if (g_peb_ldr != NULL) {
+        /* Set PEB[PEB_LDR = 0x18] to point to LDR data */
+        *(void **)((char *)peb + PEB_LDR) = g_peb_ldr;
+
+        /* Register the main PE as the first module */
+        if (g_image_base != NULL) {
+            /* Verify g_image_base is a real mapped PE image before dereferencing.
+             * madvise returns -ENONET for unmapped addresses, which guards against
+             * test scenarios where g_image_base is set to a fake value. */
+            if (madvise(g_image_base, 1, MADV_NORMAL) == 0) {
+                IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)g_image_base;
+                IMAGE_NT_HEADERS64 *img_nt = (IMAGE_NT_HEADERS64 *)((char *)g_image_base + img_dos->e_lfanew);
+                loaded_module_t *mod = add_module(g_image_base, "main.exe", img_nt);
+                if (mod != NULL) {
+                    ldr_add_module(mod);
+                }
+            }
+        }
+    }
 
     /*
      * Do NOT set GS base here. The GS base should remain pointing to

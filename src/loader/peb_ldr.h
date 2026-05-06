@@ -30,7 +30,7 @@ typedef struct {
 } UNICODE_STRING;
 
 /* ── PEB_LDR_DATA ──────────────────────────────────────────────── */
-typedef struct {
+typedef struct peb_ldr_data {
     uint8_t Reserved[8];
     LIST_ENTRY InLoadOrderModuleList;
     LIST_ENTRY InMemoryOrderModuleList;
