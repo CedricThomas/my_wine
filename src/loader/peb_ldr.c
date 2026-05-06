@@ -2,21 +2,54 @@
  * peb_ldr.c — PEB LDR data structures management
  *
  * Manages the PEB_LDR_DATA structure and LDR_DATA_TABLE_ENTRY nodes
- * for each loaded module, maintaining the three Windows-style
- * doubly-linked lists: InLoadOrder, InMemoryOrder, InInitializationOrder.
+ * (embedded in loaded_module_t) for each loaded module.
+ *
+ * Only init_peb_ldr() uses malloc (called on host stack).
+ * ldr_add_module/ldr_remove_module operate on embedded structures.
  */
 
 #include <stdlib.h>
 #include <string.h>
-#include <wchar.h>
 
 #include "peb_ldr.h"
-#include "module_list.h"
 
 /* ── Global state ──────────────────────────────────────────────── */
 PEB_LDR_DATA *g_peb_ldr = NULL;
 
-/* ── List helpers ──────────────────────────────────────────────── */
+/* ── Hand-rolled helpers (no glibc for guest-stack safety) ─────── */
+
+static size_t pdr_strlen(const char *s)
+{
+    size_t len = 0;
+    while (s[len]) len++;
+    return len;
+}
+
+static void pdr_memset(void *ptr, int c, size_t n)
+{
+    uint8_t *p = (uint8_t *)ptr;
+    size_t i;
+    for (i = 0; i < n; i++)
+        p[i] = (uint8_t)c;
+}
+
+/* Copy ASCII string into an embedded LDR_UNICODE_STRING buffer */
+static void pdr_make_unicode_string(LDR_UNICODE_STRING *us, const char *src)
+{
+    size_t len = pdr_strlen(src);
+    size_t i;
+
+    pdr_memset(us->Buffer, 0, sizeof(us->Buffer));
+
+    for (i = 0; i < len && i < MAX_LDR_NAME_WCHAR; i++) {
+        us->Buffer[i] = (uint16_t)(uint8_t)src[i];
+    }
+
+    us->Length = (uint16_t)(len * sizeof(uint16_t));
+    us->MaximumLength = (uint16_t)((len + 1) * sizeof(uint16_t));
+}
+
+/* ── List helpers ───────────────────────────────────────────────── */
 
 /* Initialize a LIST_ENTRY as a self-referencing head node */
 static void list_init(LIST_ENTRY *entry)
@@ -45,41 +78,7 @@ static void list_remove(LIST_ENTRY *entry)
     entry->Blink = entry;
 }
 
-/* ── UTF-16 conversion helpers ─────────────────────────────────── */
-
-/* Convert an ASCII string to a wchar_t (UTF-16) string.
- * Returns a malloc'd buffer that must be freed by the caller. */
-static wchar_t *ascii_to_utf16(const char *src)
-{
-    size_t len = strlen(src);
-    wchar_t *buf = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
-    if (!buf) return NULL;
-
-    for (size_t i = 0; i <= len; i++) {
-        buf[i] = (wchar_t)(uint8_t)src[i];
-    }
-    return buf;
-}
-
-/* Create a PEB_UNICODE_STRING from an ASCII source.
- * Buffers are malloc'd and must be freed by the caller. */
-static PEB_UNICODE_STRING create_unicode_string(const char *src)
-{
-    PEB_UNICODE_STRING us;
-    size_t len = strlen(src);
-    us.Buffer = ascii_to_utf16(src);
-    if (!us.Buffer) {
-        us.Length = 0;
-        us.MaximumLength = 0;
-        us.Buffer = NULL;
-        return us;
-    }
-    us.Length = (uint16_t)(len * sizeof(wchar_t));
-    us.MaximumLength = (uint16_t)((len + 1) * sizeof(wchar_t));
-    return us;
-}
-
-/* ── Public API ────────────────────────────────────────────────── */
+/* ── Public API ─────────────────────────────────────────────────── */
 
 PEB_LDR_DATA *init_peb_ldr(void)
 {
@@ -98,33 +97,30 @@ PEB_LDR_DATA *init_peb_ldr(void)
 
 int ldr_add_module(loaded_module_t *mod)
 {
+    int i;
+
     if (!mod || !mod->base || !mod->nt || !g_peb_ldr)
         return -1;
 
-    LDR_DATA_TABLE_ENTRY *entry = (LDR_DATA_TABLE_ENTRY *)calloc(1, sizeof(LDR_DATA_TABLE_ENTRY));
-    if (!entry)
-        return -1;
+    if (mod->ldr_linked)
+        return 0;  /* Already linked */
+
+    LDR_DATA_TABLE_ENTRY *entry = &mod->ldr_entry;
+
+    /* Zero the entry */
+    pdr_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
 
     entry->DllBase = mod->base;
     entry->SizeOfImage = mod->nt->OptionalHeader.SizeOfImage;
     entry->EntryPoint = (char *)mod->base + mod->nt->OptionalHeader.AddressOfEntryPoint;
     entry->TimeDateStamp = mod->nt->FileHeader.TimeDateStamp;
+    entry->LoadCount = 1;
 
-    entry->FullDllName = create_unicode_string(mod->name);
-    if (!entry->FullDllName.Buffer) {
-        free(entry);
-        return -1;
-    }
-
-    entry->BaseDllName = create_unicode_string(mod->name);
-    if (!entry->BaseDllName.Buffer) {
-        free(entry->FullDllName.Buffer);
-        free(entry);
-        return -1;
-    }
+    pdr_make_unicode_string(&entry->FullDllName, mod->name);
+    pdr_make_unicode_string(&entry->BaseDllName, mod->name);
 
     /* Initialize and insert each of the three list nodes */
-    for (int i = 0; i < 3; i++) {
+    for (i = 0; i < 3; i++) {
         list_init(&entry->DoubleList[i]);
     }
 
@@ -134,42 +130,39 @@ int ldr_add_module(loaded_module_t *mod)
 
     list_init(&entry->HashTableEntry);
 
-    entry->LoadCount = 1;
-
-    mod->ldr_entry = entry;
+    mod->ldr_linked = 1;
 
     return 0;
 }
 
 int ldr_remove_module(loaded_module_t *mod)
 {
-    if (!mod || !mod->ldr_entry)
+    if (!mod || !mod->ldr_linked)
         return 0;
 
-    LDR_DATA_TABLE_ENTRY *entry = mod->ldr_entry;
+    LDR_DATA_TABLE_ENTRY *entry = &mod->ldr_entry;
 
     /* Unlink from all three lists */
     list_remove(&entry->DoubleList[0]);
     list_remove(&entry->DoubleList[1]);
     list_remove(&entry->DoubleList[2]);
 
-    /* Free the Unicode string buffers */
-    free(entry->FullDllName.Buffer);
-    free(entry->BaseDllName.Buffer);
+    /* Reset the entry */
+    pdr_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
 
-    free(entry);
-
-    mod->ldr_entry = NULL;
+    mod->ldr_linked = 0;
 
     return 0;
 }
 
 LDR_DATA_TABLE_ENTRY *ldr_find_by_addr(void *addr)
 {
+    LIST_ENTRY *cursor;
+
     if (!g_peb_ldr || !addr)
         return NULL;
 
-    LIST_ENTRY *cursor = g_peb_ldr->InMemoryOrderModuleList.Flink;
+    cursor = g_peb_ldr->InMemoryOrderModuleList.Flink;
 
     while (cursor != &g_peb_ldr->InMemoryOrderModuleList) {
         LDR_DATA_TABLE_ENTRY *entry = (LDR_DATA_TABLE_ENTRY *)(

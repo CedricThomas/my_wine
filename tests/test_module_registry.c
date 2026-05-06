@@ -29,9 +29,7 @@ extern void *g_image_base;
 /* Forward declarations for loader functions used in API stub tests */
 int find_dll_path(const char *dll_name, char *path, size_t path_size);
 loaded_module_t *load_dll(const char *path, int depth);
-EXPORT_CACHE *parse_export_table(void *base, IMAGE_NT_HEADERS64 *nt);
-void *lookup_export(loaded_module_t *mod, const char *name);
-void free_export_cache(EXPORT_CACHE *cache);
+int parse_export_table(loaded_module_t *mod);
 void *map_image(const char *path,
                 IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS64 *out_nt,
@@ -398,7 +396,7 @@ static void test_ldr_removal(void)
 
     int rc = ldr_add_module(mod);
     check("ldr_add_module returns 0", rc == 0);
-    check("mod->ldr_entry is set", mod->ldr_entry != NULL);
+    check("mod->ldr_entry is set", mod->ldr_linked);
 
     /* Verify module is in the LDR InLoadOrder list */
     {
@@ -425,7 +423,7 @@ static void test_ldr_removal(void)
     /* Remove the module */
     rc = ldr_remove_module(mod);
     check("ldr_remove_module returns 0", rc == 0);
-    check("mod->ldr_entry is NULL after remove", mod->ldr_entry == NULL);
+    check("mod->ldr_entry is NULL after remove", !mod->ldr_linked);
 
     /* Verify it's gone from the LDR InLoadOrder list */
     {
@@ -615,7 +613,7 @@ static void test_api_load_and_lookup(void)
     setenv("WINE_DLL_PATH", "/tmp", 1);
 
     /* Load the DLL */
-    void *base = LoadLibraryA("tdll.dll");
+    void *base = _LoadLibraryA("tdll.dll");
     check("LoadLibraryA returns non-NULL", base != NULL);
 
     if (base == NULL) {
@@ -624,26 +622,26 @@ static void test_api_load_and_lookup(void)
     }
 
     /* GetModuleHandleA with name should return the same base */
-    void *handle = GetModuleHandleA("tdll.dll");
-    check("GetModuleHandleA(\"tdll.dll\") returns same base", handle == base);
+    void *handle = _GetModuleHandleA("tdll.dll");
+    check("_GetModuleHandleA(\"tdll.dll\") returns same base", handle == base);
 
-    /* GetModuleHandleA(NULL) returns the main module (module_list[0]) */
+    /* _GetModuleHandleA(NULL) returns the main module (module_list[0]) */
     /* Since module_list[0] is tdll.dll (first loaded), it should be the same */
-    void *main_handle = GetModuleHandleA(NULL);
-    check("GetModuleHandleA(NULL) returns the main module base", main_handle == base);
+    void *main_handle = _GetModuleHandleA(NULL);
+    check("_GetModuleHandleA(NULL) returns the main module base", main_handle == base);
 
     /* load_dll now auto-populates export_cache for export-only DLLs. */
 
     /* GetProcAddress for a valid export */
-    void *addr = GetProcAddress(base, "ExportFunc");
-    check("GetProcAddress(base, \"ExportFunc\") returns non-NULL", addr != NULL);
+    void *addr = _GetProcAddress(base, "ExportFunc");
+    check("_GetProcAddress(base, \"ExportFunc\") returns non-NULL", addr != NULL);
 
     /* GetProcAddress for a non-existent export */
-    void *bad_addr = GetProcAddress(base, "nonexistent");
-    check("GetProcAddress(base, \"nonexistent\") returns NULL", bad_addr == NULL);
+    void *bad_addr = _GetProcAddress(base, "nonexistent");
+    check("_GetProcAddress(base, \"nonexistent\") returns NULL", bad_addr == NULL);
 
     /* Cleanup: free the DLL and the file */
-    FreeLibraryA(base);
+    _FreeLibraryA(base);
     unlink(dll_path);
 
     /* Reset globals for subsequent tests */
@@ -675,7 +673,7 @@ static void test_api_free_library(void)
     setenv("WINE_DLL_PATH", "/tmp", 1);
 
     /* Load the DLL */
-    void *base = LoadLibraryA("tdll.dll");
+    void *base = _LoadLibraryA("tdll.dll");
     check("LoadLibraryA returns non-NULL", base != NULL);
 
     if (base == NULL) {
@@ -688,11 +686,11 @@ static void test_api_free_library(void)
     check("module is in list before FreeLibraryA", mod != NULL);
 
     /* Free the DLL */
-    int rc = FreeLibraryA(base);
+    int rc = _FreeLibraryA(base);
     check("FreeLibraryA returns non-zero", rc != 0);
 
     /* After free, GetModuleHandleA should return NULL */
-    void *handle = GetModuleHandleA("tdll.dll");
+    void *handle = _GetModuleHandleA("tdll.dll");
     check("GetModuleHandleA returns NULL after FreeLibraryA", handle == NULL);
 
     /* Verify the module is no longer in the list */
@@ -729,7 +727,7 @@ static void test_api_duplicate_load(void)
     setenv("WINE_DLL_PATH", "/tmp", 1);
 
     /* Load the DLL twice */
-    void *base1 = LoadLibraryA("tdll.dll");
+    void *base1 = _LoadLibraryA("tdll.dll");
     check("First LoadLibraryA returns non-NULL", base1 != NULL);
 
     if (base1 == NULL) {
@@ -737,7 +735,7 @@ static void test_api_duplicate_load(void)
         return;
     }
 
-    void *base2 = LoadLibraryA("tdll.dll");
+    void *base2 = _LoadLibraryA("tdll.dll");
     check("Second LoadLibraryA returns non-NULL", base2 != NULL);
     check("Both LoadLibraryA calls return the same base", base1 == base2);
 
@@ -746,21 +744,21 @@ static void test_api_duplicate_load(void)
     check("load_count is 2 after two loads", mod != NULL && mod->load_count == 2);
 
     /* Free once — module should still be loaded */
-    FreeLibraryA(base1);
+    _FreeLibraryA(base1);
     mod = find_module_by_name("tdll.dll");
     check("module still loaded after first FreeLibraryA", mod != NULL);
     check("load_count is 1 after first FreeLibraryA", mod->load_count == 1);
 
     /* Verify GetModuleHandleA still works */
-    void *handle = GetModuleHandleA("tdll.dll");
+    void *handle = _GetModuleHandleA("tdll.dll");
     check("GetModuleHandleA returns base after first free", handle == base1);
 
     /* Free again — module should now be freed */
-    FreeLibraryA(base2);
+    _FreeLibraryA(base2);
     mod = find_module_by_name("tdll.dll");
     check("module is freed after second FreeLibraryA", mod == NULL);
 
-    handle = GetModuleHandleA("tdll.dll");
+    handle = _GetModuleHandleA("tdll.dll");
     check("GetModuleHandleA returns NULL after second free", handle == NULL);
 
     /* Cleanup */

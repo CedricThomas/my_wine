@@ -213,7 +213,7 @@ static void test_three_tier_resolution(void)
     check("add_module succeeded", mod != NULL);
 
     /* Parse exports (hello_world may not have exports — that's OK) */
-    mod->export_cache = parse_export_table(base, img_nt);
+    parse_export_table(mod);
 
     /* Re-run resolve_imports — should still work
      * (Tier 1 for stubs, Tier 2 for module exports if any) */
@@ -228,11 +228,8 @@ static void test_three_tier_resolution(void)
     }
 
     /* Cleanup */
-    if (mod && mod->export_cache) {
-        free_export_cache(mod->export_cache);
-        mod->export_cache = NULL;
-    }
     if (mod) {
+        reset_export_cache(mod);
         remove_module(mod);
     }
     munmap(base, nt.OptionalHeader.SizeOfImage);
@@ -409,18 +406,16 @@ static void test_load_dll(void)
 
         /* For a DLL with no imports, resolve_module_imports returns early
          * without calling parse_export_table. Parse it manually. */
-        mod->export_cache = parse_export_table(mod->base, mod->nt);
-        check("parse_export_table populates export_cache", mod->export_cache != NULL);
-        if (mod->export_cache != NULL) {
+        parse_export_table(mod);
+        check("parse_export_table populates export_cache",
+              mod->export_cache.number_of_names > 0);
+        if (mod->export_cache.number_of_names > 0) {
             void *addr = lookup_export(mod, "DllFunc");
             check("lookup_export finds DllFunc", addr != NULL);
         }
 
         /* Cleanup */
-        if (mod->export_cache) {
-            free_export_cache(mod->export_cache);
-            mod->export_cache = NULL;
-        }
+        reset_export_cache(mod);
         remove_module(mod);
         if (mod->base) {
             munmap(mod->base, mod->nt->OptionalHeader.SizeOfImage);

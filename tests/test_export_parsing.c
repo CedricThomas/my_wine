@@ -3,7 +3,10 @@
  *
  * Constructs synthetic PE images with export tables in anonymous memory,
  * then tests parse_export_table, lookup_export, lookup_export_by_ordinal,
- * forwarder detection, and free_export_cache.
+ * forwarder detection, and reset_export_cache.
+ *
+ * The export cache is now embedded in loaded_module_t. For testing, we
+ * create a minimal loaded_module_t on the stack.
  *
  * Build: linked against export_table.o, module_list.o, debug.o, pe_headers.o, pe_imports.o
  */
@@ -42,17 +45,18 @@ static void check(const char *label, int condition)
     }
 }
 
-/* ── Build a PE image in anonymous memory with export dir ──────
- *
- * Layout (all addresses relative to base):
- *   0x0000  DOS header
- *   0x0080  NT headers (PE sig + FileHeader + OptionalHeader)
- *   0x0180  Section headers (2 sections: .text, .rdata)
- *   0x1000  .text section — stub function code
- *   0x2000  .rdata section — export directory + tables + name strings
- *
- * Returns the base address. Caller munmaps with buf_size.
- */
+/* Create a minimal loaded_module_t on the stack for testing.
+ * The embedded export_cache is zero'd. */
+static loaded_module_t *make_test_mod(void *base, IMAGE_NT_HEADERS64 *nt)
+{
+    static loaded_module_t mod;  /* static to avoid stack overflow with embedded arrays */
+    memset(&mod, 0, sizeof(mod));
+    mod.base = base;
+    mod.nt = nt;
+    return &mod;
+}
+
+/* ── Build a PE image in anonymous memory with export dir ────── */
 static void *build_pe_with_exports(size_t buf_size,
                                     const char **export_names,
                                     int num_exports,
@@ -86,18 +90,16 @@ static void *build_pe_with_exports(size_t buf_size,
 
     if (out_nt) *out_nt = nt;
 
-    /* ── Section headers at 0x0080 + sizeof(NT) ───────── */
+    /* ── Section headers ───────────────────────────────── */
     size_t sec_off = 0x80 + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) + sizeof(IMAGE_OPTIONAL_HEADER64);
     IMAGE_SECTION_HEADER *sec = (IMAGE_SECTION_HEADER *)(p + sec_off);
 
-    /* .text at RVA 0x1000 */
     memcpy(sec[0].Name, ".text\0\0\0", 8);
     sec[0].Misc.VirtualSize = 0x1000;
     sec[0].VirtualAddress = 0x1000;
     sec[0].SizeOfRawData = 0x1000;
     sec[0].Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE;
 
-    /* .rdata at RVA 0x2000 */
     memcpy(sec[1].Name, ".rdata\0\0", 8);
     sec[1].Misc.VirtualSize = 0x1000;
     sec[1].VirtualAddress = 0x2000;
@@ -116,14 +118,6 @@ static void *build_pe_with_exports(size_t buf_size,
     exp->NumberOfNames = (uint32_t)num_exports;
     exp->Base = 1;
 
-    /* Layout inside .rdata (0x2000+):
-     *  0x0000  IMAGE_EXPORT_DIRECTORY (40 bytes)
-     *  0x0028  "TEST.DLL\0"
-     *  0x0030  AddressOfNames (num_exports * 4 bytes)
-     *  +names  AddressOfNameOrdinals (num_exports * 2 bytes)
-     *  +ords   AddressOfFunctions (num_exports * 4 bytes)
-     *  +funcs  Name strings (variable length)
-     */
     uint32_t name_table_rva = 0x2030;
     uint32_t ordinal_rva = name_table_rva + num_exports * sizeof(uint32_t);
     uint32_t func_rva = ordinal_rva + num_exports * sizeof(uint16_t);
@@ -134,10 +128,8 @@ static void *build_pe_with_exports(size_t buf_size,
     exp->AddressOfFunctions = func_rva;
     exp->Name = 0x2028;
 
-    /* DLL name string */
     memcpy(p + 0x2028, "TEST.DLL\0", 9);
 
-    /* AddressOfNames array (sorted by name — binary search requires this) */
     uint32_t *names = (uint32_t *)(p + name_table_rva);
     uint32_t cur_name_rva = name_str_rva;
     for (int i = 0; i < num_exports; i++) {
@@ -145,34 +137,27 @@ static void *build_pe_with_exports(size_t buf_size,
         cur_name_rva += (uint32_t)(strlen(export_names[i]) + 1);
     }
 
-    /* AddressOfNameOrdinals — stores index into AddressOfFunctions */
     uint16_t *ordinals = (uint16_t *)(p + ordinal_rva);
     for (int i = 0; i < num_exports; i++) {
-        ordinals[i] = (uint16_t)i; /* 0-based index into func table */
+        ordinals[i] = (uint16_t)i;
     }
 
-    /* AddressOfFunctions */
     uint32_t *funcs = (uint32_t *)(p + func_rva);
     for (int i = 0; i < num_exports; i++) {
         if (has_forwarder && (i == num_exports - 1)) {
-            /* Forwarder: RVA points into the export directory itself */
-            funcs[i] = 0x2080; /* points to the forwarder string we write below */
+            funcs[i] = 0x2080;
         } else {
             funcs[i] = 0x1000 + i * 0x10;
         }
     }
 
-    /* Name strings */
     uint8_t *str_pos = p + name_str_rva;
     for (int i = 0; i < num_exports; i++) {
         memcpy(str_pos, export_names[i], strlen(export_names[i]) + 1);
         str_pos += strlen(export_names[i]) + 1;
     }
 
-    /* Forwarder string — placed at 0x2080 to avoid overlapping the name table at 0x2030+ */
     if (has_forwarder) {
-        /* Put forwarder string at a safe location within the export dir that
-         * doesn't overlap with the name/ordinal/func tables or name strings. */
         memcpy(p + 0x2080, "kernel32.dll!SomeFunc\0", 23);
     }
 
@@ -185,26 +170,25 @@ static void test_parse_export_table(void)
 {
     printf("\n=== parse_export_table ===\n");
 
-    const char *names[] = { "Alpha", "Beta", "Delta", "Gamma" }; /* sorted for binary search */
+    const char *names[] = { "Alpha", "Beta", "Delta", "Gamma" };
     size_t buf_size = 0x3000;
 
     IMAGE_NT_HEADERS64 *nt = NULL;
     void *base = build_pe_with_exports(buf_size, names, 4, 0, &nt);
     if (!base) { printf("  SKIP: build failed\n"); return; }
 
-    EXPORT_CACHE *cache = parse_export_table(base, nt);
-    check("parse_export_table returns non-NULL", cache != NULL);
+    loaded_module_t *mod = make_test_mod(base, nt);
+    int rc = parse_export_table(mod);
+    check("parse_export_table returns 0", rc == 0);
 
-    if (cache) {
-        check("number_of_functions == 4", cache->number_of_functions == 4);
-        check("number_of_names == 4", cache->number_of_names == 4);
-        check("base_ordinal == 1", cache->base_ordinal == 1);
-        check("name_table allocated", cache->name_table != NULL);
-        check("ordinal_table allocated", cache->ordinal_table != NULL);
-        check("func_table allocated", cache->func_table != NULL);
-    }
+    EXPORT_CACHE *cache = &mod->export_cache;
+    check("number_of_functions == 4", cache->number_of_functions == 4);
+    check("number_of_names == 4", cache->number_of_names == 4);
+    check("base_ordinal == 1", cache->base_ordinal == 1);
+    check("name_table has data", cache->name_table[0] != 0);
+    check("ordinal_table has data", cache->ordinal_table[1] == 1);
+    check("func_table has data", cache->func_table[0] != 0);
 
-    if (cache) free_export_cache(cache);
     munmap(base, buf_size);
 }
 
@@ -232,8 +216,9 @@ static void test_parse_no_export(void)
     nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
     nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress = 0;
 
-    EXPORT_CACHE *cache = parse_export_table(base, nt);
-    check("returns NULL for no export dir", cache == NULL);
+    loaded_module_t *mod = make_test_mod(base, nt);
+    int rc = parse_export_table(mod);
+    check("returns -1 for no export dir", rc == -1);
 
     munmap(base, buf_size);
 }
@@ -244,26 +229,20 @@ static void test_lookup_export(void)
 {
     printf("\n=== lookup_export ===\n");
 
-    const char *names[] = { "Alpha", "Beta", "Delta", "Gamma" }; /* sorted for binary search */
+    const char *names[] = { "Alpha", "Beta", "Delta", "Gamma" };
     size_t buf_size = 0x3000;
 
     IMAGE_NT_HEADERS64 *nt = NULL;
     void *base = build_pe_with_exports(buf_size, names, 4, 0, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 
-    EXPORT_CACHE *cache = parse_export_table(base, nt);
-    if (!cache) { munmap(base, buf_size); printf("  SKIP: parse failed\n"); return; }
+    loaded_module_t *mod = make_test_mod(base, nt);
+    parse_export_table(mod);
 
-    loaded_module_t mod;
-    memset(&mod, 0, sizeof(mod));
-    mod.base = base;
-    mod.export_cache = cache;
-
-    /* Lookup each name */
     for (int i = 0; i < 4; i++) {
         char label[64];
         snprintf(label, sizeof(label), "lookup_export finds %s", names[i]);
-        void *addr = lookup_export(&mod, names[i]);
+        void *addr = lookup_export(mod, names[i]);
         check(label, addr != NULL);
         if (addr) {
             check("address in .text region",
@@ -272,14 +251,11 @@ static void test_lookup_export(void)
         }
     }
 
-    /* Non-existent name */
-    void *missing = lookup_export(&mod, "NonExistent");
+    void *missing = lookup_export(mod, "NonExistent");
     check("returns NULL for missing name", missing == NULL);
 
-    /* NULL module */
     check("returns NULL for NULL module", lookup_export(NULL, "Alpha") == NULL);
 
-    free_export_cache(cache);
     munmap(base, buf_size);
 }
 
@@ -296,32 +272,19 @@ static void test_lookup_export_by_ordinal(void)
     void *base = build_pe_with_exports(buf_size, names, 3, 0, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 
-    EXPORT_CACHE *cache = parse_export_table(base, nt);
-    if (!cache) { munmap(base, buf_size); printf("  SKIP\n"); return; }
+    loaded_module_t *mod = make_test_mod(base, nt);
+    parse_export_table(mod);
 
-    loaded_module_t mod;
-    memset(&mod, 0, sizeof(mod));
-    mod.base = base;
-    mod.export_cache = cache;
-
-    /* ordinal 1 (base=1, index 0) */
-    void *a1 = lookup_export_by_ordinal(&mod, 1);
+    void *a1 = lookup_export_by_ordinal(mod, 1);
     check("ordinal 1 returns non-NULL", a1 != NULL);
 
-    /* ordinal 3 (index 2) */
-    void *a3 = lookup_export_by_ordinal(&mod, 3);
+    void *a3 = lookup_export_by_ordinal(mod, 3);
     check("ordinal 3 returns non-NULL", a3 != NULL);
 
-    /* out of range */
-    check("ordinal 100 returns NULL", lookup_export_by_ordinal(&mod, 100) == NULL);
-
-    /* below base */
-    check("ordinal 0 returns NULL", lookup_export_by_ordinal(&mod, 0) == NULL);
-
-    /* NULL module */
+    check("ordinal 100 returns NULL", lookup_export_by_ordinal(mod, 100) == NULL);
+    check("ordinal 0 returns NULL", lookup_export_by_ordinal(mod, 0) == NULL);
     check("NULL module returns NULL", lookup_export_by_ordinal(NULL, 1) == NULL);
 
-    free_export_cache(cache);
     munmap(base, buf_size);
 }
 
@@ -335,38 +298,29 @@ static void test_forwarder_detection(void)
     size_t buf_size = 0x3000;
 
     IMAGE_NT_HEADERS64 *nt = NULL;
-    void *base = build_pe_with_exports(buf_size, names, 3, 1, &nt); /* has_forwarder=1 */
+    void *base = build_pe_with_exports(buf_size, names, 3, 1, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 
-    EXPORT_CACHE *cache = parse_export_table(base, nt);
-    if (!cache) { munmap(base, buf_size); printf("  SKIP\n"); return; }
+    loaded_module_t *mod = make_test_mod(base, nt);
+    parse_export_table(mod);
 
-    loaded_module_t mod;
-    memset(&mod, 0, sizeof(mod));
-    mod.base = base;
-    mod.export_cache = cache;
-
-    /* "Forwarded" has func_rva pointing into export dir -> should be NULL */
-    void *fwd = lookup_export(&mod, "Forwarded");
+    void *fwd = lookup_export(mod, "Forwarded");
     check("lookup_export returns NULL for forwarder", fwd == NULL);
 
-    /* "Alpha" should still work */
-    void *alpha = lookup_export(&mod, "Alpha");
+    void *alpha = lookup_export(mod, "Alpha");
     check("non-forwarder lookup still works", alpha != NULL);
 
-    /* ordinal lookup for forwarded function (ordinal 3 = index 2) */
-    void *fwd_ord = lookup_export_by_ordinal(&mod, 3);
+    void *fwd_ord = lookup_export_by_ordinal(mod, 3);
     check("lookup_by_ordinal returns NULL for forwarder", fwd_ord == NULL);
 
-    free_export_cache(cache);
     munmap(base, buf_size);
 }
 
-/* ── Test: free_export_cache ─────────────────────────────────── */
+/* ── Test: reset_export_cache ────────────────────────────────── */
 
-static void test_free_export_cache(void)
+static void test_reset_export_cache(void)
 {
-    printf("\n=== free_export_cache ===\n");
+    printf("\n=== reset_export_cache ===\n");
 
     const char *names[] = { "A", "B" };
     size_t buf_size = 0x3000;
@@ -375,14 +329,16 @@ static void test_free_export_cache(void)
     void *base = build_pe_with_exports(buf_size, names, 2, 0, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 
-    EXPORT_CACHE *cache = parse_export_table(base, nt);
-    if (!cache) { munmap(base, buf_size); printf("  SKIP\n"); return; }
+    loaded_module_t *mod = make_test_mod(base, nt);
+    parse_export_table(mod);
+    check("parse_export_table populated cache", mod->export_cache.number_of_names == 2);
 
-    free_export_cache(cache);
-    check("free does not crash", 1);
+    reset_export_cache(mod);
+    check("reset_export_cache zeroes name count", mod->export_cache.number_of_names == 0);
+    check("reset_export_cache zeroes func count", mod->export_cache.number_of_functions == 0);
 
-    free_export_cache(NULL);
-    check("free(NULL) does not crash", 1);
+    reset_export_cache(NULL);
+    check("reset_export_cache(NULL) does not crash", 1);
 
     munmap(base, buf_size);
 }
@@ -398,7 +354,7 @@ int main(void)
     test_lookup_export();
     test_lookup_export_by_ordinal();
     test_forwarder_detection();
-    test_free_export_cache();
+    test_reset_export_cache();
 
     printf("\n========================================\n");
     printf("Total:  %d  Passed: %d  Failed: %d\n",

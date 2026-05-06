@@ -2,49 +2,43 @@
  * export_table.c — Parse export tables and lookup exports
  *
  * Reads IMAGE_EXPORT_DIRECTORY from a loaded PE image and caches
- * the address-of-functions, name, and ordinal tables into heap
- * buffers so they survive mprotect changes to the image.
+ * the address-of-functions, name, and ordinal tables into the
+ * embedded EXPORT_CACHE within loaded_module_t.
+ *
+ * No malloc — the cache is embedded. No glibc — all memory ops
+ * use __builtin_memcpy or hand-rolled loops.
  */
 
-#define _GNU_SOURCE
-
 #include <stdio.h>
-#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "export_table.h"
 #include "include/nt_constants.h"
 #include "include/debug.h"
-#include "module_list.h"
 
-/*
- * parse_export_table — Read the export directory and copy the three
- * lookup tables (names, ordinals, function addresses) into heap-
- * allocated buffers inside an EXPORT_CACHE.
- *
- * Returns NULL when the module has no export directory
- * (DataDirectory[0].VirtualAddress == 0).
- */
-EXPORT_CACHE *parse_export_table(void *base, IMAGE_NT_HEADERS64 *nt)
+int parse_export_table(loaded_module_t *mod)
 {
+    if (!mod || !mod->base || !mod->nt) {
+        return -1;
+    }
+
     const IMAGE_DATA_DIRECTORY *dir =
-        &nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT];
+        &mod->nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT];
 
     if (dir->VirtualAddress == 0) {
-        return NULL;
+        return -1;  /* No export directory */
     }
 
     IMAGE_EXPORT_DIRECTORY *exp =
-        (IMAGE_EXPORT_DIRECTORY *)((uint8_t *)base + dir->VirtualAddress);
+        (IMAGE_EXPORT_DIRECTORY *)((uint8_t *)mod->base + dir->VirtualAddress);
 
-    /* Allocate the cache struct */
-    EXPORT_CACHE *cache = malloc(sizeof(EXPORT_CACHE));
-    if (!cache) {
-        return NULL;
-    }
+    EXPORT_CACHE *cache = &mod->export_cache;
 
-    cache->base = base;
+    /* Zero the entire cache */
+    __builtin_memset(cache, 0, sizeof(EXPORT_CACHE));
+
+    cache->base = mod->base;
     cache->export_dir_rva = dir->VirtualAddress;
     cache->export_dir_size = dir->Size;
     cache->address_of_functions = exp->AddressOfFunctions;
@@ -56,50 +50,37 @@ EXPORT_CACHE *parse_export_table(void *base, IMAGE_NT_HEADERS64 *nt)
 
     /* Copy AddressOfNames array (RVAs) */
     if (exp->NumberOfNames > 0 && exp->AddressOfNames != 0) {
-        size_t nsize = exp->NumberOfNames * sizeof(uint32_t);
-        uint32_t *src = (uint32_t *)((uint8_t *)base + exp->AddressOfNames);
-        cache->name_table = malloc(nsize);
-        if (!cache->name_table) {
-            free(cache);
-            return NULL;
+        if (exp->NumberOfNames > MAX_EXPORT_NAMES) {
+            DEBUG("  WARNING: export name count %u exceeds MAX_EXPORT_NAMES %d",
+                  exp->NumberOfNames, MAX_EXPORT_NAMES);
+            exp->NumberOfNames = MAX_EXPORT_NAMES;
         }
-        memcpy(cache->name_table, src, nsize);
-    } else {
-        cache->name_table = NULL;
+        size_t nsize = exp->NumberOfNames * sizeof(uint32_t);
+        uint32_t *src = (uint32_t *)((uint8_t *)mod->base + exp->AddressOfNames);
+        __builtin_memcpy(cache->name_table, src, nsize);
     }
 
     /* Copy AddressOfNameOrdinals array (uint16_t ordinals) */
     if (exp->NumberOfNames > 0 && exp->AddressOfNameOrdinals != 0) {
-        size_t osize = exp->NumberOfNames * sizeof(uint16_t);
-        uint16_t *src = (uint16_t *)((uint8_t *)base + exp->AddressOfNameOrdinals);
-        cache->ordinal_table = malloc(osize);
-        if (!cache->ordinal_table) {
-            free(cache->name_table);
-            free(cache);
-            return NULL;
-        }
-        memcpy(cache->ordinal_table, src, osize);
-    } else {
-        cache->ordinal_table = NULL;
+        uint32_t names = exp->NumberOfNames;  /* already capped above */
+        size_t osize = names * sizeof(uint16_t);
+        uint16_t *src = (uint16_t *)((uint8_t *)mod->base + exp->AddressOfNameOrdinals);
+        __builtin_memcpy(cache->ordinal_table, src, osize);
     }
 
     /* Copy AddressOfFunctions array (RVAs) */
     if (exp->NumberOfFunctions > 0 && exp->AddressOfFunctions != 0) {
-        size_t fsize = exp->NumberOfFunctions * sizeof(uint32_t);
-        uint32_t *src = (uint32_t *)((uint8_t *)base + exp->AddressOfFunctions);
-        cache->func_table = malloc(fsize);
-        if (!cache->func_table) {
-            free(cache->ordinal_table);
-            free(cache->name_table);
-            free(cache);
-            return NULL;
+        if (exp->NumberOfFunctions > MAX_EXPORT_FUNCTIONS) {
+            DEBUG("  WARNING: export func count %u exceeds MAX_EXPORT_FUNCTIONS %d",
+                  exp->NumberOfFunctions, MAX_EXPORT_FUNCTIONS);
+            exp->NumberOfFunctions = MAX_EXPORT_FUNCTIONS;
         }
-        memcpy(cache->func_table, src, fsize);
-    } else {
-        cache->func_table = NULL;
+        size_t fsize = exp->NumberOfFunctions * sizeof(uint32_t);
+        uint32_t *src = (uint32_t *)((uint8_t *)mod->base + exp->AddressOfFunctions);
+        __builtin_memcpy(cache->func_table, src, fsize);
     }
 
-    return cache;
+    return 0;
 }
 
 /*
@@ -112,24 +93,18 @@ static int check_forwarder(EXPORT_CACHE *cache, loaded_module_t *mod, uint32_t f
     uint32_t export_end = cache->export_dir_rva + cache->export_dir_size;
 
     if (func_rva >= cache->export_dir_rva && func_rva < export_end) {
-        const char *forwarder_str = (const char *)((uint8_t *)mod->base + func_rva);
-        fprintf(stderr, "my_wine: forwarder detected: %s\n", forwarder_str);
+        DEBUG("  WARNING: forwarder detected in %s at RVA 0x%x",
+              mod->name, func_rva);
         return 1;
     }
     return 0;
 }
 
-/*
- * lookup_export — Find an export by name via binary search on the
- * AddressOfNames table.
- *
- * Returns the absolute runtime address, or NULL if not found.
- */
 void *lookup_export(loaded_module_t *mod, const char *func_name)
 {
     if (!mod) return NULL;
-    EXPORT_CACHE *cache = mod->export_cache;
-    if (!cache || !cache->name_table || cache->number_of_names == 0) {
+    EXPORT_CACHE *cache = &mod->export_cache;
+    if (cache->number_of_names == 0) {
         return NULL;
     }
 
@@ -149,7 +124,7 @@ void *lookup_export(loaded_module_t *mod, const char *func_name)
         } else {
             /* Found — resolve through ordinal table then function table */
             uint16_t ordinal = cache->ordinal_table[mid];
-            if (!cache->func_table) {
+            if (cache->number_of_functions == 0) {
                 return NULL;
             }
             uint32_t func_rva = cache->func_table[ordinal];
@@ -163,17 +138,11 @@ void *lookup_export(loaded_module_t *mod, const char *func_name)
     return NULL;
 }
 
-/*
- * lookup_export_by_ordinal — Direct lookup by ordinal number.
- *
- * The ordinal is the full ordinal (includes base_ordinal).
- * Returns the absolute runtime address, or NULL if not found.
- */
 void *lookup_export_by_ordinal(loaded_module_t *mod, uint16_t ordinal)
 {
     if (!mod) return NULL;
-    EXPORT_CACHE *cache = mod->export_cache;
-    if (!cache || !cache->func_table) {
+    EXPORT_CACHE *cache = &mod->export_cache;
+    if (cache->number_of_functions == 0) {
         return NULL;
     }
 
@@ -189,16 +158,10 @@ void *lookup_export_by_ordinal(loaded_module_t *mod, uint16_t ordinal)
     return (void *)((uint8_t *)mod->base + func_rva);
 }
 
-/*
- * free_export_cache — Release all heap-allocated buffers.
- */
-void free_export_cache(EXPORT_CACHE *cache)
+/* Reset the embedded export cache (clear all fields).
+ * No free needed — the cache is embedded in the module. */
+void reset_export_cache(loaded_module_t *mod)
 {
-    if (!cache) {
-        return;
-    }
-    free(cache->name_table);
-    free(cache->ordinal_table);
-    free(cache->func_table);
-    free(cache);
+    if (!mod) return;
+    __builtin_memset(&mod->export_cache, 0, sizeof(EXPORT_CACHE));
 }

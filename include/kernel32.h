@@ -16,6 +16,14 @@
 
 /* ── Function Declarations ──────────────────────────────────── */
 
+/* SysV-compatible versions for test code (non-guest callers).
+ * Test code calls these directly instead of the ms_abi versions. */
+void *_LoadLibraryA(const char *lpLibFileName);
+void *_GetProcAddress(void *hModule, const char *lpProcName);
+void *_GetModuleHandleA(const char *lpModuleName);
+int _FreeLibraryA(void *hModule);
+
+/* Guest-facing declarations (ms_abi — called from PE code) */
 __attribute__((ms_abi))
 void *GetStdHandle(int nStdHandle);
 
@@ -31,13 +39,22 @@ __attribute__((ms_abi))
 void ExitProcess(uint32_t uExitCode);
 
 __attribute__((ms_abi))
-void *GetProcAddress(void *hModule, const char *lpProcName);
-
-__attribute__((ms_abi))
 void *LoadLibraryA(const char *lpLibFileName);
+
+/* SysV-compatible wrapper for LoadLibraryA (callable from native code / tests) */
+void *_LoadLibraryA(const char *lpLibFileName);
 
 __attribute__((ms_abi))
 void *GetModuleHandleA(const char *lpModuleName);
+
+/* SysV-compatible wrapper for GetModuleHandleA (callable from native code / tests) */
+void *_GetModuleHandleA(const char *lpModuleName);
+
+__attribute__((ms_abi))
+void *GetProcAddress(void *hModule, const char *lpProcName);
+
+/* SysV-compatible wrapper for GetProcAddress (callable from native code / tests) */
+void *_GetProcAddress(void *hModule, const char *lpProcName);
 
 __attribute__((ms_abi))
 const char *GetCommandLineA(void);
@@ -62,6 +79,9 @@ int WideCharToMultiByte(uint32_t code_page, uint32_t dw_flags,
 
 __attribute__((ms_abi))
 int FreeLibraryA(void *hModule);
+
+/* SysV-compatible wrapper for FreeLibraryA (callable from native code / tests) */
+int _FreeLibraryA(void *hModule);
 
 /* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
 #define FreeLibrary FreeLibraryA
