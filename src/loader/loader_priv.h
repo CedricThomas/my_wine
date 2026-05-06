@@ -100,6 +100,10 @@ void *map_image(const char *path,
                 IMAGE_NT_HEADERS64 *out_nt,
                 size_t *out_nt_size);
 
+/* ── relocations.c ─────────────────────────────────────────── */
+
+int apply_relocations(void *base, IMAGE_NT_HEADERS64 *nt);
+
 /* ── teb_peb.c ─────────────────────────────────────────────── */
 
 void *setup_teb_peb(void);
