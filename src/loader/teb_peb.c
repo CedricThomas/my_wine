@@ -21,6 +21,7 @@
 #include "../heap/wine_heap.h"
 #include "peb_ldr.h"
 #include "module_list.h"
+#include "include/common.h"
 
 void *g_stack_base = NULL;
 size_t g_stack_size = 0;
@@ -37,7 +38,7 @@ size_t g_stack_size = 0;
 void *setup_teb_peb(void)
 {
     /* Allocate TEB (Thread Environment Block) - at least 4KB */
-    size_t teb_size = 4096;
+    size_t teb_size = PAGE_SIZE;
     void *teb = mmap(NULL, teb_size, PROT_READ|PROT_WRITE,
                       MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK, -1, 0);
     if (teb == MAP_FAILED) {
@@ -58,7 +59,7 @@ void *setup_teb_peb(void)
     *(void **)((uint8_t *)teb + TEB_THREAD_PTR) = teb;  // fake thread pointer (self-ref)
 
     /* Allocate PEB (Process Environment Block) */
-    size_t peb_size = 4096;
+    size_t peb_size = PAGE_SIZE;
     void *peb = mmap(NULL, peb_size, PROT_READ|PROT_WRITE,
                       MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK, -1, 0);
     if (peb == MAP_FAILED) {
@@ -132,7 +133,7 @@ void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
 
     /* Ensure minimum sizes */
     if (reserve == 0) reserve = 1024 * 1024; /* 1MB default */
-    if (commit  == 0) commit   = 4096;        /* 1 page minimum */
+    if (commit  == 0) commit   = PAGE_SIZE;   /* 1 page minimum */
 
     /* CRITICAL: ensure at least 512KB of stack for CRT startup (mainCRTStartup
      * needs significant stack for nested calls to __getmainargs, _initterm, etc.)
@@ -140,8 +141,8 @@ void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt)
     if (commit < 512 * 1024) commit = 512 * 1024;
 
     /* Align to page boundary */
-    reserve = (reserve + 4095) & ~(uint64_t)4095;
-    commit  = (commit  + 4095) & ~(uint64_t)4095;
+    reserve = (reserve + PAGE_MASK) & ~(uint64_t)PAGE_MASK;
+    commit  = (commit  + PAGE_MASK) & ~(uint64_t)PAGE_MASK;
 
     /* Allocate stack (grows downward on x86_64) */
     void *stack_base = mmap(NULL, commit, PROT_READ|PROT_WRITE,

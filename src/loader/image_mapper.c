@@ -17,6 +17,7 @@
 #include "include/nt_constants.h"
 #include "include/debug.h"
 #include "loader_priv.h"
+#include "include/common.h"
 
 void *g_image_base = NULL;
 static char g_pe_path[512] = {0};
@@ -178,7 +179,7 @@ void *map_image_at(const char *path,
         size_t size = sections[i].Misc.VirtualSize;
         if (size == 0)
             size = sections[i].SizeOfRawData;
-        size = (size + 4095) & ~(size_t)4095;
+        size = (size + PAGE_MASK) & ~(size_t)PAGE_MASK;
 
         if (INLINE_SYSCALL_MPROTECT((char *)base + sections[i].VirtualAddress, size, prot) != 0) {
             DEBUG("mprotect failed");
