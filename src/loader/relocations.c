@@ -67,16 +67,16 @@ int apply_relocations(void *base, IMAGE_NT_HEADERS64 *nt)
 
         /* Number of relocation entries in this block */
         uint32_t num_entries =
-            (size - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(IMAGE_RELOC_ENTRY);
+            (size - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(uint16_t);
 
-        IMAGE_RELOC_ENTRY *entries = block->entries;
+        const uint16_t *entries = (const uint16_t *)((const uint8_t *)block + sizeof(IMAGE_BASE_RELOCATION));
 
         for (uint32_t i = 0; i < num_entries; i++) {
-            uint16_t type   = entries[i].type;
-            uint16_t offset = entries[i].offset;
+            uint16_t type   = IMAGE_REL_ENTRY_TYPE(entries[i]);
+            uint16_t offset = IMAGE_REL_ENTRY_OFFSET(entries[i]);
 
             if (type == IMAGE_REL_BASED_DIR64) {
-                uint64_t *target = (uint64_t *)((char *)base + va + offset);
+                uint64_t *target = (uint64_t *)((char *)base + va + IMAGE_REL_ENTRY_OFFSET(entries[i]));
                 *target += delta;
             } else if (type == IMAGE_REL_BASED_ABSOLUTE) {
                 /* Padding / no-op */
@@ -84,7 +84,7 @@ int apply_relocations(void *base, IMAGE_NT_HEADERS64 *nt)
             } else {
                 fprintf(stderr,
                         "Unsupported relocation type 0x%04X at RVA 0x%08X\n",
-                        type, va + offset);
+                        type, va + IMAGE_REL_ENTRY_OFFSET(entries[i]));
                 continue;
             }
         }
