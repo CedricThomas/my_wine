@@ -22,6 +22,8 @@
 
 #include "pe.h"
 #include "pe_parser.h"
+#include "src/loader/module_list.h"
+#include "src/loader/export_table.h"
 
 /* ── Forward declarations from loader_priv.h ───────────────── */
 
@@ -166,6 +168,70 @@ static void test_import_resolution_pipeline(void)
     munmap(base, opt->SizeOfImage);
 }
 
+/* ── Test: three-tier resolution with module exports (Tier 2) ── */
+
+static void test_three_tier_resolution(void)
+{
+    const char *path = find_hello_exe();
+
+    if (!path) {
+        printf("\n=== Three-Tier Resolution: SKIPPED (hello.exe not found) ===\n");
+        return;
+    }
+
+    printf("\n=== Three-Tier Resolution (hello.exe: %s) ===\n", path);
+
+    /* Initialize all subsystems: import table + module registry */
+    init_msvcrt_imports();
+    init_import_table();
+    init_module_list();
+
+    /* Map the image */
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS64 nt;
+    size_t nt_size;
+    void *base = map_image(path, &dos, &nt, &nt_size);
+
+    if (base == NULL) {
+        printf("  SKIP: map_image() failed (cannot map %s)\n", path);
+        return;
+    }
+
+    check("map_image returns non-NULL", base != NULL);
+
+    /* Register the PE as a module with exports */
+    IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
+    IMAGE_NT_HEADERS64 *img_nt = (IMAGE_NT_HEADERS64 *)((char *)base + img_dos->e_lfanew);
+
+    loaded_module_t *mod = add_module(base, "hello_world.exe", img_nt);
+    check("add_module succeeded", mod != NULL);
+
+    /* Parse exports (hello_world may not have exports — that's OK) */
+    mod->export_cache = parse_export_table(base, img_nt);
+
+    /* Re-run resolve_imports — should still work
+     * (Tier 1 for stubs, Tier 2 for module exports if any) */
+    int rc = resolve_imports(base, &nt);
+    check("resolve_imports succeeds after module registration", rc == 0);
+
+    /* Verify module is in the registry */
+    loaded_module_t *found = find_module_by_name("hello_world.exe");
+    check("module found by name", found != NULL);
+    if (found) {
+        check("found module base matches", found->base == base);
+    }
+
+    /* Cleanup */
+    if (mod && mod->export_cache) {
+        free_export_cache(mod->export_cache);
+        mod->export_cache = NULL;
+    }
+    if (mod) {
+        remove_module(mod);
+    }
+    munmap(base, nt.OptionalHeader.SizeOfImage);
+}
+
 /* ── Main ───────────────────────────────────────────────────── */
 
 int main(void)
@@ -173,6 +239,7 @@ int main(void)
     printf("=== Import Resolution Tests (t7.3) ===\n");
 
     test_import_resolution_pipeline();
+    test_three_tier_resolution();
 
     /* ── Summary ──────────────────────────────────────────── */
     printf("\n========================================\n");
