@@ -40,12 +40,12 @@ const refptr_mapping_t refptr_mappings[] = {
     { NULL, NULL }
 };
 
-static struct refptr_patch_arg {
+struct refptr_patch_arg {
     uint64_t *refptr;
     void *target;
     const char *name;
     uint64_t rva;
-} refptr_patch_arg;
+};
 
 static void refptr_patch_cb(void *arg)
 {
@@ -66,12 +66,14 @@ void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
     char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)PAGE_MASK);
 
-    refptr_patch_arg.refptr = refptr;
-    refptr_patch_arg.target = target;
-    refptr_patch_arg.name = name;
-    refptr_patch_arg.rva = rva;
+    struct refptr_patch_arg arg = {
+        .refptr = refptr,
+        .target = target,
+        .name = name,
+        .rva = rva,
+    };
 
-    if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &refptr_patch_arg, PROT_READ) != 0) {
+    if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &arg, PROT_READ) != 0) {
         perror("patch_crt_refptrs: with_mprotect_rw");
     }
 }
