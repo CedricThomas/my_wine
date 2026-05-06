@@ -147,6 +147,21 @@ int main(void)
     }
     out("OK: printmethod succeeded\r\n");
 
+    /* 5c. GetProcAddress("dll_puts") + call */
+    typedef DWORD (*dll_puts_fn)(const char *);
+    dll_puts_fn puts_fn = (dll_puts_fn)GetProcAddress(hDll, "dll_puts");
+    if (puts_fn == NULL) {
+        out("FAIL: GetProcAddress(dll_puts) returned NULL\r\n");
+        ExitProcess(1);
+    }
+    DWORD puts_rc = puts_fn("Test from dll_puts!");
+    if (puts_rc != 0) {
+        lstrcpyA(buf, "FAIL: dll_puts returned non-zero\r\n");
+        out(buf);
+        ExitProcess(1);
+    }
+    out("OK: dll_puts succeeded\r\n");
+
     /* 6. FreeLibrary */
     BOOL freed = FreeLibrary(hDll);
 

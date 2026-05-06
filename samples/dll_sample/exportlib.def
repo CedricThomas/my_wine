@@ -1,4 +1,5 @@
 EXPORTS
     dll_add
     dll_greeting
+    dll_puts
     printmethod
