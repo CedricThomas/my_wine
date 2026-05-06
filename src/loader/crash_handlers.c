@@ -27,6 +27,8 @@
 #include "include/syscall/thunk_gen.h"
 #include <sys/user.h>
 
+static int g_alt_stack_available = 1;  /* Flipped to 0 if signal stack mmap fails */
+
 /**
  * SEH handler — called when an exception occurs in guest code.
  * On x86_64, SEH handlers receive (ExceptionRecord, EstablisherFrame,
@@ -77,6 +79,11 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 
     INLINE_SYSCALL_WRITE_ERR(sig_name, (size_t)sig_len);
 
+    if (!g_alt_stack_available) {
+        const char stack_warn[] = "WARNING: running on guest stack — crash may be unrecoverable\n";
+        INLINE_SYSCALL_WRITE(2, stack_warn, sizeof(stack_warn) - 1);
+    }
+
     ucontext_t *uc = (ucontext_t *)ucontext;
     if (uc) {
         greg_t *regs = uc->uc_mcontext.gregs;
@@ -120,7 +127,9 @@ void setup_signal_handlers(void)
     void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     if (sigstack_mem == MAP_FAILED) {
-        /* Fallback: handlers will run on the current stack */
+        g_alt_stack_available = 0;
+        const char warn_msg[] = "WARNING: alt signal stack mmap failed — crash handlers will run on guest stack (crash may be unrecoverable)\n";
+        INLINE_SYSCALL_WRITE(2, warn_msg, sizeof(warn_msg) - 1);
     } else {
         stack_t ss;
         ss.ss_sp = sigstack_mem;
