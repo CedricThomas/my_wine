@@ -24,6 +24,14 @@
 #define IMAGE_DIRECTORY_ENTRY_IMPORT     1
 #define IMAGE_DIRECTORY_ENTRY_BASERELOC  3
 
+#ifndef IMAGE_REL_BASED_DIR64
+#define IMAGE_REL_BASED_DIR64       0x000A
+#define IMAGE_REL_BASED_ABSOLUTE    0x0000
+#endif
+#ifndef IMAGE_FILE_RELOCS_STRIPPED
+#define IMAGE_FILE_RELOCS_STRIPPED  0x0001
+#endif
+
 #define IMAGE_SCN_MEM_READ      0x40000000  /* bit 30 */
 #define IMAGE_SCN_MEM_WRITE     0x80000000  /* bit 31 */
 #define IMAGE_SCN_MEM_EXECUTE   0x20000000  /* bit 29 */
@@ -160,6 +168,46 @@ typedef union {
     uint64_t Ordinal;        /* high bit set when this is an ordinal */
     uint64_t AddressOfData;
 } IMAGE_THUNK_DATA64;
+
+/* ── Relocation ────────────────────────────────────────────────── */
+
+typedef struct {
+    uint16_t type;
+    uint16_t offset;
+} IMAGE_RELOC_ENTRY;
+
+typedef struct {
+    uint32_t virtualAddress;
+    uint32_t sizeOfBlock;
+    IMAGE_RELOC_ENTRY entries[1]; // variable
+} IMAGE_BASE_RELOCATION;
+
+/* ── Export Directory ──────────────────────────────────────────── */
+
+typedef struct {
+    uint32_t Characteristics;
+    uint32_t TimeDateStamp;
+    uint16_t MajorVersion;
+    uint16_t MinorVersion;
+    uint32_t Name;
+    uint32_t Base;
+    uint32_t NumberOfFunctions;
+    uint32_t NumberOfNames;
+    uint32_t AddressOfFunctions;
+    uint32_t AddressOfNames;
+    uint32_t AddressOfNameOrdinals;
+} IMAGE_EXPORT_DIRECTORY;
+
+/* ── TLS Directory (64-bit) ────────────────────────────────────── */
+
+typedef struct {
+    void *StartAddress;
+    void *EndAddress;
+    void *ZeroFill;
+    void *Callback; // actually pointer to array of callbacks
+    uint32_t SizeOfZeroFill;
+    uint32_t Characteristics;
+} IMAGE_TLS_DIRECTORY64;
 
 /* ── COFF Symbol Table ─────────────────────────────────────────── */
 

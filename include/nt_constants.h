@@ -50,4 +50,19 @@
 #define PEB_IMAGE_BASE       0x008  /* ImageBaseAddress */
 #define PEB_PROCESS_HEAP     0x030  /* ProcessHeap */
 
+/* ── Data Directory entries ───────────────────────────────────── */
+
+#ifndef DIRECTORY_ENTRY_EXPORT
+#define DIRECTORY_ENTRY_EXPORT            0
+#endif
+#ifndef DIRECTORY_ENTRY_TLS
+#define DIRECTORY_ENTRY_TLS               9
+#endif
+#ifndef DIRECTORY_ENTRY_EXCEPTION
+#define DIRECTORY_ENTRY_EXCEPTION         3  /* IMAGE_DIRECTORY_ENTRY_EXCEPTION */
+#endif
+#ifndef IMAGE_NUMBEROF_DIRECTORY_ENTRIES
+#define IMAGE_NUMBEROF_DIRECTORY_ENTRIES  16
+#endif
+
 #endif /* MY_WINE_NT_CONSTANTS_H */
