@@ -11,12 +11,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <malloc.h>
 #include <stdint.h>
 #include <signal.h>
 #include "msvcrt_priv.h"
 #include "../syscall/abi_wrappers.h"
 #include "../syscall/syscalls_inline.h"
+
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096
+#endif
 
 /* ── _amsg_exit / _cexit (called from CRT startup) ────────── */
 
@@ -134,8 +137,10 @@ void *wine_realloc(void *ptr, size_t size)
     void *new_ptr = wine_malloc(size);
     if (new_ptr == NULL) return NULL;
 
-    size_t orig_size = malloc_usable_size(ptr);
-    memcpy(new_ptr, ptr, orig_size);
+    /* sysv_malloc uses mmap (page-sized). We can't know the original
+     * allocation size, so copy PAGE_SIZE (safe minimum). mmap returns
+     * zeroed memory, so any excess in the new block is clean. */
+    sysv_memcpy(new_ptr, ptr, PAGE_SIZE);
     wine_free(ptr);
     return new_ptr;
 }
