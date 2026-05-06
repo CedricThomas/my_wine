@@ -19,6 +19,10 @@ build/
 # Main binary
 my_wine
 
+# Test binaries (ignore all in tests/, keep .c sources)
+tests/*
+!tests/*.c
+
 # Auto-generated files
 include/crt_offsets_generated.h
 src/syscall/dispatcher_generated.c
