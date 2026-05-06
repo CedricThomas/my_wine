@@ -25,6 +25,12 @@ typedef struct {
     uint8_t    used;
 } handle_entry_t;
 
+/*
+ * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
+ * No mutex, spinlock, or atomic protection is applied.
+ * If multi-threaded guest code is supported in the future, each table
+ * must be protected (e.g., pthread_mutex_t) and all accessors updated.
+ */
 extern handle_entry_t handle_table[HANDLE_TABLE_SIZE];
 
 void init_handle_table(void);
@@ -43,6 +49,12 @@ typedef struct {
     uint64_t  max_size;
 } wine_section_t;
 
+/*
+ * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
+ * No mutex, spinlock, or atomic protection is applied.
+ * If multi-threaded guest code is supported in the future, each table
+ * must be protected (e.g., pthread_mutex_t) and all accessors updated.
+ */
 extern wine_section_t sections[MAX_SECTIONS];
 extern int section_count;
 
@@ -67,6 +79,12 @@ typedef struct {
     pthread_cond_t cond;
 } wine_event_t;
 
+/*
+ * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
+ * No mutex, spinlock, or atomic protection is applied.
+ * If multi-threaded guest code is supported in the future, each table
+ * must be protected (e.g., pthread_mutex_t) and all accessors updated.
+ */
 extern wine_event_t events[MAX_EVENTS];
 extern int event_count;
 
@@ -80,6 +98,12 @@ typedef struct {
     int            locked;  /* track if currently locked */
 } wine_mutex_t;
 
+/*
+ * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
+ * No mutex, spinlock, or atomic protection is applied.
+ * If multi-threaded guest code is supported in the future, each table
+ * must be protected (e.g., pthread_mutex_t) and all accessors updated.
+ */
 extern wine_mutex_t mutexes[MAX_MUTEXES];
 extern int mutex_count;
 
@@ -96,6 +120,12 @@ typedef struct {
     int suspended;
 } wine_thread_t;
 
+/*
+ * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
+ * No mutex, spinlock, or atomic protection is applied.
+ * If multi-threaded guest code is supported in the future, each table
+ * must be protected (e.g., pthread_mutex_t) and all accessors updated.
+ */
 extern wine_thread_t threads[MAX_THREADS];
 extern int thread_count;
 

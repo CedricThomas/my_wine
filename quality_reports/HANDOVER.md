@@ -37,16 +37,12 @@ Replace `{REPORT}` with one of:
 
 | Report | Focus |
 |--------|-------|
-| `magic_numbers.md` | **Easiest start** — replace bare literals with named constants, low risk |
-| `code_smells.md` | Dedup string helpers, split long functions, clean dead code |
 | `bad_designs.md` | Add accessor functions, improve error handling, fix reentrancy |
 | `architectural_issues.md` | **Largest** — split god-headers, refactor import_resolve.c, extract init_loader() |
 | `non_future_proof.md` | Add architecture guards, document limitations, improve error messages |
 
 ## Recommended Order
 
-1. `magic_numbers.md` (quick wins, affects many files but simple changes)
-2. `code_smells.md` (deduplication unlocks cleaner architecture work)
 3. `bad_designs.md` (accessor functions, safer globals)
 4. `architectural_issues.md` (big structural changes, last so they don't conflict with earlier work)
 5. `non_future_proof.md` (documentation + defensive checks)
