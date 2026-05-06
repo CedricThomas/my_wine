@@ -27,6 +27,11 @@
 .equ RSP_OFF,       48
 .equ RET_ADDR_OFF,  56
 .equ RAX_OFF,       64
+.equ RBX_OFF,       72
+.equ R12_OFF,       80
+.equ R13_OFF,       88
+.equ R14_OFF,       96
+.equ R15_OFF,       104
 
 .extern __wine_guest_regs
 .extern unix_stack_ptr_val
@@ -52,9 +57,14 @@ __wine_dispatcher:
     mov %r8,  __wine_guest_regs+R8_OFF(%rip)
     mov %r9,  __wine_guest_regs+R9_OFF(%rip)
 
-    /* Guest callee-saved register (clobbered by C dispatcher) */
+    /* Guest callee-saved registers (clobbered by C dispatcher) */
     /* RDI is NOT saved here — the thunk push/pop rdi wraps the call. */
     mov %rsi, __wine_guest_regs+RSI_OFF(%rip)
+    mov %rbx, __wine_guest_regs+RBX_OFF(%rip)
+    mov %r12, __wine_guest_regs+R12_OFF(%rip)
+    mov %r13, __wine_guest_regs+R13_OFF(%rip)
+    mov %r14, __wine_guest_regs+R14_OFF(%rip)
+    mov %r15, __wine_guest_regs+R15_OFF(%rip)
 
     /* ── Switch to UNIX stack ── */
 
@@ -86,6 +96,11 @@ __wine_dispatcher:
     mov __wine_guest_regs+R9_OFF(%rip), %r9
     /* RDI is NOT restored here — the thunk's `pop rdi` after our `ret` handles it. */
     mov __wine_guest_regs+RSI_OFF(%rip), %rsi
+    mov __wine_guest_regs+RBX_OFF(%rip), %rbx
+    mov __wine_guest_regs+R12_OFF(%rip), %r12
+    mov __wine_guest_regs+R13_OFF(%rip), %r13
+    mov __wine_guest_regs+R14_OFF(%rip), %r14
+    mov __wine_guest_regs+R15_OFF(%rip), %r15
     mov __wine_guest_regs+RAX_OFF(%rip), %rax
 
     /* Return to the thunk's `pop rdi` (at loc+14, pushed by the thunk's `call`).

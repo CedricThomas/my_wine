@@ -32,6 +32,11 @@ struct guest_regs {
     uint64_t rsp;       /* original guest RSP at dispatch time */
     uint64_t ret_addr;  /* return address pushed by the thunk call */
     uint64_t rax;       /* output: result for guest */
+    uint64_t rbx;       /* guest callee-saved */
+    uint64_t r12;       /* guest callee-saved */
+    uint64_t r13;       /* guest callee-saved */
+    uint64_t r14;       /* guest callee-saved */
+    uint64_t r15;       /* guest callee-saved */
 };
 
 /* Shared global state between assembly dispatcher and C dispatcher */
