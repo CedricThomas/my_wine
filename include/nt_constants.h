@@ -50,6 +50,10 @@
 #define PEB_IMAGE_BASE       0x008  /* ImageBaseAddress */
 #define PEB_PROCESS_HEAP     0x030  /* ProcessHeap */
 
+#ifndef PEB_LDR
+#define PEB_LDR              0x18   /* PEB_LDR_DATA pointer offset in PEB */
+#endif
+
 /* ── Data Directory entries ───────────────────────────────────── */
 
 #ifndef DIRECTORY_ENTRY_EXPORT

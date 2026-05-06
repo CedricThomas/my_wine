@@ -134,4 +134,13 @@ void *get_gs_base(void);
 int setup_unix_stack(void);
 void cleanup_unix_stack(void);
 
+/* ── module_list.c ─────────────────────────────────────────── */
+#include "module_list.h"  /* for loaded_module_t type */
+
+/* ── peb_ldr.c ─────────────────────────────────────────────── */
+/* Forward declarations for PEB_LDR_DATA, LDR_DATA_TABLE_ENTRY
+ * Full definitions in peb_ldr.h (created in next phase) */
+typedef struct peb_ldr_data PEB_LDR_DATA;
+typedef struct ldr_data_table_entry LDR_DATA_TABLE_ENTRY;
+
 #endif /* MY_WINE_LOADER_PRIV_H */
