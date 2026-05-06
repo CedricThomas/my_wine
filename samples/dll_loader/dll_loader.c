@@ -20,13 +20,13 @@ static void out(const char *s)
 /* Helper: print a pointer as "0xHHHHHHHH" */
 static void out_ptr(HMODULE p)
 {
-    unsigned long addr = (unsigned long)p;
+    unsigned long long addr = (unsigned long long)p;
     char buf[12];
     int i;
 
     lstrcpyA(buf, "0x");
     for (i = 0; i < 8; i++) {
-        int nibble = (addr >> (28 - i * 4)) & 0xF;
+        int nibble = (int)((addr >> (28 - i * 4)) & 0xF);
         buf[2 + i] = (char)(nibble < 10 ? ('0' + nibble) : ('A' + nibble - 10));
     }
     buf[10] = '\0';
@@ -64,12 +64,6 @@ static void out_int(int v)
     }
 }
 
-/* Build a string into buf, then out() it */
-static void out_buf(char *buf)
-{
-    out(buf);
-}
-
 int main(void)
 {
     char buf[128];
@@ -87,7 +81,7 @@ int main(void)
         ExitProcess(1);
     }
     lstrcpyA(buf, "OK: LoadLibraryA -> ");
-    out_buf(buf);
+    out(buf);
     out_ptr(hDll);
     out("\r\n");
 
@@ -98,7 +92,7 @@ int main(void)
         ExitProcess(1);
     }
     lstrcpyA(buf, "OK: GetModuleHandleA -> ");
-    out_buf(buf);
+    out(buf);
     out_ptr(hMod);
     out("\r\n");
 
@@ -112,13 +106,13 @@ int main(void)
     int result = add_fn(3, 4);
 
     lstrcpyA(buf, "OK: dll_add(3, 4) = ");
-    out_buf(buf);
+    out(buf);
     out_int(result);
     out("\r\n");
 
     if (result != 7) {
         lstrcpyA(buf, "FAIL: expected 7, got ");
-        out_buf(buf);
+        out(buf);
         out_int(result);
         out("\r\n");
         ExitProcess(1);
@@ -134,7 +128,7 @@ int main(void)
     const char *msg = greet_fn();
 
     lstrcpyA(buf, "OK: dll_greeting() = \"");
-    out_buf(buf);
+    out(buf);
     out(msg);
     out("\"\r\n");
 
@@ -142,7 +136,7 @@ int main(void)
     BOOL freed = FreeLibrary(hDll);
 
     lstrcpyA(buf, "OK: FreeLibrary -> ");
-    out_buf(buf);
+    out(buf);
     out_int(freed);
     out("\r\n");
 
@@ -150,5 +144,4 @@ int main(void)
     out("\r\n=== ALL TESTS PASSED ===\r\n");
 
     ExitProcess(0);
-    return 0;
 }
