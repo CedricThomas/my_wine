@@ -12,6 +12,7 @@
 #include <search.h>
 #include <strings.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
@@ -100,6 +101,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
 
         for (int i = 0; orig_thunks[i].AddressOfData != 0; i++) {
             void *addr = NULL;
+            const char *func_name_for_debug = NULL;
 
             if (orig_thunks[i].AddressOfData & 0x8000000000000000ULL) {
                 /* Ordinal import (high bit set) */
@@ -113,18 +115,16 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
                     fprintf(stderr, "  WARNING: ordinal import %s!%d not in lookup table\n",
                             dll_name, ordinal);
                 }
+                func_name_for_debug = "<ordinal>";
             } else {
                 /* Name import */
                 IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData);
-                addr = resolve_import(dll_name, (const char *)imp_name->Name);
+                func_name_for_debug = (const char *)imp_name->Name;
+                addr = resolve_import(dll_name, func_name_for_debug);
             }
 
             if (addr != NULL) {
-                DEBUG("    Resolved %s -> %p",
-                      orig_thunks[i].AddressOfData & 0x8000000000000000ULL ?
-                      "<ordinal>" :
-                      ((IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData))->Name,
-                      addr);
+                DEBUG("    Resolved %s -> %p", func_name_for_debug, addr);
                 iath[i].AddressOfData = (uint64_t)(uintptr_t)addr;
             } else {
                 fprintf(stderr, "    FAILED to resolve import at index %d\n", i);
@@ -342,7 +342,11 @@ static int find_dll_path(const char *dll_name, char *path, size_t path_size)
 }
 
 /* load_dll: map a DLL, apply relocations, register in module list + LDR, resolve its imports.
- * Returns the loaded_module_t or NULL on failure. */
+ * Returns the loaded_module_t or NULL on failure.
+ *
+ * Cleanup: if anything fails after add_module(), we undo all allocations
+ * (LDR entry, export cache, module slot, mmap) to avoid resource leaks.
+ */
 static loaded_module_t *load_dll(const char *path, int depth)
 {
     /* Map the DLL */
@@ -365,6 +369,7 @@ static loaded_module_t *load_dll(const char *path, int depth)
     loaded_module_t *mod = add_module(base, name, img_nt);
     if (mod == NULL) {
         fprintf(stderr, "  ERROR: module list full, cannot load '%s'\n", name);
+        munmap(base, img_nt->OptionalHeader.SizeOfImage);
         return NULL;
     }
 
@@ -373,12 +378,21 @@ static loaded_module_t *load_dll(const char *path, int depth)
         ldr_add_module(mod);
     }
 
-    /* Parse exports */
-    mod->export_cache = parse_export_table(base, img_nt);
-
-    /* Resolve this DLL's own imports (recursive) */
+    /* Resolve this DLL's own imports (recursive).
+     * resolve_module_imports also calls parse_export_table internally,
+     * so we do NOT call it here — that would double-allocate export_cache. */
     if (resolve_module_imports(mod, depth + 1) != 0) {
         fprintf(stderr, "  ERROR: import resolution failed for '%s'\n", name);
+        /* Cleanup all resources allocated above */
+        if (g_peb_ldr != NULL) {
+            ldr_remove_module(mod);
+        }
+        if (mod->export_cache != NULL) {
+            free_export_cache(mod->export_cache);
+            mod->export_cache = NULL;
+        }
+        remove_module(mod);
+        munmap(base, img_nt->OptionalHeader.SizeOfImage);
         return NULL;
     }
 
