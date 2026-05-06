@@ -178,7 +178,7 @@ static void parse_pe_headers(uint64_t entry_abs,
                              IMAGE_SECTION_HEADER **out_sections)
 {
     /* Re-parse PE headers from entry_abs to get nt_headers + sections */
-    uint64_t image_base = entry_abs & ~0xFFFFFUL;
+    uint64_t image_base = entry_abs & PAGE_ALIGN_MASK;
     void *base = (void *)(uintptr_t)image_base;
     const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
     uint32_t pe_off = img_dos->e_lfanew;
@@ -300,7 +300,7 @@ __attribute__((noreturn)) void setup_guest_and_run(
 
     parse_pe_headers(entry_abs, &nt, &sections);
 
-    uint64_t image_base = entry_abs & ~0xFFFFFUL;
+    uint64_t image_base = entry_abs & PAGE_ALIGN_MASK;
     void *base = (void *)(uintptr_t)image_base;
     apply_final_patches(base, nt, sections);
 

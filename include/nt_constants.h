@@ -69,4 +69,16 @@
 #define IMAGE_NUMBEROF_DIRECTORY_ENTRIES  16
 #endif
 
+/* ── Windows access mask constants ──────────────────────────── */
+
+#define GENERIC_READ          0x80000000
+#define GENERIC_WRITE         0x40000000
+
+/* ── Windows error codes ────────────────────────────────────── */
+
+#define ERROR_SUCCESS                0
+#define ERROR_ACCESS_DENIED          5
+#define ERROR_INVALID_PARAMETER     87
+#define ERROR_INSUFFICIENT_BUFFER  122
+
 #endif /* MY_WINE_NT_CONSTANTS_H */

@@ -15,6 +15,8 @@
 #include "include/debug.h"
 #include "msvcrt_priv.h"
 
+#define CRT_BSS_INITIALIZED 0x30
+
 const refptr_mapping_t refptr_mappings[] = {
     { "__CTOR_LIST__",              (void *)&ctor_list_stub },
     { "__DTOR_LIST__",              (void *)&dtor_list_stub },
@@ -101,7 +103,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
      * unpatched __DTOR_LIST__ refptrs or other CRT issues. */
     if (bss_sec) {
         uint32_t *initialized_ptr = (uint32_t *)((char *)image_base +
-                                                  g_crt_ctx.bss_vaddr + 0x30);
+                                                  g_crt_ctx.bss_vaddr + CRT_BSS_INITIALIZED);
         *initialized_ptr = 1;
         DEBUG("patch_crt_refptrs: set initialized=1 at %p", (void *)initialized_ptr);
     }
