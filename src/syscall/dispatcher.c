@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 #include <stdint.h>
-#include <sys/ucontext.h>
 
 #include "include/common.h"
 #include "include/nt_constants.h"
@@ -18,8 +17,8 @@
  * calling convention (RCX, RDX, R8, R9, ...) and dispatches
  * to the appropriate handler.
  *
- * Both entry points (c_dispatch_syscall and handle_syscall) delegate
- * to a shared dispatcher_core() via a dispatch context global.
+ * Single entry point: c_dispatch_syscall().
+ * Uses dispatcher_core() which includes the generated switch body.
  */
 
 /* ── Guest stack reader ───────────────────────────────────────── */
@@ -111,17 +110,10 @@ static void format_err_unhandled_syscall(char *buf, uint64_t nr)
     buf[i] = '\0';
 }
 
-/* Unified dispatch context: set before calling dispatcher_core().
- * - NULL     → use __wine_guest_regs (c_dispatch_syscall path)
- * - non-NULL → use ctx->uc_mcontext.gregs (handle_syscall path) */
-static ucontext_t *g_dispatch_ctx = NULL;
-
 /*
  * read_guest_stack — read an argument from the guest stack.
  *
- * Checks g_dispatch_ctx to determine the RSP source:
- *   - NULL     → __wine_guest_regs.rsp (c_dispatch_syscall path)
- *   - non-NULL → ctx->uc_mcontext.gregs[REG_RSP] (handle_syscall path)
+ * Uses __wine_guest_regs.rsp (populated by the assembly dispatcher entry).
  *
  * In the Windows x64 ABI, args 5+ are on the stack:
  *   [RSP+0]  = return address (index 0)
@@ -136,12 +128,7 @@ static ucontext_t *g_dispatch_ctx = NULL;
 static inline uint64_t read_guest_stack(int index)
 {
     if (index < 0 || index > 15) return 0;
-    uintptr_t rsp;
-    if (g_dispatch_ctx != NULL) {
-        rsp = (uintptr_t)g_dispatch_ctx->uc_mcontext.gregs[REG_RSP];
-    } else {
-        rsp = (uintptr_t)__wine_guest_regs.rsp;
-    }
+    uintptr_t rsp = (uintptr_t)__wine_guest_regs.rsp;
 
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
         char buf[56];
@@ -221,10 +208,7 @@ static int dispatch_ptr_inout(uint64_t guest_arg, uint64_t *ptr_val,
 /* ── Shared dispatcher core ─────────────────────────────────────── */
 
 /*
- * dispatcher_core — common switch body shared by both entry points.
- *
- * Relies on g_dispatch_ctx being set by the caller before invocation
- * so that read_guest_stack() picks the correct RSP source.
+ * dispatcher_core — switch body shared by the dispatcher entry point.
  *
  * @nr    NT syscall number
  * @arg1  RCX argument
@@ -246,7 +230,7 @@ static uint64_t dispatcher_core(uint64_t nr, uint64_t arg1, uint64_t arg2,
     return result;
 }
 
-/* ── C dispatcher (single-process, no ucontext) ────────────────── */
+/* ── Dispatcher entry point ───────────────────────────────────── */
 
 /*
  * c_dispatch_syscall — dispatch a Windows NT syscall to its handler.
@@ -264,43 +248,9 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     format_trace_syscall(trace_buf, nr);
     INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXX\n"));
 
-    g_dispatch_ctx = NULL;
     uint64_t result = dispatcher_core(nr, __wine_guest_regs.rcx, __wine_guest_regs.rdx,
                                        __wine_guest_regs.r8, __wine_guest_regs.r9);
-    g_dispatch_ctx = NULL;  /* clear after use */
 
     __wine_guest_regs.rax = result;
     return result;
-}
-
-/* ── Legacy dispatcher (ucontext-based, for test compatibility) ── */
-
-/*
- * handle_syscall — dispatch a Windows NT syscall to its handler.
- *
- * @syscall_number: the raw NT syscall number (passed directly by thunks,
- *                  e.g. 0x05 for NtCallbackReturn)
- * @ctx:            pointer to the ucontext_t captured by the thunk entry
- *
- * Delegates to dispatcher_core() with g_dispatch_ctx set so that
- * read_guest_stack() uses ctx->uc_mcontext.gregs[REG_RSP].
- *
- * NOTE: This function is kept for backward compatibility with existing
- * tests that construct ucontext_t manually. The production path uses
- * c_dispatch_syscall() instead.
- */
-int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
-{
-    char trace_buf[32];
-    format_trace_syscall(trace_buf, syscall_number);
-    INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXX\n"));
-
-    g_dispatch_ctx = ctx;
-    uint64_t result = dispatcher_core(syscall_number,
-        ctx->uc_mcontext.gregs[REG_RCX], ctx->uc_mcontext.gregs[REG_RDX],
-        ctx->uc_mcontext.gregs[REG_R8], ctx->uc_mcontext.gregs[REG_R9]);
-    g_dispatch_ctx = NULL;  /* clear after use */
-
-    ctx->uc_mcontext.gregs[REG_RAX] = (greg_t)result;
-    return 0;
 }
