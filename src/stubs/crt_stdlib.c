@@ -15,7 +15,7 @@
 #include <stdint.h>
 #include <signal.h>
 #include "msvcrt_priv.h"
-#include "include/abi_wrappers.h"
+#include "../syscall/abi_wrappers.h"
 #include "../syscall/syscalls_inline.h"
 
 /* ── _amsg_exit / _cexit (called from CRT startup) ────────── */

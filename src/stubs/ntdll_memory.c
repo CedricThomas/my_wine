@@ -12,7 +12,7 @@
 #include "handler_abi.h"
 #include "ntdll_priv.h"
 #include "../syscall/syscalls_inline.h"
-#include "include/abi_wrappers.h"
+#include "../syscall/abi_wrappers.h"
 #include "include/common.h"
 
 /* ── Section / View storage ────────────────────────────────────── */

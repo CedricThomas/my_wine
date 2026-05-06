@@ -11,7 +11,7 @@
 #include "include/ntdll.h"
 #include "include/syscall/thunk_gen.h"
 #include "include/wine_abi.h"
-#include "include/abi_wrappers.h"
+#include "../syscall/abi_wrappers.h"
 #include "include/common.h"
 #include "ntdll_priv.h"
 #include "../syscall/syscalls_inline.h"
