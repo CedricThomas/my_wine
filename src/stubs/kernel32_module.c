@@ -10,7 +10,6 @@
 #include "kernel32_priv.h"
 #include "../loader/loader_priv.h"
 
-uintptr_t g_last_library_return = 0;  /* diagnostic: last LoadLibraryA return value */
 static char g_dll_path[512];
 
 /* ── LoadLibraryA ─────────────────────────────────────────────── */
@@ -19,14 +18,12 @@ WINE_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
     if (lpLibFileName == NULL) {
-        g_last_library_return = 0;
         return FORCE_PTR_RETURN(NULL);
     }
 
     loaded_module_t *mod = find_module_by_name_safe(lpLibFileName);
     if (mod != NULL) {
         mod->load_count++;
-        g_last_library_return = (uintptr_t)mod->base;
         return FORCE_PTR_RETURN(mod->base);
     }
 
@@ -36,13 +33,10 @@ void *LoadLibraryA(const char *lpLibFileName)
 
     mod = load_dll(g_dll_path, 0);
     if (mod == NULL) {
-        g_last_library_return = 0;
         return FORCE_PTR_RETURN(NULL);
     }
 
-    uintptr_t ret_val = (uintptr_t)mod->base;
-    g_last_library_return = ret_val;  /* diagnostic */
-    return FORCE_PTR_RETURN((void *)ret_val);
+    return FORCE_PTR_RETURN(mod->base);
 }
 
 void *_LoadLibraryA(const char *lpLibFileName)
