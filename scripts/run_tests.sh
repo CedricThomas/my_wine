@@ -34,4 +34,13 @@ fi
 echo "=== Running test_syscall_dispatch ==="
 timeout 5 ./"$BUILDDIR"/test_syscall_dispatch
 
+# test_relocations
+echo "=== Running test_relocations ==="
+if [ -f "$SHELL_EXE" ]; then
+	timeout 5 ./"$BUILDDIR"/test_relocations "$SHELL_EXE"
+else
+	echo "No hello_world.exe found — running unit tests only"
+	timeout 5 ./"$BUILDDIR"/test_relocations
+fi
+
 echo "=== Tests completed ==="

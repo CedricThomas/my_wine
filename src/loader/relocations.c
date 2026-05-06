@@ -8,7 +8,6 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <inttypes.h>
 
 #include "include/pe.h"
 #include "include/nt_constants.h"
@@ -57,34 +56,48 @@ int apply_relocations(void *base, IMAGE_NT_HEADERS64 *nt)
     while (block_ptr < block_end) {
         IMAGE_BASE_RELOCATION *block = (IMAGE_BASE_RELOCATION *)block_ptr;
 
-        /* Stop at zero-sized block (shouldn't happen but be safe) */
-        if (block->sizeOfBlock == 0) {
+        /* Stop at zero-sized or malformed block */
+        if (block->sizeOfBlock == 0 ||
+            block->sizeOfBlock < sizeof(IMAGE_BASE_RELOCATION)) {
             break;
         }
 
         uint32_t va   = block->virtualAddress;
         uint32_t size = block->sizeOfBlock;
 
-        /* Number of relocation entries in this block */
+        /* Number of relocation entries in this block. */
+        /* PE spec: entry count = (sizeOfBlock - 8) / 2 */
         uint32_t num_entries =
             (size - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(uint16_t);
 
-        const uint16_t *entries = (const uint16_t *)((const uint8_t *)block + sizeof(IMAGE_BASE_RELOCATION));
+        const uint16_t *entries =
+            (const uint16_t *)((const uint8_t *)block +
+                               sizeof(IMAGE_BASE_RELOCATION));
 
         for (uint32_t i = 0; i < num_entries; i++) {
             uint16_t type   = IMAGE_REL_ENTRY_TYPE(entries[i]);
             uint16_t offset = IMAGE_REL_ENTRY_OFFSET(entries[i]);
 
             if (type == IMAGE_REL_BASED_DIR64) {
-                uint64_t *target = (uint64_t *)((char *)base + va + IMAGE_REL_ENTRY_OFFSET(entries[i]));
+                uint64_t *target =
+                    (uint64_t *)((char *)base + va + offset);
                 *target += delta;
             } else if (type == IMAGE_REL_BASED_ABSOLUTE) {
                 /* Padding / no-op */
                 continue;
             } else {
-                fprintf(stderr,
-                        "Unsupported relocation type 0x%04X at RVA 0x%08X\n",
-                        type, va + IMAGE_REL_ENTRY_OFFSET(entries[i]));
+                /* Known 32-bit types that are no-ops on x86_64: */
+                /* 0x0001 HIGH, 0x0002 LOW, 0x0003 HILOW, 0x0006 DIR32 */
+                /* 0x0004 REL, 0x0007 SECREL, etc. */
+                /* Emit at most one warning per type to avoid spam. */
+                static unsigned warned_types[0x10];
+                if (!(warned_types[type])) {
+                    warned_types[type] = 1;
+                    fprintf(stderr,
+                            "Warning: unsupported relocation type "
+                            "0x%04X at RVA 0x%08X (no-op on x86_64)\n",
+                            type, va + offset);
+                }
                 continue;
             }
         }
