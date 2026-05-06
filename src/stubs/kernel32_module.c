@@ -18,22 +18,22 @@ WINE_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
     if (lpLibFileName == NULL)
-        return NULL;
+        return FORCE_PTR_RETURN(NULL);
 
     loaded_module_t *mod = find_module_by_name_safe(lpLibFileName);
     if (mod != NULL) {
         mod->load_count++;
-        return mod->base;
+        return FORCE_PTR_RETURN(mod->base);
     }
 
     if (!find_dll_path(lpLibFileName, g_dll_path, sizeof(g_dll_path)))
-        return NULL;
+        return FORCE_PTR_RETURN(NULL);
 
     mod = load_dll(g_dll_path, 0);
     if (mod == NULL)
-        return NULL;
+        return FORCE_PTR_RETURN(NULL);
 
-    return mod->base;
+    return FORCE_PTR_RETURN(mod->base);
 }
 
 void *_LoadLibraryA(const char *lpLibFileName)
@@ -47,13 +47,13 @@ WINE_STUB
 void *GetProcAddress(void *hModule, const char *lpProcName)
 {
     if (hModule == NULL || lpProcName == NULL)
-        return NULL;
+        return FORCE_PTR_RETURN(NULL);
 
     loaded_module_t *mod = find_module_by_addr(hModule);
     if (mod == NULL || mod->export_cache.number_of_names == 0)
-        return NULL;
+        return FORCE_PTR_RETURN(NULL);
 
-    return lookup_export(mod, lpProcName);
+    return FORCE_PTR_RETURN(lookup_export(mod, lpProcName));
 }
 
 void *_GetProcAddress(void *hModule, const char *lpProcName)
@@ -68,12 +68,12 @@ void *GetModuleHandleA(const char *lpModuleName)
 {
     if (lpModuleName == NULL) {
         if (module_count > 0)
-            return module_list[0].base;
-        return NULL;
+            return FORCE_PTR_RETURN(module_list[0].base);
+        return FORCE_PTR_RETURN(NULL);
     }
 
     loaded_module_t *mod = find_module_by_name_safe(lpModuleName);
-    return mod ? mod->base : NULL;
+    return FORCE_PTR_RETURN(mod ? mod->base : NULL);
 }
 
 void *_GetModuleHandleA(const char *lpModuleName)

@@ -41,7 +41,7 @@ WINE_STUB
 void *SetUnhandledExceptionFilter(void *callback)
 {
     (void)callback;
-    return NULL;
+    return FORCE_PTR_RETURN(NULL);
 }
 
 /* ── Sleep ──────────────────────────────────────────────────── */

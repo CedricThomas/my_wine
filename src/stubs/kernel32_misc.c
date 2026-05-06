@@ -26,8 +26,8 @@ int lstrlenA(const char *lpString)
 WINE_STUB
 char *lstrcpyA(char *dest, const char *src)
 {
-    if (dest == NULL || src == NULL) return NULL;
-    return strcpy(dest, src);
+    if (dest == NULL || src == NULL) return FORCE_PTR_RETURN(NULL);
+    return FORCE_PTR_RETURN(strcpy(dest, src));
 }
 
 /* ── GetLastError ───────────────────────────────────────────── */
@@ -44,7 +44,7 @@ WINE_STUB
 void *TlsGetValue(uint32_t dwTlsIndex)
 {
     (void)dwTlsIndex;
-    return NULL;
+    return FORCE_PTR_RETURN(NULL);
 }
 
 /* ── GetSystemTimeAsFileTime ───────────────────────────────── */
@@ -183,7 +183,7 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
 WINE_STUB
 const char *GetCommandLineA(void)
 {
-    return _acmdln ? _acmdln : "";
+    return FORCE_PTR_RETURN(_acmdln ? _acmdln : "");
 }
 
 /* ── GetEnvironmentStringsA ────────────────────────────────── */
@@ -195,7 +195,7 @@ const char *GetCommandLineA(void)
 WINE_STUB
 char *GetEnvironmentStringsA(void)
 {
-    return NULL;
+    return FORCE_PTR_RETURN(NULL);
 }
 
 /* ── IsDBCSLeadByteEx ──────────────────────────────────────── */
@@ -273,5 +273,5 @@ uint64_t __C_specific_handler(uint64_t exception_record, uint64_t establisher_fr
     return 1; /* ExceptionContinueSearch — skip this handler */
 }
 #include "include/wine_abi.h"
-WINE_STUB void *test_return_ptr(void) { return (void *)0x12345678UL; }
-WINE_STUB void *test_return_ptr_arg(void *arg) { return arg ? arg : (void *)0xdeadbeefUL; }
+WINE_STUB void *test_return_ptr(void) { return FORCE_PTR_RETURN((void *)0x12345678UL); }
+WINE_STUB void *test_return_ptr_arg(void *arg) { return FORCE_PTR_RETURN(arg ? arg : (void *)0xdeadbeefUL); }

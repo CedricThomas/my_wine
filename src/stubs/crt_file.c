@@ -39,7 +39,7 @@ void *__wine_iob_data(void)
 WINE_STUB
 void *__iob_func(void)
 {
-    return __wine_iob.bytes;
+    return FORCE_PTR_RETURN(__wine_iob.bytes);
 }
 
 /*
@@ -49,5 +49,5 @@ void *__iob_func(void)
 WINE_STUB
 void *__acrt_iob_func(void)
 {
-    return __wine_iob.bytes;
+    return FORCE_PTR_RETURN(__wine_iob.bytes);
 }

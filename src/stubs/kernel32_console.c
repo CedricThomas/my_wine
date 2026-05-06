@@ -16,10 +16,10 @@ WINE_STUB
 void *GetStdHandle(int nStdHandle)
 {
     switch (nStdHandle) {
-    case STD_INPUT_HANDLE:  return (void *)(uintptr_t)STD_INPUT_HANDLE_VALUE;
-    case STD_OUTPUT_HANDLE: return (void *)(uintptr_t)STD_OUTPUT_HANDLE_VALUE;
-    case STD_ERROR_HANDLE:  return (void *)(uintptr_t)STD_ERROR_HANDLE_VALUE;
-    default:                return NULL;
+    case STD_INPUT_HANDLE:  return FORCE_PTR_RETURN((void *)(uintptr_t)STD_INPUT_HANDLE_VALUE);
+    case STD_OUTPUT_HANDLE: return FORCE_PTR_RETURN((void *)(uintptr_t)STD_OUTPUT_HANDLE_VALUE);
+    case STD_ERROR_HANDLE:  return FORCE_PTR_RETURN((void *)(uintptr_t)STD_ERROR_HANDLE_VALUE);
+    default:                return FORCE_PTR_RETURN(NULL);
     }
 }
 

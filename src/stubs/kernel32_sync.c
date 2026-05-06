@@ -26,7 +26,7 @@ void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, cons
     (void)lpName;
     uint64_t handle = 0;
     handler_NtCreateEvent(&handle, 0x100000, 0, bManualReset ? 1 : 0, bInitialState ? 1 : 0);
-    return (void *)(uintptr_t)handle;
+    return FORCE_PTR_RETURN((void *)(uintptr_t)handle);
 }
 
 /* ── SetEvent ────────────────────────────────────────────────── */
@@ -114,7 +114,7 @@ void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName)
     (void)bInitialOwner; /* Initial ownership not implemented */
     uint64_t handle = 0;
     handler_NtCreateMutex(&handle, 0x100000, 0);
-    return (void *)(uintptr_t)handle;
+    return FORCE_PTR_RETURN((void *)(uintptr_t)handle);
 }
 
 /* ── ReleaseMutex ────────────────────────────────────────────── */

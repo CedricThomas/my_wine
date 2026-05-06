@@ -29,14 +29,14 @@ void *_initterm_e(const void **pi, const void **pe)
 {
     if (pi) *pi = NULL;
     if (pe) *pe = NULL;
-    return NULL;
+    return FORCE_PTR_RETURN(NULL);
 }
 
 WINE_STUB
 void *_onexit(void (*func)(void))
 {
     (void)func;
-    return NULL;
+    return FORCE_PTR_RETURN(NULL);
 }
 
 /*
@@ -88,7 +88,7 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
 WINE_STUB
 void *_setargv(void)
 {
-    return NULL;
+    return FORCE_PTR_RETURN(NULL);
 }
 
 WINE_STUB

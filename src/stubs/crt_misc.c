@@ -51,7 +51,7 @@ static int g_msvcrt_errno = 0;
 WINE_STUB
 int *_errno_func(void)
 {
-    return &g_msvcrt_errno;
+    return FORCE_PTR_RETURN(&g_msvcrt_errno);
 }
 
 /* ── _lock / _unlock ───────────────────────────────────────── */
