@@ -23,32 +23,48 @@
 WINE_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
-    if (lpLibFileName == NULL)
+    if (lpLibFileName == NULL) {
+        write_to_stderr("LoadLibraryA: NULL argument\n");
         return NULL;
+    }
 
     /* Check if already loaded */
     loaded_module_t *mod = find_module_by_name(lpLibFileName);
     if (mod != NULL) {
-        /* Duplicate load — increment ref count and return cached base */
         mod->load_count++;
+        {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "LoadLibraryA: already loaded '%s' at %p\n", lpLibFileName, mod->base);
+            write_to_stderr(buf);
+        }
         return mod->base;
     }
 
     /* Search for the DLL */
     char path[512];
     if (!find_dll_path(lpLibFileName, path, sizeof(path))) {
-        fprintf(stderr, "LoadLibraryA: cannot find '%s'\n", lpLibFileName);
+        {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "LoadLibraryA: cannot find '%s'\n", lpLibFileName);
+            write_to_stderr(buf);
+        }
         return NULL;
     }
+    {
+        char buf[568];
+        snprintf(buf, sizeof(buf), "LoadLibraryA: found at '%s'\n", path);
+        write_to_stderr(buf);
+    }
 
-    /* Load the DLL (map, relocate, register, resolve imports) */
+    /* Load the DLL */
     mod = load_dll(path, 0);
+
     if (mod == NULL) {
-        fprintf(stderr, "LoadLibraryA: failed to load '%s'\n", lpLibFileName);
         return NULL;
     }
 
-    return mod->base;
+    /* TEMP DIAG: return fixed address 0xdeadbeef12345678 to test return path */
+    return (void *)0xdeadbeef12345678ULL;
 }
 
 /* ── GetProcAddress ──────────────────────────────────────────── */
