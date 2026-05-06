@@ -223,8 +223,8 @@ static int dispatch_ptr_inout(uint64_t guest_arg, uint64_t *ptr_val,
 /*
  * dispatcher_core — common switch body shared by both entry points.
  *
- * Sets g_dispatch_ctx before the switch so that read_guest_stack()
- * picks the correct RSP source.
+ * Relies on g_dispatch_ctx being set by the caller before invocation
+ * so that read_guest_stack() picks the correct RSP source.
  *
  * @nr    NT syscall number
  * @arg1  RCX argument
