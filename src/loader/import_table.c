@@ -1,35 +1,8 @@
 /*
- * import_table.c — Import resolution table
+ * import_table.c — Static import entry definitions
  *
- * This file maintains the name→address lookup table used to resolve
- * PE import descriptors against our stub implementations.  Each entry
- * maps a DLL name + function name to a code address.
- *
- * ── Resolution Tiers ──────────────────────────────────────────────────
- *
- *   Tier 1 (THUNK)   — ntdll.dll syscall handlers
- *       Resolved via thunk lookup to our syscall dispatcher.
- *       Functions here never go through the real ntdll.dll.
- *
- *   Tier 2 (STUB)    — kernel32.dll C implementations
- *       Hand-written stubs that provide enough API surface for the
- *       target executable to operate.  Includes mingw-w64 aliases.
- *
- *   Tier 3 (Msvcrt)  — msvcrt.dll functions
- *       Split into two sub-tiers:
- *         Tier 3a — statically-known addresses: functions we implement
- *                  ourselves or expose data symbols (NULL-terminated).
- *         Tier 3b — dynamically-filled entries: initialised at runtime
- *                  by init_msvcrt_imports(), which fills each entry
- *                  with our own C reimplementation (e.g. malloc →
- *                  wine_malloc, strlen → wine_strlen).
- *
- *   init_msvcrt_imports() fills the NULL entries in Tier 3b by calling
- *   set_import() with our internal msvcrt-compatible implementations.
- *
- *   import_table_count is computed as sizeof(table)/sizeof(entry) - 1
- *   (excludes the sentinel).  init_import_table() sorts the array by
- *   name for bsearch lookups.
+ * Maintains the import_entry_t table mapping DLL/function names
+ * to our stub implementations.
  */
 
 #define _GNU_SOURCE
@@ -49,29 +22,9 @@
 #include "loader_priv.h"
 #include "include/debug.h"
 
-/*
- * Resolution strategy for import entries.
- * THUNK    — ntdll syscall handlers (dispatched to our syscall layer)
- * STUB     — kernel32/mingw stubs (our C implementations)
- * DYNAMIC  — msvcrt functions filled at runtime by init_msvcrt_imports()
- *
- * NOTE: This enum is for documentation only.  It is NOT added to
- *       import_entry_t (that would change the ABI).  Future code can
- *       reference it if a richer resolution model is needed.
- */
-typedef enum {
-    RESOLVE_THUNK,      /* ntdll syscall thunks */
-    RESOLVE_STUB,       /* kernel32 C stubs */
-    RESOLVE_DYNAMIC,    /* msvcrt — filled by init_msvcrt_imports() */
-} resolution_type;
-
-/*
- * Import table — name → address lookup.
- * Sorted by name at init time (init_import_table) for bsearch.
- * Sentinel entry {NULL, NULL, NULL} marks the end.
- */
+/* Name→address table for NT, kernel32 and msvcrt functions */
 import_entry_t import_table[] = {
-    /* ── Tier 1: ntdll syscall thunks (RESOLVE_THUNK) ── */
+    /* ntdll functions (via syscall thunks) */
     { "ntdll.dll", "NtWriteFile", (void*)handler_NtWriteFile },
     { "ntdll.dll", "NtReadFile", (void*)handler_NtReadFile },
     { "ntdll.dll", "NtClose", (void*)handler_NtClose },
@@ -88,7 +41,7 @@ import_entry_t import_table[] = {
     { "ntdll.dll", "NtOpenFile", (void*)handler_NtOpenFile },
     { "ntdll.dll", "NtGetContextThread", (void*)handler_NtGetContextThread },
     { "ntdll.dll", "NtSetContextThread", (void*)handler_NtSetContextThread },
-    /* ── Tier 2: kernel32 C stubs (RESOLVE_STUB) ── */
+    /* kernel32 functions */
     { "kernel32.dll", "GetStdHandle", (void*)GetStdHandle },
     { "kernel32.dll", "WriteFile", (void*)WriteFile },
     { "kernel32.dll", "ReadFile", (void*)ReadFile },
@@ -134,7 +87,7 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "MultiByteToWideChar", (void*)MultiByteToWideChar },
     { "kernel32.dll", "WideCharToMultiByte", (void*)WideCharToMultiByte },
     { "msvcrt.dll", "__C_specific_handler", (void*)__C_specific_handler },
-    /* ── Tier 3a: msvcrt statically-known (RESOLVE_STUB) ── */
+    /* msvcrt functions (statically known) */
     { "msvcrt.dll", "__getmainargs", (void*)__getmainargs },
     { "msvcrt.dll", "__initenv", (void*)__initenv },
     { "msvcrt.dll", "__iob_func", (void*)__iob_func },
@@ -149,7 +102,7 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "_fmode", (void*)&_fmode },
     { "msvcrt.dll", "_initterm", (void*)_initterm },
     { "msvcrt.dll", "_onexit", (void*)_onexit },
-    /* ── Tier 3b: msvcrt dynamic entries (RESOLVE_DYNAMIC) — filled by init_msvcrt_imports() ── */
+    /* Dynamic entries - filled by init_msvcrt_imports() */
     { "msvcrt.dll", "abort", NULL },
     { "msvcrt.dll", "calloc", NULL },
     { "msvcrt.dll", "exit", NULL },

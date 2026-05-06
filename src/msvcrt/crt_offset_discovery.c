@@ -137,104 +137,6 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
 }
 
 /*
- * Open the PE file, mmap it, and extract symbol table + string table pointers.
- * Returns the mmap'd base address (caller must munmap).
- * Returns NULL on failure.
- */
-static void *open_and_map_symbols(const char *file_path, uint32_t sym_ptr,
-                                  uint32_t sym_count, size_t *mapped_size,
-                                  IMAGE_SYMBOL **out_symbols,
-                                  char **out_string_table)
-{
-    int fd = open(file_path, O_RDONLY);
-    if (fd < 0) return NULL;
-
-    struct stat st;
-    if (fstat(fd, &st) < 0) { close(fd); return NULL; }
-
-    void *file_map = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    if (file_map == MAP_FAILED) return NULL;
-
-    *mapped_size = (size_t)st.st_size;
-    *out_symbols = (IMAGE_SYMBOL *)((char *)file_map + sym_ptr);
-
-    char *string_table = NULL;
-    size_t sym_table_size = (size_t)sym_count * IMAGE_SIZEOF_SYMBOL;
-    size_t str_off = sym_ptr + sym_table_size;
-    if (str_off + 4 <= (size_t)st.st_size) {
-        uint32_t str_size = *((const uint32_t *)((char *)file_map + str_off));
-        /* Allow small overhang (up to 64 bytes) for string table that extends
-         * past the file. Some PE tools include padding in the size field. */
-        size_t str_end = str_off + 4 + str_size;
-        if (str_end <= (size_t)st.st_size + 64 && str_size > 0) {
-            string_table = (char *)file_map + str_off + 4;
-        }
-    }
-    *out_string_table = string_table;
-    return file_map;
-}
-
-/*
- * Check whether a single COFF symbol matches the target name.
- * Applies four matching strategies in priority order:
- *   a. .rdata$.refptr.{name}  b. .refptr.{name}
- *   c. exact name match       d. substring fallback (name length > 8)
- * Returns the symbol pointer on match, NULL otherwise.
- */
-static const IMAGE_SYMBOL *find_matching_symbol(IMAGE_SYMBOL *sym,
-        char *string_table, const char *target)
-{
-    const char *sym_name = get_symbol_name(sym, string_table);
-    if (!sym_name) return NULL;
-
-    size_t sym_name_len = strlen(sym_name);
-    const char *prefix = ".rdata$.refptr.";
-    size_t plen = strlen(prefix);
-    if (sym_name_len == plen + strlen(target) &&
-        strncmp(sym_name, prefix, plen) == 0 &&
-        strncmp(sym_name + plen, target, sym_name_len - plen) == 0)
-        return sym;
-
-    prefix = ".refptr.";
-    plen = strlen(prefix);
-    if (sym_name_len == plen + strlen(target) &&
-        strncmp(sym_name, prefix, plen) == 0 &&
-        strncmp(sym_name + plen, target, sym_name_len - plen) == 0)
-        return sym;
-
-    if (strncmp(sym_name, target, sym_name_len) == 0 &&
-        target[sym_name_len] == '\0')
-        return sym;
-
-    if (sym_name_len > 8 && strstr(sym_name, target) != NULL)
-        return sym;
-
-    return NULL;
-}
-
-/*
- * Compute the RVA of a matched symbol.
- * Section-bound symbols: section VirtualAddress + symbol Value.
- * Absolute symbols (section_num == 0): use symbol Value directly.
- * Returns 0 on failure (invalid section number).
- */
-static uint64_t compute_rva_from_symbol(const IMAGE_SYMBOL *sym,
-        IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
-{
-    int32_t section_num = sym->SectionNumber;
-    if (section_num > 0 && (size_t)section_num <=
-            nt->FileHeader.NumberOfSections) {
-        IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
-        return sec->VirtualAddress + sym->Value;
-    }
-    if (section_num == 0) {
-        return sym->Value;
-    }
-    return 0;
-}
-
-/*
  * Read the COFF symbol table from the PE file to find symbol addresses.
  * Returns the RVA (relative virtual address) of the symbol, or 0 if not found.
  */
@@ -245,14 +147,34 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
 {
     uint32_t sym_ptr = nt->FileHeader.PointerToSymbolTable;
     uint32_t sym_count = nt->FileHeader.NumberOfSymbols;
-    if (sym_ptr == 0 || sym_count == 0) return 0;
 
-    size_t mapped_size = 0;
-    IMAGE_SYMBOL *symbols = NULL;
+    if (sym_ptr == 0 || sym_count == 0)
+        return 0;
+
+    int fd = open(file_path, O_RDONLY);
+    if (fd < 0) return 0;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) { close(fd); return 0; }
+
+    void *file_map = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (file_map == MAP_FAILED) return 0;
+
+    IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)((char *)file_map + sym_ptr);
+    size_t sym_table_size = (size_t)sym_count * IMAGE_SIZEOF_SYMBOL;
+
     char *string_table = NULL;
-    void *file_map = open_and_map_symbols(file_path, sym_ptr, sym_count,
-                                          &mapped_size, &symbols, &string_table);
-    if (file_map == NULL) return 0;
+    size_t str_off = sym_ptr + sym_table_size;
+    if (str_off + 4 <= (size_t)st.st_size) {
+        uint32_t str_size = *((const uint32_t *)((char *)file_map + str_off));
+        /* Allow small overhang (up to 64 bytes) for string table that extends
+         * past the file. Some PE tools include padding in the size field. */
+        size_t str_end = str_off + 4 + str_size;
+        if (str_end <= (size_t)st.st_size + 64 && str_size > 0) {
+            string_table = (char *)file_map + str_off + 4;
+        }
+    }
 
     /*
      * Scan all symbols, preferring section-bound over absolute.
@@ -262,56 +184,101 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
     uint64_t best_rva = 0;
     int has_section_match = 0;
 
-    DEBUG("COFF: '%s' scanning %u symbols", name, sym_count);
+    fprintf(stderr, "DBG_COFF: '%s' scanning %u symbols\n", name, sym_count);
     for (uint32_t i = 0; i < sym_count; i++) {
-        const IMAGE_SYMBOL *match = find_matching_symbol(&symbols[i], string_table, name);
-        if (!match) continue;
-
-        const char *sym_name = get_symbol_name(&symbols[i], string_table);
+        const IMAGE_SYMBOL *sym = &symbols[i];
+        const char *sym_name = get_symbol_name(sym, string_table);
+        if (!sym_name) continue;
         size_t sym_name_len = strlen(sym_name);
 
         if (i < 3) {
-            DEBUG("COFF: sym[%u] = '%.*s' sect=%d",
-                  i, (int)sym_name_len, sym_name, symbols[i].SectionNumber);
+            fprintf(stderr, "DBG_COFF: sym[%u] = '%.*s' sect=%d\n",
+                    i, (int)sym_name_len, sym_name, sym->SectionNumber);
         }
 
+        /* Debug: show symbols that contain CTOR or DTOR */
         if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
-            DEBUG("COFF: sym[%u] = '%s' sect=%d val=%u",
-                  i, sym_name, (int)symbols[i].SectionNumber, (unsigned)symbols[i].Value);
-            DEBUG("COFF_SYM: idx=%u name='%.*s' sect=%d val=%u type=%d",
-                  i, (int)sym_name_len, sym_name, (int)symbols[i].SectionNumber,
-                  symbols[i].Value, symbols[i].Type);
+            fprintf(stderr, "DBG_COFF: sym[%u] = '%s' sect=%d val=%u\n",
+                    i, sym_name, (int)sym->SectionNumber, (unsigned)sym->Value);
         }
 
-        if (strncmp(name, "__CTOR_LIST__", 13) == 0 ||
-            strncmp(name, "__DTOR_LIST__", 13) == 0) {
-            if (sym_name_len > 8) {
-                DEBUG("COFF_SUB: sym[%u] '%.*s' matched '%s' as substring",
-                      i, (int)sym_name_len, sym_name, name);
+        /* Debug: show all symbols containing CTOR or DTOR */
+        if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
+            fprintf(stderr, "DBG_COFF_SYM: idx=%u name='%.*s' sect=%d val=%u type=%d\n",
+                    i, (int)sym_name_len, sym_name, (int)sym->SectionNumber, sym->Value, sym->Type);
+        }
+
+        int matched = 0;
+        int is_refptr = 0;
+        /* Prefer .refptr entries over bare symbol names.
+         * mingw-w64 COFF tables often have bare "mingw_app_type" in .idata
+         * (wrong address) and ".rdata$.refptr.mingw_app_type" / ".refptr.mingw_app_type"
+         * in .rdata (correct address). Check refptr prefixes FIRST so we
+         * always find the right entry before the bare-name fallback. */
+        const char *prefix = ".rdata$.refptr.";
+        size_t plen = strlen(prefix);
+        if (sym_name_len == plen + strlen(name) &&
+            strncmp(sym_name, prefix, plen) == 0 &&
+            strncmp(sym_name + plen, name, sym_name_len - plen) == 0) {
+            matched = 1;
+        }
+        if (!matched) {
+            const char *prefix2 = ".refptr.";
+            size_t plen2 = strlen(prefix2);
+            if (sym_name_len == plen2 + strlen(name) &&
+                strncmp(sym_name, prefix2, plen2) == 0 &&
+                strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0) {
+                matched = 1;
             }
-            DEBUG("COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d",
-                  i, (int)sym_name_len, sym_name, symbols[i].SectionNumber,
-                  symbols[i].Value, nt->FileHeader.NumberOfSections, has_section_match);
+        }
+        if (!matched) {
+            /* Exact name match (last resort — .idata may have bare name with wrong address) */
+            if (strncmp(sym_name, name, sym_name_len) == 0 &&
+                name[sym_name_len] == '\0') {
+                matched = 1;
+            }
+        }
+        if (!matched) {
+            /* Substring fallback */
+            if (sym_name_len > 8 && strstr(sym_name, name) != NULL) {
+                matched = 1;
+                if (strstr(sym_name, ".refptr.")) {
+                    is_refptr = 1;
+                }
+                if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
+                    fprintf(stderr, "DBG_COFF_SUB: sym[%u] '%.*s' matched '%s' as substring\n",
+                            i, (int)sym_name_len, sym_name, name);
+                }
+            }
         }
 
-        uint64_t rva = compute_rva_from_symbol(&symbols[i], nt, sections);
+        if (!matched) continue;
+
+        if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
+            fprintf(stderr, "DBG_COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d\n",
+                    i, (int)sym_name_len, sym_name, sym->SectionNumber, sym->Value,
+                    nt->FileHeader.NumberOfSections, has_section_match);
+        }
+
+        int32_t section_num = sym->SectionNumber;
 
         /* Prefer section-bound symbols. If we already have one, skip.
-         * For absolute symbols (sec=0), remember as fallback only.
-         * Guard with rva != 0: compute_rva_from_symbol returns 0 for
-         * invalid section numbers, and we must not let those overwrite
-         * or block valid matches (preserves original behavior where
-         * section_num bounds were checked inline). */
-        if (rva != 0 && symbols[i].SectionNumber > 0 && !has_section_match) {
-            best_rva = rva;
-            has_section_match = 1;
-        } else if (rva != 0 && symbols[i].SectionNumber == 0 && !has_section_match) {
-            best_rva = rva;
+         * For absolute symbols (sec=0), remember as fallback only. */
+        if (section_num > 0 && (size_t)section_num <=
+            nt->FileHeader.NumberOfSections) {
+            if (!has_section_match) {
+                IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
+                best_rva = sec->VirtualAddress + sym->Value;
+                has_section_match = 1;
+            }
+        } else if (section_num == 0 && !has_section_match) {
+            /* Fallback: absolute symbol, but only if no section-bound one */
+            best_rva = sym->Value;
         }
     }
 
-    DEBUG("COFF: '%s' -> rva=0x%lx", name, (unsigned long)best_rva);
-    munmap(file_map, mapped_size);
+    fprintf(stderr, "DBG_COFF: '%s' -> rva=0x%lx\n", name, (unsigned long)best_rva);
+    munmap(file_map, st.st_size);
     return best_rva;
 }
 

@@ -42,6 +42,8 @@ __attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *ima
  *
  * @param  entry_abs   absolute virtual address of the PE entry point
  * @param  stack_top   top of the guest stack
+ * @param  image_base  mapped image base
+ * @param  stack_top   top of the guest stack
  * @param  teb         TEB pointer (GS base)
  * @param  guest_argv  argument vector for the guest
  * @param  guest_envp  environment pointer for the guest
