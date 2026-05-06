@@ -218,6 +218,14 @@ case "$MODE" in
         ;;
     run)
         samples=$(discover_samples "$TARGET")
+        if [ -z "$samples" ]; then
+            if [ -n "$TARGET" ]; then
+                echo "ERR: sample '$TARGET' not found in $SAMPLES_DIR/"
+                exit 1
+            fi
+            echo "No samples found in $SAMPLES_DIR/"
+            exit 0
+        fi
         pass=0 fail=0 skip=0
         for name in $samples; do
             # Skip DLL-only samples in run mode (they produce .dll, not .exe)
@@ -225,16 +233,33 @@ case "$MODE" in
                 echo "  SKIP  $name (DLL sample — not runnable)"
                 skip=$((skip + 1))
                 # Build it anyway so other samples that depend on it can find it
-                build_sample "$name"
+                if build_sample "$name"; then
+                    : # build succeeded (expected)
+                else
+                    echo "  WARN  $name build failed, skipping"
+                    fail=$((fail + 1))
+                fi
                 echo ""
                 continue
             fi
 
             # Build dependencies first (dll_loader needs dll_sample)
+            # Note: build_sample must be guarded by 'if' because set -e would
+            # abort the entire run loop on build failure.
             if [ "$name" = "dll_loader" ]; then
-                build_sample "dll_sample"
+                if ! build_sample "dll_sample"; then
+                    echo "  FAIL  $name (dependency dll_sample build failed)"
+                    fail=$((fail + 1))
+                    echo ""
+                    continue
+                fi
             fi
-            build_sample "$name"
+            if ! build_sample "$name"; then
+                echo "  FAIL  $name (build failed, not running)"
+                fail=$((fail + 1))
+                echo ""
+                continue
+            fi
             echo ""
             if run_sample "$name" "${@:3}"; then
                 pass=$((pass + 1))

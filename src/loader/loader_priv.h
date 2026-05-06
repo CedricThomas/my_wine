@@ -88,7 +88,7 @@ void init_msvcrt_imports(void);
 /* ── image_mapper.c ────────────────────────────────────────── */
 
 /**
- * Map a PE file at the preferred image base.
+ * Map a PE file at the preferred image base (uses PE's ImageBase).
  *
  * Opens the file, maps read-only, parses headers, maps the image
  * memory, copies sections, sets per-section protections, cleans up.
@@ -103,6 +103,26 @@ void *map_image(const char *path,
                 IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS64 *out_nt,
                 size_t *out_nt_size);
+
+/**
+ * Map a PE file at a specific base address.
+ *
+ * When desired_base is non-zero, maps at that address instead of the
+ * PE's preferred ImageBase.  Used by load_dll() to keep DLLs below 4GB
+ * and avoid the GCC ms_abi 32-bit return truncation bug.
+ *
+ * @param  path         path to the PE file
+ * @param  out_dos      (optional) receives parsed DOS header
+ * @param  out_nt       (optional) receives parsed NT headers
+ * @param  out_nt_size  (optional) receives size of parsed NT headers struct
+ * @param  desired_base forced image base (0 = use PE's preferred ImageBase)
+ * @return  image base address (virtual), or NULL on failure
+ */
+void *map_image_at(const char *path,
+                   IMAGE_DOS_HEADER *out_dos,
+                   IMAGE_NT_HEADERS64 *out_nt,
+                   size_t *out_nt_size,
+                   uintptr_t desired_base);
 
 /* ── relocations.c ─────────────────────────────────────────── */
 

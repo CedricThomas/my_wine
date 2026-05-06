@@ -12,12 +12,6 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
@@ -33,6 +27,9 @@
 extern char **environ;
 
 #define MAX_IMPORT_DEPTH 8
+
+/* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
+static uintptr_t g_dll_base_next = 0x60000000;  /* Start at 1.5GB */
 
 /* ── Hand-rolled helpers (no glibc) ─────────────────────────────── */
 
@@ -516,7 +513,7 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
  */
 loaded_module_t *load_dll(const char *path, int depth)
 {
-    /* Save main PE globals — map_image overwrites them with the DLL's values */
+    /* Save main PE globals — map_image_at overwrites them with the DLL's values */
     void *saved_image_base = g_image_base;
     char saved_pe_path[512];
     const char *cur_pe_path = get_pe_path();
@@ -530,18 +527,25 @@ loaded_module_t *load_dll(const char *path, int depth)
         saved_pe_path[0] = '\0';
     }
 
-    /* Map the DLL */
-    IMAGE_NT_HEADERS64 nt_copy;
-    void *base = map_image(path, NULL, &nt_copy, NULL);
+    /* Round g_dll_base_next to page alignment */
+    g_dll_base_next = (g_dll_base_next + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
 
-    /* Restore main PE globals */
+    /* Map the DLL at a controlled base below 4GB to avoid GCC ms_abi truncation */
+    IMAGE_NT_HEADERS64 nt_copy;
+    void *base = map_image_at(path, NULL, &nt_copy, NULL, g_dll_base_next);
+
+    /* Restore main PE globals (regardless of success/failure) */
     g_image_base = saved_image_base;
     set_pe_path(saved_pe_path);
 
     if (base == NULL) {
-        DEBUG("  ERROR: map_image failed for '%s'", path);
+        DEBUG("  ERROR: map_image_at failed for '%s'", path);
         return NULL;
     }
+
+    /* Advance g_dll_base_next past this DLL's image, rounded up to page alignment */
+    g_dll_base_next += nt_copy.OptionalHeader.SizeOfImage;
+    g_dll_base_next = (g_dll_base_next + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
 
     /* Extract NT headers from image memory */
     IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;

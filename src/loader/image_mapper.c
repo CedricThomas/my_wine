@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 
 #include "../syscalls_inline.h"
@@ -22,21 +23,27 @@ static char g_pe_path[512] = {0};
 uintptr_t g_host_gs_base = 0;  /* Saved before GS→TEB for unix stack calls */
 
 /**
- * Map a PE file at the preferred image base.
+ * Internal core: map a PE file at the given desired base address.
+ *
+ * When desired_base is non-zero, maps at that address instead of the
+ * PE's preferred ImageBase.  This is used by load_dll() to keep DLLs
+ * below 4 GB and avoid the GCC ms_abi 32-bit return truncation bug.
  *
  * Opens the file, maps read-only, parses headers, maps the image
  * memory, copies sections, sets per-section protections, cleans up.
  *
- * @param  path  path to the PE file
- * @param  out_dos   (optional) receives parsed DOS header
- * @param  out_nt    (optional) receives parsed NT headers
- * @param  out_nt_size (optional) receives size of parsed NT headers struct
+ * @param  path         path to the PE file
+ * @param  out_dos      (optional) receives parsed DOS header
+ * @param  out_nt       (optional) receives parsed NT headers
+ * @param  out_nt_size  (optional) receives size of parsed NT headers struct
+ * @param  desired_base forced image base (0 = use PE's preferred ImageBase)
  * @return  image base address (virtual), or NULL on failure
  */
-void *map_image(const char *path,
-                IMAGE_DOS_HEADER *out_dos,
-                IMAGE_NT_HEADERS64 *out_nt,
-                size_t *out_nt_size)
+void *map_image_at(const char *path,
+                   IMAGE_DOS_HEADER *out_dos,
+                   IMAGE_NT_HEADERS64 *out_nt,
+                   size_t *out_nt_size,
+                   uintptr_t desired_base)
 {
     /* Save PE path for DLL search — hand-rolled copy, no glibc */
     {
@@ -102,8 +109,10 @@ void *map_image(const char *path,
     }
 
     /* 4. Map image */
-    uint64_t image_base = nt.OptionalHeader.ImageBase;
-    size_t image_size   = nt.OptionalHeader.SizeOfImage;
+    size_t image_size = nt.OptionalHeader.SizeOfImage;
+
+    /* Use desired_base if non-zero, otherwise use the PE's preferred ImageBase */
+    uint64_t image_base = (desired_base != 0) ? desired_base : nt.OptionalHeader.ImageBase;
 
     void *base = INLINE_SYSCALL_MMAP((void *)(uintptr_t)image_base, image_size,
                        PROT_READ|PROT_WRITE|PROT_EXEC,
@@ -187,6 +196,26 @@ void *map_image(const char *path,
     /* Save the image base for later use (import resolution, TEB/PEB, etc.) */
     g_image_base = base;
     return base;
+}
+
+/**
+ * Map a PE file at the preferred image base (uses PE's ImageBase).
+ *
+ * Opens the file, maps read-only, parses headers, maps the image
+ * memory, copies sections, sets per-section protections, cleans up.
+ *
+ * @param  path  path to the PE file
+ * @param  out_dos   (optional) receives parsed DOS header
+ * @param  out_nt    (optional) receives parsed NT headers
+ * @param  out_nt_size (optional) receives size of parsed NT headers struct
+ * @return  image base address (virtual), or NULL on failure
+ */
+void *map_image(const char *path,
+                IMAGE_DOS_HEADER *out_dos,
+                IMAGE_NT_HEADERS64 *out_nt,
+                size_t *out_nt_size)
+{
+    return map_image_at(path, out_dos, out_nt, out_nt_size, 0);
 }
 
 const char *get_pe_path(void) { return g_pe_path; }
