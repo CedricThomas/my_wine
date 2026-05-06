@@ -26,6 +26,12 @@
 
 #define MAX_IMPORT_DEPTH 8
 
+/* Case-insensitive string equality */
+static int strci_equal(const char *a, const char *b)
+{
+    return strcasecmp(a, b) == 0;
+}
+
 /* Forward declarations */
 int find_dll_path(const char *dll_name, char *path, size_t path_size);
 loaded_module_t *load_dll(const char *path, int depth);
@@ -309,6 +315,18 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
         /* Check if already loaded */
         loaded_module_t *dep = find_module_by_name(dll_name);
         if (dep == NULL) {
+            /* Check if this is a known stub library (provided by my_wine itself).
+             * These don't have a corresponding .dll file; their exports are
+             * resolved via the stub import table in Pass 1. */
+            if (strci_equal("kernel32.dll", dll_name) ||
+                strci_equal("ntdll.dll", dll_name) ||
+                strci_equal("msvcrt.dll", dll_name)) {
+                DEBUG("  Skipping stub library '%s' for %s (resolved via import table)",
+                      dll_name, mod->name);
+                d++;
+                continue;
+            }
+
             /* Need to load this DLL — search in standard paths */
             char path[512];
             if (!find_dll_path(dll_name, path, sizeof(path))) {
