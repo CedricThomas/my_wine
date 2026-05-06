@@ -38,7 +38,13 @@ void *map_image(const char *path,
                 IMAGE_NT_HEADERS64 *out_nt,
                 size_t *out_nt_size)
 {
-    snprintf(g_pe_path, sizeof(g_pe_path), "%s", path);
+    /* Save PE path for DLL search — hand-rolled copy, no glibc */
+    {
+        size_t i;
+        for (i = 0; path[i] && i < sizeof(g_pe_path) - 1; i++)
+            g_pe_path[i] = path[i];
+        g_pe_path[i] = '\0';
+    }
 
     /* 1. Open the PE file */
     long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, path, O_RDONLY);
@@ -186,6 +192,8 @@ void *map_image(const char *path,
 const char *get_pe_path(void) { return g_pe_path; }
 void set_pe_path(const char *path)
 {
-    strncpy(g_pe_path, path, sizeof(g_pe_path));
-    g_pe_path[sizeof(g_pe_path) - 1] = '\0';
+    size_t i;
+    for (i = 0; path[i] && i < sizeof(g_pe_path) - 1; i++)
+        g_pe_path[i] = path[i];
+    g_pe_path[i] = '\0';
 }
