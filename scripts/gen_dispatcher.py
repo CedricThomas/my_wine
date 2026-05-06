@@ -77,8 +77,16 @@ def parse_args(args_str):
         part = part.strip()
         if not part:
             continue
-        if part.startswith("ptr(wb)"):
-            # ptr(wb) src as name ["label"]
+        if part.startswith("ptr(wb32)"):
+            # ptr(wb32) src as name ["label"] — 32-bit write-back (PBOOLEAN, PULONG)
+            m = re.match(r'ptr\(wb32\)\s+(\w+)\s+as\s+(\w+)(?:\s+"([^"]*)")?', part)
+            if not m:
+                raise ValueError("Invalid ptr(wb32): %s" % part)
+            src, name = m.group(1), m.group(2)
+            label = m.group(3) if m.group(3) else name
+            args.append({"type": "wb32", "src": src, "name": name, "label": label})
+        elif part.startswith("ptr(wb)"):
+            # ptr(wb) src as name ["label"] — 64-bit write-back
             m = re.match(r'ptr\(wb\)\s+(\w+)\s+as\s+(\w+)(?:\s+"([^"]*)")?', part)
             if not m:
                 raise ValueError("Invalid ptr(wb): %s" % part)
@@ -144,7 +152,7 @@ def gen_decls(args, variant):
 
     # ptr(wb) locals: skip uint64_t if already declared by stack
     for a in args:
-        if a["type"] == "wb":
+        if a["type"] in ("wb", "wb32"):
             n = a["name"]  # already h_xxx
             pn = p_name_for(n)
             a["p_name"] = pn
@@ -159,9 +167,9 @@ def gen_decls(args, variant):
 def gen_validation(args, variant):
     """Generate ptr(wb) dispatch and ptr(ro) validation code."""
     lines = []
-    # ptr(wb)
+    # ptr(wb) and ptr(wb32)
     for a in args:
-        if a["type"] == "wb":
+        if a["type"] in ("wb", "wb32"):
             n = a["name"]
             pn = p_name_for(n)
             fn = "dispatch_ptr_inout" if variant == "c" else "dispatch_ptr_inout_ctx"
@@ -199,13 +207,17 @@ def expand_call(call_template, args, variant):
 
 
 def gen_writeback(args):
-    """Generate write-back code for ptr(wb) args."""
+    """Generate write-back code for ptr(wb) and ptr(wb32) args."""
     lines = []
     for a in args:
         if a["type"] == "wb":
             n = a["name"]
             pn = p_name_for(n)
             lines.append("        if (%s) *(uint64_t *)%s = %s;" % (pn, pn, n))
+        elif a["type"] == "wb32":
+            n = a["name"]
+            pn = p_name_for(n)
+            lines.append("        if (%s) *(uint32_t *)%s = (uint32_t)%s;" % (pn, pn, n))
     return "\n".join(lines)
 
 

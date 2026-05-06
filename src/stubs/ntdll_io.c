@@ -29,7 +29,7 @@ uint64_t handler_NtWriteFile(uint64_t file_handle, uint64_t event, uint64_t apc,
     if (n < 0) return STATUS_UNSUCCESSFUL;
 
     if (bytes_written != 0)
-        *(uint64_t *)(uintptr_t)bytes_written = (uint64_t)n;
+        *(uint32_t *)(uintptr_t)bytes_written = (uint32_t)n; /* PULONG Key = 4 bytes */
 
     return STATUS_SUCCESS;
 }
@@ -50,7 +50,7 @@ uint64_t handler_NtReadFile(uint64_t file_handle, uint64_t event, uint64_t apc,
     if (n < 0) return STATUS_UNSUCCESSFUL;
 
     if (bytes_read != 0)
-        *(uint64_t *)(uintptr_t)bytes_read = (uint64_t)n;
+        *(uint32_t *)(uintptr_t)bytes_read = (uint32_t)n; /* PULONG Key = 4 bytes */
 
     return STATUS_SUCCESS;
 }

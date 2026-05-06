@@ -104,12 +104,12 @@ call: handler_NtQueryPerformanceFrequency((PVOID)&h_freq)
 
 0x5C  NtSetEvent
 handler: handler_NtSetEvent
-args: ptr(wb) arg2 as h_prev
+args: ptr(wb32) arg2 as h_prev
 call: handler_NtSetEvent(arg1, (PVOID)&h_prev)
 
 0x5E  NtResetEvent
 handler: handler_NtResetEvent
-args: ptr(wb) arg2 as h_prev
+args: ptr(wb32) arg2 as h_prev
 call: handler_NtResetEvent(arg1, (PVOID)&h_prev)
 
 0x09  NtQuerySystemTime
