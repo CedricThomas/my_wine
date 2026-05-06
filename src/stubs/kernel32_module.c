@@ -32,26 +32,41 @@ extern void *unix_stack_ptr_val;  /* from dispatcher_entry.c */
 /* Type for host-side functions: void *(void *arg) */
 typedef void *(*wine_host_fn)(void *);
 
-/* call_on_unix_stack — switch to UNIX stack, call fn(arg), switch back.
+/* call_on_unix_stack — switch to UNIX stack + host GS, call fn(arg), switch back.
  * The function must be a normal SysV C function (NOT ms_abi).
  * NOINLINE: prevents the compiler from merging this into an ms_abi frame
- * and using the wrong calling convention for the fn() call. */
+ * and using the wrong calling convention for the fn() call.
+ *
+ * After finalize_guest_state, GS points to the TEB. glibc functions access
+ * TLS via GS-relative offsets. We switch GS to the host value, call the
+ * function on the UNIX stack, then restore everything. */
 static __attribute__((noinline)) void *call_on_unix_stack(wine_host_fn fn, void *arg)
 {
     uintptr_t guest_rsp;
+    uintptr_t guest_gs_base;
+
+    /* Save guest RSP and GS base (currently TEB) */
     __asm__ volatile(
         "mov %%rsp, %0\n"
-        "mov %2, %%rsp\n"
-        "sub $8, %%rsp\n"
-        : "=r"(guest_rsp)
-        : "0"(guest_rsp), "r"(unix_stack_ptr_val)
-        : "memory"
+        "rdgsbase %1\n"
+        : "=r"(guest_rsp), "=r"(guest_gs_base)
     );
+
+    /* Switch to UNIX stack */
+    __asm__ volatile("mov %0, %%rsp; sub $8, %%rsp" : : "r"(unix_stack_ptr_val) : "memory");
+
+    /* Restore host GS base so glibc can access TLS/vDSO */
+    __asm__ volatile("wrgsbase %0" : : "r"(g_host_gs_base));
+
+    /* Call host function (glibc is now safe) */
     void *ret = fn(arg);
-    __asm__ volatile(
-        "mov %0, %%rsp\n"
-        : : "r"(guest_rsp) : "memory"
-    );
+
+    /* Restore guest RSP */
+    __asm__ volatile("mov %0, %%rsp" : : "r"(guest_rsp) : "memory");
+
+    /* Restore guest GS base (TEB) */
+    __asm__ volatile("wrgsbase %0" : : "r"(guest_gs_base));
+
     return ret;
 }
 

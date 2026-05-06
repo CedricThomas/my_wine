@@ -18,6 +18,7 @@
 
 /* Set by image_mapper.c, read by teb_peb.c and import_resolve.c */
 extern void *g_image_base;
+extern uintptr_t g_host_gs_base;
 const char *get_pe_path(void);
 void set_pe_path(const char *path);
 

@@ -23,6 +23,7 @@
 
 void *g_image_base = NULL;
 static char g_pe_path[512] = {0};
+uintptr_t g_host_gs_base = 0;  /* Saved before GS→TEB for unix stack calls */
 
 /**
  * Map a PE file at the preferred image base.
