@@ -209,6 +209,51 @@ static uint64_t compute_rva_from_symbol(
 }
 
 /*
+ * Try to match a single symbol name against the target using 4 strategies:
+ * .rdata$.refptr. prefix, .refptr. prefix, exact match, substring fallback.
+ * Returns 1 if matched, 0 otherwise.
+ */
+static int match_symbol_name(const char *sym_name, size_t sym_name_len,
+                             const char *name)
+{
+    /* Strategy 1: .rdata$.refptr.<name> */
+    {
+        const char *prefix = ".rdata$.refptr.";
+        size_t plen = strlen(prefix);
+        if (sym_name_len == plen + strlen(name) &&
+            strncmp(sym_name, prefix, plen) == 0 &&
+            strncmp(sym_name + plen, name, sym_name_len - plen) == 0)
+            return 1;
+    }
+
+    /* Strategy 2: .refptr.<name> */
+    {
+        const char *prefix = ".refptr.";
+        size_t plen = strlen(prefix);
+        if (sym_name_len == plen + strlen(name) &&
+            strncmp(sym_name, prefix, plen) == 0 &&
+            strncmp(sym_name + plen, name, sym_name_len - plen) == 0)
+            return 1;
+    }
+
+    /* Strategy 3: exact name match */
+    if (strncmp(sym_name, name, sym_name_len) == 0 &&
+        name[sym_name_len] == '\0')
+        return 1;
+
+    /* Strategy 4: substring fallback */
+    if (sym_name_len > 8 && strstr(sym_name, name) != NULL) {
+        if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
+            DEBUG("DBG_COFF_SUB: '%.*s' matched '%s' as substring",
+                    (int)sym_name_len, sym_name, name);
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+/*
  * Search the symbol table for a symbol matching the target name.
  * Tries (in order): .rdata$.refptr. prefix, .refptr. prefix, exact match, substring.
  * Prefers section-bound symbols over absolute.
@@ -248,46 +293,7 @@ static int find_matching_symbol(
                     i, (int)sym_name_len, sym_name, (int)sym->SectionNumber, sym->Value, sym->Type);
         }
 
-        int matched = 0;
-        /* Prefer .refptr entries over bare symbol names.
-         * mingw-w64 COFF tables often have bare "mingw_app_type" in .idata
-         * (wrong address) and ".rdata$.refptr.mingw_app_type" / ".refptr.mingw_app_type"
-         * in .rdata (correct address). Check refptr prefixes FIRST so we
-         * always find the right entry before the bare-name fallback. */
-        const char *prefix = ".rdata$.refptr.";
-        size_t plen = strlen(prefix);
-        if (sym_name_len == plen + strlen(name) &&
-            strncmp(sym_name, prefix, plen) == 0 &&
-            strncmp(sym_name + plen, name, sym_name_len - plen) == 0) {
-            matched = 1;
-        }
-        if (!matched) {
-            const char *prefix2 = ".refptr.";
-            size_t plen2 = strlen(prefix2);
-            if (sym_name_len == plen2 + strlen(name) &&
-                strncmp(sym_name, prefix2, plen2) == 0 &&
-                strncmp(sym_name + plen2, name, sym_name_len - plen2) == 0) {
-                matched = 1;
-            }
-        }
-        if (!matched) {
-            /* Exact name match (last resort — .idata may have bare name with wrong address) */
-            if (strncmp(sym_name, name, sym_name_len) == 0 &&
-                name[sym_name_len] == '\0') {
-                matched = 1;
-            }
-        }
-        if (!matched) {
-            /* Substring fallback */
-            if (sym_name_len > 8 && strstr(sym_name, name) != NULL) {
-                matched = 1;
-
-                if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
-                    DEBUG("DBG_COFF_SUB: sym[%u] '%.*s' matched '%s' as substring",
-                            i, (int)sym_name_len, sym_name, name);
-                }
-            }
-        }
+        int matched = match_symbol_name(sym_name, sym_name_len, name);
 
         if (!matched) continue;
 

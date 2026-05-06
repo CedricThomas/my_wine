@@ -24,7 +24,11 @@
 
 /* Name→address table for NT, kernel32 and msvcrt functions */
 import_entry_t import_table[] = {
-    /* ntdll functions (via syscall thunks) */
+    /* ── ntdll syscall handlers ────────────────────────────────────────
+     * Resolved via thunk lookup — each entry maps to a handler_*
+     * function that dispatches to the corresponding Linux syscall.
+     * All addresses are non-NULL (statically known at build time).
+     * ───────────────────────────────────────────────────────────────── */
     { "ntdll.dll", "NtWriteFile", (void*)handler_NtWriteFile },
     { "ntdll.dll", "NtReadFile", (void*)handler_NtReadFile },
     { "ntdll.dll", "NtClose", (void*)handler_NtClose },
@@ -41,7 +45,10 @@ import_entry_t import_table[] = {
     { "ntdll.dll", "NtOpenFile", (void*)handler_NtOpenFile },
     { "ntdll.dll", "NtGetContextThread", (void*)handler_NtGetContextThread },
     { "ntdll.dll", "NtSetContextThread", (void*)handler_NtSetContextThread },
-    /* kernel32 functions */
+    /* ── kernel32 stubs ────────────────────────────────────────────────
+     * Our C implementations of common Windows API functions.
+     * All addresses are non-NULL (statically known at build time).
+     * ───────────────────────────────────────────────────────────────── */
     { "kernel32.dll", "GetStdHandle", (void*)GetStdHandle },
     { "kernel32.dll", "WriteFile", (void*)WriteFile },
     { "kernel32.dll", "ReadFile", (void*)ReadFile },
@@ -86,8 +93,11 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "IsDBCSLeadByteEx", (void*)IsDBCSLeadByteEx },
     { "kernel32.dll", "MultiByteToWideChar", (void*)MultiByteToWideChar },
     { "kernel32.dll", "WideCharToMultiByte", (void*)WideCharToMultiByte },
+    /* ── msvcrt functions (statically known) ────────────────────────────
+     * Our C stubs for CRT initialization, I/O, and data variables.
+     * All addresses are non-NULL (statically known at build time).
+     * ───────────────────────────────────────────────────────────────── */
     { "msvcrt.dll", "__C_specific_handler", (void*)__C_specific_handler },
-    /* msvcrt functions (statically known) */
     { "msvcrt.dll", "__getmainargs", (void*)__getmainargs },
     { "msvcrt.dll", "__initenv", (void*)__initenv },
     { "msvcrt.dll", "__iob_func", (void*)__iob_func },
@@ -102,7 +112,12 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "_fmode", (void*)&_fmode },
     { "msvcrt.dll", "_initterm", (void*)_initterm },
     { "msvcrt.dll", "_onexit", (void*)_onexit },
-    /* Dynamic entries - filled by init_msvcrt_imports() */
+    /* ── msvcrt functions (dynamic) ─────────────────────────────────────
+     * Address field is NULL at build time; filled by
+     * init_msvcrt_imports() at runtime via musl symbol lookup.
+     * Binary search works for both static and dynamic entries (NULL
+     * addresses are simply skipped by resolve_import).
+     * ───────────────────────────────────────────────────────────────── */
     { "msvcrt.dll", "abort", NULL },
     { "msvcrt.dll", "calloc", NULL },
     { "msvcrt.dll", "exit", NULL },

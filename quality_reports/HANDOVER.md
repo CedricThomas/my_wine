@@ -8,53 +8,52 @@
 | Category | File | Total | ✅ Fixed | ⚠️ Partial | ❌ Open |
 |---|---|---|---|---|---|
 | Architectural Issues | [architectural_issues.md](./architectural_issues.md) | 5 | 0 | 0 | 5 |
-| Code Smells | [code_smells.md](./code_smells.md) | 4 | 1 | 0 | 3 |
+| Code Smells | [code_smells.md](./code_smells.md) | 4 | 4 | 0 | 0 |
 | Magic Numbers | [magic_numbers.md](./magic_numbers.md) | 8 | 3 | 1 | 4 |
 | Non-Future-Proof | [non_future_proof.md](./non_future_proof.md) | 5 | 0 | 0 | 5 |
 | Bad Designs | [bad_designs.md](./bad_designs.md) | 4 | 2 | 2 | 0 |
-| **Total** | | **26** | **6** | **3** | **17** |
+| **Total** | | **26** | **9** | **2** | **14** |
 
 ## What Changed Since Original Report
 
 ### Fixed (6)
+- **B1** — `loader_utils.h` now used by both import_resolve.c and module_list.c; local static copies removed
+- **B2** — `find_symbol_rva_from_file()` split into 4 sub-functions (wrapper + open_and_map_symbols + find_matching_symbol/match_symbol_name + compute_rva_from_symbol)
 - **B3** — handle_syscall() removed; dispatcher now uses shared `dispatcher_core()`
+- **B4** — import_table[] documented with Tier 1/2/3a/3b section headers
 - **C2** — CRT BSS `0x30` → `#define CRT_BSS_INITIALIZED 0x30`
 - **C3** — DLL base `0x60000000` → `#define DLL_ALLOC_BASE`
 - **C6** — Exit codes `139`/`134` → `EXIT_SIGSEGV`/`EXIT_SIGABRT`
 - **C7** — `0xC0000005` → `EXIT_SIGSEGV` named constant
 - **E2** — Silent mmap failure → warning via `INLINE_SYSCALL_WRITE` + `g_alt_stack_available` flag
 
-### Partially Fixed (3)
-- **B1** — `loader_utils.h` exists with shared dll_* funcs, but import_resolve.c and module_list.c still have their own static copies (not using the shared header)
+### Partially Fixed (2)
 - **C4** — `GENERIC_READ`/`GENERIC_WRITE` defined in nt_constants.h, but ntdll.c still declares local variables with the same values
 - **E1** — `g_dll_base_next` now uses `__atomic_*` builtins; other globals (handle_table, g_crt_ctx) still unprotected
 - **E3** — `refptr_patch_arg` is now stack-local instead of global, but still depends on `g_crt_ctx` global
 
 ### Still Open (17)
-- **HIGH**: A1 (god-header), A2 (multipurpose import_resolve.c), B1 (duplication), D1 (no arch guard), D2 (syscall version)
-- **MEDIUM**: A3 (main() 230 lines), A4 (ntdll_priv.h globals), A5 (section offset dup), B2 (long function), C1 (bare 4096/4095), C5 (bare error codes), D3 (PAGE_SIZE hardcoded), D4 (mingw-w64 CRT), D5 (PE32 error msg), E1 (thread safety)
-- **LOW**: B4 (mixed import_table), C8 (WINE_FILE_SIZE)
+- **HIGH**: A1 (god-header), A2 (multipurpose import_resolve.c), D1 (no arch guard), D2 (syscall version)
+- **MEDIUM**: A3 (main() 230 lines), A4 (ntdll_priv.h globals), A5 (section offset dup), C1 (bare 4096/4095), C5 (bare error codes), D3 (PAGE_SIZE hardcoded), D4 (mingw-w64 CRT), D5 (PE32 error msg), E1 (thread safety)
+- **LOW**: C8 (WINE_FILE_SIZE)
 
 ## Recommended Priority Order
 
-1. **B1** — Make modules use `loader_utils.h` (high impact, low risk, ~60 lines saved)
-2. **C1** — Replace bare 4096/4095 with PAGE_SIZE/PAGE_MASK in stubs/msvcrt
-3. **A2** — Split import_resolve.c into 3 files
-4. **A5** — Add `get_image_sections()` helper
-5. **C4** — Fix remaining hardcoded GENERIC_READ/WRITE in ntdll.c
-6. **C5** — Define error code constants in nt_constants.h
-7. **C8** — Add `_Static_assert` for WINE_FILE_SIZE
-8. **D1** — Add `#error` compile-time arch guard
-9. **D5** — Improve PE32 rejection message
-10. **A3** — Extract `init_loader()` from main()
-11. **B2** — Split `find_symbol_rva_from_file()`
-12. **E1** — Document thread-safety limitations
-13. **A4** — Add accessor functions for ntdll_priv.h globals
-14. **A1** — Split loader_priv.h into per-module headers (biggest refactoring)
-15. **D2** — Document syscall version assumptions
-16. **D3** — Runtime PAGE_SIZE query
-17. **D4** — Document mingw-w64 CRT limitation
-18. **B4** — Document/structure import_table[] tiers
+1. **C1** — Replace bare 4096/4095 with PAGE_SIZE/PAGE_MASK in stubs/msvcrt
+2. **A2** — Split import_resolve.c into 3 files
+3. **A5** — Add `get_image_sections()` helper
+4. **C4** — Fix remaining hardcoded GENERIC_READ/WRITE in ntdll.c
+5. **C5** — Define error code constants in nt_constants.h
+6. **C8** — Add `_Static_assert` for WINE_FILE_SIZE
+7. **D1** — Add `#error` compile-time arch guard
+8. **D5** — Improve PE32 rejection message
+9. **A3** — Extract `init_loader()` from main()
+10. **E1** — Document thread-safety limitations
+11. **A4** — Add accessor functions for ntdll_priv.h globals
+12. **A1** — Split loader_priv.h into per-module headers (biggest refactoring)
+13. **D2** — Document syscall version assumptions
+14. **D3** — Runtime PAGE_SIZE query
+15. **D4** — Document mingw-w64 CRT limitation
 
 ---
 
@@ -66,10 +65,10 @@ Copy the template below, replace `{REPORT}` with the report file, and give it to
 You are working on the my_wine PE loader codebase at /home/arzad/Bureau/my_wine/.
 
 Your task: implement the fixes defined in the quality report at:
-  quality_reports/bad_smell.md
+  quality_reports/{REPORT}.md
 
 Before you start:
-1. Read bad_smell.md in full to understand the findings and implementation plan.
+1. Read {REPORT}.md in full to understand the findings and implementation plan.
 2. Read each source file mentioned in the findings so you understand the current code.
 3. Work through the tasks in order (Task 1 → Task 2 → ...), respecting dependencies.
 

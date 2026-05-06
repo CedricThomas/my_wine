@@ -8,7 +8,7 @@
 ## Findings
 
 ### [FINDING B1] — Duplication: dll_strcasecmp, dll_copy_str, dll_memset in two files
-- **Status**: ❌ OPEN (partially — loader_utils.h exists but is not used by all modules)
+- **Status**: ✅ FIXED
 - **Severity**: HIGH
 - **Files**: src/loader/import_resolve.c (lines 37-55, 384-423), src/loader/module_list.c (lines 15-31), src/loader/loader_utils.h
 - **Description**: Both import_resolve.c and module_list.c define their own copies of `dll_strcasecmp()`, `dll_copy_str()`, `dll_memset()`. Additionally, import_resolve.c defines `dll_strlen()`, `dll_strncmp()`, `dll_strchr()`, `dll_build_path()`, `dll_path_exists()` — none shared with module_list.c.
@@ -22,10 +22,10 @@
 ---
 
 ### [FINDING B2] — Long function: find_symbol_rva_from_file()
-- **Status**: ❌ OPEN
+- **Status**: ✅ FIXED
 - **Severity**: MEDIUM
-- **Files**: src/msvcrt/crt_offset_discovery.c (~165 lines for this function)
-- **Description**: This function opens a file, mmaps it, parses COFF symbols, and searches for symbol names. It contains 4+ symbol matching strategies (refptr prefix, exact match, substring fallback) with extensive debug logging sprinkled throughout. The debug output alone is ~30 lines.
+- **Files**: src/msvcrt/crt_offset_discovery.c
+- **Description**: Split into `open_and_map_symbols()`, `find_matching_symbol()` (with `match_symbol_name()`), `compute_rva_from_symbol()`. Wrapper is ~12 lines. All sub-functions under 65 lines.
 
 - **Suggested Fix**: Split into: `open_and_map_symbols()` + `find_matching_symbol()` + `compute_rva_from_symbol()`. Move debug output behind DEBUG() macro.
 
@@ -44,15 +44,10 @@
 ---
 
 ### [FINDING B4] — Large import_table[] with mixed static/dynamic entries
-- **Status**: ❌ OPEN
+- **Status**: ✅ FIXED
 - **Severity**: LOW
-- **Files**: src/loader/import_table.c (lines 27–128)
-- **Description**: The import_table[] array mixes three categories:
-  1. ntdll syscall handlers (resolved via thunk lookup)
-  2. kernel32 stubs (our C implementations)
-  3. msvcrt functions — half statically known, half dynamically filled
-
-  The dynamic entries (NULL address) are filled by init_msvcrt_imports() at runtime. The mix of resolved and unresolved entries in one flat table means binary search works for both but the intent is unclear.
+- **Files**: src/loader/import_table.c
+- **Description**: Tier comments added: Tier 1 (ntdll syscall handlers), Tier 2 (kernel32 stubs), Tier 3a (msvcrt statically known), Tier 3b (msvcrt dynamic with NULL addresses).
 
 - **Suggested Fix**: Document the three tiers clearly. Or use a struct with resolution strategy field (THUNK / STUB / DYNAMIC) for clarity.
 
