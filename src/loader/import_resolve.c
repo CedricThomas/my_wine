@@ -12,6 +12,7 @@
 #include <search.h>
 #include <strings.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 
 #include "include/pe.h"
@@ -23,6 +24,10 @@
 #include "export_table.h"
 #include "module_list.h"
 #include "peb_ldr.h"
+#include "../syscalls_inline.h"
+
+/* For extern environ — avoid getenv() in syscall-safe path */
+extern char **environ;
 
 #define MAX_IMPORT_DEPTH 8
 
@@ -358,44 +363,146 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
     return 0;
 }
 
+/* ───────────────────────────────────────────────────────────── */
+/* Syscall-safe helpers for find_dll_path                      */
+/* No glibc — suitable for WINE_STUB context without GS switch  */
+/* ───────────────────────────────────────────────────────────── */
+
+static void dll_copy_str(char *dst, const char *src, size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i++)
+        dst[i] = src[i];
+}
+
+static size_t dll_strlen(const char *s)
+{
+    size_t len = 0;
+    while (s[len]) len++;
+    return len;
+}
+
+static int dll_strncmp(const char *a, const char *b, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (a[i] != b[i]) return (unsigned char)a[i] - (unsigned char)b[i];
+        if (a[i] == '\0') return 0;
+    }
+    return 0;
+}
+
+static const char *dll_strchr(const char *s, int c)
+{
+    while (*s) {
+        if (*s == (char)c) return s;
+        s++;
+    }
+    return NULL;
+}
+
+/* Concatenate dir/filename into dst with bounds check.
+ * Returns 0 on success, -1 if truncated. */
+static int dll_build_path(char *dst, size_t dst_size,
+                          const char *dir, const char *name)
+{
+    size_t d_len = dll_strlen(dir);
+    size_t n_len = dll_strlen(name);
+    if (d_len + 1 + n_len + 1 > dst_size)
+        return -1;
+    dll_copy_str(dst, dir, d_len);
+    dst[d_len] = '/';
+    dll_copy_str(dst + d_len + 1, name, n_len);
+    dst[d_len + 1 + n_len] = '\0';
+    return 0;
+}
+
+/* Check if path exists via openat syscall (no glibc access()). */
+static int dll_path_exists(const char *p)
+{
+    long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, p, O_RDONLY);
+    if (fd >= 0) {
+        INLINE_SYSCALL_CLOSE(fd);
+        return 1;
+    }
+    return 0;
+}
+
 /* find_dll_path: search for a DLL in standard paths.
- * Search order: current dir, WINE_DLL_PATH env var.
+ * Search order: current dir, app dir, WINE_DLL_PATH env var.
+ *
+ * SYSCALL-SAFE: uses only inline syscalls (openat/close) and pure C
+ * character ops — no glibc (no snprintf, access, getenv, strdup, strtok,
+ * free, memcpy, strchr, strncmp). Suitable for calling from WINE_STUB
+ * context without GS/stack switching.
+ *
  * Returns 1 if found (path filled), 0 if not found. */
 int find_dll_path(const char *dll_name, char *path, size_t path_size)
 {
-    /* Try current directory */
-    int ret = snprintf(path, path_size, "./%s", dll_name);
-    if (ret >= 0 && (size_t)ret < path_size) {
-        if (access(path, F_OK) == 0) return 1;
+    /* --- Try current directory --- */
+    if (dll_build_path(path, path_size, ".", dll_name) == 0) {
+        if (dll_path_exists(path))
+            return 1;
     }
 
-    /* Try app directory (current working directory as app exe dir fallback) */
+    /* --- Try app directory --- */
     init_exe_dir();
     if (g_exe_dir[0] != '.' || g_exe_dir[1] != '\0') {
-        ret = snprintf(path, path_size, "%s/%s", g_exe_dir, dll_name);
-        if (ret >= 0 && (size_t)ret < path_size) {
-            if (access(path, F_OK) == 0) return 1;
+        if (dll_build_path(path, path_size, g_exe_dir, dll_name) == 0) {
+            if (dll_path_exists(path))
+                return 1;
         }
     }
 
-    /* Try WINE_DLL_PATH */
-    const char *wine_dll_path = getenv("WINE_DLL_PATH");
-    if (wine_dll_path != NULL) {
-        /* WINE_DLL_PATH is a semicolon-separated list */
-        char *copy = strdup(wine_dll_path);
-        if (copy != NULL) {
-            char *tok = strtok(copy, ";");
-            while (tok != NULL) {
-                ret = snprintf(path, path_size, "%s/%s", tok, dll_name);
-                if (ret >= 0 && (size_t)ret < path_size) {
-                    if (access(path, F_OK) == 0) {
-                        free(copy);
-                        return 1;
-                    }
-                }
-                tok = strtok(NULL, ";");
+    /* --- Try WINE_DLL_PATH (semicolon-separated) via environ --- */
+    {
+        const char *env_key = "WINE_DLL_PATH=";
+        const size_t env_key_len = 13; /* strlen("WINE_DLL_PATH=") */
+        const char *env_val = NULL;
+
+        /* Manual getenv via extern environ */
+        for (char **ep = environ; *ep != NULL; ep++) {
+            if (dll_strncmp(*ep, env_key, env_key_len) == 0) {
+                env_val = *ep + env_key_len;
+                break;
             }
-            free(copy);
+        }
+
+        if (env_val != NULL) {
+            /* Split env_val on ';' into stack array of pointers.
+             * Copy into a stack buffer so we can zero-terminate segments. */
+            #define DLL_PATH_MAX_SEGMENTS 32
+            char path_buf[1024];
+            const char *segments[DLL_PATH_MAX_SEGMENTS];
+            int seg_count = 0;
+
+            /* Manual bounded copy of env_val */
+            size_t env_len = dll_strlen(env_val);
+            if (env_len >= sizeof(path_buf)) env_len = sizeof(path_buf) - 1;
+            dll_copy_str(path_buf, env_val, env_len);
+            path_buf[env_len] = '\0';
+
+            char *p = path_buf;
+            while (seg_count < DLL_PATH_MAX_SEGMENTS && p != NULL) {
+                const char *semi = dll_strchr(p, ';');
+                if (semi != NULL) {
+                    *(char *)semi = '\0';
+                    segments[seg_count++] = p;
+                    p = (char *)semi + 1;
+                } else {
+                    if (*p != '\0') {
+                        segments[seg_count++] = p;
+                    }
+                    break;
+                }
+            }
+
+            for (int i = 0; i < seg_count; i++) {
+                if (dll_build_path(path, path_size, segments[i], dll_name) == 0) {
+                    if (dll_path_exists(path))
+                        return 1;
+                }
+            }
         }
     }
 

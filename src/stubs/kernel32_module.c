@@ -43,14 +43,13 @@ static __attribute__((noinline)) void *call_on_unix_stack(wine_host_fn fn, void 
 {
     uintptr_t guest_rsp;
     uintptr_t guest_gs_base;
-    uintptr_t host_gs;
+    uintptr_t host_gs = g_host_gs_base;
 
-    /* Save guest RSP and GS base */
-    __asm__ volatile(
-        "mov %%rsp, %0\n"
-        "rdgsbase %1\n"
-        : "=r"(guest_rsp), "=r"(guest_gs_base)
-    );
+    /* Save guest RSP */
+    __asm__ volatile("mov %%rsp, %0" : "=r"(guest_rsp));
+
+    /* Save current GS base (TEB) via the existing helper */
+    guest_gs_base = (uintptr_t)get_gs_base();
 
     /* Switch to UNIX stack (SysV ABI: 8 mod 16 before call) */
     __asm__ volatile(
@@ -60,34 +59,17 @@ static __attribute__((noinline)) void *call_on_unix_stack(wine_host_fn fn, void 
     );
 
     /* Restore host GS base for glibc TLS access */
-    host_gs = g_host_gs_base;
-    if (host_gs == 0) {
-        /* Host GS base not set (shouldn't happen after finalize_guest_state). */
-        /* Restore guest state and return NULL. */
-        __asm__ volatile("mov %0, %%rsp" : : "r"(guest_rsp) : "memory");
-        __asm__ volatile("wrgsbase %0" : : "r"(guest_gs_base));
-        return NULL;
+    if (host_gs != 0) {
+        set_gs_base((void *)host_gs);
     }
-    __asm__ volatile("wrgsbase %0" : : "r"(host_gs));
 
-    /* glibc TLS stores the thread's stack pointer at GS+0x7000 on x86_64 Linux.
-     * We need to update it to our UNIX stack pointer so glibc doesn't crash.
-     * The TLS is a TCB struct at GS base; the stack pointer field is at offset
-     * within the pthread structure. We approximate: the first 8 bytes of TCB point
-     * to a pthread struct, and its stack_base is at a known offset.
-     *
-     * Instead of trying to patch TLS, we use a different approach: call the
-     * function directly without going through glibc TLS. The load_library_host
-     * function doesn't use any thread-local variables, so this should work.
-     * If glibc internally tries to read TLS, it might still crash, but simple
-     * functions like getenv/access/snprintf should work with the original GS base.
-     */
-
-    /* Call host function */
+    /* Call host function (now on UNIX stack with host GS) */
     void *ret = fn(arg);
 
     /* Restore guest GS base (TEB) */
-    __asm__ volatile("wrgsbase %0" : : "r"(guest_gs_base));
+    if (guest_gs_base != 0) {
+        set_gs_base((void *)guest_gs_base);
+    }
 
     /* Restore guest RSP */
     __asm__ volatile("mov %0, %%rsp" : : "r"(guest_rsp) : "memory");
