@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 #
-# samples.sh — Build and/or run my_wine samples.
+# samples.sh — Convention-driven build and run for my_wine samples.
 #
-# Samples are written as Windows C code and cross-compiled to PE .exe
-# via Docker (mingw-w64). They are then run under ./my_wine.
+# Conventions (no hardcoded sample names):
+#   - Discover samples: every subdirectory of samples/
+#   - EXE build: .c files in the sample dir → {sample_name}.exe
+#   - DLL build: .c + .def files in dlls/ subdirectory → parent sample dir
+#   - A sample with dlls/ builds BOTH its DLLs and its EXE (if .c exists)
+#   - Run mode: reads expected exit code / timeout from sample.info
+#   - Before running: all .dll outputs from every sample are copied into
+#     the target sample's directory (so LoadLibraryA("foo.dll") just works)
+#   - Samples with no .c in the main dir (DLL-producers only) are SKIPPED
 #
 # Usage:
 #   ./samples.sh              # Build all samples
-#   ./samples.sh hello_world  # Build a specific sample
-#   ./samples.sh run          # Build all + run each under ./my_wine
-#   ./samples.sh run hello_world  # Build + run a specific sample
+#   ./samples.sh build        # Build all samples
+#   ./samples.sh build NAME   # Build one sample
+#   ./samples.sh run          # Build all + run all
+#   ./samples.sh run NAME     # Build + run one sample
 #
 
 set -euo pipefail
@@ -17,13 +25,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SAMPLES_DIR="$PROJECT_DIR/samples"
-BUILDDIR="$PROJECT_DIR/build"
 MY_WINE="$PROJECT_DIR/my_wine"
 IMAGE_NAME="my_wine-samples"
 
-# ── Discover sample directories ──────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────
+
+# Parse a key=value entry from a sample.info file.
+# Returns the value or empty string if key not found.
+parse_sample_info() {
+    local file="$1"
+    local key="$2"
+    grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2
+}
+
+# Discover sample directory names (sorted).
+# With argument: echo the name if it exists as a sample dir.
+# Without argument: echo every sample dir name, one per line, sorted.
 discover_samples() {
-    local name="$1"
+    local name="${1:-}"
     if [ -n "$name" ]; then
         if [ -d "$SAMPLES_DIR/$name" ]; then
             echo "$name"
@@ -33,52 +52,57 @@ discover_samples() {
     fi
 }
 
-# ── Check if a sample produces a runnable EXE ────────────────────
-is_exe_sample() {
-    local name="$1"
-    # A sample is runnable (produces .exe) if it has no .def files
-    # (.def files indicate DLL builds via build_sample)
-    local def
-    def=$(find "$SAMPLES_DIR/$name" -name '*.def' 2>/dev/null | head -1)
-    [ -z "$def" ]
-}
-
-# ── Ensure Docker image exists ───────────────────────────────────
+# Ensure the Docker cross-compiler image exists; build if missing.
 ensure_image() {
     if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
         echo "  Building Docker image $IMAGE_NAME ..."
-        DOCKER_BUILDKIT=0 docker build -t "$IMAGE_NAME" "$SAMPLES_DIR" 2>&1 || { echo "FAIL: Docker build failed"; return 1; }
+        DOCKER_BUILDKIT=0 docker build -t "$IMAGE_NAME" "$SAMPLES_DIR" 2>&1 || {
+            echo "  FAIL: Docker build failed"
+            return 1
+        }
     fi
 }
 
-# ── Build a single sample ────────────────────────────────────────
-build_sample() {
+# Rewrite a host path to its /project/... equivalent inside the Docker container.
+to_container_path() {
+    local host_path="$1"
+    echo "/project${host_path#$PROJECT_DIR}"
+}
+
+# ── Build: DLLs ───────────────────────────────────────────────────
+
+# Build all DLLs from a sample's dlls/ subdirectory.
+# Each .def file produces a .dll in the parent (sample) directory.
+# Sources: .c files in dlls/ with the same base name as the .def.
+build_dlls() {
     local name="$1"
     local src_dir="$SAMPLES_DIR/$name"
-    local out="$src_dir/${name}.exe"
+    local dll_dir="$src_dir/dlls"
 
-    # Find all .c files in this sample
-    local srcs
-    srcs=$(find "$src_dir" -name '*.c' | sort)
-    if [ -z "$srcs" ]; then
-        echo "  WARN: no .c files in $src_dir, skipping"
-        return
-    fi
+    # No dlls/ directory → nothing to do
+    [ -d "$dll_dir" ] || return 0
 
-    # Check for .def file (DLL marker)
-    local def
-    def=$(find "$src_dir" -name '*.def' | head -1)
-    if [ -n "$def" ]; then
+    local defs
+    defs=$(find "$dll_dir" -name '*.def' 2>/dev/null | sort)
+    [ -z "$defs" ] && return 0
+
+    ensure_image
+
+    for def in $defs; do
         local dll_base
         dll_base=$(basename "$def" .def)
         local out_dll="$src_dir/${dll_base}.dll"
 
-        # Check if rebuild needed
+        # Find the matching .c source (same base name)
+        local c_src="$dll_dir/${dll_base}.c"
+        [ -f "$c_src" ] || continue
+
+        # Check if rebuild is needed (compare timestamps)
         local need_build=0
         if [ ! -f "$out_dll" ]; then
             need_build=1
         else
-            for src in $srcs; do
+            for src in "$c_src" "$def"; do
                 if [ "$src" -nt "$out_dll" ]; then
                     need_build=1
                     break
@@ -86,58 +110,69 @@ build_sample() {
             done
         fi
 
-        if [ "$need_build" -eq 0 ]; then
-            return
-        fi
+        [ "$need_build" -eq 0 ] && continue
 
-        ensure_image
+        local container_src
+        local container_def
+        container_src=$(to_container_path "$c_src")
+        container_def=$(to_container_path "$def")
 
-        local in_container_srcs
-        in_container_srcs=$(echo "$srcs" | sed "s|$PROJECT_DIR|/project|g")
-
-        echo "  CC  $name (mingw-dll)"
+        echo "  CC  ${name}/dlls/${dll_base}.dll (mingw-dll)"
         docker run --rm \
             -v "$PROJECT_DIR:/project:ro" \
             -v "$src_dir:/out" \
             "$IMAGE_NAME" \
             x86_64-w64-mingw32-gcc \
             -Wall -Wextra -O2 -shared \
-            -Wl,/project${def#$PROJECT_DIR} \
+            -Wl,"$container_def" \
             -o "/out/${dll_base}.dll" \
-            $in_container_srcs 2>&1 || { echo "  FAIL $name"; return 1; }
+            "$container_src" 2>&1 || {
+                echo "  FAIL ${name}/dlls/${dll_base}.dll"
+                return 1
+            }
 
         echo "  OK  $name -> ${dll_base}.dll"
-        return
-    fi
+    done
+}
 
-    # Check if rebuild needed
+# ── Build: EXE ────────────────────────────────────────────────────
+
+# Build the EXE from .c files in the sample's main directory (not dlls/).
+# Output: {sample_name}.exe in the same directory.
+build_exe() {
+    local name="$1"
+    local src_dir="$SAMPLES_DIR/$name"
+    local out_exe="$src_dir/${name}.exe"
+
+    # Find .c files in the sample dir only (maxdepth 1 excludes dlls/)
+    local srcs
+    srcs=$(find "$src_dir" -maxdepth 1 -name '*.c' 2>/dev/null | sort)
+    [ -z "$srcs" ] && return 0
+
+    # Check if rebuild is needed
     local need_build=0
-    if [ ! -f "$out" ]; then
+    if [ ! -f "$out_exe" ]; then
         need_build=1
     else
         for src in $srcs; do
-            if [ "$src" -nt "$out" ]; then
+            if [ "$src" -nt "$out_exe" ]; then
                 need_build=1
                 break
             fi
         done
     fi
 
-    if [ "$need_build" -eq 0 ]; then
-        return
-    fi
+    [ "$need_build" -eq 0 ] && return 0
 
     ensure_image
 
-    # Cross-compile via Docker
-    # Mount project read-only at /project; output dir writable at /out
-    # Rewrite host paths -> /project/... for use inside the container
-    echo "  CC  $name (mingw)"
-    local in_container_srcs=""
+    # Rewrite host paths to container paths
+    local container_srcs=""
     for src in $srcs; do
-        in_container_srcs="$in_container_srcs /project${src#$PROJECT_DIR}"
+        container_srcs="$container_srcs $(to_container_path "$src")"
     done
 
+    echo "  CC  $name (mingw)"
     docker run --rm \
         -v "$PROJECT_DIR:/project:ro" \
         -v "$src_dir:/out" \
@@ -145,18 +180,59 @@ build_sample() {
         x86_64-w64-mingw32-gcc \
         -Wall -Wextra -O2 -mconsole \
         -o "/out/${name}.exe" \
-        $in_container_srcs 2>&1 || { echo "  FAIL $name"; return 1; }
+        $container_srcs 2>&1 || {
+            echo "  FAIL $name"
+            return 1
+        }
 
-    echo "  OK  $name -> $(basename "$out")"
+    echo "  OK  $name -> ${name}.exe"
 }
 
-# ── Run a sample under my_wine ────────────────────────────────────
+# Build a single sample: DLLs (if dlls/ exists) + EXE (if .c files in main dir).
+build_sample() {
+    local name="$1"
+    build_dlls "$name"
+    build_exe "$name"
+}
+
+# ── Run ───────────────────────────────────────────────────────────
+
+# Check if a sample has .c files in its main directory (not in dlls/).
+has_main_c_files() {
+    local name="$1"
+    local src_dir="$SAMPLES_DIR/$name"
+    find "$src_dir" -maxdepth 1 -name '*.c' 2>/dev/null | head -1 | grep -q .
+}
+
+# Distribute all .dll files from every sample directory into the target dir.
+# This ensures LoadLibraryA("foo.dll") works without path manipulation.
+distribute_dlls() {
+    local target_dir="$1"
+    find "$SAMPLES_DIR" -maxdepth 2 -name '*.dll' 2>/dev/null | while IFS= read -r dll; do
+        # Skip DLLs already in the target directory (avoids "same file" errors)
+        local dll_dir
+        dll_dir=$(dirname "$dll")
+        [ "$dll_dir" = "$target_dir" ] && continue
+        cp "$dll" "$target_dir/" 2>/dev/null || true
+    done
+}
+
+# Run a single sample under my_wine.
+# Returns: 0 = PASS, 1 = FAIL, 2 = SKIP
 run_sample() {
     local name="$1"
-    local exe="$SAMPLES_DIR/$name/${name}.exe"
+    local src_dir="$SAMPLES_DIR/$name"
+    local exe="$src_dir/${name}.exe"
+    local info="$src_dir/sample.info"
+
+    # Skip samples with no .c in the main dir (DLL producers only)
+    if ! has_main_c_files "$name"; then
+        echo "  SKIP  $name (no .c in main dir — DLL-only sample)"
+        return 2
+    fi
 
     if [ ! -f "$exe" ]; then
-        echo "  ERR: $exe not built. Run './samples/samples.sh $name' first."
+        echo "  ERR: $exe not built. Run './samples/samples.sh build $name' first."
         return 1
     fi
 
@@ -165,35 +241,34 @@ run_sample() {
         return 1
     fi
 
-    # If running dll_loader, ensure exportlib.dll is copied into its dir
-    if [ "$name" = "dll_loader" ]; then
-        local dll_src="$SAMPLES_DIR/dll_sample/exportlib.dll"
-        if [ ! -f "$dll_src" ]; then
-            echo "  ERR: exportlib.dll not built. Build dll_sample first."
-            return 1
-        fi
-        cp "$dll_src" "$SAMPLES_DIR/dll_loader/"
+    # Read expected exit code and timeout from sample.info (with defaults)
+    local expected_exit=0
+    local timeout_sec=5
+    if [ -f "$info" ]; then
+        expected_exit=$(parse_sample_info "$info" "exit")
+        timeout_sec=$(parse_sample_info "$info" "timeout")
     fi
 
-    echo "  RUN $name (under my_wine)"
+    # Distribute all .dll outputs from every sample into this sample's dir
+    distribute_dlls "$src_dir"
+
+    echo "  RUN $name (under my_wine, expect exit=$expected_exit, timeout=${timeout_sec}s)"
+
+    # Run with timeout; capture exit code without triggering set -e
     local ret=0
-    timeout 5 "$MY_WINE" "$exe" "${@:2}" || ret=$?
-    if [ $ret -eq 0 ]; then
-        echo "  PASS  $name"
-        return 0
-    elif [ $ret -eq 124 ]; then
-        echo "  PASS  $name (timed out after 5s, process was stable)"
-        return 0
-    elif [ $ret -eq 139 ] && [ "$name" = "null_deref" ]; then
-        echo "  PASS  $name (expected SIGSEGV caught by crash handler)"
+    timeout "$timeout_sec" "$MY_WINE" "$exe" || ret=$?
+
+    if [ "$ret" -eq "$expected_exit" ]; then
+        echo "  PASS  $name (exit=$ret, expected=$expected_exit)"
         return 0
     else
-        echo "  FAIL  $name (exit code $ret)"
+        echo "  FAIL  $name (exit=$ret, expected=$expected_exit)"
         return 1
     fi
 }
 
-# ── Main ─────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────
+
 MODE="${1:-build}"
 TARGET="${2:-}"
 
@@ -209,13 +284,10 @@ case "$MODE" in
             exit 0
         fi
         for name in $samples; do
-            # dll_loader depends on dll_sample (uses exportlib.dll)
-            if [ "$name" = "dll_loader" ]; then
-                build_sample "dll_sample"
-            fi
-            build_sample "$name"
+            build_sample "$name" || { echo "  FAIL  $name (build failed)"; exit 1; }
         done
         ;;
+
     run)
         samples=$(discover_samples "$TARGET")
         if [ -z "$samples" ]; then
@@ -228,53 +300,31 @@ case "$MODE" in
         fi
         pass=0 fail=0 skip=0
         for name in $samples; do
-            # Skip DLL-only samples in run mode (they produce .dll, not .exe)
-            if ! is_exe_sample "$name"; then
-                echo "  SKIP  $name (DLL sample — not runnable)"
-                skip=$((skip + 1))
-                # Build it anyway so other samples that depend on it can find it
-                if build_sample "$name"; then
-                    : # build succeeded (expected)
-                else
-                    echo "  WARN  $name build failed, skipping"
-                    fail=$((fail + 1))
-                fi
-                echo ""
-                continue
-            fi
-
-            # Build dependencies first (dll_loader needs dll_sample)
-            # Note: build_sample must be guarded by 'if' because set -e would
-            # abort the entire run loop on build failure.
-            if [ "$name" = "dll_loader" ]; then
-                if ! build_sample "dll_sample"; then
-                    echo "  FAIL  $name (dependency dll_sample build failed)"
-                    fail=$((fail + 1))
-                    echo ""
-                    continue
-                fi
-            fi
+            # Build the sample first
             if ! build_sample "$name"; then
                 echo "  FAIL  $name (build failed, not running)"
                 fail=$((fail + 1))
-                echo ""
                 continue
             fi
-            echo ""
-            if run_sample "$name" "${@:3}"; then
-                pass=$((pass + 1))
-            else
-                fail=$((fail + 1))
-            fi
+
+            # Run — use || to prevent set -e from aborting on expected failures
+            result=0
+            run_sample "$name" || result=$?
+            case $result in
+                0) pass=$((pass + 1)) ;;
+                2) skip=$((skip + 1)) ;;
+                *) fail=$((fail + 1)) ;;
+            esac
         done
         echo ""
-        echo "  Results: $pass passed, $fail failed, $skip skipped"
+        echo "Results: $pass passed, $fail failed, $skip skipped"
         if [ "$fail" -gt 0 ]; then
             exit 1
         fi
         ;;
+
     *)
-        echo "Usage: $0 {build|run} [sample_name] [args...]"
+        echo "Usage: $0 {build|run} [sample_name]"
         echo ""
         echo "  build         Build all samples (or named sample)"
         echo "  run           Build + run under ./my_wine"
