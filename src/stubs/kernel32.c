@@ -11,6 +11,7 @@
 #include "include/kernel32.h"
 #include "include/ntdll.h"
 #include "include/syscall/thunk_gen.h"
+#include "include/common.h"
 
 /*
  * Direct handler declarations for kernel32 stubs.
@@ -318,7 +319,7 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
     mbi->BaseAddress = lpAddress;
     mbi->AllocationBase = lpAddress;
     mbi->AllocationProtect = 4; /* PAGE_READWRITE */
-    mbi->RegionSize = 4096;
+    mbi->RegionSize = PAGE_SIZE;
     mbi->State = 0x2000; /* MEM_COMMIT */
     mbi->Protect = 4; /* PAGE_READWRITE */
     mbi->Type = 0x20000; /* MEM_PRIVATE */

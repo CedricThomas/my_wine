@@ -14,6 +14,7 @@
 #include <stdarg.h>
 #include "msvcrt_priv.h"
 #include "../syscall/syscalls_inline.h"
+#include "include/common.h"
 
 /* ── Internal implementations ──────────────────────────────── */
 
@@ -31,7 +32,7 @@ int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap)
     /* Instead of calling vsnprintf (which crashes on garbage va_list from PE),
      * write the format string directly. This handles most CRT startup output. */
     size_t len = 0;
-    while (len < 4095 && format[len]) len++;
+    while (len < PAGE_MASK && format[len]) len++;
     if (len == 0) return 0;
 
     long res = INLINE_SYSCALL_WRITE(fd, format, len);

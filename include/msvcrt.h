@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "common.h"
 
 /* ── MSVCRT CRT Startup Stubs ──────────────────────────────── */
 
@@ -18,7 +19,7 @@ extern char **g_guest_argv;
 extern char **g_guest_envp;
 
 /* _cmdline_storage buffer and pointer - set from main.c before entry jump */
-extern char _cmdline_storage[4096];
+extern char _cmdline_storage[PAGE_SIZE];
 
 /* CRT startup functions */
 __attribute__((ms_abi))

@@ -10,6 +10,7 @@
 #include <pthread.h>
 
 #include "include/ntdll.h"
+#include "include/nt_constants.h"
 
 /* ── Handle Table ───────────────────────────────────────────── */
 
@@ -289,9 +290,6 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     int oflags = 0;
 
     /* Map Windows desired_access to Linux open flags */
-    uint64_t GENERIC_READ  = 0x80000000;
-    uint64_t GENERIC_WRITE = 0x40000000;
-
     if (desired_access & GENERIC_READ)
         oflags |= O_RDONLY;
     if (desired_access & GENERIC_WRITE)

@@ -18,6 +18,7 @@
 #include "include/wine_abi.h"
 #include "include/pe.h"
 #include "include/pe_parser.h"
+#include "include/common.h"
 
 /* ── Global variables (defined in crt_globals.c) ───────────── */
 
@@ -29,7 +30,7 @@ extern char **_msvcrt_environ;
 extern char **g_guest_argv;
 extern char **g_guest_envp;
 
-extern char _cmdline_storage[4096];
+extern char _cmdline_storage[PAGE_SIZE];
 extern char *_acmdln;
 
 extern uint64_t native_startup_lock;

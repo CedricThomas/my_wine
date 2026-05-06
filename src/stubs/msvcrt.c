@@ -23,6 +23,7 @@
  * Use __builtin_ functions and direct syscalls instead. */
 
 #include "include/msvcrt.h"
+#include "include/common.h"
 
 /* ── Global variables ──────────────────────────────────────── */
 
@@ -31,7 +32,8 @@ int _commode = 0;
 int _fmode = 0;
 char **_msvcrt_environ = NULL;
 
-static char _cmdline_storage[4096] = "./hello.exe";
+// Default empty; overwritten from main.c with the actual guest command line
+static char _cmdline_storage[PAGE_SIZE] = "";
 char *_acmdln = _cmdline_storage;
 
 /* Static variables for additional CRT refptr patches */
@@ -110,6 +112,8 @@ typedef struct {
     unsigned char  _pad[16];   /* 40  - padding to 48 bytes */
 } wine_FILE;
 #pragma pack(pop)
+
+_Static_assert(sizeof(wine_FILE) == WINE_FILE_SIZE, "wine_FILE size mismatch");
 
 #define WINE_IOEOF  0x8000
 #define WINE_IOWRT  0x0002
@@ -478,7 +482,7 @@ int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap)
     /* Instead of calling vsnprintf (which crashes on garbage va_list from PE),
      * write the format string directly. This handles most CRT startup output. */
     size_t len = 0;
-    while (len < 4095 && format[len]) len++;
+    while (len < PAGE_MASK && format[len]) len++;
     if (len == 0) return 0;
 
     long res;
@@ -604,8 +608,8 @@ void patch_crt_refptrs(void *image_base, void *nt_ptr)
      */
     {
         char *acrt_fn = (char *)image_base + 0x27ac;
-        char *page_start = (char *)((uint64_t)acrt_fn & ~(uint64_t)4095);
-        if (mprotect(page_start, 4096, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+        char *page_start = (char *)((uint64_t)acrt_fn & ~(uint64_t)PAGE_MASK);
+        if (mprotect(page_start, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
             /* Replace 13 bytes starting at 0x27ac:
              * Original: mov%ebx,%ecx | lea(%rcx,%rcx,2),%rdx | shl$4,%rdx | add%rdx,%rax
              * New:      mov%ebx,%edx | imul$48,%edx,%edx | 3NOP | add%rdx,%rax
@@ -620,7 +624,7 @@ void patch_crt_refptrs(void *image_base, void *nt_ptr)
             memcpy(acrt_fn, new_code, sizeof(new_code));
             fprintf(stderr, "patched __acrt_iob_func to use ebx directly\n");
         }
-        mprotect(page_start, 4096, PROT_READ | PROT_EXEC);
+        mprotect(page_start, PAGE_SIZE, PROT_READ | PROT_EXEC);
     }
 
     uint64_t image_size = nt->OptionalHeader.SizeOfImage;
@@ -638,8 +642,8 @@ void patch_crt_refptrs(void *image_base, void *nt_ptr)
         void *old_val = (void *)*refptr;
 
         /* Make the containing page writable */
-        char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)4095);
-        if (mprotect(page_start, 4096, PROT_READ | PROT_WRITE) != 0) {
+        char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)PAGE_MASK);
+        if (mprotect(page_start, PAGE_SIZE, PROT_READ | PROT_WRITE) != 0) {
             perror("patch_crt_refptrs: mprotect");
             continue;
         }
@@ -650,6 +654,6 @@ void patch_crt_refptrs(void *image_base, void *nt_ptr)
                 (unsigned long)old_val, refptr_patches[i].target);
 
         /* Restore read-only */
-        mprotect(page_start, 4096, PROT_READ);
+        mprotect(page_start, PAGE_SIZE, PROT_READ);
     }
 }

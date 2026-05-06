@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 
 #include "msvcrt_priv.h"
+#include "include/common.h"
 
 /* ── Global variables ──────────────────────────────────────── */
 
@@ -24,7 +25,7 @@ char **_msvcrt_environ = NULL;
 char **g_guest_argv  = NULL;
 char **g_guest_envp  = NULL;
 
-char _cmdline_storage[4096];
+char _cmdline_storage[PAGE_SIZE];
 char *_acmdln = _cmdline_storage;
 
 /* Static variables for additional CRT refptr patches */
