@@ -234,14 +234,11 @@ static int dispatch_ptr_inout(uint64_t guest_arg, uint64_t *ptr_val,
  *
  * @nr       NT syscall number
  * @arg1-4   decoded register arguments (RCX, RDX, R8, R9)
- * @result_out  output: written on normal completion
  *
- * @return NTSTATUS result (either *result_out on normal path, or
- *         early error NTSTATUS from the generated switch)
+ * @return NTSTATUS result
  */
 static uint64_t dispatcher_core(uint64_t nr, uint64_t arg1, uint64_t arg2,
-                                 uint64_t arg3, uint64_t arg4,
-                                 uint64_t *result_out)
+                                 uint64_t arg3, uint64_t arg4)
 {
     char trace_buf[32];
     format_trace_syscall(trace_buf, nr);
@@ -253,7 +250,6 @@ static uint64_t dispatcher_core(uint64_t nr, uint64_t arg1, uint64_t arg2,
     #include "dispatcher_generated.c"
     #undef DISPATCHER_C_BODY
 
-    *result_out = result;
     return result;
 }
 
@@ -272,11 +268,10 @@ static uint64_t dispatcher_core(uint64_t nr, uint64_t arg1, uint64_t arg2,
 uint64_t c_dispatch_syscall(uint64_t nr)
 {
     g_dispatch_ctx = NULL;
-    uint64_t result;
-    result = dispatcher_core(nr, __wine_guest_regs.rcx, __wine_guest_regs.rdx,
-                             __wine_guest_regs.r8, __wine_guest_regs.r9,
-                             &result);
+    uint64_t result = dispatcher_core(nr, __wine_guest_regs.rcx, __wine_guest_regs.rdx,
+                             __wine_guest_regs.r8, __wine_guest_regs.r9);
     __wine_guest_regs.rax = result;
+    g_dispatch_ctx = NULL;
     return result;
 }
 
@@ -305,13 +300,12 @@ uint64_t c_dispatch_syscall(uint64_t nr)
 int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 {
     g_dispatch_ctx = ctx;
-    uint64_t result;
-    result = dispatcher_core(syscall_number,
+    uint64_t result = dispatcher_core(syscall_number,
                              ctx->uc_mcontext.gregs[REG_RCX],
                              ctx->uc_mcontext.gregs[REG_RDX],
                              ctx->uc_mcontext.gregs[REG_R8],
-                             ctx->uc_mcontext.gregs[REG_R9],
-                             &result);
+                             ctx->uc_mcontext.gregs[REG_R9]);
     ctx->uc_mcontext.gregs[REG_RAX] = (greg_t)result;
+    g_dispatch_ctx = NULL;
     return 0;
 }
