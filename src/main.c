@@ -216,6 +216,6 @@ int main(int argc, char *argv[])
                 (unsigned long)entry_abs);
     }
 
-    run_guest_entry(entry_abs, stack_top, teb, guest_argv, guest_envp);
+    run_guest_entry(entry_abs, base, stack_top, teb, guest_argv, guest_envp);
     return 0;
 }

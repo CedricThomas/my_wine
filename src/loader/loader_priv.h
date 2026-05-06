@@ -140,10 +140,10 @@ __attribute__((ms_abi)) void seh_crash_handler(void *, void *, void *, void *);
 
 /* ── entry.c / guest_setup.c ─────────────────────────────── */
 
-__attribute__((noreturn)) void run_guest_entry(uint64_t entry_abs, void *stack_top,
+__attribute__((noreturn)) void run_guest_entry(uint64_t entry_abs, void *image_base, void *stack_top,
                                                 void *teb, char **guest_argv,
                                                 char **guest_envp);
-__attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *stack_top,
+__attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *image_base, void *stack_top,
                                                     void *teb, char **guest_argv,
                                                     char **guest_envp);
 void cleanup_guest(void *teb, void *stack_base);

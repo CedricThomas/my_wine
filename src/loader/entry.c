@@ -21,7 +21,7 @@ extern void run_guest(void (*)(void), void *, void *, char **, char **,
                        void (*)(uint32_t)) __attribute__((noreturn));
 
 /* From guest_setup.c — called directly (no fork) */
-__attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *stack_top,
+__attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *image_base, void *stack_top,
                                                     void *teb, char **guest_argv,
                                                     char **guest_envp);
 
@@ -46,10 +46,10 @@ __attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *sta
  * @param  guest_argv  argument vector for the guest
  * @param  guest_envp  environment pointer for the guest
  */
-__attribute__((noreturn)) void run_guest_entry(uint64_t entry_abs, void *stack_top, void *teb,
+__attribute__((noreturn)) void run_guest_entry(uint64_t entry_abs, void *image_base, void *stack_top, void *teb,
                                                 char **guest_argv, char **guest_envp)
 {
-    setup_guest_and_run(entry_abs, stack_top, teb, guest_argv, guest_envp);
+    setup_guest_and_run(entry_abs, image_base, stack_top, teb, guest_argv, guest_envp);
     /* setup_guest_and_run calls run_guest which is noreturn.
      * If we somehow get here, exit. */
     _exit(1);

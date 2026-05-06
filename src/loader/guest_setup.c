@@ -173,20 +173,24 @@ static void *setup_seh_and_thunks(void)
 
 /* ── Step 3a: PE header re-parse ── */
 
-static void parse_pe_headers(uint64_t entry_abs,
+static void parse_pe_headers(uint64_t entry_abs, void *image_base,
                              IMAGE_NT_HEADERS64 **out_nt,
                              IMAGE_SECTION_HEADER **out_sections)
 {
-    /* Re-parse PE headers from entry_abs to get nt_headers + sections */
-    uint64_t image_base = entry_abs & PAGE_ALIGN_MASK;
-    void *base = (void *)(uintptr_t)image_base;
-    const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
+    (void)entry_abs;  /* image_base passed directly instead of computing from entry_abs */
+    /* Validate DOS header magic */
+    const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)image_base;
+    if (img_dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        fprintf(stderr, "ERROR: invalid DOS header magic 0x%04x (expected 0x5A4D)\n",
+                img_dos->e_magic);
+        return;
+    }
     uint32_t pe_off = img_dos->e_lfanew;
-    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((char *)base + pe_off);
+    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((char *)image_base + pe_off);
     uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
                        nt->FileHeader.SizeOfOptionalHeader;
     IMAGE_SECTION_HEADER *sections =
-        (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
+        (IMAGE_SECTION_HEADER *)((char *)image_base + sec_off);
 
     *out_nt = nt;
     *out_sections = sections;
@@ -286,7 +290,7 @@ static __attribute__((noreturn)) void jump_to_guest(uint64_t entry_abs, void *st
  * Called in the single-process model; does not return.
  */
 __attribute__((noreturn)) void setup_guest_and_run(
-        uint64_t entry_abs, void *stack_top, void *teb,
+        uint64_t entry_abs, void *image_base, void *stack_top, void *teb,
         char **guest_argv, char **guest_envp)
 {
     setup_signal_handlers();
@@ -298,11 +302,9 @@ __attribute__((noreturn)) void setup_guest_and_run(
     IMAGE_NT_HEADERS64 *nt = NULL;
     IMAGE_SECTION_HEADER *sections = NULL;
 
-    parse_pe_headers(entry_abs, &nt, &sections);
+    parse_pe_headers(entry_abs, image_base, &nt, &sections);
 
-    uint64_t image_base = entry_abs & PAGE_ALIGN_MASK;
-    void *base = (void *)(uintptr_t)image_base;
-    apply_final_patches(base, nt, sections);
+    apply_final_patches(image_base, nt, sections);
 
     finalize_guest_state(teb, seh_frame);
 
