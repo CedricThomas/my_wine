@@ -21,6 +21,7 @@ typedef struct {
     IMAGE_NT_HEADERS64 *nt;     /* Pointer to NT headers in image memory */
     EXPORT_CACHE *export_cache; /* Cached export table (from export_table.c) */
     LDR_DATA_TABLE_ENTRY *ldr_entry; /* PEB LDR entry */
+    int load_count;                 /* Reference count (incremented on LoadLibraryA) */
 } loaded_module_t;
 
 #define MAX_MODULES 16

@@ -40,6 +40,13 @@ __attribute__((ms_abi))
 void *GetModuleHandleA(const char *lpModuleName);
 
 __attribute__((ms_abi))
+int FreeLibraryA(void *hModule);
+
+__attribute__((ms_abi))
+__attribute__((noreturn))
+void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode);
+
+__attribute__((ms_abi))
 int lstrlenA(const char *lpString);
 
 /* ── FILETIME / LARGE_INTEGER types ───────────────────────── */

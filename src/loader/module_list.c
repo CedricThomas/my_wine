@@ -25,6 +25,7 @@ loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS64 *nt
             module_list[i].nt = nt;
             module_list[i].export_cache = NULL;
             module_list[i].ldr_entry = NULL;
+            module_list[i].load_count = 1;
             module_count++;
             return &module_list[i];
         }
