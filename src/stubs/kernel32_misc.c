@@ -28,7 +28,9 @@ WINE_STUB
 char *lstrcpyA(char *dest, const char *src)
 {
     if (dest == NULL || src == NULL) return FORCE_PTR_RETURN(NULL);
-    return FORCE_PTR_RETURN(strcpy(dest, src));
+    size_t len = __builtin_strlen(src);
+    __builtin_memcpy(dest, src, len + 1);  /* include null terminator */
+    return FORCE_PTR_RETURN(dest);
 }
 
 /* ── GetLastError ───────────────────────────────────────────── */
