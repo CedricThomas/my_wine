@@ -22,7 +22,6 @@
 #include "src/loader/export_table.h"
 #include "include/kernel32.h"
 #include "include/common.h"
-#include "include/common.h"
 
 /* Forward declarations for functions used in tests */
 void *setup_teb_peb(void);
