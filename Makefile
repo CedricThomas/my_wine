@@ -177,6 +177,7 @@ fclean: clean
 	rm -f my_wine
 	find samples/ -name '*.exe' -delete 2>/dev/null || true
 	find samples/ -name '*.dll' -delete 2>/dev/null || true
+	find tests/ -maxdepth 1 -type f -executable -delete 2>/dev/null || true
 
 re: fclean
 	@$(MAKE) all
