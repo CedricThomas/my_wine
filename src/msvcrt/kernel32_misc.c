@@ -3,6 +3,7 @@
 #include <string.h>
 #include "kernel32_priv.h"
 #include "include/wine_abi.h"
+#include "include/nt_constants.h"
 
 /*
  * _acmdln is defined in crt_globals.c. We use a weak declaration so that
@@ -64,7 +65,7 @@ WINE_STUB
 void GetSystemTimeAsFileTime(FILETIME *lpSystemTime)
 {
     if (lpSystemTime == NULL) {
-        g_last_error = 87; /* ERROR_INVALID_PARAMETER */
+        g_last_error = ERROR_INVALID_PARAMETER;
         return;
     }
 
@@ -84,7 +85,7 @@ WINE_STUB
 int QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount)
 {
     if (lpPerformanceCount == NULL) {
-        g_last_error = 87; /* ERROR_INVALID_PARAMETER */
+        g_last_error = ERROR_INVALID_PARAMETER;
         return 0;
     }
 
@@ -104,7 +105,7 @@ WINE_STUB
 int QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency)
 {
     if (lpFrequency == NULL) {
-        g_last_error = 87; /* ERROR_INVALID_PARAMETER */
+        g_last_error = ERROR_INVALID_PARAMETER;
         return 0;
     }
 
@@ -136,7 +137,7 @@ int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint
 
     if (sysv_mprotect(page_start, aligned_size, prot) != 0) {
         write_to_stderr("my_wine: VirtualProtect: mprotect failed\n");
-        g_last_error = 1; /* fixed error code instead of errno */
+        g_last_error = ERROR_ACCESS_DENIED;
         return 0;
     }
     return 1;
@@ -165,7 +166,7 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
     }
 
     if (dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
-        g_last_error = 122; /* ERROR_INSUFFICIENT_BUFFER */
+        g_last_error = ERROR_INSUFFICIENT_BUFFER;
         return 0;
     }
 

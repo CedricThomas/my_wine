@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
+#include "include/nt_constants.h"
 #include "../syscall/syscalls_inline.h"
 
 #define AT_FDCWD ((long)-100)
@@ -67,14 +68,14 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     int oflags = 0;
 
     /* Map Windows desired_access to Linux open flags */
-    uint64_t GENERIC_READ  = 0x80000000;
-    uint64_t GENERIC_WRITE = 0x40000000;
+    uint64_t gen_read  = GENERIC_READ;
+    uint64_t gen_write = GENERIC_WRITE;
 
-    if (desired_access & GENERIC_READ)
+    if (desired_access & gen_read)
         oflags |= 0; /* O_RDONLY */
-    if (desired_access & GENERIC_WRITE)
+    if (desired_access & gen_write)
         oflags |= 2; /* O_RDWR */
-    if (!(desired_access & GENERIC_READ) && !(desired_access & GENERIC_WRITE))
+    if (!(desired_access & gen_read) && !(desired_access & gen_write))
         oflags = 0; /* O_RDONLY */
 
     /* Extract path from OBJECT_ATTRIBUTES if provided */
