@@ -8,7 +8,7 @@
 #define _GNU_SOURCE
 
 #include "wine_heap.h"
-#include "../stubs/kernel32_priv.h"
+#include "../msvcrt/kernel32_priv.h"
 #include "../syscall/syscalls_inline.h"
 
 #include <string.h>

@@ -1,7 +1,7 @@
 /*
  * ntdll_priv.h — Private declarations shared across ntdll split files
  *
- * All files in src/stubs/ntdll_*.c include this header. It re-exports the
+ * All files in src/msvcrt/ntdll_*.c include this header. It re-exports the
  * public ntdll.h and declares the internal globals, types, and helpers.
  */
 

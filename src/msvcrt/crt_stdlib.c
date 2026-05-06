@@ -143,19 +143,19 @@ void *wine_realloc(void *ptr, size_t size)
 WINE_STUB_STATIC
 void *wine_memcpy(void *dest, const void *src, size_t n)
 {
-    return __builtin_memcpy(dest, src, n);
+    return sysv_memcpy(dest, src, n);
 }
 
 WINE_STUB_STATIC
 size_t wine_strlen(const void *s)
 {
-    return __builtin_strlen(s);
+    return sysv_strlen(s);
 }
 
 WINE_STUB_STATIC
 int wine_strncmp(const void *s1, const void *s2, size_t n)
 {
-    return __builtin_strncmp(s1, s2, n);
+    return sysv_strncmp(s1, s2, n);
 }
 
 WINE_STUB_STATIC

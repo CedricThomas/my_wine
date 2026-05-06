@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "loader_priv.h"
-#include "../stubs/msvcrt_priv.h"
+#include "../msvcrt/msvcrt_priv.h"
 
 /**
  * Fill dynamic msvcrt import entries (abort, malloc, etc.) with

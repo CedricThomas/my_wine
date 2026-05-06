@@ -16,13 +16,13 @@ BUILDDIR = build
 
 # Auto-discover .c per source group; objects flatten into build/
 ROOT_SRC     = $(sort $(shell find src/   -maxdepth 1 -name '*.c'))
-STUBS_SRC    = $(sort $(shell find src/stubs   -maxdepth 1 -name '*.c'))
+STUBS_SRC    = $(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c'))
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c'))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
 HEAP_SRC     = $(sort $(shell find src/heap    -maxdepth 1 -name '*.c'))
 
 ROOT_OBJS    = $(patsubst src/%.c,$(BUILDDIR)/%.o,$(ROOT_SRC))
-STUBS_OBJS   = $(patsubst src/stubs/%.c,$(BUILDDIR)/%.o,$(STUBS_SRC))
+STUBS_OBJS   = $(patsubst src/msvcrt/%.c,$(BUILDDIR)/%.o,$(STUBS_SRC))
 LOADER_OBJS  = $(patsubst src/loader/%.c,$(BUILDDIR)/%.o,$(LOADER_SRC))
 SYSCALL_OBJS = $(patsubst src/syscall/%.c,$(BUILDDIR)/%.o,$(SYSCALL_SRC))
 HEAP_OBJS    = $(patsubst src/heap/%.c,$(BUILDDIR)/%.o,$(HEAP_SRC))
@@ -39,7 +39,7 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 
 # Shared objects used by import-resolution and teb_peb tests
 TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) $(HEAP_OBJS) \
-	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o \
+	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o
 
 # Non-crt stubs (syscall dispatch test doesn't need the CRT stubs)
@@ -52,7 +52,7 @@ STUBS_SYSCALL_OBJS = $(filter-out $(BUILDDIR)/kernel32_module.o, $(STUBS_NO_CRT_
 TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_SYSCALL_OBJS) $(BUILDDIR)/common.o
 
 # ── vpath ───────────────────────────────────────────────────────
-vpath %.c src src/stubs src/loader src/syscall src/heap
+vpath %.c src src/msvcrt src/loader src/syscall src/heap
 vpath %.S src src/syscall
 
 # ── Per-target CFLAGS overrides ─────────────────────────────────
@@ -60,9 +60,10 @@ vpath %.S src src/syscall
 # $(SPECIAL_CFLAGS) (entry points, loader core, stubs, syscall infra).
 
 SPECIAL_OBJS = main.o common.o entry.o teb_peb.o guest_setup.o crash_handlers.o gs_base.o \
-	thunk_gen.o dispatcher.o dispatcher_entry_asm.o import_resolve.o image_mapper.o
+	thunk_gen.o dispatcher.o dispatcher_entry_asm.o abi_wrappers.o import_resolve.o image_mapper.o
 $(foreach obj,$(SPECIAL_OBJS),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
+$(foreach obj,$(notdir $(SYSCALL_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
 # ── Targets ─────────────────────────────────────────────────────
