@@ -112,7 +112,8 @@ TEST_parse_OBJS = $(PE_OBJS) $(BUILDDIR)/debug.o
 TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/debug.o
 TEST_teb_peb_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o $(BUILDDIR)/debug.o
 TEST_syscall_dispatch_OBJS = $(TEST_SYSCALL_OBJS) $(BUILDDIR)/debug.o
-TEST_relocations_OBJS = $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
+TEST_relocations_OBJS = $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o \
+	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/image_mapper.o
 
 define TEST_RULE
 $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
