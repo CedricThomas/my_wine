@@ -200,7 +200,7 @@ uint64_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem)
     }
 
     (void)dwFlags;
-    return (uint64_t)musl_malloc_usable_size(lpMem);
+    return (uint64_t)musl_malloc_usable_size((void *)lpMem);
 }
 
 /*

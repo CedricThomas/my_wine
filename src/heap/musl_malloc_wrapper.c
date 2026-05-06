@@ -101,9 +101,15 @@ extern void __libc_free(void *);
  * are defined. The #include "..." directives inside musl source
  * resolve to our stubs via -Isrc/heap/musl_stubs. */
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#pragma GCC diagnostic ignored "-Warray-bounds"
 #include "musl_src/malloc.c"
 #include "musl_src/aligned_alloc.c"
 #include "musl_src/malloc_usable_size.c"
+#pragma GCC diagnostic pop
 
 /* ── Step 7: Export wrapper functions for use by abi_wrappers.c ──
  * These are the public interface. The musl internal functions

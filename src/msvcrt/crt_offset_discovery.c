@@ -209,7 +209,6 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         }
 
         int matched = 0;
-        int is_refptr = 0;
         /* Prefer .refptr entries over bare symbol names.
          * mingw-w64 COFF tables often have bare "mingw_app_type" in .idata
          * (wrong address) and ".rdata$.refptr.mingw_app_type" / ".refptr.mingw_app_type"
@@ -242,9 +241,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
             /* Substring fallback */
             if (sym_name_len > 8 && strstr(sym_name, name) != NULL) {
                 matched = 1;
-                if (strstr(sym_name, ".refptr.")) {
-                    is_refptr = 1;
-                }
+
                 if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
                     DEBUG("DBG_COFF_SUB: sym[%u] '%.*s' matched '%s' as substring",
                             i, (int)sym_name_len, sym_name, name);
