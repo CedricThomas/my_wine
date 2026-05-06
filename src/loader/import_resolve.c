@@ -395,16 +395,6 @@ static size_t dll_strlen(const char *s)
     return len;
 }
 
-static int dll_strncmp(const char *a, const char *b, size_t n)
-{
-    size_t i;
-    for (i = 0; i < n; i++) {
-        if (a[i] != b[i]) return (unsigned char)a[i] - (unsigned char)b[i];
-        if (a[i] == '\0') return 0;
-    }
-    return 0;
-}
-
 static const char *dll_strchr(const char *s, int c)
 {
     while (*s) {
