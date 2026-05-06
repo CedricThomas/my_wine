@@ -11,8 +11,11 @@ SAMPLES_DIR="$PROJECT_DIR/samples"
 
 echo "my_wine: generating CRT offsets from mingw-w64 toolchain..."
 
+# Create a work directory inside the project (so Docker can see it through the sandbox)
+WORK_DIR=$(mktemp -d "$PROJECT_DIR/.gen_crt_offsets.XXXXXX")
+
 # Compile a minimal test program that forces the CRT to include all .refptr entries
-TEST_SRC=$(mktemp -d)/test_crt.c
+TEST_SRC="$WORK_DIR/test_crt.c"
 cat > "$TEST_SRC" << 'EOF'
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,26 +27,31 @@ int main(int argc, char *argv[]) {
 }
 EOF
 
-TEST_EXE=$(mktemp)/test_crt.exe
+TEST_EXE="$WORK_DIR/test_crt.exe"
 
-# Build via Docker (reuse the same container as samples)
+# Build via Docker (reuse the my_wine-samples image)
 if command -v docker &>/dev/null; then
+    # Ensure the my_wine-samples image exists; build it if not
+    if ! docker image inspect my_wine-samples &>/dev/null; then
+        echo "my_wine: building my_wine-samples image from samples/Dockerfile..."
+        DOCKER_BUILDKIT=0 docker build -t my_wine-samples "$PROJECT_DIR/samples" \
+            || { echo "ERROR: Failed to build my_wine-samples image"; rm -rf "$WORK_DIR"; exit 1; }
+    fi
+
     docker run --rm \
-        -v "$(dirname "$TEST_SRC"):/work" \
+        -v "$WORK_DIR:/work" \
         -w /work \
-        ghcr.io/msys2/mingw:w64 \
-        /bin/bash -c "gcc -O2 -o test_crt.exe test_crt.c" \
+        my_wine-samples \
+        /bin/bash -c "x86_64-w64-mingw32-gcc -O2 -o test_crt.exe test_crt.c" \
         || {
             echo "ERROR: mingw-w64 Docker build failed"
-            rm -f "$TEST_EXE"
+            rm -rf "$WORK_DIR"
             exit 1
         }
-
-    # Docker outputs to the mounted dir
-    TEST_EXE=$(dirname "$TEST_SRC")/test_crt.exe
 else
     echo "ERROR: Docker not found — cannot generate CRT offsets"
     echo "       Install Docker or skip this step (hardcoded fallbacks will be used)"
+    rm -rf "$WORK_DIR"
     exit 1
 fi
 
@@ -104,8 +112,12 @@ int main(int argc, char *argv[]) {
     uint32_t pe_sig = *((uint32_t *)((char *)map + e_lfanew));
     if (pe_sig != 0x00004550) { fprintf(stderr, "Not a PE\n"); return 1; }
 
-    uint16_t num_symbols = *((uint16_t *)((char *)map + e_lfanew + 4 + 2));
-    uint32_t sym_ptr = *((uint32_t *)((char *)map + e_lfanew + 4 + 2 + 4));
+    // COFF FileHeader (20 bytes): Machine(2)+NumSections(2)+TimeDateStamp(4)
+    //   +PointerToSymbolTable(4)+NumberOfSymbols(4)+SizeOfOptionalHeader(2)+Characteristics(2)
+    uint16_t num_sections = *((uint16_t *)((char *)map + e_lfanew + 6));
+    uint32_t sym_ptr = *((uint32_t *)((char *)map + e_lfanew + 12));
+    uint32_t num_symbols = *((uint32_t *)((char *)map + e_lfanew + 16));
+    uint16_t opt_hdr_size = *((uint16_t *)((char *)map + e_lfanew + 20));
 
     if (sym_ptr == 0 || num_symbols == 0) {
         fprintf(stderr, "No COFF symbol table\n");
@@ -124,10 +136,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Find section virtual addresses
-    uint16_t num_sections = *((uint16_t *)((char *)map + e_lfanew + 4 + 2));
-    uint32_t sec_ptr = e_lfanew + 4 + 2 + 2 + 20;  // after FileHeader + OptionalHeader header
-    uint16_t opt_hdr_size = *((uint16_t *)((char *)map + e_lfanew + 4 + 2));
-    sec_ptr = e_lfanew + 4 + 2 + 2 + opt_hdr_size;
+    uint32_t sec_ptr = e_lfanew + 4 + 20 + opt_hdr_size;  // FileHeader(20) + OptionalHeader
 
     // Section headers: Name[8] + VirtualAddress + ...
     uint64_t section_vaddrs[96];
@@ -222,7 +231,7 @@ int main(int argc, char *argv[]) {
 CEOF
 
 # Compile the parser
-PARSER_EXE=$(mktemp)/parse_offsets
+PARSER_EXE=$(mktemp -d)/parse_offsets
 gcc -O2 -o "$PARSER_EXE" "$PARSER_SRC" || { echo "ERROR: parser compilation failed"; exit 1; }
 
 # Run the parser on the test PE
@@ -230,8 +239,8 @@ gcc -O2 -o "$PARSER_EXE" "$PARSER_SRC" || { echo "ERROR: parser compilation fail
 echo "" >> "$OUTPUT"
 
 # Clean up
-rm -f "$PARSER_EXE" "$PARSER_SRC" "$TEST_EXE"
-rm -rf "$(dirname "$TEST_SRC")"
+rm -f "$PARSER_EXE"
+rm -rf "$WORK_DIR" "$(dirname "$PARSER_SRC")"
 
 echo "Generated: $OUTPUT"
 echo "Contents:"
