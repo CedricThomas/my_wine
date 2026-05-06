@@ -5,17 +5,13 @@
  * section data, sets per-section memory protections, and cleans up.
  */
 
-#define _GNU_SOURCE
-
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <unistd.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "../syscalls_inline.h"
 #include "include/pe.h"
 #include "include/nt_constants.h"
 #include "include/debug.h"
@@ -45,31 +41,31 @@ void *map_image(const char *path,
     snprintf(g_pe_path, sizeof(g_pe_path), "%s", path);
 
     /* 1. Open the PE file */
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) { perror("open"); return NULL; }
+    long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, path, O_RDONLY);
+    if (fd < 0) { DEBUG("open failed"); return NULL; }
 
     struct stat st;
-    if (fstat(fd, &st) < 0) { perror("fstat"); close(fd); return NULL; }
+    if (INLINE_SYSCALL_FSTAT(fd, &st) < 0) { DEBUG("fstat failed"); INLINE_SYSCALL_CLOSE(fd); return NULL; }
     size_t file_size = (size_t)st.st_size;
 
     /* 2. Map file read-only */
-    void *file_base = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (file_base == MAP_FAILED) { perror("mmap file"); close(fd); return NULL; }
+    void *file_base = INLINE_SYSCALL_MMAP(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (file_base == MAP_FAILED) { DEBUG("mmap file failed"); INLINE_SYSCALL_CLOSE(fd); return NULL; }
 
     /* 3. Parse headers */
     IMAGE_DOS_HEADER dos;
     if (parse_dos_header(file_base, file_size, &dos) != 0) {
         DEBUG("Invalid DOS header");
-        munmap(file_base, file_size);
-        close(fd);
+        INLINE_SYSCALL_MUNMAP(file_base, file_size);
+        INLINE_SYSCALL_CLOSE(fd);
         return NULL;
     }
 
     IMAGE_NT_HEADERS64 nt;
     if (parse_nt_headers(file_base, file_size, &dos, &nt) != 0) {
         DEBUG("Invalid NT headers");
-        munmap(file_base, file_size);
-        close(fd);
+        INLINE_SYSCALL_MUNMAP(file_base, file_size);
+        INLINE_SYSCALL_CLOSE(fd);
         return NULL;
     }
 
@@ -77,8 +73,8 @@ void *map_image(const char *path,
     int num_sections = parse_sections(file_base, file_size, &nt, &sections);
     if (num_sections < 0) {
         DEBUG("Failed to parse sections");
-        munmap(file_base, file_size);
-        close(fd);
+        INLINE_SYSCALL_MUNMAP(file_base, file_size);
+        INLINE_SYSCALL_CLOSE(fd);
         return NULL;
     }
 
@@ -103,18 +99,18 @@ void *map_image(const char *path,
     uint64_t image_base = nt.OptionalHeader.ImageBase;
     size_t image_size   = nt.OptionalHeader.SizeOfImage;
 
-    void *base = mmap((void *)(uintptr_t)image_base, image_size,
+    void *base = INLINE_SYSCALL_MMAP((void *)(uintptr_t)image_base, image_size,
                        PROT_READ|PROT_WRITE|PROT_EXEC,
                        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
     if (base == MAP_FAILED) {
 
-        base = mmap(NULL, image_size,
+        base = INLINE_SYSCALL_MMAP(NULL, image_size,
                      PROT_READ|PROT_WRITE|PROT_EXEC,
                      MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK, -1, 0);
         if (base == MAP_FAILED) {
-            perror("mmap image");
-            munmap(file_base, file_size);
-            close(fd);
+            DEBUG("mmap image failed");
+            INLINE_SYSCALL_MUNMAP(file_base, file_size);
+            INLINE_SYSCALL_CLOSE(fd);
             return NULL;
         }
     }
@@ -145,9 +141,9 @@ void *map_image(const char *path,
     /* Apply base relocations (needed when actual base != preferred ImageBase) */
     if (apply_relocations(base, &nt) != 0) {
         DEBUG("Failed to apply relocations");
-        munmap(base, image_size);
-        munmap(file_base, file_size);
-        close(fd);
+        INLINE_SYSCALL_MUNMAP(base, image_size);
+        INLINE_SYSCALL_MUNMAP(file_base, file_size);
+        INLINE_SYSCALL_CLOSE(fd);
         return NULL;
     }
 
@@ -169,18 +165,18 @@ void *map_image(const char *path,
             size = sections[i].SizeOfRawData;
         size = (size + 4095) & ~(size_t)4095;
 
-        if (mprotect((char *)base + sections[i].VirtualAddress, size, prot) != 0) {
-            perror("mprotect");
-            munmap(base, image_size);
-            munmap(file_base, file_size);
-            close(fd);
+        if (INLINE_SYSCALL_MPROTECT((char *)base + sections[i].VirtualAddress, size, prot) != 0) {
+            DEBUG("mprotect failed");
+            INLINE_SYSCALL_MUNMAP(base, image_size);
+            INLINE_SYSCALL_MUNMAP(file_base, file_size);
+            INLINE_SYSCALL_CLOSE(fd);
             return NULL;
         }
     }
 
     /* Unmap the original file mapping (no longer needed) */
-    munmap(file_base, file_size);
-    close(fd);
+    INLINE_SYSCALL_MUNMAP(file_base, file_size);
+    INLINE_SYSCALL_CLOSE(fd);
 
     /* Save the image base for later use (import resolution, TEB/PEB, etc.) */
     g_image_base = base;
