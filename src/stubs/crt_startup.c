@@ -48,13 +48,13 @@ void *_onexit(void (*func)(void))
 WINE_STUB
 void *__p__commode(void)
 {
-    return &_commode;
+    return FORCE_PTR_RETURN(&_commode);
 }
 
 WINE_STUB
 void *__p__fmode(void)
 {
-    return &_fmode;
+    return FORCE_PTR_RETURN(&_fmode);
 }
 
 /* __getmainargs: return the actual argv/envp passed from main.c */
