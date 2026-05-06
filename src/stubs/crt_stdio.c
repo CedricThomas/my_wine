@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include "msvcrt_priv.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 /* ── Internal implementations ──────────────────────────────── */
 

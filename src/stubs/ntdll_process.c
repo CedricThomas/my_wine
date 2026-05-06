@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 /* Cleanup functions — no longer called in handler_NtTerminateProcess.
  * INLINE_SYSCALL_EXIT terminates the process immediately, so cleanup

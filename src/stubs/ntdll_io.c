@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 #define AT_FDCWD ((long)-100)
 

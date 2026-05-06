@@ -14,7 +14,7 @@
 
 #define _GNU_SOURCE
 
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 #include "loader_priv.h"
 #include "include/pe.h"
 #include "include/msvcrt.h"

@@ -9,7 +9,7 @@
 #include "include/syscall/dispatcher_entry.h"
 #include "include/nt_constants.h"
 #include "include/common.h"
-#include "../syscalls_inline.h"
+#include "syscalls_inline.h"
 
 /*
  * thunk_gen.c — Direct-call thunk generator

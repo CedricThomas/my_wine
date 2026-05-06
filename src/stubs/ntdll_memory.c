@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 #include "include/abi_wrappers.h"
 #include "include/common.h"
 

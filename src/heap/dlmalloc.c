@@ -21,7 +21,7 @@
 #define ABORT dlmalloc_abort()
 
 /* ── System-specific overrides ── */
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 #include <sys/types.h>
 #include <pthread.h>
 #include <string.h>

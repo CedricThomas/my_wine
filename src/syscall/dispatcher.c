@@ -7,7 +7,7 @@
 #include "include/ntdll.h"
 #include "include/syscall/dispatcher.h"
 #include "include/syscall/dispatcher_entry.h"  /* guest_regs, __wine_guest_regs */
-#include "../syscalls_inline.h"
+#include "syscalls_inline.h"
 #include "include/debug.h"
 
 /*

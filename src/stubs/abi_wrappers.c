@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096

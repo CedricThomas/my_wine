@@ -15,7 +15,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "msvcrt_priv.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 /* ── ___lc_codepage_func ───────────────────────────────────── */
 /*

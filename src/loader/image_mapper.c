@@ -12,7 +12,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 #include "include/pe.h"
 #include "include/nt_constants.h"
 #include "include/debug.h"

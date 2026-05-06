@@ -14,7 +14,7 @@
 #include "include/abi_wrappers.h"
 #include "include/common.h"
 #include "ntdll_priv.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 /* Shared helper: write a static message to stderr via direct syscall */
 WINE_STUB

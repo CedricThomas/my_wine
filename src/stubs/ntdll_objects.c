@@ -14,7 +14,7 @@
 #include <sys/syscall.h>
 #include <signal.h>
 #include <pthread.h>
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 #include "handler_abi.h"
 #include "ntdll_priv.h"
 

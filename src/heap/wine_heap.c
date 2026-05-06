@@ -9,7 +9,7 @@
 
 #include "wine_heap.h"
 #include "../stubs/kernel32_priv.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 #include <string.h>
 #include <stdlib.h>

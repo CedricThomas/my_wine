@@ -21,7 +21,7 @@
 #include "export_table.h"
 #include "module_list.h"
 #include "peb_ldr.h"
-#include "../syscalls_inline.h"
+#include "../syscall/syscalls_inline.h"
 
 /* For extern environ — avoid getenv() in syscall-safe path */
 extern char **environ;
