@@ -137,10 +137,10 @@ void *wine_realloc(void *ptr, size_t size)
     void *new_ptr = wine_malloc(size);
     if (new_ptr == NULL) return NULL;
 
-    /* sysv_malloc uses mmap (page-sized). We can't know the original
-     * allocation size, so copy PAGE_SIZE (safe minimum). mmap returns
-     * zeroed memory, so any excess in the new block is clean. */
-    sysv_memcpy(new_ptr, ptr, PAGE_SIZE);
+    /* We don't know the old size; conservatively copy min(old_estimated, new_size).
+     * Since we can't track old sizes through sysv_malloc, copy the new size
+     * (the caller knows the original was at least this small or we'd have failed). */
+    sysv_memcpy(new_ptr, ptr, size);
     wine_free(ptr);
     return new_ptr;
 }

@@ -21,6 +21,11 @@
  * All string ops use compiler builtins (no vDSO).
  */
 
+/* malloc header: stored just before the returned pointer */
+typedef struct {
+    size_t mmap_size;  /* total mmap'd size (page-aligned) */
+} malloc_hdr_t;
+
 /* Round up to page size */
 static inline size_t page_align(size_t s)
 {
@@ -31,34 +36,40 @@ __attribute__((sysv_abi))
 void *sysv_malloc(size_t s)
 {
     if (s == 0) s = 1;
-    return INLINE_SYSCALL_MMAP(NULL, page_align(s),
+    /* We need space for the header + the requested data, both page-aligned overall */
+    size_t total = page_align(sizeof(malloc_hdr_t) + s);
+    void *p = INLINE_SYSCALL_MMAP(NULL, total,
         PROT_READ | PROT_WRITE,
         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == NULL || p == MAP_FAILED) return NULL;
+    malloc_hdr_t *hdr = (malloc_hdr_t *)p;
+    hdr->mmap_size = total;
+    return (void *)(hdr + 1);
 }
 
 __attribute__((sysv_abi))
 void *sysv_calloc(size_t n, size_t s)
 {
-    size_t total = n * s;
-    if (total == 0) total = 1;
-    void *p = INLINE_SYSCALL_MMAP(NULL, page_align(total),
+    size_t total_req = n * s;
+    if (total_req == 0) total_req = 1;
+    size_t total = page_align(sizeof(malloc_hdr_t) + total_req);
+    void *p = INLINE_SYSCALL_MMAP(NULL, total,
         PROT_READ | PROT_WRITE,
         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (p != NULL && p != MAP_FAILED)
-        __builtin_memset(p, 0, total);
-    return p;
+    if (p == NULL || p == MAP_FAILED) return NULL;
+    malloc_hdr_t *hdr = (malloc_hdr_t *)p;
+    hdr->mmap_size = total;
+    void *user_ptr = (void *)(hdr + 1);
+    __builtin_memset(user_ptr, 0, total_req);
+    return user_ptr;
 }
 
 __attribute__((sysv_abi))
 void sysv_free(void *p)
 {
     if (p == NULL) return;
-    /* We allocated page-sized chunks via mmap. munmap the whole page.
-     * Note: this is a best-effort deallocation — it works for the
-     * allocations we make (page-aligned mmap). For glibc-allocated
-     * memory, this is undefined, but we no longer use glibc post-GS. */
-    uintptr_t base = (uintptr_t)p & ~(uintptr_t)(PAGE_SIZE - 1);
-    (void)INLINE_SYSCALL_MUNMAP((void *)base, PAGE_SIZE);
+    malloc_hdr_t *hdr = (malloc_hdr_t *)((uintptr_t)p - sizeof(malloc_hdr_t));
+    (void)INLINE_SYSCALL_MUNMAP(hdr, hdr->mmap_size);
 }
 
 __attribute__((sysv_abi))
