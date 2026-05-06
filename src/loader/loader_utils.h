@@ -35,6 +35,7 @@ static inline int dll_strcasecmp(const char *a, const char *b)
 /* strncpy-like: copies up to max_len-1 bytes, always null-terminates */
 static inline void dll_copy_str(char *dst, const char *src, size_t max_len)
 {
+    if (max_len == 0) return; /* avoid SIZE_MAX underflow */
     size_t i;
     for (i = 0; i < max_len - 1 && src[i] != '\0'; i++)
         dst[i] = src[i];
