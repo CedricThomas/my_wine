@@ -27,9 +27,12 @@ int lstrlenA(const char *lpString)
 WINE_STUB
 char *lstrcpyA(char *dest, const char *src)
 {
-    if (dest == NULL || src == NULL) return FORCE_PTR_RETURN(NULL);
-    size_t len = __builtin_strlen(src);
-    __builtin_memcpy(dest, src, len + 1);  /* include null terminator */
+    char *d = dest;
+    const char *s = src;
+    if (d == NULL || s == NULL) return FORCE_PTR_RETURN(NULL);
+    do {
+        *d++ = *s++;
+    } while (s[-1] != '\0');
     return FORCE_PTR_RETURN(dest);
 }
 
