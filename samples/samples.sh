@@ -218,15 +218,35 @@ case "$MODE" in
         ;;
     run)
         samples=$(discover_samples "$TARGET")
+        pass=0 fail=0 skip=0
         for name in $samples; do
-            # If running dll_loader, ensure dll_sample is built first
+            # Skip DLL-only samples in run mode (they produce .dll, not .exe)
+            if ! is_exe_sample "$name"; then
+                echo "  SKIP  $name (DLL sample — not runnable)"
+                skip=$((skip + 1))
+                # Build it anyway so other samples that depend on it can find it
+                build_sample "$name"
+                echo ""
+                continue
+            fi
+
+            # Build dependencies first (dll_loader needs dll_sample)
             if [ "$name" = "dll_loader" ]; then
                 build_sample "dll_sample"
             fi
             build_sample "$name"
             echo ""
-            run_sample "$name" "${@:3}"
+            if run_sample "$name" "${@:3}"; then
+                pass=$((pass + 1))
+            else
+                fail=$((fail + 1))
+            fi
         done
+        echo ""
+        echo "  Results: $pass passed, $fail failed, $skip skipped"
+        if [ "$fail" -gt 0 ]; then
+            exit 1
+        fi
         ;;
     *)
         echo "Usage: $0 {build|run} [sample_name] [args...]"
