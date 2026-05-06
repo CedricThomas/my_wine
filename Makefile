@@ -66,7 +66,7 @@ $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
 all: my_wine samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
-	$(BUILDDIR)/test_relocations
+	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry
 
 my_wine: $(OBJS)
 	@echo "==== Link my_wine ===="
@@ -101,7 +101,7 @@ TEST ?=
 
 tests: my_wine $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
-		$(BUILDDIR)/test_relocations
+		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry
 
 run-test: tests
 	@echo "==== Running tests ===="
@@ -115,6 +115,10 @@ TEST_syscall_dispatch_OBJS = $(TEST_SYSCALL_OBJS) $(BUILDDIR)/debug.o
 TEST_relocations_OBJS = $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o \
 	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/image_mapper.o
 
+# Module registry + PEB LDR test
+TEST_module_registry_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o \
+	$(BUILDDIR)/peb_ldr.o $(BUILDDIR)/module_list.o $(BUILDDIR)/debug.o
+
 define TEST_RULE
 $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
 	@echo "  LD $$@"
@@ -126,6 +130,7 @@ $(eval $(call TEST_RULE,import_resolution,$(TEST_import_resolution_OBJS)))
 $(eval $(call TEST_RULE,teb_peb,$(TEST_teb_peb_OBJS)))
 $(eval $(call TEST_RULE,syscall_dispatch,$(TEST_syscall_dispatch_OBJS)))
 $(eval $(call TEST_RULE,relocations,$(TEST_relocations_OBJS)))
+$(eval $(call TEST_RULE,module_registry,$(TEST_module_registry_OBJS)))
 
 # ── Auto-generated header dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
