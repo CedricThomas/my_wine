@@ -20,12 +20,12 @@
  *         Tier 3a — statically-known addresses: functions we implement
  *                  ourselves or expose data symbols (NULL-terminated).
  *         Tier 3b — dynamically-filled entries: initialised at runtime
- *                  by init_msvcrt_imports(), which probes the real
- *                  msvcrt.dll loaded by the PE loader for functions we
- *                  do not reimplement (e.g. malloc, strlen, fprintf).
+ *                  by init_msvcrt_imports(), which fills each entry
+ *                  with our own C reimplementation (e.g. malloc →
+ *                  wine_malloc, strlen → wine_strlen).
  *
- *   init_msvcrt_imports() fills the NULL entries in Tier 3b by probing
- *   the real msvcrt.dll via GetProcAddress at runtime.
+ *   init_msvcrt_imports() fills the NULL entries in Tier 3b by calling
+ *   set_import() with our internal msvcrt-compatible implementations.
  *
  *   import_table_count is computed as sizeof(table)/sizeof(entry) - 1
  *   (excludes the sentinel).  init_import_table() sorts the array by
