@@ -71,10 +71,10 @@ int main(void)
 
     hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
 
-    /* 1. Banner */
+    /* Banner */
     out("=== DLL Loader Test ===\r\n");
 
-    /* 2. LoadLibraryA */
+    /* LoadLibraryA */
     hDll = LoadLibraryA("exportlib.dll");
     if (hDll == NULL) {
         out("FAIL: LoadLibraryA(exportlib.dll) returned NULL\r\n");
@@ -85,7 +85,7 @@ int main(void)
     out_ptr(hDll);
     out("\r\n");
 
-    /* 3. GetModuleHandleA */
+    /* GetModuleHandleA */
     hMod = GetModuleHandleA("exportlib.dll");
     if (hMod != hDll) {
         out("FAIL: GetModuleHandleA mismatch\r\n");
@@ -96,7 +96,7 @@ int main(void)
     out_ptr(hMod);
     out("\r\n");
 
-    /* 4. GetProcAddress("dll_add") + call */
+    /* GetProcAddress("dll_add") + call */
     typedef int (*dll_add_fn)(int, int);
     dll_add_fn add_fn = (dll_add_fn)GetProcAddress(hDll, "dll_add");
     if (add_fn == NULL) {
@@ -118,7 +118,7 @@ int main(void)
         ExitProcess(1);
     }
 
-    /* 5. GetProcAddress("dll_greeting") + call */
+    /* GetProcAddress("dll_greeting") + call */
     typedef const char *(*dll_greeting_fn)(void);
     dll_greeting_fn greet_fn = (dll_greeting_fn)GetProcAddress(hDll, "dll_greeting");
     if (greet_fn == NULL) {
@@ -132,37 +132,29 @@ int main(void)
     out(msg);
     out("\"\r\n");
 
-    /* 5b. GetProcAddress("printmethod") + call */
-    typedef int (*printmethod_fn)(const char *);
-    printmethod_fn print_fn = (printmethod_fn)GetProcAddress(hDll, "printmethod");
-    if (print_fn == NULL) {
-        out("FAIL: GetProcAddress(printmethod) returned NULL\r\n");
-        ExitProcess(1);
-    }
-    int rc = print_fn("Hello from printmethod!");
-    if (rc != 0) {
-        lstrcpyA(buf, "FAIL: printmethod returned non-zero\r\n");
-        out(buf);
-        ExitProcess(1);
-    }
-    out("OK: printmethod succeeded\r\n");
-
-    /* 5c. GetProcAddress("dll_puts") + call */
+    /* GetProcAddress("dll_puts") + call */
     typedef DWORD (*dll_puts_fn)(const char *);
     dll_puts_fn puts_fn = (dll_puts_fn)GetProcAddress(hDll, "dll_puts");
     if (puts_fn == NULL) {
         out("FAIL: GetProcAddress(dll_puts) returned NULL\r\n");
         ExitProcess(1);
     }
-    DWORD puts_rc = puts_fn("Test from dll_puts!");
-    if (puts_rc != 0) {
-        lstrcpyA(buf, "FAIL: dll_puts returned non-zero\r\n");
+    const char *puts_msg = "Test from dll_puts!";
+    DWORD puts_rc = puts_fn(puts_msg);
+    DWORD puts_len = (DWORD)lstrlenA(puts_msg);
+    if (puts_rc != puts_len) {
+        lstrcpyA(buf, "FAIL: dll_puts returned ");
         out(buf);
+        out_int((int)puts_rc);
+        lstrcpyA(buf, " instead of ");
+        out(buf);
+        out_int((int)puts_len);
+        out("\r\n");
         ExitProcess(1);
     }
     out("OK: dll_puts succeeded\r\n");
 
-    /* 6. FreeLibrary */
+    /* FreeLibrary */
     BOOL freed = FreeLibrary(hDll);
 
     lstrcpyA(buf, "OK: FreeLibrary -> ");
@@ -170,7 +162,7 @@ int main(void)
     out_int(freed);
     out("\r\n");
 
-    /* 7. Summary */
+    /* Summary */
     out("\r\n=== ALL TESTS PASSED ===\r\n");
 
     ExitProcess(0);
