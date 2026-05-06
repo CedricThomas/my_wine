@@ -184,7 +184,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
     uint64_t best_rva = 0;
     int has_section_match = 0;
 
-    fprintf(stderr, "DBG_COFF: '%s' scanning %u symbols\n", name, sym_count);
+    DEBUG("DBG_COFF: '%s' scanning %u symbols", name, sym_count);
     for (uint32_t i = 0; i < sym_count; i++) {
         const IMAGE_SYMBOL *sym = &symbols[i];
         const char *sym_name = get_symbol_name(sym, string_table);
@@ -192,19 +192,19 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         size_t sym_name_len = strlen(sym_name);
 
         if (i < 3) {
-            fprintf(stderr, "DBG_COFF: sym[%u] = '%.*s' sect=%d\n",
+            DEBUG("DBG_COFF: sym[%u] = '%.*s' sect=%d",
                     i, (int)sym_name_len, sym_name, sym->SectionNumber);
         }
 
         /* Debug: show symbols that contain CTOR or DTOR */
         if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
-            fprintf(stderr, "DBG_COFF: sym[%u] = '%s' sect=%d val=%u\n",
+            DEBUG("DBG_COFF: sym[%u] = '%s' sect=%d val=%u",
                     i, sym_name, (int)sym->SectionNumber, (unsigned)sym->Value);
         }
 
         /* Debug: show all symbols containing CTOR or DTOR */
         if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
-            fprintf(stderr, "DBG_COFF_SYM: idx=%u name='%.*s' sect=%d val=%u type=%d\n",
+            DEBUG("DBG_COFF_SYM: idx=%u name='%.*s' sect=%d val=%u type=%d",
                     i, (int)sym_name_len, sym_name, (int)sym->SectionNumber, sym->Value, sym->Type);
         }
 
@@ -246,7 +246,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
                     is_refptr = 1;
                 }
                 if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
-                    fprintf(stderr, "DBG_COFF_SUB: sym[%u] '%.*s' matched '%s' as substring\n",
+                    DEBUG("DBG_COFF_SUB: sym[%u] '%.*s' matched '%s' as substring",
                             i, (int)sym_name_len, sym_name, name);
                 }
             }
@@ -255,7 +255,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         if (!matched) continue;
 
         if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
-            fprintf(stderr, "DBG_COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d\n",
+            DEBUG("DBG_COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d",
                     i, (int)sym_name_len, sym_name, sym->SectionNumber, sym->Value,
                     nt->FileHeader.NumberOfSections, has_section_match);
         }
@@ -277,7 +277,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         }
     }
 
-    fprintf(stderr, "DBG_COFF: '%s' -> rva=0x%lx\n", name, (unsigned long)best_rva);
+    DEBUG("DBG_COFF: '%s' -> rva=0x%lx", name, (unsigned long)best_rva);
     munmap(file_map, st.st_size);
     return best_rva;
 }

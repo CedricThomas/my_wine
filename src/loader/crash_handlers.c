@@ -149,6 +149,5 @@ void setup_signal_handlers(void)
     sigaction(SIGFPE, &sa, NULL);
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGTRAP, &sa, NULL);
-    { const char t[] = "GUEST: all handlers set\n";
-      syscall(__NR_write, 2, t, sizeof(t)-1); }
+    DEBUG("GUEST: all handlers set");
 }
