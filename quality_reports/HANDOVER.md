@@ -66,10 +66,10 @@ Copy the template below, replace `{REPORT}` with the report file, and give it to
 You are working on the my_wine PE loader codebase at /home/arzad/Bureau/my_wine/.
 
 Your task: implement the fixes defined in the quality report at:
-  quality_reports/{REPORT}.md
+  quality_reports/bad_smell.md
 
 Before you start:
-1. Read {REPORT}.md in full to understand the findings and implementation plan.
+1. Read bad_smell.md in full to understand the findings and implementation plan.
 2. Read each source file mentioned in the findings so you understand the current code.
 3. Work through the tasks in order (Task 1 → Task 2 → ...), respecting dependencies.
 

@@ -6,41 +6,58 @@
  */
 
 #include "module_list.h"
+#include "loader_utils.h"
 
 loaded_module_t module_list[MAX_MODULES];
 int module_count = 0;
 
-/* ── Hand-rolled helpers (no glibc) ─────────────────────────────── */
+/* ── Helpers ───────────────────────────────────────────────────── */
 
-static void dll_memset(void *ptr, int c, size_t n)
+/* Copy an ASCII string into an embedded LDR_UNICODE_STRING buffer */
+static void module_make_unicode_string(LDR_UNICODE_STRING *us, const char *src)
 {
-    uint8_t *p = (uint8_t *)ptr;
+    size_t len = 0;
+    while (src[len]) len++;
     size_t i;
-    for (i = 0; i < n; i++)
-        p[i] = (uint8_t)c;
-}
 
-static void dll_copy_str(char *dst, const char *src, size_t max_len)
-{
-    size_t i;
-    for (i = 0; i < max_len - 1 && src[i] != '\0'; i++)
-        dst[i] = src[i];
-    dst[i] = '\0';
-}
+    dll_memset(us->Buffer, 0, sizeof(us->Buffer));
 
-static int dll_strcasecmp(const char *a, const char *b)
-{
-    while (*a && *b) {
-        unsigned char ca = *a, cb = *b;
-        if (ca >= 'A' && ca <= 'Z') ca += 32;
-        if (cb >= 'A' && cb <= 'Z') cb += 32;
-        if (ca != cb) return (int)ca - (int)cb;
-        a++; b++;
+    for (i = 0; i < len && i < MAX_LDR_NAME_WCHAR; i++) {
+        us->Buffer[i] = (uint16_t)(uint8_t)src[i];
     }
-    unsigned char ca = *a, cb = *b;
-    if (ca >= 'A' && ca <= 'Z') ca += 32;
-    if (cb >= 'A' && cb <= 'Z') cb += 32;
-    return (int)ca - (int)cb;
+
+    us->Length = (uint16_t)(len * sizeof(uint16_t));
+    us->MaximumLength = (uint16_t)((len + 1) * sizeof(uint16_t));
+}
+
+/* Initialize a LIST_ENTRY as a self-referencing head node */
+static void module_list_entry_init(LIST_ENTRY *entry)
+{
+    entry->Flink = entry;
+    entry->Blink = entry;
+}
+
+/* Populate the LDR_DATA_TABLE_ENTRY from module metadata */
+static void module_init_ldr_entry(loaded_module_t *m, IMAGE_NT_HEADERS64 *nt)
+{
+    LDR_DATA_TABLE_ENTRY *entry = &m->ldr_entry;
+
+    dll_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
+
+    entry->DllBase = m->base;
+    entry->EntryPoint = (char *)m->base + nt->OptionalHeader.AddressOfEntryPoint;
+    entry->SizeOfImage = nt->OptionalHeader.SizeOfImage;
+    entry->TimeDateStamp = nt->FileHeader.TimeDateStamp;
+    entry->LoadCount = 1;
+
+    module_make_unicode_string(&entry->FullDllName, m->name);
+    module_make_unicode_string(&entry->BaseDllName, m->name);
+
+    /* Initialize DoubleList nodes as self-referencing (not yet linked) */
+    module_list_entry_init(&entry->DoubleList[0]);
+    module_list_entry_init(&entry->DoubleList[1]);
+    module_list_entry_init(&entry->DoubleList[2]);
+    module_list_entry_init(&entry->HashTableEntry);
 }
 
 /* ── Public API ─────────────────────────────────────────────────── */
@@ -63,6 +80,7 @@ loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS64 *nt
             m->nt = nt;
             m->load_count = 1;
             m->ldr_linked = 0;
+            module_init_ldr_entry(m, nt);
             module_count++;
             return m;
         }
