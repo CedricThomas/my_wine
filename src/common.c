@@ -8,6 +8,10 @@
 // Set from main() by scanning envp for MY_WINE_DEBUG
 int g_debug_enabled = 0;
 
+// ── Cached WINE_DLL_PATH ────────────────────────────────────────
+// Populated in main() before GS switch so find_dll_path is syscall-safe
+char g_wine_dll_path[WINE_DLL_PATH_MAX] = {0};
+
 // Override debug_check_fn (weak in debug.c) to check g_debug_enabled
 static int debug_enabled(void) { return g_debug_enabled; }
 int (*debug_check_fn)(void) = &debug_enabled;

@@ -61,7 +61,6 @@ loaded_module_t *load_dll(const char *path, int depth);
 static void init_exe_dir(void);
 
 static char g_exe_dir[512] = {0};
-char g_wine_dll_path[512] = {0};
 
 /**
  * Initialize g_exe_dir with the current working directory (app directory).
@@ -456,27 +455,18 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
         }
     }
 
-    /* --- Try WINE_DLL_PATH (semicolon-separated) via environ --- */
+    /* --- Try WINE_DLL_PATH (semicolon-separated) from cached path ---
+     * Cached from environ in main() before GS switch — syscall-safe. */
     {
-        const char *env_key = "WINE_DLL_PATH=";
-        const size_t env_key_len = 14;  /* strlen("WINE_DLL_PATH=") */
-        const char *env_val = NULL;
-
-        for (char **ep = environ; *ep != NULL; ep++) {
-            if (dll_strncmp(*ep, env_key, env_key_len) == 0) {
-                env_val = *ep + env_key_len;
-                break;
-            }
-        }
-        if (env_val != NULL) {
+        if (g_wine_dll_path[0] != '\0') {
             #define DLL_PATH_MAX_SEGMENTS 32
             char path_buf[1024];
             const char *segments[DLL_PATH_MAX_SEGMENTS];
             int seg_count = 0;
 
-            size_t env_len = dll_strlen(env_val);
+            size_t env_len = dll_strlen(g_wine_dll_path);
             if (env_len >= sizeof(path_buf)) env_len = sizeof(path_buf) - 1;
-            dll_copy_str(path_buf, env_val, env_len);
+            dll_copy_str(path_buf, g_wine_dll_path, env_len);
             path_buf[env_len] = '\0';
 
             char *p = path_buf;

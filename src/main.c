@@ -112,6 +112,15 @@ int main(int argc, char *argv[])
         g_debug_enabled = 1;
     }
 
+    /* 0b. Cache WINE_DLL_PATH before GS switch so find_dll_path is syscall-safe */
+    {
+        const char *dll_path = envp_lookup(environ, "WINE_DLL_PATH");
+        if (dll_path != NULL) {
+            strncpy(g_wine_dll_path, dll_path, sizeof(g_wine_dll_path) - 1);
+            g_wine_dll_path[sizeof(g_wine_dll_path) - 1] = '\0';
+        }
+    }
+
     /* 1. Map the PE image (open file, parse headers, copy sections, set protections) */
     IMAGE_DOS_HEADER dos;
     IMAGE_NT_HEADERS64 nt;

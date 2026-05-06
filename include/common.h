@@ -8,6 +8,10 @@
 /* Global debug flag: set from envp in main() */
 extern int g_debug_enabled;
 
+/* Cached WINE_DLL_PATH from environ, set in main() before GS switch */
+#define WINE_DLL_PATH_MAX 512
+extern char g_wine_dll_path[WINE_DLL_PATH_MAX];
+
 // Memory page constants
 #define PAGE_SIZE         4096
 #define PAGE_MASK         (PAGE_SIZE - 1)
