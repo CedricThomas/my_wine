@@ -1,6 +1,3 @@
-- Copy-paste template — fill in {REPORT} and send to an agent                                                                                                                              
- - Recommended order — start with magic_numbers.md (easy, low-risk quick wins), end with architectural_issues.md (big structural changes)                                                   
- - Rules — minimal changes, compile after each task, respect existing conventions
 
 # Handover Prompt — Quality Report Implementation
 

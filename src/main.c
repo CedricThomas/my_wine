@@ -66,8 +66,8 @@ static void seed_bss_vars(void *base,
     if (bss_size == 0) bss_size = bss_sec->SizeOfRawData;
 
     /* Ensure .bss page is writable */
-    uintptr_t bss_page = (uintptr_t)bss_base & ~(uintptr_t)4095;
-    if (mprotect((void *)bss_page, (bss_size + 4095) & ~(size_t)4095,
+    uintptr_t bss_page = (uintptr_t)bss_base & ~(uintptr_t)PAGE_MASK;
+    if (mprotect((void *)bss_page, (bss_size + PAGE_MASK) & ~(size_t)PAGE_MASK,
                   PROT_READ | PROT_WRITE) != 0) {
         fprintf(stderr, "WARNING: mprotect .bss failed, skipping pre-seed\n");
         return;
