@@ -171,16 +171,18 @@ typedef union {
 
 /* ── Relocation ────────────────────────────────────────────────── */
 
-typedef struct {
-    uint16_t type;
-    uint16_t offset;
-} IMAGE_RELOC_ENTRY;
+/* Each relocation entry is a single 16-bit value: bits 0-11 = offset,
+   bits 12-15 = type. See PE/COFF specification. */
+typedef uint16_t IMAGE_RELOC_ENTRY;
 
 typedef struct {
     uint32_t virtualAddress;
     uint32_t sizeOfBlock;
-    IMAGE_RELOC_ENTRY entries[1]; // variable
+    IMAGE_RELOC_ENTRY entries[]; /* flexible array */
 } IMAGE_BASE_RELOCATION;
+
+#define IMAGE_REL_ENTRY_OFFSET(entry)  ((uint16_t)((entry) & 0x0FFF))
+#define IMAGE_REL_ENTRY_TYPE(entry)    ((uint16_t)(((entry) >> 12) & 0xF))
 
 /* ── Export Directory ──────────────────────────────────────────── */
 
