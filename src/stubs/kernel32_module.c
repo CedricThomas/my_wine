@@ -1,8 +1,15 @@
 /*
  * kernel32_module.c — Module loading and management stubs
  *
- * All functions are WINE_STUB (ms_abi) so they can be called directly
- * by guest code. All loader functions are now glibc-free.
+ * All functions are WINE_STUB (ms_abi) for guest code,
+ * with plain-C aliases for test code.
+ * All loader functions are now glibc-free.
+ *
+ * NOTE: There is a known GCC bug where WINE_STUB functions
+ * (ms_abi + force_align_arg_pointer) that return high addresses
+ * (> 4GB) get truncated to 32 bits on return to guest code.
+ * Workaround: ensure DLLs are mapped below 4GB by using
+ * MAP_FIXED with a controlled base address in load_dll().
  */
 
 #include <stdint.h>
@@ -12,6 +19,9 @@
 
 #include "kernel32_priv.h"
 #include "../loader/loader_priv.h"
+
+/* Global DLL search buffer (avoids stack allocation issues) */
+static char g_dll_path[512];
 
 /* ── LoadLibraryA ────────────────────────────────────────────── */
 
@@ -27,16 +37,17 @@ void *LoadLibraryA(const char *lpLibFileName)
         return mod->base;
     }
 
-    char path[512];
-    if (!find_dll_path(lpLibFileName, path, sizeof(path)))
+    if (!find_dll_path(lpLibFileName, g_dll_path, sizeof(g_dll_path)))
         return NULL;
 
-    mod = load_dll(path, 0);
+    mod = load_dll(g_dll_path, 0);
     if (mod == NULL)
         return NULL;
 
     return mod->base;
 }
+
+void *_LoadLibraryA(const char *lpLibFileName) { return LoadLibraryA(lpLibFileName); }
 
 /* ── GetProcAddress ──────────────────────────────────────────── */
 
@@ -51,6 +62,11 @@ void *GetProcAddress(void *hModule, const char *lpProcName)
         return NULL;
 
     return lookup_export(mod, lpProcName);
+}
+
+void *_GetProcAddress(void *hModule, const char *lpProcName)
+{
+    return GetProcAddress(hModule, lpProcName);
 }
 
 /* ── GetModuleHandleA ────────────────────────────────────────── */
@@ -68,6 +84,11 @@ void *GetModuleHandleA(const char *lpModuleName)
     return mod ? mod->base : NULL;
 }
 
+void *_GetModuleHandleA(const char *lpModuleName)
+{
+    return GetModuleHandleA(lpModuleName);
+}
+
 /* ── FreeLibraryA ────────────────────────────────────────────── */
 
 WINE_STUB
@@ -79,26 +100,24 @@ int FreeLibraryA(void *hModule)
 
     mod->load_count--;
     if (mod->load_count > 0)
-        return 1; /* Still referenced */
+        return 1;
 
-    /* Reset export cache (embedded, no free needed) */
     reset_export_cache(mod);
 
-    /* Remove from LDR */
     if (g_peb_ldr != NULL && mod->ldr_linked)
         ldr_remove_module(mod);
 
-    /* Unmap the image */
     if (mod->base && mod->nt) {
         uint32_t size = mod->nt->OptionalHeader.SizeOfImage;
         munmap(mod->base, size);
     }
 
-    /* Remove from module list */
     remove_module(mod);
 
     return 1;
 }
+
+int _FreeLibraryA(void *hModule) { return FreeLibraryA(hModule); }
 
 /* ── FreeLibraryAndExitThread ────────────────────────────────── */
 
@@ -108,10 +127,3 @@ __attribute__((noreturn)) void FreeLibraryAndExitThread(void *hModule, uint32_t 
     FreeLibraryA(hModule);
     pthread_exit((void *)(uintptr_t)exitCode);
 }
-
-/* ── SysV aliases for test code (ms_abi functions can't be called
- * from SysV code without argument passing mismatch) ──────────── */
-void *_LoadLibraryA(const char *s)   { return LoadLibraryA(s); }
-void *_GetProcAddress(void *m, const char *n) { return GetProcAddress(m, n); }
-void *_GetModuleHandleA(const char *n) { return GetModuleHandleA(n); }
-int _FreeLibraryA(void *m)           { return FreeLibraryA(m); }

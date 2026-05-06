@@ -33,6 +33,16 @@ discover_samples() {
     fi
 }
 
+# ── Check if a sample produces a runnable EXE ────────────────────
+is_exe_sample() {
+    local name="$1"
+    # A sample is runnable (produces .exe) if it has no .def files
+    # (.def files indicate DLL builds via build_sample)
+    local def
+    def=$(find "$SAMPLES_DIR/$name" -name '*.def' 2>/dev/null | head -1)
+    [ -z "$def" ]
+}
+
 # ── Ensure Docker image exists ───────────────────────────────────
 ensure_image() {
     if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
@@ -170,12 +180,16 @@ run_sample() {
     timeout 5 "$MY_WINE" "$exe" "${@:2}" || ret=$?
     if [ $ret -eq 0 ]; then
         echo "  PASS  $name"
+        return 0
     elif [ $ret -eq 124 ]; then
         echo "  PASS  $name (timed out after 5s, process was stable)"
+        return 0
     elif [ $ret -eq 139 ] && [ "$name" = "null_deref" ]; then
         echo "  PASS  $name (expected SIGSEGV caught by crash handler)"
+        return 0
     else
         echo "  FAIL  $name (exit code $ret)"
+        return 1
     fi
 }
 
