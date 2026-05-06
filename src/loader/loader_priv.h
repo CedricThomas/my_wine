@@ -137,6 +137,9 @@ void cleanup_unix_stack(void);
 /* ── module_list.c ─────────────────────────────────────────── */
 #include "module_list.h"  /* for loaded_module_t type */
 
+/* resolve_module_imports uses loaded_module_t (declared after include above) */
+int resolve_module_imports(loaded_module_t *mod, int depth);
+
 /* ── export_table.c ────────────────────────────────────────── */
 #include "export_table.h"  /* for EXPORT_CACHE type */
 

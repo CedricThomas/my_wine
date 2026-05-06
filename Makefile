@@ -35,7 +35,7 @@ PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
 
 IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o $(BUILDDIR)/ordinal_table.o \
-	$(BUILDDIR)/relocations.o
+	$(BUILDDIR)/relocations.o $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o
 
 # Shared objects used by import-resolution and teb_peb tests
 TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) $(HEAP_OBJS) \
@@ -111,7 +111,8 @@ run-test: tests
 
 # Per-test object groups
 TEST_parse_OBJS = $(PE_OBJS) $(BUILDDIR)/debug.o
-TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/debug.o
+TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/module_list.o \
+	$(BUILDDIR)/export_table.o $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/debug.o
 TEST_teb_peb_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/module_list.o $(BUILDDIR)/debug.o
 TEST_syscall_dispatch_OBJS = $(TEST_SYSCALL_OBJS) $(BUILDDIR)/debug.o
 TEST_relocations_OBJS = $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o \

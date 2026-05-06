@@ -11,12 +11,22 @@
 #include <string.h>
 #include <search.h>
 #include <strings.h>
+#include <unistd.h>
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
 #include "loader_priv.h"
 #include "include/debug.h"
+#include "export_table.h"
+#include "module_list.h"
+#include "peb_ldr.h"
+
+#define MAX_IMPORT_DEPTH 8
+
+/* Forward declarations */
+static int find_dll_path(const char *dll_name, char *path, size_t path_size);
+static loaded_module_t *load_dll(const char *path, int depth);
 
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
@@ -35,25 +45,32 @@ void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
 
 static void *resolve_import(const char *dll_name, const char *func_name)
 {
+    /* Tier 1: lookup in our stub import table */
     size_t count = import_table_count;
     import_entry_t *entry = bsearch(func_name, import_table,
                                      count, sizeof(import_entry_t), import_cmp_by_name);
-    if (entry == NULL) {
-        fprintf(stderr, "  ERROR: unresolved import: %s!%s\n", dll_name, func_name);
-        return NULL;
+    if (entry != NULL && entry->address != NULL) {
+        if (entry->dll_name && strcasecmp(entry->dll_name, dll_name) != 0) {
+            fprintf(stderr, "  WARNING: %s found in %s but requested from %s\n",
+                    func_name, entry->dll_name, dll_name);
+        }
+        return entry->address;
     }
-    if (entry->address == NULL) {
-        fprintf(stderr, "  ERROR: import %s!%s has NULL address (not initialized)\n",
-                dll_name, func_name);
-        return NULL;
+
+    /* Tier 2: lookup in loaded module exports */
+    loaded_module_t *mod = find_module_by_name(dll_name);
+    if (mod != NULL && mod->export_cache != NULL) {
+        void *addr = lookup_export(mod, func_name);
+        if (addr != NULL) {
+            DEBUG("    Resolved %s!%s from module %s via export table -> %p",
+                  dll_name, func_name, mod->name, addr);
+            return addr;
+        }
     }
-    /* DLL name mismatch: warn but still resolve (same function
-     * may be exported from multiple DLLs by the PE compiler) */
-    if (entry->dll_name && strcasecmp(entry->dll_name, dll_name) != 0) {
-        fprintf(stderr, "  WARNING: %s found in %s but requested from %s (resolving anyway)\n",
-                func_name, entry->dll_name, dll_name);
-    }
-    return entry->address;
+
+    /* Tier 3: not found */
+    fprintf(stderr, "  ERROR: unresolved import: %s!%s\n", dll_name, func_name);
+    return NULL;
 }
 
 /**
@@ -219,4 +236,152 @@ int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt)
     if (resolve_import_pass1(base, nt) != 0)
         return -1;
     return resolve_import_pass2(base, nt);
+}
+
+/**
+ * Resolve imports for a dynamically loaded module.
+ *
+ * Handles recursive DLL dependencies: if the module imports from a DLL
+ * that isn't loaded yet, load it first (up to MAX_IMPORT_DEPTH levels).
+ *
+ * @param mod  the loaded module to resolve imports for
+ * @param depth  recursion depth (caller should pass 0)
+ * @return 0 on success, -1 on failure
+ */
+int resolve_module_imports(loaded_module_t *mod, int depth)
+{
+    if (depth >= MAX_IMPORT_DEPTH) {
+        fprintf(stderr, "  ERROR: import resolution depth exceeded (%d) for %s\n",
+                MAX_IMPORT_DEPTH, mod->name);
+        return -1;
+    }
+
+    void *base = mod->base;
+    IMAGE_NT_HEADERS64 *nt = mod->nt;
+
+    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
+    if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
+        return 0; /* No imports */
+    }
+
+    uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
+
+    /* First pass: ensure all dependency DLLs are loaded */
+    IMAGE_IMPORT_DESCRIPTOR *d = desc;
+    while (d->Name != 0) {
+        const char *dll_name = (const char *)((char *)base + d->Name);
+
+        /* Check if already loaded */
+        loaded_module_t *dep = find_module_by_name(dll_name);
+        if (dep == NULL) {
+            /* Need to load this DLL — search in standard paths */
+            char path[512];
+            if (!find_dll_path(dll_name, path, sizeof(path))) {
+                fprintf(stderr, "  ERROR: cannot find DLL '%s' imported by %s\n",
+                        dll_name, mod->name);
+                return -1;
+            }
+
+            /* Load the DLL (map + relocate + register) */
+            dep = load_dll(path, depth + 1);
+            if (dep == NULL) {
+                fprintf(stderr, "  ERROR: failed to load '%s' for %s\n",
+                        dll_name, mod->name);
+                return -1;
+            }
+        }
+        d++;
+    }
+
+    /* Second pass: resolve all imports using the three-tier resolver */
+    if (resolve_imports(base, nt) != 0) {
+        fprintf(stderr, "  ERROR: import resolution failed for %s\n", mod->name);
+        return -1;
+    }
+
+    /* Parse exports so this module's functions can be found by others */
+    mod->export_cache = parse_export_table(base, nt);
+
+    return 0;
+}
+
+/* find_dll_path: search for a DLL in standard paths.
+ * Search order: current dir, WINE_DLL_PATH env var.
+ * Returns 1 if found (path filled), 0 if not found. */
+static int find_dll_path(const char *dll_name, char *path, size_t path_size)
+{
+    /* Try current directory */
+    int ret = snprintf(path, path_size, "./%s", dll_name);
+    if (ret >= 0 && (size_t)ret < path_size) {
+        if (access(path, F_OK) == 0) return 1;
+    }
+
+    /* Try WINE_DLL_PATH */
+    const char *wine_dll_path = getenv("WINE_DLL_PATH");
+    if (wine_dll_path != NULL) {
+        /* WINE_DLL_PATH is a semicolon-separated list */
+        char *copy = strdup(wine_dll_path);
+        if (copy != NULL) {
+            char *tok = strtok(copy, ";");
+            while (tok != NULL) {
+                ret = snprintf(path, path_size, "%s/%s", tok, dll_name);
+                if (ret >= 0 && (size_t)ret < path_size) {
+                    if (access(path, F_OK) == 0) {
+                        free(copy);
+                        return 1;
+                    }
+                }
+                tok = strtok(NULL, ";");
+            }
+            free(copy);
+        }
+    }
+
+    return 0;
+}
+
+/* load_dll: map a DLL, apply relocations, register in module list + LDR, resolve its imports.
+ * Returns the loaded_module_t or NULL on failure. */
+static loaded_module_t *load_dll(const char *path, int depth)
+{
+    /* Map the DLL */
+    IMAGE_NT_HEADERS64 nt_copy;
+    void *base = map_image(path, NULL, &nt_copy, NULL);
+    if (base == NULL) {
+        fprintf(stderr, "  ERROR: map_image failed for '%s'\n", path);
+        return NULL;
+    }
+
+    /* Extract NT headers from image memory */
+    IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
+    IMAGE_NT_HEADERS64 *img_nt = (IMAGE_NT_HEADERS64 *)((char *)base + img_dos->e_lfanew);
+
+    /* Extract DLL name from path (basename) */
+    const char *name = strrchr(path, '/');
+    name = name ? name + 1 : path;
+
+    /* Register in module list */
+    loaded_module_t *mod = add_module(base, name, img_nt);
+    if (mod == NULL) {
+        fprintf(stderr, "  ERROR: module list full, cannot load '%s'\n", name);
+        return NULL;
+    }
+
+    /* Add to PEB LDR */
+    if (g_peb_ldr != NULL) {
+        ldr_add_module(mod);
+    }
+
+    /* Parse exports */
+    mod->export_cache = parse_export_table(base, img_nt);
+
+    /* Resolve this DLL's own imports (recursive) */
+    if (resolve_module_imports(mod, depth + 1) != 0) {
+        fprintf(stderr, "  ERROR: import resolution failed for '%s'\n", name);
+        return NULL;
+    }
+
+    DEBUG("Loaded DLL: %s at %p", name, base);
+    return mod;
 }
