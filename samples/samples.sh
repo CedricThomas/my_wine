@@ -35,7 +35,7 @@ IMAGE_NAME="my_wine-samples"
 parse_sample_info() {
     local file="$1"
     local key="$2"
-    grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2
+    grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r'
 }
 
 # Discover sample directory names (sorted).
