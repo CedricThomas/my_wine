@@ -3,6 +3,7 @@
  */
 
 #include <string.h>
+#include <strings.h>
 #include "module_list.h"
 
 loaded_module_t module_list[MAX_MODULES];
@@ -37,7 +38,7 @@ loaded_module_t *find_module_by_name(const char *name)
 {
     for (int i = 0; i < MAX_MODULES; i++) {
         if (module_list[i].base != NULL &&
-            strcmp(module_list[i].name, name) == 0) {
+            strcasecmp(module_list[i].name, name) == 0) {
             return &module_list[i];
         }
     }

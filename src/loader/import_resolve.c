@@ -28,6 +28,23 @@
 /* Forward declarations */
 int find_dll_path(const char *dll_name, char *path, size_t path_size);
 loaded_module_t *load_dll(const char *path, int depth);
+static void init_exe_dir(void);
+
+static char g_exe_dir[512] = {0};
+
+/**
+ * Initialize g_exe_dir with the current working directory (app directory).
+ * Called once on first use. Matches Windows behavior where the app directory
+ * is searched for DLLs.
+ */
+static void init_exe_dir(void)
+{
+    if (g_exe_dir[0] != '\0') return;
+    if (getcwd(g_exe_dir, sizeof(g_exe_dir)) == NULL) {
+        g_exe_dir[0] = '.';
+        g_exe_dir[1] = '\0';
+    }
+}
 
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
@@ -315,6 +332,15 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
     int ret = snprintf(path, path_size, "./%s", dll_name);
     if (ret >= 0 && (size_t)ret < path_size) {
         if (access(path, F_OK) == 0) return 1;
+    }
+
+    /* Try app directory (current working directory as app exe dir fallback) */
+    init_exe_dir();
+    if (g_exe_dir[0] != '.' || g_exe_dir[1] != '\0') {
+        ret = snprintf(path, path_size, "%s/%s", g_exe_dir, dll_name);
+        if (ret >= 0 && (size_t)ret < path_size) {
+            if (access(path, F_OK) == 0) return 1;
+        }
     }
 
     /* Try WINE_DLL_PATH */
