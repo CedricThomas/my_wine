@@ -14,6 +14,10 @@
 #include "include/pe.h"
 #include "include/pe_parser.h"
 
+/* Cached WINE_DLL_PATH — set from main() before GS switch so find_dll_path
+ * doesn't need to scan environ after GS→TEB switch. */
+extern char g_wine_dll_path[512];
+
 /* ── Global state shared across loader modules ─────────────── */
 
 /* Set by image_mapper.c, read by teb_peb.c and import_resolve.c */

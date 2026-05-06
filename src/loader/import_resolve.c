@@ -23,9 +23,6 @@
 #include "peb_ldr.h"
 #include "../syscall/syscalls_inline.h"
 
-/* For extern environ — avoid getenv() in syscall-safe path */
-extern char **environ;
-
 #define MAX_IMPORT_DEPTH 8
 
 #define DLL_ALLOC_BASE 0x60000000  /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
@@ -64,6 +61,7 @@ loaded_module_t *load_dll(const char *path, int depth);
 static void init_exe_dir(void);
 
 static char g_exe_dir[512] = {0};
+char g_wine_dll_path[512] = {0};
 
 /**
  * Initialize g_exe_dir with the current working directory (app directory).
