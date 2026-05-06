@@ -3,6 +3,7 @@
 #include "kernel32_priv.h"
 
 /* Helper: write a static message to stderr via direct syscall */
+WINE_STUB
 void write_to_stderr(const char *msg)
 {
     INLINE_SYSCALL_WRITE_ERR(msg, (size_t)__builtin_strlen(msg));

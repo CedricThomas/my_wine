@@ -18,53 +18,95 @@
 #include "kernel32_priv.h"
 #include "../loader/loader_priv.h"
 
+/* ── UNIX stack helpers ────────────────────────────────────────
+ *
+ * After GS→TEB switch, glibc functions (strcasecmp, getenv, snprintf,
+ * access, fprintf) access vDSO via GS-relative offsets and read TEB
+ * memory instead → SIGSEGV. We switch to the UNIX stack (same one
+ * used by the syscall dispatcher) before calling any glibc-dependent
+ * function, then switch back.
+ */
+
+extern void *unix_stack_ptr_val;  /* from dispatcher_entry.c */
+
+/* Type for host-side functions: void *(void *arg) */
+typedef void *(*wine_host_fn)(void *);
+
+/* call_on_unix_stack — switch to UNIX stack, call fn(arg), switch back.
+ * The function must be a normal SysV C function (NOT ms_abi).
+ * NOINLINE: prevents the compiler from merging this into an ms_abi frame
+ * and using the wrong calling convention for the fn() call. */
+static __attribute__((noinline)) void *call_on_unix_stack(wine_host_fn fn, void *arg)
+{
+    uintptr_t guest_rsp;
+    __asm__ volatile(
+        "mov %%rsp, %0\n"
+        "mov %2, %%rsp\n"
+        "sub $8, %%rsp\n"
+        : "=r"(guest_rsp)
+        : "0"(guest_rsp), "r"(unix_stack_ptr_val)
+        : "memory"
+    );
+    void *ret = fn(arg);
+    __asm__ volatile(
+        "mov %0, %%rsp\n"
+        : : "r"(guest_rsp) : "memory"
+    );
+    return ret;
+}
+
+/* Host-side LoadLibraryA implementation (SysV, glibc OK) */
+static void *load_library_host(void *arg)
+{
+    const char *name = (const char *)arg;
+    char path[512];
+    if (!find_dll_path(name, path, sizeof(path)))
+        return NULL;
+    loaded_module_t *mod = load_dll(path, 0);
+    return mod ? (void *)mod : NULL;
+}
+
 /* ── LoadLibraryA ────────────────────────────────────────────── */
+
+/* Safe version of find_module_by_name that doesn't use strcasecmp (glibc/vDSO). */
+static loaded_module_t *find_module_by_name_safe(const char *name)
+{
+    for (int i = 0; i < module_count; i++) {
+        const char *a = module_list[i].name;
+        const char *b = name;
+        if (a == NULL || b == NULL) continue;
+        while (*a && *b) {
+            unsigned char ca = *a, cb = *b;
+            if (ca >= 'A' && ca <= 'Z') ca += 32;
+            if (cb >= 'A' && cb <= 'Z') cb += 32;
+            if (ca != cb) break;
+            a++; b++;
+        }
+        if (*a == '\0' && *b == '\0') return &module_list[i];
+    }
+    return NULL;
+}
 
 WINE_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
-    if (lpLibFileName == NULL) {
-        write_to_stderr("LoadLibraryA: NULL argument\n");
+    if (lpLibFileName == NULL)
         return NULL;
-    }
 
-    /* Check if already loaded */
-    loaded_module_t *mod = find_module_by_name(lpLibFileName);
+    /* Fast path: already loaded (no glibc, no stack switch) */
+    loaded_module_t *mod = find_module_by_name_safe(lpLibFileName);
     if (mod != NULL) {
         mod->load_count++;
-        {
-            char buf[128];
-            snprintf(buf, sizeof(buf), "LoadLibraryA: already loaded '%s' at %p\n", lpLibFileName, mod->base);
-            write_to_stderr(buf);
-        }
         return mod->base;
     }
 
-    /* Search for the DLL */
-    char path[512];
-    if (!find_dll_path(lpLibFileName, path, sizeof(path))) {
-        {
-            char buf[128];
-            snprintf(buf, sizeof(buf), "LoadLibraryA: cannot find '%s'\n", lpLibFileName);
-            write_to_stderr(buf);
-        }
+    /* Slow path: switch to UNIX stack for glibc-dependent load_dll */
+    void *ret = call_on_unix_stack(load_library_host, (void *)lpLibFileName);
+    if (ret == NULL)
         return NULL;
-    }
-    {
-        char buf[568];
-        snprintf(buf, sizeof(buf), "LoadLibraryA: found at '%s'\n", path);
-        write_to_stderr(buf);
-    }
 
-    /* Load the DLL */
-    mod = load_dll(path, 0);
-
-    if (mod == NULL) {
-        return NULL;
-    }
-
-    /* TEMP DIAG: return fixed address 0xdeadbeef12345678 to test return path */
-    return (void *)0xdeadbeef12345678ULL;
+    mod = (loaded_module_t *)ret;
+    return mod->base;
 }
 
 /* ── GetProcAddress ──────────────────────────────────────────── */
@@ -95,7 +137,7 @@ void *GetModuleHandleA(const char *lpModuleName)
         return NULL;
     }
 
-    loaded_module_t *mod = find_module_by_name(lpModuleName);
+    loaded_module_t *mod = find_module_by_name_safe(lpModuleName);
     return mod ? mod->base : NULL;
 }
 

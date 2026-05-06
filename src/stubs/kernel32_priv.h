@@ -17,6 +17,7 @@
 #include "../syscalls_inline.h"
 
 /* Shared helper: write a static message to stderr via direct syscall */
+WINE_STUB
 void write_to_stderr(const char *msg);
 
 /* Thread-local last-error code (defined in kernel32_misc.c) */
