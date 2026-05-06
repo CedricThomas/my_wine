@@ -22,6 +22,7 @@
 #include "module_list.h"
 #include "peb_ldr.h"
 #include "../syscall/syscalls_inline.h"
+#include "loader_utils.h"
 
 #define MAX_IMPORT_DEPTH 8
 
@@ -31,23 +32,6 @@
  * and module registration are separate steps), but prevents overlapping bases.
  */
 static uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
-
-/* ── Hand-rolled helpers (no glibc) ─────────────────────────────── */
-
-static int dll_strcasecmp(const char *a, const char *b)
-{
-    while (*a && *b) {
-        unsigned char ca = *a, cb = *b;
-        if (ca >= 'A' && ca <= 'Z') ca += 32;
-        if (cb >= 'A' && cb <= 'Z') cb += 32;
-        if (ca != cb) return (int)ca - (int)cb;
-        a++; b++;
-    }
-    unsigned char ca = *a, cb = *b;
-    if (ca >= 'A' && ca <= 'Z') ca += 32;
-    if (cb >= 'A' && cb <= 'Z') cb += 32;
-    return (int)ca - (int)cb;
-}
 
 /* Case-insensitive string equality */
 static int strci_equal(const char *a, const char *b)
@@ -373,58 +357,6 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
         DEBUG("  parse_export_table returned -1 for %s (no exports?)", mod->name);
     }
 
-    return 0;
-}
-
-/* ───────────────────────────────────────────────────────────── */
-/* Syscall-safe helpers for find_dll_path                      */
-/* No glibc — suitable for WINE_STUB context without GS switch  */
-/* ───────────────────────────────────────────────────────────── */
-
-static void dll_copy_str(char *dst, const char *src, size_t len)
-{
-    size_t i;
-    for (i = 0; i < len; i++)
-        dst[i] = src[i];
-}
-
-static size_t dll_strlen(const char *s)
-{
-    size_t len = 0;
-    while (s[len]) len++;
-    return len;
-}
-
-static const char *dll_strchr(const char *s, int c)
-{
-    while (*s) {
-        if (*s == (char)c) return s;
-        s++;
-    }
-    return NULL;
-}
-
-static int dll_build_path(char *dst, size_t dst_size,
-                          const char *dir, const char *name)
-{
-    size_t d_len = dll_strlen(dir);
-    size_t n_len = dll_strlen(name);
-    if (d_len + 1 + n_len + 1 > dst_size)
-        return -1;
-    dll_copy_str(dst, dir, d_len);
-    dst[d_len] = '/';
-    dll_copy_str(dst + d_len + 1, name, n_len);
-    dst[d_len + 1 + n_len] = '\0';
-    return 0;
-}
-
-static int dll_path_exists(const char *p)
-{
-    long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, p, O_RDONLY);
-    if (fd >= 0) {
-        INLINE_SYSCALL_CLOSE(fd);
-        return 1;
-    }
     return 0;
 }
 
