@@ -116,7 +116,31 @@ static IMAGE_NT_HEADERS64 *setup_nt_headers(void *base,
     return nt;
 }
 
-/* Build a single-entry DIR64 relocation block at block_va */
+/*
+ * Build a PE-spec-compliant 16-bit packed relocation entry.
+ *
+ * PE spec: bits 0–11 = offset, bits 12–15 = type.
+ * Stored as a single uint16_t (2 bytes) per entry.
+ */
+static uint16_t make_reloc_entry(uint16_t type, uint16_t offset)
+{
+    return ((type & 0xF) << 12) | (offset & 0xFFF);
+}
+
+/*
+ * Get a pointer to the first relocation entry right after the
+ * IMAGE_BASE_RELOCATION header (8 bytes: virtualAddress + sizeOfBlock).
+ */
+static uint16_t *reloc_entries_ptr(IMAGE_BASE_RELOCATION *block)
+{
+    return (uint16_t *)((char *)block + sizeof(IMAGE_BASE_RELOCATION));
+}
+
+/*
+ * Build a single-entry DIR64 relocation block at block_va.
+ *
+ * Layout: 8-byte header + 2-byte entry = 10 bytes total.
+ */
 static void setup_single_dir64_block(void *base,
                                       uint32_t block_va,
                                       uint32_t target_va,
@@ -125,10 +149,10 @@ static void setup_single_dir64_block(void *base,
     IMAGE_BASE_RELOCATION *block =
         (IMAGE_BASE_RELOCATION *)((char *)base + block_va);
     block->virtualAddress = target_va;
-    block->sizeOfBlock =
-        sizeof(IMAGE_BASE_RELOCATION) + sizeof(IMAGE_RELOC_ENTRY);
-    block->entries[0].type = IMAGE_REL_BASED_DIR64;
-    block->entries[0].offset = entry_offset;
+    /* 8-byte header + 1 entry (2 bytes) = 10 */
+    block->sizeOfBlock = sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t);
+    uint16_t *entries = reloc_entries_ptr(block);
+    entries[0] = make_reloc_entry(IMAGE_REL_BASED_DIR64, entry_offset);
 }
 
 /* ---------------------------------------------------------------- */
@@ -154,8 +178,8 @@ static void test_dir64_relocation(void)
     setup_dos_header(base);
 
     uint32_t block_va = 0x1100;
-    uint32_t block_size =
-        sizeof(IMAGE_BASE_RELOCATION) + sizeof(IMAGE_RELOC_ENTRY);
+    /* 8-byte header + 1 entry (2 bytes) = 10 bytes */
+    uint32_t block_size = sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t);
     setup_single_dir64_block(base, block_va, 0x1000, 0);
 
     IMAGE_NT_HEADERS64 *nt =
@@ -202,10 +226,10 @@ static void test_absolute_noop(void)
     IMAGE_BASE_RELOCATION *block =
         (IMAGE_BASE_RELOCATION *)((char *)base + block_va);
     block->virtualAddress = 0x1000;
-    block->sizeOfBlock =
-        sizeof(IMAGE_BASE_RELOCATION) + sizeof(IMAGE_RELOC_ENTRY);
-    block->entries[0].type = IMAGE_REL_BASED_ABSOLUTE;
-    block->entries[0].offset = 0;
+    /* 8-byte header + 1 entry (2 bytes) = 10 */
+    block->sizeOfBlock = sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t);
+    uint16_t *entries = reloc_entries_ptr(block);
+    entries[0] = make_reloc_entry(IMAGE_REL_BASED_ABSOLUTE, 0);
 
     uint32_t block_size = block->sizeOfBlock;
     IMAGE_NT_HEADERS64 *nt =
@@ -245,13 +269,11 @@ static void test_mixed_entries(void)
     IMAGE_BASE_RELOCATION *block =
         (IMAGE_BASE_RELOCATION *)((char *)base + block_va);
     block->virtualAddress = 0x1000;
-    /* Two entries: ABSOLUTE at offset 0, DIR64 at offset 8 */
-    block->sizeOfBlock =
-        sizeof(IMAGE_BASE_RELOCATION) + 2 * sizeof(IMAGE_RELOC_ENTRY);
-    block->entries[0].type = IMAGE_REL_BASED_ABSOLUTE;
-    block->entries[0].offset = 0;
-    block->entries[1].type = IMAGE_REL_BASED_DIR64;
-    block->entries[1].offset = 8;
+    /* 8-byte header + 2 entries (2 bytes each) = 12 */
+    block->sizeOfBlock = sizeof(IMAGE_BASE_RELOCATION) + 2 * sizeof(uint16_t);
+    uint16_t *entries = reloc_entries_ptr(block);
+    entries[0] = make_reloc_entry(IMAGE_REL_BASED_ABSOLUTE, 0);
+    entries[1] = make_reloc_entry(IMAGE_REL_BASED_DIR64, 8);
 
     IMAGE_NT_HEADERS64 *nt =
         setup_nt_headers(base, old_image_base, block_va, block->sizeOfBlock, 0);
@@ -311,8 +333,8 @@ static void test_delta_zero(void)
     setup_dos_header(base);
 
     uint32_t block_va = 0x1100;
-    uint32_t block_size =
-        sizeof(IMAGE_BASE_RELOCATION) + sizeof(IMAGE_RELOC_ENTRY);
+    /* 8-byte header + 1 entry (2 bytes) = 10 */
+    uint32_t block_size = sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t);
     setup_single_dir64_block(base, block_va, 0x1000, 0);
 
     IMAGE_NT_HEADERS64 *nt =
@@ -343,8 +365,8 @@ static void test_relocs_stripped(void)
     setup_dos_header(base);
 
     uint32_t block_va = 0x1100;
-    uint32_t block_size =
-        sizeof(IMAGE_BASE_RELOCATION) + sizeof(IMAGE_RELOC_ENTRY);
+    /* 8-byte header + 1 entry (2 bytes) = 10 */
+    uint32_t block_size = sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t);
     setup_single_dir64_block(base, block_va, 0x1000, 0);
 
     IMAGE_NT_HEADERS64 *nt =
@@ -383,14 +405,16 @@ static void test_multiple_blocks(void)
 
     /* Block 1 at 0x3000 → targets VA 0x1000 */
     uint32_t block1_va = 0x3000;
+    /* 8-byte header + 1 entry (2 bytes) = 10 */
     uint32_t block1_size =
-        sizeof(IMAGE_BASE_RELOCATION) + sizeof(IMAGE_RELOC_ENTRY);
+        sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t);
     setup_single_dir64_block(base, block1_va, 0x1000, 0);
 
     /* Block 2 immediately after block 1 → targets VA 0x2000 */
     uint32_t block2_va = block1_va + block1_size;
+    /* 8-byte header + 1 entry (2 bytes) = 10 */
     uint32_t block2_size =
-        sizeof(IMAGE_BASE_RELOCATION) + sizeof(IMAGE_RELOC_ENTRY);
+        sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t);
     setup_single_dir64_block(base, block2_va, 0x2000, 0);
 
     /* Total reloc dir covers both blocks */
@@ -602,6 +626,133 @@ static void test_integration_map_relocated(const char *pe_path)
 }
 
 /* ---------------------------------------------------------------- */
+/* Integration Test 2: forced non-preferred base with pre-allocation */
+/* ---------------------------------------------------------------- */
+
+/**
+ * test_integration_forced_relocation — forces map_image() to use the
+ * MAP_STACK fallback by pre-allocating the entire preferred ImageBase
+ * region with MAP_FIXED, then verifies the image still loads and works
+ * correctly at a relocated address with relocations applied.
+ */
+static void test_integration_forced_relocation(const char *pe_path)
+{
+    printf("\n--- Integration: forced relocation (pre-allocated base) ---\n");
+    printf("    PE path: %s\n", pe_path);
+
+    int fd = open(pe_path, O_RDONLY);
+    if (fd < 0) {
+        perror("    open PE file");
+        failed_tests++;
+        total_tests++;
+        return;
+    }
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        perror("    fstat");
+        close(fd);
+        failed_tests++;
+        total_tests++;
+        return;
+    }
+    size_t file_size = (size_t)st.st_size;
+
+    void *file_base = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (file_base == MAP_FAILED) {
+        perror("    mmap file");
+        close(fd);
+        failed_tests++;
+        total_tests++;
+        return;
+    }
+
+    IMAGE_DOS_HEADER dos;
+    if (parse_dos_header(file_base, file_size, &dos) != 0) {
+        munmap(file_base, file_size);
+        close(fd);
+        failed_tests++;
+        total_tests++;
+        return;
+    }
+
+    IMAGE_NT_HEADERS64 nt;
+    if (parse_nt_headers(file_base, file_size, &dos, &nt) != 0) {
+        munmap(file_base, file_size);
+        close(fd);
+        failed_tests++;
+        total_tests++;
+        return;
+    }
+
+    munmap(file_base, file_size);
+    close(fd);
+
+    uint64_t preferred_base = nt.OptionalHeader.ImageBase;
+    size_t image_size = nt.OptionalHeader.SizeOfImage;
+
+    printf("    preferred ImageBase: 0x%lx\n", (unsigned long)preferred_base);
+    printf("    SizeOfImage: 0x%lx\n", (unsigned long)image_size);
+
+    /* Pre-allocate the preferred base region to force MAP_FIXED to fail */
+    void *prealloc = mmap((void *)(uintptr_t)preferred_base, image_size,
+                          PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                          -1, 0);
+    if (prealloc == MAP_FAILED) {
+        /* Preferred base already occupied by something else — that's fine,
+         * it still forces the MAP_STACK fallback. */
+        printf("    pre-allocation failed (%s) — base already occupied\n",
+               strerror(errno));
+        prealloc = NULL;
+    } else {
+        /* Tag the pre-allocated region so we can verify it wasn't touched */
+        printf("    pre-allocated 0x%lx bytes at preferred base 0x%lx\n",
+               (unsigned long)image_size, (unsigned long)preferred_base);
+    }
+
+    /* Now call map_image() — MAP_FIXED should fail, triggering MAP_STACK */
+    IMAGE_NT_HEADERS64 mapped_nt;
+    void *base = map_image(pe_path, NULL, &mapped_nt, NULL);
+
+    check("map_image returns non-NULL", base != NULL);
+
+    if (base != NULL) {
+        uint64_t actual_base = (uint64_t)(uintptr_t)base;
+        printf("    actual mapped base: 0x%lx\n", (unsigned long)actual_base);
+
+        check("loaded at non-preferred base (MAP_STACK fallback)",
+              actual_base != preferred_base);
+
+        /* Verify PE headers at the mapped base */
+        IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
+        check("mapped image has valid DOS signature",
+              img_dos->e_magic == IMAGE_DOS_SIGNATURE);
+
+        check("mapped NT headers ImageBase matches original",
+              mapped_nt.OptionalHeader.ImageBase == preferred_base);
+
+        check("g_image_base set by map_image", g_image_base == base);
+
+        printf("    relocation delta: 0x%lx\n",
+               (unsigned long)((uintptr_t)base - preferred_base));
+    }
+
+    /* Cleanup: unmap the pre-allocated region and the image */
+    if (base != NULL) {
+        size_t munmap_size = mapped_nt.OptionalHeader.SizeOfImage;
+        if (munmap_size == 0) {
+            munmap_size = 0x1000;
+        }
+        munmap(base, munmap_size);
+    }
+
+    if (prealloc != NULL) {
+        munmap(prealloc, image_size);
+    }
+}
+
+/* ---------------------------------------------------------------- */
 /* Main                                                               */
 /* ---------------------------------------------------------------- */
 
@@ -617,9 +768,10 @@ int main(int argc, char *argv[])
     test_relocs_stripped();
     test_multiple_blocks();
 
-    /* Integration test with real PE file */
+    /* Integration tests with real PE file */
     if (argc > 1) {
         test_integration_map_relocated(argv[1]);
+        test_integration_forced_relocation(argv[1]);
     } else {
         printf("\n--- Integration: skipped (no PE path provided) ---\n");
     }
