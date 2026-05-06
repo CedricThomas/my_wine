@@ -123,7 +123,7 @@ build_dlls() {
             -v "$src_dir:/out" \
             "$IMAGE_NAME" \
             x86_64-w64-mingw32-gcc \
-            -Wall -Wextra -O2 -shared \
+            -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -shared \
             -Wl,"$container_def" \
             -o "/out/${dll_base}.dll" \
             "$container_src" 2>&1 || {
@@ -178,7 +178,7 @@ build_exe() {
         -v "$src_dir:/out" \
         "$IMAGE_NAME" \
         x86_64-w64-mingw32-gcc \
-        -Wall -Wextra -O2 -mconsole \
+        -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -mconsole \
         -o "/out/${name}.exe" \
         $container_srcs 2>&1 || {
             echo "  FAIL $name"
