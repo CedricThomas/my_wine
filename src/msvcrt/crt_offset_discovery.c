@@ -137,29 +137,34 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
 }
 
 /*
- * Read the COFF symbol table from the PE file to find symbol addresses.
- * Returns the RVA (relative virtual address) of the symbol, or 0 if not found.
+ * Opens the PE file, mmaps it, and extracts the symbol table + string table.
+ * Returns 0 on success, -1 on failure.
+ * On success: sets *out_file_map, *out_symbols, *out_string_table, *out_file_size.
+ * Caller must munmap(*out_file_map, *out_file_size) when done.
  */
-uint64_t find_symbol_rva_from_file(const char *file_path,
-                                   IMAGE_NT_HEADERS64 *nt,
-                                   IMAGE_SECTION_HEADER *sections,
-                                   const char *name)
+static int open_and_map_symbols(
+    const char *file_path,
+    IMAGE_NT_HEADERS64 *nt,
+    void **out_file_map,
+    IMAGE_SYMBOL **out_symbols,
+    char **out_string_table,
+    size_t *out_file_size)
 {
     uint32_t sym_ptr = nt->FileHeader.PointerToSymbolTable;
     uint32_t sym_count = nt->FileHeader.NumberOfSymbols;
 
     if (sym_ptr == 0 || sym_count == 0)
-        return 0;
+        return -1;
 
     int fd = open(file_path, O_RDONLY);
-    if (fd < 0) return 0;
+    if (fd < 0) return -1;
 
     struct stat st;
-    if (fstat(fd, &st) < 0) { close(fd); return 0; }
+    if (fstat(fd, &st) < 0) { close(fd); return -1; }
 
     void *file_map = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
-    if (file_map == MAP_FAILED) return 0;
+    if (file_map == MAP_FAILED) return -1;
 
     IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)((char *)file_map + sym_ptr);
     size_t sym_table_size = (size_t)sym_count * IMAGE_SIZEOF_SYMBOL;
@@ -176,14 +181,55 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         }
     }
 
+    *out_file_map = file_map;
+    *out_file_size = (size_t)st.st_size;
+    *out_symbols = symbols;
+    *out_string_table = string_table;
+    return 0;
+}
+
+/*
+ * Convert a section-bound symbol to its RVA.
+ * Returns the RVA or 0 if the symbol can't be converted.
+ */
+static uint64_t compute_rva_from_symbol(
+    const IMAGE_SYMBOL *sym, IMAGE_NT_HEADERS64 *nt,
+    IMAGE_SECTION_HEADER *sections)
+{
+    int32_t section_num = sym->SectionNumber;
+
+    if (section_num > 0 && (size_t)section_num <= nt->FileHeader.NumberOfSections) {
+        IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
+        return sec->VirtualAddress + sym->Value;
+    }
+    if (section_num == 0) {
+        return sym->Value;
+    }
+    return 0;
+}
+
+/*
+ * Search the symbol table for a symbol matching the target name.
+ * Tries (in order): .rdata$.refptr. prefix, .refptr. prefix, exact match, substring.
+ * Prefers section-bound symbols over absolute.
+ * Returns index of the best matching symbol, or -1 if not found.
+ * Sets *out_best_rva to the RVA of the best match.
+ */
+static int find_matching_symbol(
+    IMAGE_SYMBOL *symbols, char *string_table, uint32_t sym_count,
+    const char *name,
+    IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections,
+    uint64_t *out_best_rva)
+{
+    uint64_t best_rva = 0;
+    int best_idx = -1;
+    int has_section_match = 0;
+
     /*
      * Scan all symbols, preferring section-bound over absolute.
      * Some mingw-w64 builds have garbage absolute symbols (sec=0) with
      * wrong values that appear before the real section-bound entry.
      */
-    uint64_t best_rva = 0;
-    int has_section_match = 0;
-
     DEBUG("DBG_COFF: '%s' scanning %u symbols", name, sym_count);
     for (uint32_t i = 0; i < sym_count; i++) {
         const IMAGE_SYMBOL *sym = &symbols[i];
@@ -194,12 +240,6 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         if (i < 3) {
             DEBUG("DBG_COFF: sym[%u] = '%.*s' sect=%d",
                     i, (int)sym_name_len, sym_name, sym->SectionNumber);
-        }
-
-        /* Debug: show symbols that contain CTOR or DTOR */
-        if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
-            DEBUG("DBG_COFF: sym[%u] = '%s' sect=%d val=%u",
-                    i, sym_name, (int)sym->SectionNumber, (unsigned)sym->Value);
         }
 
         /* Debug: show all symbols containing CTOR or DTOR */
@@ -264,18 +304,47 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
         if (section_num > 0 && (size_t)section_num <=
             nt->FileHeader.NumberOfSections) {
             if (!has_section_match) {
-                IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
-                best_rva = sec->VirtualAddress + sym->Value;
+                best_rva = compute_rva_from_symbol(sym, nt, sections);
+                best_idx = i;
                 has_section_match = 1;
             }
         } else if (section_num == 0 && !has_section_match) {
             /* Fallback: absolute symbol, but only if no section-bound one */
-            best_rva = sym->Value;
+            best_rva = compute_rva_from_symbol(sym, nt, sections);
+            best_idx = i;
         }
     }
 
+    *out_best_rva = best_rva;
+    return best_idx;
+}
+
+/*
+ * Read the COFF symbol table from the PE file to find symbol addresses.
+ * Returns the RVA (relative virtual address) of the symbol, or 0 if not found.
+ */
+uint64_t find_symbol_rva_from_file(const char *file_path,
+                                   IMAGE_NT_HEADERS64 *nt,
+                                   IMAGE_SECTION_HEADER *sections,
+                                   const char *name)
+{
+    uint32_t sym_count = nt->FileHeader.NumberOfSymbols;
+
+    void *file_map;
+    size_t file_size;
+    IMAGE_SYMBOL *symbols;
+    char *string_table;
+
+    if (open_and_map_symbols(file_path, nt, &file_map, &symbols,
+                             &string_table, &file_size) != 0)
+        return 0;
+
+    uint64_t best_rva;
+    (void)find_matching_symbol(symbols, string_table, sym_count, name,
+                               nt, sections, &best_rva);
+
     DEBUG("DBG_COFF: '%s' -> rva=0x%lx", name, (unsigned long)best_rva);
-    munmap(file_map, st.st_size);
+    munmap(file_map, file_size);
     return best_rva;
 }
 
