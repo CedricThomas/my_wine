@@ -1,15 +1,5 @@
 /*
  * kernel32_module.c — Module loading and management stubs
- *
- * All functions are WINE_STUB (ms_abi) for guest code,
- * with plain-C aliases for test code.
- * All loader functions are now glibc-free.
- *
- * NOTE: There is a known GCC bug where WINE_STUB functions
- * (ms_abi + force_align_arg_pointer) that return high addresses
- * (> 4GB) get truncated to 32 bits on return to guest code.
- * Workaround: ensure DLLs are mapped below 4GB by using
- * MAP_FIXED with a controlled base address in load_dll().
  */
 
 #include <stdint.h>
@@ -20,10 +10,9 @@
 #include "kernel32_priv.h"
 #include "../loader/loader_priv.h"
 
-/* Global DLL search buffer (avoids stack allocation issues) */
 static char g_dll_path[512];
 
-/* ── LoadLibraryA ────────────────────────────────────────────── */
+/* ── LoadLibraryA ─────────────────────────────────────────────── */
 
 WINE_STUB
 void *LoadLibraryA(const char *lpLibFileName)
@@ -47,9 +36,12 @@ void *LoadLibraryA(const char *lpLibFileName)
     return mod->base;
 }
 
-void *_LoadLibraryA(const char *lpLibFileName) { return LoadLibraryA(lpLibFileName); }
+void *_LoadLibraryA(const char *lpLibFileName)
+{
+    return LoadLibraryA(lpLibFileName);
+}
 
-/* ── GetProcAddress ──────────────────────────────────────────── */
+/* ── GetProcAddress ────────────────────────────────────────────── */
 
 WINE_STUB
 void *GetProcAddress(void *hModule, const char *lpProcName)
@@ -69,7 +61,7 @@ void *_GetProcAddress(void *hModule, const char *lpProcName)
     return GetProcAddress(hModule, lpProcName);
 }
 
-/* ── GetModuleHandleA ────────────────────────────────────────── */
+/* ── GetModuleHandleA ──────────────────────────────────────────── */
 
 WINE_STUB
 void *GetModuleHandleA(const char *lpModuleName)
@@ -89,7 +81,7 @@ void *_GetModuleHandleA(const char *lpModuleName)
     return GetModuleHandleA(lpModuleName);
 }
 
-/* ── FreeLibraryA ────────────────────────────────────────────── */
+/* ── FreeLibraryA ──────────────────────────────────────────────── */
 
 WINE_STUB
 int FreeLibraryA(void *hModule)
@@ -117,13 +109,21 @@ int FreeLibraryA(void *hModule)
     return 1;
 }
 
-int _FreeLibraryA(void *hModule) { return FreeLibraryA(hModule); }
+int _FreeLibraryA(void *hModule)
+{
+    return FreeLibraryA(hModule);
+}
 
-/* ── FreeLibraryAndExitThread ────────────────────────────────── */
+/* ── FreeLibraryAndExitThread ──────────────────────────────────── */
 
 WINE_STUB
 __attribute__((noreturn)) void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)
 {
     FreeLibraryA(hModule);
     pthread_exit((void *)(uintptr_t)exitCode);
+}
+
+void _FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)
+{
+    FreeLibraryAndExitThread(hModule, exitCode);
 }

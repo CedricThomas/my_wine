@@ -272,3 +272,6 @@ uint64_t __C_specific_handler(uint64_t exception_record, uint64_t establisher_fr
      */
     return 1; /* ExceptionContinueSearch — skip this handler */
 }
+#include "include/wine_abi.h"
+WINE_STUB void *test_return_ptr(void) { return (void *)0x12345678UL; }
+WINE_STUB void *test_return_ptr_arg(void *arg) { return arg ? arg : (void *)0xdeadbeefUL; }
