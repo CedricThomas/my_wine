@@ -29,6 +29,10 @@ extern char **environ;
 #define MAX_IMPORT_DEPTH 8
 
 #define DLL_ALLOC_BASE 0x60000000  /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
+/* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
+ * Uses atomic operations for allocation — still not fully thread-safe (mmap
+ * and module registration are separate steps), but prevents overlapping bases.
+ */
 static uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
 
 /* ── Hand-rolled helpers (no glibc) ─────────────────────────────── */
@@ -531,8 +535,9 @@ loaded_module_t *load_dll(const char *path, int depth)
     g_dll_base_next = (g_dll_base_next + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
 
     /* Map the DLL at a controlled base below 4GB to avoid GCC ms_abi truncation */
+    uintptr_t alloc_base = g_dll_base_next;
     IMAGE_NT_HEADERS64 nt_copy;
-    void *base = map_image_at(path, NULL, &nt_copy, NULL, g_dll_base_next);
+    void *base = map_image_at(path, NULL, &nt_copy, NULL, alloc_base);
 
     /* Restore main PE globals (regardless of success/failure) */
     g_image_base = saved_image_base;
@@ -544,8 +549,9 @@ loaded_module_t *load_dll(const char *path, int depth)
     }
 
     /* Advance g_dll_base_next past this DLL's image, rounded up to page alignment */
-    g_dll_base_next += nt_copy.OptionalHeader.SizeOfImage;
-    g_dll_base_next = (g_dll_base_next + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
+    size_t dll_size = nt_copy.OptionalHeader.SizeOfImage;
+    size_t aligned = (dll_size + (PAGE_SIZE - 1)) & ~(size_t)(PAGE_SIZE - 1);
+    __atomic_add_fetch(&g_dll_base_next, aligned, __ATOMIC_SEQ_CST);
 
     /* Extract NT headers from image memory */
     IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
