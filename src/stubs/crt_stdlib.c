@@ -9,7 +9,9 @@
 #define CRT_STDLIB_C
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 #include <stdint.h>
 #include <signal.h>
 #include "msvcrt_priv.h"
@@ -124,6 +126,21 @@ void wine_free(void *ptr)
 }
 
 WINE_STUB_STATIC
+void *wine_realloc(void *ptr, size_t size)
+{
+    if (ptr == NULL) return wine_malloc(size);
+    if (size == 0) { wine_free(ptr); return NULL; }
+
+    void *new_ptr = wine_malloc(size);
+    if (new_ptr == NULL) return NULL;
+
+    size_t orig_size = malloc_usable_size(ptr);
+    memcpy(new_ptr, ptr, orig_size);
+    wine_free(ptr);
+    return new_ptr;
+}
+
+WINE_STUB_STATIC
 void *wine_memcpy(void *dest, const void *src, size_t n)
 {
     return __builtin_memcpy(dest, src, n);
@@ -154,6 +171,7 @@ int wine_signal(int sig, void (*handler)(int))
 void *__msvcrt_malloc     = (void *)wine_malloc;
 void *__msvcrt_calloc     = (void *)wine_calloc;
 void *__msvcrt_free       = (void *)wine_free;
+void *__msvcrt_realloc    = (void *)wine_realloc;
 void *__msvcrt_memcpy     = (void *)wine_memcpy;
 void *__msvcrt_strlen     = (void *)wine_strlen;
 void *__msvcrt_strncmp    = (void *)wine_strncmp;

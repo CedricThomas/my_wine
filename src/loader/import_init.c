@@ -24,6 +24,7 @@ void init_msvcrt_imports(void)
     set_import("fwrite",   __msvcrt_fwrite);
     set_import("malloc",   __msvcrt_malloc);
     set_import("memcpy",   __msvcrt_memcpy);
+    set_import("realloc",  __msvcrt_realloc);
     set_import("signal",   __msvcrt_signal);
     set_import("strlen",   __msvcrt_strlen);
     set_import("strncmp",  __msvcrt_strncmp);

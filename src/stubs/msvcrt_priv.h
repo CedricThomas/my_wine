@@ -108,6 +108,8 @@ void *wine_calloc(size_t nmemb, size_t size);
 WINE_STUB_STATIC
 void wine_free(void *ptr);
 WINE_STUB_STATIC
+void *wine_realloc(void *ptr, size_t size);
+WINE_STUB_STATIC
 void *wine_memcpy(void *dest, const void *src, size_t n);
 WINE_STUB_STATIC
 size_t wine_strlen(const void *s);
@@ -128,6 +130,7 @@ extern void *__msvcrt_vfprintf;
 extern void *__msvcrt_malloc;
 extern void *__msvcrt_calloc;
 extern void *__msvcrt_free;
+extern void *__msvcrt_realloc;
 extern void *__msvcrt_memcpy;
 extern void *__msvcrt_strlen;
 extern void *__msvcrt_strncmp;

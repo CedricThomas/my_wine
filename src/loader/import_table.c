@@ -111,6 +111,7 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "fwrite", NULL },
     { "msvcrt.dll", "malloc", NULL },
     { "msvcrt.dll", "memcpy", NULL },
+    { "msvcrt.dll", "realloc", NULL },
     { "msvcrt.dll", "signal", NULL },
     { "msvcrt.dll", "strlen", NULL },
     { "msvcrt.dll", "strncmp", NULL },

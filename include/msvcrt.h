@@ -89,6 +89,7 @@ extern void *__msvcrt_vfprintf;
 extern void *__msvcrt_malloc;
 extern void *__msvcrt_calloc;
 extern void *__msvcrt_free;
+extern void *__msvcrt_realloc;
 extern void *__msvcrt_memcpy;
 extern void *__msvcrt_strlen;
 extern void *__msvcrt_strncmp;
