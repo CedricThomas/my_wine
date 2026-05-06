@@ -48,6 +48,10 @@ extern int g_debug_enabled;
 // Signal stack size (64KB, matching original value)
 #define SIG_STACK_SIZE      65536
 
+// Exit codes for signals (128 + signal number)
+#define EXIT_SIGSEGV    139   /* 128 + SIGSEGV(11) */
+#define EXIT_SIGABRT    134   /* 128 + SIGABRT(6) */
+
 // ── Shared helpers ─────────────────────────────────────────────
 
 void format_hex(char *buf, int buf_size, uint64_t val);

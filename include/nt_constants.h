@@ -81,4 +81,8 @@
 #define ERROR_INVALID_PARAMETER     87
 #define ERROR_INSUFFICIENT_BUFFER  122
 
+/* ── NT status codes ────────────────────────────────────────── */
+
+#define STATUS_ACCESS_VIOLATION   0xC0000005
+
 #endif /* MY_WINE_NT_CONSTANTS_H */

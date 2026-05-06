@@ -23,6 +23,7 @@
 #include <sys/mman.h>
 
 #include "include/common.h"
+#include "include/nt_constants.h"
 #include "include/syscall/thunk_gen.h"
 #include <sys/user.h>
 
@@ -44,8 +45,8 @@ void seh_crash_handler(void *exception_record, void *establisher_frame,
     { const char t[] = "SEV: SEH handler invoked (exception in guest code)\n";
       INLINE_SYSCALL_WRITE(2, t, sizeof(t)-1); }
 
-    /* Extract exit code from exception record if possible, else use 0xC0000005 (ACCESS_VIOLATION) */
-    uint64_t exit_code = 0xC0000005;
+    /* Extract exit code from exception record if possible, else use STATUS_ACCESS_VIOLATION */
+    uint64_t exit_code = STATUS_ACCESS_VIOLATION;
 
     /* Call sys_exit directly (post-GS safe) */
     INLINE_SYSCALL_EXIT((int)(exit_code & 0xFF));
@@ -101,7 +102,7 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
      * internal state that can segfault in this context.
      * A direct syscall is fully async-signal-safe and avoids this.
      */
-    INLINE_SYSCALL_EXIT(139);
+    INLINE_SYSCALL_EXIT(EXIT_SIGSEGV);
 }
 
 /**

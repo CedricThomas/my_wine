@@ -16,6 +16,7 @@
 #include "msvcrt_priv.h"
 #include "../syscall/abi_wrappers.h"
 #include "../syscall/syscalls_inline.h"
+#include "include/common.h"
 
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096
@@ -100,7 +101,7 @@ void wine_abort(void)
     print_hex_val(2, "SP1=", sp1);
     print_hex_val(2, "SP2=", sp2);
 
-    wine__exit(134);
+    wine__exit(EXIT_SIGABRT);
 }
 
 WINE_STUB_STATIC

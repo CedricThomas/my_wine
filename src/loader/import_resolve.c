@@ -28,8 +28,8 @@ extern char **environ;
 
 #define MAX_IMPORT_DEPTH 8
 
-/* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
-static uintptr_t g_dll_base_next = 0x60000000;  /* Start at 1.5GB */
+#define DLL_ALLOC_BASE 0x60000000  /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
+static uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
 
 /* ── Hand-rolled helpers (no glibc) ─────────────────────────────── */
 

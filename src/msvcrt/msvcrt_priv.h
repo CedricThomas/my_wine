@@ -66,6 +66,8 @@ typedef struct {
 } wine_FILE;
 #pragma pack(pop)
 
+_Static_assert(sizeof(wine_FILE) == WINE_FILE_SIZE, "wine_FILE size mismatch");
+
 #define WINE_IOEOF  0x8000
 #define WINE_IOWRT  0x0002
 #define WINE_IONBF  0x4000
