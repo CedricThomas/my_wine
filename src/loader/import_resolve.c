@@ -41,6 +41,18 @@ static char g_exe_dir[512] = {0};
 static void init_exe_dir(void)
 {
     if (g_exe_dir[0] != '\0') return;
+    const char *pe_path = get_pe_path();
+    if (pe_path != NULL && pe_path[0] != '\0') {
+        const char *last_slash = strrchr(pe_path, '/');
+        if (last_slash != NULL && last_slash != pe_path) {
+            size_t dir_len = last_slash - pe_path;
+            if (dir_len >= sizeof(g_exe_dir)) dir_len = sizeof(g_exe_dir) - 1;
+            memcpy(g_exe_dir, pe_path, dir_len);
+            g_exe_dir[dir_len] = '\0';
+            return;
+        }
+    }
+    /* Fallback to CWD */
     if (getcwd(g_exe_dir, sizeof(g_exe_dir)) == NULL) {
         g_exe_dir[0] = '.';
         g_exe_dir[1] = '\0';

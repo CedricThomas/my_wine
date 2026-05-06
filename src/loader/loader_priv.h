@@ -18,6 +18,7 @@
 
 /* Set by image_mapper.c, read by teb_peb.c and import_resolve.c */
 extern void *g_image_base;
+const char *get_pe_path(void);
 
 /* Set by teb_peb.c (setup_stack), read by main.c */
 extern void *g_stack_base;

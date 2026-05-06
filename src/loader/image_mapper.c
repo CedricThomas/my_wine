@@ -22,6 +22,7 @@
 #include "loader_priv.h"
 
 void *g_image_base = NULL;
+static char g_pe_path[512] = {0};
 
 /**
  * Map a PE file at the preferred image base.
@@ -40,6 +41,8 @@ void *map_image(const char *path,
                 IMAGE_NT_HEADERS64 *out_nt,
                 size_t *out_nt_size)
 {
+    snprintf(g_pe_path, sizeof(g_pe_path), "%s", path);
+
     /* 1. Open the PE file */
     int fd = open(path, O_RDONLY);
     if (fd < 0) { perror("open"); return NULL; }
@@ -182,3 +185,5 @@ void *map_image(const char *path,
     g_image_base = base;
     return base;
 }
+
+const char *get_pe_path(void) { return g_pe_path; }

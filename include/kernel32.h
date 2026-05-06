@@ -73,6 +73,9 @@ void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode);
 __attribute__((ms_abi))
 int lstrlenA(const char *lpString);
 
+__attribute__((ms_abi))
+char *lstrcpyA(char *dest, const char *src);
+
 /* ── FILETIME / LARGE_INTEGER types ───────────────────────── */
 
 typedef struct {

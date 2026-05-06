@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <string.h>
 #include "kernel32_priv.h"
 
 /*
@@ -18,6 +19,15 @@ WINE_STUB
 int lstrlenA(const char *lpString)
 {
     return (int)__builtin_strlen(lpString);
+}
+
+/* ── lstrcpyA ───────────────────────────────────────────────── */
+
+WINE_STUB
+char *lstrcpyA(char *dest, const char *src)
+{
+    if (dest == NULL || src == NULL) return NULL;
+    return strcpy(dest, src);
 }
 
 /* ── GetLastError ───────────────────────────────────────────── */
