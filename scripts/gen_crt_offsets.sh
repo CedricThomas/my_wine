@@ -42,9 +42,9 @@ TEST_EXE="$WORK_DIR/test_crt.exe"
 if command -v docker &>/dev/null; then
     # Ensure the my_wine-samples image exists; build it if not
     if ! docker image inspect my_wine-samples &>/dev/null; then
-        echo "my_wine: building my_wine-samples image from samples/Dockerfile..."
-        DOCKER_BUILDKIT=0 docker build -t my_wine-samples "$PROJECT_DIR/samples" \
-            || { echo "ERROR: Failed to build my_wine-samples image"; rm -rf "$WORK_DIR"; exit 1; }
+        echo "my_wine: building my_wine-samples image from Dockerfile..."
+        DOCKER_BUILDKIT=0 docker build -t my_wine-samples "$PROJECT_DIR" \
+            || { echo "ERROR: Failed to build my_wine-samples image"; echo "       Try: make build-docker-image"; rm -rf "$WORK_DIR"; exit 1; }
     fi
 
     docker run --rm \
@@ -54,12 +54,14 @@ if command -v docker &>/dev/null; then
         /bin/bash -c "x86_64-w64-mingw32-gcc -O2 -o test_crt.exe test_crt.c" \
         || {
             echo "ERROR: mingw-w64 Docker build failed"
+            echo "       Try: make build-docker-image"
             rm -rf "$WORK_DIR"
             exit 1
         }
 else
     echo "ERROR: Docker not found — cannot generate CRT offsets"
     echo "       Install Docker or skip this step (hardcoded fallbacks will be used)"
+    echo "       Try: make build-docker-image"
     rm -rf "$WORK_DIR"
     exit 1
 fi

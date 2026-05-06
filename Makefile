@@ -187,11 +187,16 @@ src/syscall/dispatcher_generated.c: include/nt_syscalls.def scripts/gen_dispatch
 	@python3 scripts/gen_dispatcher.py --generate
 $(BUILDDIR)/dispatcher.o: src/syscall/dispatcher_generated.c
 
+build-docker-image:
+	@echo "Building my_wine-samples Docker image..."
+	@DOCKER_BUILDKIT=0 docker build -t my_wine-samples . || { echo "FAIL: Docker build failed"; exit 1; }
+	@echo "OK  my_wine-samples image ready"
+
 gen-crt-offsets:
 	@echo "Generating CRT offsets from current mingw-w64 toolchain..."
-	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed, using hardcoded fallback"; exit 0; }
+	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed"; echo "  Try: make build-docker-image"; exit 0; }
 
 gen-dispatcher: src/syscall/dispatcher_generated.c
 	@echo "Generated dispatcher switch bodies."
 
-.PHONY: all clean fclean re tests run-test samples run-sample gen-crt-offsets gen-dispatcher $(BUILDDIR)
+.PHONY: all clean fclean re tests run-test samples run-sample build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR)

@@ -56,7 +56,7 @@ discover_samples() {
 ensure_image() {
     if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
         echo "  Building Docker image $IMAGE_NAME ..."
-        DOCKER_BUILDKIT=0 docker build -t "$IMAGE_NAME" "$SAMPLES_DIR" 2>&1 || {
+        DOCKER_BUILDKIT=0 docker build -t "$IMAGE_NAME" "$PROJECT_DIR" 2>&1 || {
             echo "  FAIL: Docker build failed"
             return 1
         }
