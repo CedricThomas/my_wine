@@ -15,6 +15,8 @@ echo "my_wine: generating CRT offsets from mingw-w64 toolchain..."
 WORK_DIR=$(mktemp -d "$PROJECT_DIR/.gen_crt_offsets.XXXXXX")
 
 # Compile a minimal test program that forces the CRT to include all .refptr entries
+# Note: __environ doesn't exist in mingw-w64 as a local CRT BSS symbol
+# (it's an msvcrt.dll import), so we only reference the ones that do.
 TEST_SRC="$WORK_DIR/test_crt.c"
 cat > "$TEST_SRC" << 'EOF'
 #include <stdio.h>
@@ -23,14 +25,12 @@ cat > "$TEST_SRC" << 'EOF'
 // Force the CRT .refptr symbols into the binary
 extern int __argc;
 extern char **__argv;
-extern char **__environ;
 extern char ***__initenv;
 
 int main(int argc, char *argv[]) {
     (void)argc; (void)argv;
     printf("argc=%d, __argc=%d\n", argc, __argc);
     printf("__argv=%p\n", (void *)__argv);
-    printf("__environ=%p\n", (void *)__environ);
     printf("__initenv=%p\n", (void *)__initenv);
     return 0;
 }
@@ -65,7 +65,11 @@ else
 fi
 
 # Now parse the PE to extract offsets
-# Use a small C program that uses the existing PE parser
+# PE/COFF symbol records are exactly IMAGE_SIZEOF_SYMBOL = 18 bytes each.
+# Layout: name(8) + value(4) + sectionNumber(4) + type(2) = 18
+# There are NO StorageClass or NumberOfAuxSymbols fields in the 18-byte record.
+# Aux records also occupy 18 bytes each and are interleaved with regular symbols.
+# We iterate through ALL 18-byte records and match by name + section.
 PARSER_SRC=$(mktemp -d)/parse_offsets.c
 cat > "$PARSER_SRC" << 'CEOF'
 #include <stdio.h>
@@ -79,50 +83,48 @@ cat > "$PARSER_SRC" << 'CEOF'
 
 #define IMAGE_SIZEOF_SYMBOL 18
 
-typedef struct {
+// PE/COFF symbol: exactly 18 bytes.
+// Name is either short (bytes 0-7) or long (bytes 0-3 = string table offset, bytes 4-7 = 0).
+typedef struct __attribute__((packed)) {
     union {
-        char    ShortName[8];
-        struct { uint32_t Short; uint32_t Long; } LongName;
+        char    name[8];
+        struct { uint32_t short_part; uint32_t long_part; } long_name;
     } N;
     uint32_t    Value;
     int32_t     SectionNumber;
     uint16_t    Type;
-    uint8_t     StorageClass;
-    uint8_t     NumberOfAuxSymbols;
 } IMAGE_SYMBOL;
 
 static const char *get_symbol_name(const IMAGE_SYMBOL *sym, char *string_table) {
-    if (sym->N.LongName.Short != 0 || sym->N.LongName.Long != 0) {
+    // Long name: first dword is offset into string table, second dword is 0
+    if (sym->N.long_name.short_part != 0 && sym->N.long_name.long_part == 0) {
         if (string_table) {
-            uint32_t off = sym->N.LongName.Short + 4;
+            uint32_t off = sym->N.long_name.short_part + 4;
             return string_table + off;
         }
     }
-    return sym->N.ShortName;
+    // Short name: up to 8 chars
+    if (sym->N.name[0] != 0)
+        return sym->N.name;
+    return NULL;
 }
 
 int main(int argc, char *argv[]) {
     if (argc < 2) { fprintf(stderr, "Usage: %s <pe_file>\n", argv[0]); return 1; }
-
     const char *path = argv[1];
     int fd = open(path, O_RDONLY);
     if (fd < 0) { perror("open"); return 1; }
-
     struct stat st;
     fstat(fd, &st);
     void *map = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (map == MAP_FAILED) { perror("mmap"); return 1; }
 
-    // Parse DOS header
     uint32_t e_lfanew = *((uint32_t *)((char *)map + 0x3C));
+    if (*((uint32_t *)((char *)map + e_lfanew)) != 0x00004550) {
+        fprintf(stderr, "Not a PE\n"); munmap(map, st.st_size); return 1;
+    }
 
-    // Parse NT headers
-    uint32_t pe_sig = *((uint32_t *)((char *)map + e_lfanew));
-    if (pe_sig != 0x00004550) { fprintf(stderr, "Not a PE\n"); return 1; }
-
-    // COFF FileHeader (20 bytes): Machine(2)+NumSections(2)+TimeDateStamp(4)
-    //   +PointerToSymbolTable(4)+NumberOfSymbols(4)+SizeOfOptionalHeader(2)+Characteristics(2)
     uint16_t num_sections = *((uint16_t *)((char *)map + e_lfanew + 6));
     uint32_t sym_ptr = *((uint32_t *)((char *)map + e_lfanew + 12));
     uint32_t num_symbols = *((uint32_t *)((char *)map + e_lfanew + 16));
@@ -135,8 +137,8 @@ int main(int argc, char *argv[]) {
     }
 
     IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)((char *)map + sym_ptr);
-    size_t sym_size = num_symbols * IMAGE_SIZEOF_SYMBOL;
-    uint32_t str_off = sym_ptr + sym_size;
+    // String table follows all num_symbols * 18-byte records
+    uint32_t str_off = sym_ptr + num_symbols * IMAGE_SIZEOF_SYMBOL;
     char *string_table = NULL;
     if (str_off + 4 <= st.st_size) {
         uint32_t str_size = *((uint32_t *)((char *)map + str_off));
@@ -144,20 +146,12 @@ int main(int argc, char *argv[]) {
             string_table = (char *)map + str_off + 4;
     }
 
-    // Find section virtual addresses
-    uint32_t sec_ptr = e_lfanew + 4 + 20 + opt_hdr_size;  // FileHeader(20) + OptionalHeader
-
-    // Section headers: Name[8] + VirtualAddress + ...
+    // Section virtual addresses
+    uint32_t sec_ptr = e_lfanew + 4 + 20 + opt_hdr_size;
     uint64_t section_vaddrs[96];
-    uint64_t section_sizes[96];
-    for (int i = 0; i < num_sections && i < 96; i++) {
-        section_vaddrs[i] = *((uint32_t *)((char *)map + sec_ptr + i * 40 + 12));
-        section_sizes[i] = *((uint32_t *)((char *)map + sec_ptr + i * 40 + 16));
-    }
-
-    // Search for .refptr symbols and extract their .bss offsets
     uint32_t bss_vaddr = 0;
     for (int i = 0; i < num_sections && i < 96; i++) {
+        section_vaddrs[i] = *((uint32_t *)((char *)map + sec_ptr + i * 40 + 12));
         char name[9] = {0};
         memcpy(name, (char *)map + sec_ptr + i * 40, 8);
         if (strcmp(name, ".bss") == 0) {
@@ -165,72 +159,48 @@ int main(int argc, char *argv[]) {
             break;
         }
     }
-
     if (bss_vaddr == 0) {
         fprintf(stderr, "ERROR: .bss section not found\n");
         munmap(map, st.st_size);
         return 1;
     }
 
-    // Target symbols (in order of output)
-    const char *targets[] = {
-        "__initenv",   // -> CRT_BSS_INITENV
-        "__argv",      // -> CRT_BSS_ARGV
-        "__argc",      // -> CRT_BSS_ARGC
-        "__environ",   // -> CRT_BSS_ENVP
-    };
-    const char *fallback_targets[] = {
-        "_initenv",    // alternative name
-        "_argv",       // alternative name
-        "_argc",       // alternative name
-        "_environ",    // alternative name
-    };
-    const char *define_names[] = {
-        "CRT_BSS_INITENV",
-        "CRT_BSS_ARGV",
-        "CRT_BSS_ARGC",
-        "CRT_BSS_ENVP"
-    };
+    // Target symbols: the COFF names in mingw-w64's .bss are:
+    //   envp  (offset 0x018) - the CRT environment pointer variable
+    //   argv  (offset 0x020) - the CRT argv pointer variable
+    //   argc  (offset 0x028) - the CRT argc int variable
+    // __initenv is NOT in .bss (it's an msvcrt.dll import),
+    // so CRT_BSS_INITENV falls back to the same value as envp.
+    const char *defines[] = {"CRT_BSS_INITENV", "CRT_BSS_ARGV", "CRT_BSS_ARGC", "CRT_BSS_ENVP"};
     uint32_t results[4] = {0, 0, 0, 0};
 
-    for (int t = 0; t < 4; t++) {
-        for (int i = 0; i < (int)num_symbols; i++) {
-            IMAGE_SYMBOL *sym = &symbols[i];
-            const char *name = get_symbol_name(sym, string_table);
-            if (!name) continue;
+    // Scan all 18-byte records looking for our target names in .bss
+    for (int i = 0; i < (int)num_symbols; i++) {
+        IMAGE_SYMBOL *sym = &symbols[i];
+        const char *name = get_symbol_name(sym, string_table);
+        if (!name || sym->SectionNumber <= 0 || sym->SectionNumber > num_sections)
+            continue;
 
-            // Check for .refptr prefix or bare name
-            int matched = 0;
-            if (strstr(name, ".refptr.") != NULL && strstr(name, targets[t]) != NULL)
-                matched = 1;
-            else if (strstr(name, ".rdata$.refptr.") != NULL && strstr(name, targets[t]) != NULL)
-                matched = 1;
-            else if (strcmp(name, targets[t]) == 0)
-                matched = 1;
-            else if (strcmp(name, fallback_targets[t]) == 0)
-                matched = 1;
+        // Check if this symbol is in the .bss section
+        uint32_t rva = section_vaddrs[sym->SectionNumber - 1] + sym->Value;
+        uint32_t bss_offset = rva - bss_vaddr;
 
-            if (!matched) continue;
-
-            // Prefer section-bound symbols
-            if (sym->SectionNumber > 0 && sym->SectionNumber <= num_sections) {
-                uint32_t rva = section_vaddrs[sym->SectionNumber - 1] + sym->Value;
-                uint32_t offset = rva - bss_vaddr;
-                if (results[t] == 0 || offset < results[t]) {
-                    results[t] = offset;
-                }
-            }
-        }
+        if (strcmp(name, "argv") == 0) results[1] = bss_offset;
+        else if (strcmp(name, "argc") == 0) results[2] = bss_offset;
+        else if (strcmp(name, "envp") == 0) results[3] = bss_offset;
     }
 
-    // Generate the header
-    printf("/* Auto-generated by scripts/gen_crt_offsets.sh — DO NOT EDIT */\n");
+    // CRT_BSS_INITENV falls back to CRT_BSS_ENVP since __initenv is an import
+    if (results[0] == 0) results[0] = results[3];
+
+    // Generate header
+    printf("/* Auto-generated by scripts/gen_crt_offsets.sh \xe2\x80\x94 DO NOT EDIT */\n");
     printf("/* CRT BSS offsets extracted from current mingw-w64 toolchain */\n\n");
     printf("#ifndef MY_WINE_CRT_OFFSETS_GENERATED_H\n");
     printf("#define MY_WINE_CRT_OFFSETS_GENERATED_H\n\n");
     for (int t = 0; t < 4; t++) {
-        printf("#define %s          0x%03x   /* from current mingw-w64 */\n",
-               define_names[t], results[t]);
+        printf("#define %-20s 0x%03x   /* from current mingw-w64 */\n",
+               defines[t], results[t]);
     }
     printf("\n#endif /* MY_WINE_CRT_OFFSETS_GENERATED_H */\n");
 
