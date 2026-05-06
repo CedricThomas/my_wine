@@ -19,7 +19,9 @@ __thread uint32_t g_last_error = 0;
 WINE_STUB
 int lstrlenA(const char *lpString)
 {
-    return (int)__builtin_strlen(lpString);
+    const char *s = lpString;
+    while (*s) s++;
+    return (int)(s - lpString);
 }
 
 /* ── lstrcpyA ───────────────────────────────────────────────── */
