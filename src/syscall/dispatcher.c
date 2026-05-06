@@ -18,11 +18,8 @@
  * calling convention (RCX, RDX, R8, R9, ...) and dispatches
  * to the appropriate handler.
  *
- * Two dispatch entry points:
- *   - c_dispatch_syscall(nr): new path, reads from __wine_guest_regs
- *     directly (single-process model, no ucontext).
- *   - handle_syscall(nr, ctx): legacy path, reads from ucontext_t.
- *     Kept for backward compatibility with existing tests.
+ * Both entry points (c_dispatch_syscall and handle_syscall) delegate
+ * to a shared dispatcher_core() via a dispatch context global.
  */
 
 /* ── Guest stack reader ───────────────────────────────────────── */
@@ -114,10 +111,18 @@ static void format_err_unhandled_syscall(char *buf, uint64_t nr)
     buf[i] = '\0';
 }
 
+/* Unified dispatch context: set before calling dispatcher_core().
+ * - NULL     → use __wine_guest_regs (c_dispatch_syscall path)
+ * - non-NULL → use ctx->uc_mcontext.gregs (handle_syscall path) */
+static ucontext_t *g_dispatch_ctx = NULL;
+
 /*
  * read_guest_stack — read an argument from the guest stack.
  *
- * Uses __wine_guest_regs.rsp as the base pointer (single-process model).
+ * Checks g_dispatch_ctx to determine the RSP source:
+ *   - NULL     → __wine_guest_regs.rsp (c_dispatch_syscall path)
+ *   - non-NULL → ctx->uc_mcontext.gregs[REG_RSP] (handle_syscall path)
+ *
  * In the Windows x64 ABI, args 5+ are on the stack:
  *   [RSP+0]  = return address (index 0)
  *   [RSP+8]  = arg5 (index 1)
@@ -131,7 +136,12 @@ static void format_err_unhandled_syscall(char *buf, uint64_t nr)
 static inline uint64_t read_guest_stack(int index)
 {
     if (index < 0 || index > 15) return 0;
-    uintptr_t rsp = (uintptr_t)__wine_guest_regs.rsp;
+    uintptr_t rsp;
+    if (g_dispatch_ctx != NULL) {
+        rsp = (uintptr_t)g_dispatch_ctx->uc_mcontext.gregs[REG_RSP];
+    } else {
+        rsp = (uintptr_t)__wine_guest_regs.rsp;
+    }
 
     if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
         char buf[56];
@@ -145,47 +155,6 @@ static inline uint64_t read_guest_stack(int index)
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return 0;
     }
-    uint64_t *stack = (uint64_t *)(uintptr_t)rsp;
-    return stack[index];
-}
-
-/*
- * read_guest_stack_ctx — read an argument from the guest stack, using
- * the ucontext from the SIGSYS handler (legacy path for tests).
- *
- * In the Windows x64 ABI, args 5+ are placed on the stack after the
- * call instruction pushes the return address. At the point of the
- * syscall instruction:
- *   [RSP+0]   = return address
- *   [RSP+8]   = arg5  (index 1)
- *   [RSP+16]  = arg6  (index 2)
- *   [RSP+24]  = arg7  (index 3)
- *   ...
- *
- * The guest stack is mmap'd into our address space, so we can
- * dereference it directly. RSP is validated before dereference.
- */
-static inline uint64_t read_guest_stack_ctx(ucontext_t *ctx, int index)
-{
-    if (index < 0 || index > 15) return 0;
-    uintptr_t rsp = (uintptr_t)ctx->uc_mcontext.gregs[REG_RSP];
-
-    /* Validate RSP is in a reasonable user-space range */
-    if (rsp == 0 || rsp > 0xfffffffffffe0000UL) {
-        char buf[56];
-        format_err_invalid_rsp(buf, (uint64_t)rsp);
-        INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
-        return 0;
-    }
-
-    /* Additional guard: RSP must pass our guest-ptr validator */
-    if (!is_valid_guest_ptr((uint64_t)rsp, 8)) {
-        char buf[51];
-        format_err_rsp_check(buf, (uint64_t)rsp);
-        INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
-        return 0;
-    }
-
     uint64_t *stack = (uint64_t *)(uintptr_t)rsp;
     return stack[index];
 }
@@ -249,31 +218,32 @@ static int dispatch_ptr_inout(uint64_t guest_arg, uint64_t *ptr_val,
     return 0;
 }
 
+/* ── Shared dispatcher core ─────────────────────────────────────── */
+
 /*
- * dispatch_ptr_inout_ctx — read a guest-space pointer (inout),
- * set result to error status on failure.
+ * dispatcher_core — common switch body shared by both entry points.
  *
- * Used by handle_syscall (legacy path). Sets *result to the NTSTATUS error
- * and returns -1 so the caller can break out of the switch.
+ * Sets g_dispatch_ctx before the switch so that read_guest_stack()
+ * picks the correct RSP source.
  *
- * @guest_arg  the guest arg register value (pointer in guest space)
- * @ptr_val    output: value read from guest ptr
- * @ptr_out    output: host pointer for write-back
- * @name       for error messages
- * @result     output: set to error NTSTATUS on failure
+ * @nr    NT syscall number
+ * @arg1  RCX argument
+ * @arg2  RDX argument
+ * @arg3  R8 argument
+ * @arg4  R9 argument
  *
- * @return 0 on success, -1 on error.
+ * @return result to place in RAX
  */
-static int dispatch_ptr_inout_ctx(uint64_t guest_arg, uint64_t *ptr_val,
-                                   void **ptr_out, const char *name,
-                                   uint64_t *result)
+static uint64_t dispatcher_core(uint64_t nr, uint64_t arg1, uint64_t arg2,
+                                 uint64_t arg3, uint64_t arg4)
 {
-    int status = read_guest_ptr(guest_arg, ptr_val, ptr_out, name);
-    if (status != 0) {
-        *result = (uint64_t)status;
-        return -1;
-    }
-    return 0;
+    uint64_t result = 0;
+
+    #define DISPATCHER_C_BODY
+    #include "dispatcher_generated.c"
+    #undef DISPATCHER_C_BODY
+
+    return result;
 }
 
 /* ── C dispatcher (single-process, no ucontext) ────────────────── */
@@ -294,15 +264,10 @@ uint64_t c_dispatch_syscall(uint64_t nr)
     format_trace_syscall(trace_buf, nr);
     INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXX\n"));
 
-    uint64_t arg1 = __wine_guest_regs.rcx;
-    uint64_t arg2 = __wine_guest_regs.rdx;
-    uint64_t arg3 = __wine_guest_regs.r8;
-    uint64_t arg4 = __wine_guest_regs.r9;
-    uint64_t result = 0;
-
-    #define DISPATCHER_C_BODY
-    #include "dispatcher_generated.c"
-    #undef DISPATCHER_C_BODY
+    g_dispatch_ctx = NULL;
+    uint64_t result = dispatcher_core(nr, __wine_guest_regs.rcx, __wine_guest_regs.rdx,
+                                       __wine_guest_regs.r8, __wine_guest_regs.r9);
+    g_dispatch_ctx = NULL;  /* clear after use */
 
     __wine_guest_regs.rax = result;
     return result;
@@ -317,14 +282,8 @@ uint64_t c_dispatch_syscall(uint64_t nr)
  *                  e.g. 0x05 for NtCallbackReturn)
  * @ctx:            pointer to the ucontext_t captured by the thunk entry
  *
- * Decodes arguments from the x86_64 Windows calling convention:
- *   RCX (ARG1) = gregs[REG_RCX]
- *   RDX (ARG2) = gregs[REG_RDX]
- *   R8  (ARG3) = gregs[REG_R8]
- *   R9  (ARG4) = gregs[REG_R9]
- *
- * Writes the return value into gregs[REG_RAX].
- * On unhandled syscall, prints an error to stderr and returns STATUS_NOT_IMPLEMENTED.
+ * Delegates to dispatcher_core() with g_dispatch_ctx set so that
+ * read_guest_stack() uses ctx->uc_mcontext.gregs[REG_RSP].
  *
  * NOTE: This function is kept for backward compatibility with existing
  * tests that construct ucontext_t manually. The production path uses
@@ -332,26 +291,16 @@ uint64_t c_dispatch_syscall(uint64_t nr)
  */
 int handle_syscall(uint64_t syscall_number, ucontext_t *ctx)
 {
-    /* Trace every syscall invocation to stderr via direct write syscall */
     char trace_buf[32];
     format_trace_syscall(trace_buf, syscall_number);
     INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXX\n"));
 
-    /* syscall_number is the raw NT syscall number (passed directly
-     * by the thunks — no Wine offset).                               */
-    uint64_t nt_nr = syscall_number;
-
-    uint64_t arg1 = ctx->uc_mcontext.gregs[REG_RCX];
-    uint64_t arg2 = ctx->uc_mcontext.gregs[REG_RDX];
-    uint64_t arg3 = ctx->uc_mcontext.gregs[REG_R8];
-    uint64_t arg4 = ctx->uc_mcontext.gregs[REG_R9];
-    uint64_t result = 0;
-
-    #define DISPATCHER_LEGACY_BODY
-    #include "dispatcher_generated.c"
-    #undef DISPATCHER_LEGACY_BODY
+    g_dispatch_ctx = ctx;
+    uint64_t result = dispatcher_core(syscall_number,
+        ctx->uc_mcontext.gregs[REG_RCX], ctx->uc_mcontext.gregs[REG_RDX],
+        ctx->uc_mcontext.gregs[REG_R8], ctx->uc_mcontext.gregs[REG_R9]);
+    g_dispatch_ctx = NULL;  /* clear after use */
 
     ctx->uc_mcontext.gregs[REG_RAX] = (greg_t)result;
-
     return 0;
 }
