@@ -50,10 +50,10 @@ void *setup_teb_peb(void)
 
     /* SEH chain (gs:[0x00]) is set up by the child in entry.c */
 
-    /* Fix gs:[0x30] null deref crash at 0x1400011d4:
-     *   mov rax, gs:[0x30]  →  rax must be TEB
-     *   mov rsi, [rax+8]    →  teb[0x08] must be TEB (self-ref)
-     * so the loop that checks rsi==rax can exit. */
+    /* Fix gs:[0x30] null deref crash at PE entry point:
+     *   Guest code reads TEB from gs:[0x30], then follows
+     *   the self-referential pointer at teb[0x08] to verify.
+     *   Without this, the bootstrap loop (rsi==rax check) never exits. */
     *(void **)((uint8_t *)teb + TEB_TEB_SELF_REF) = teb;  // TEB self-referential
     *(void **)((uint8_t *)teb + TEB_THREAD_PTR) = teb;  // fake thread pointer (self-ref)
 

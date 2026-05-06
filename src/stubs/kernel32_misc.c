@@ -281,5 +281,10 @@ uint64_t __C_specific_handler(uint64_t exception_record, uint64_t establisher_fr
     return 1; /* ExceptionContinueSearch — skip this handler */
 }
 
+/*
+ * Test stubs for validating FORCE_PTR_RETURN macro behavior.
+ * Used to verify that pointer-returning stubs correctly force values
+ * into RAX for guest code consumption.
+ */
 WINE_STUB void *test_return_ptr(void) { return FORCE_PTR_RETURN((void *)0x12345678UL); }
 WINE_STUB void *test_return_ptr_arg(void *arg) { return FORCE_PTR_RETURN(arg ? arg : (void *)0xdeadbeefUL); }
