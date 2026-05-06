@@ -150,15 +150,20 @@ int main(int argc, char *argv[])
             fprintf(stderr, "WARNING: .data section not found\n");
         } else {
             uint64_t data_vaddr = data_sec->VirtualAddress;
-            size_t data_size = data_sec->Misc.VirtualSize;
-            if (data_size == 0) {
-                data_size = data_sec->SizeOfRawData;
+            /* image_mapper already copied SizeOfRawData bytes of initialized data.
+             * Only zero the padding tail after the raw data (VirtualSize - SizeOfRawData). */
+            if (data_sec->Misc.VirtualSize > data_sec->SizeOfRawData) {
+                size_t padding_off = data_sec->SizeOfRawData;
+                size_t padding_size = data_sec->Misc.VirtualSize - data_sec->SizeOfRawData;
+                memset((uint8_t *)base + data_vaddr + padding_off, 0, padding_size);
+                DEBUG(".data section: vaddr=0x%lx, raw=0x%lx, virt=0x%lx, zeroed %lu padding bytes",
+                       (unsigned long)data_vaddr, (unsigned long)data_sec->SizeOfRawData,
+                       (unsigned long)data_sec->Misc.VirtualSize, (unsigned long)padding_size);
+            } else {
+                DEBUG(".data section: vaddr=0x%lx, size=0x%lx, no padding to zero",
+                       (unsigned long)data_vaddr, (unsigned long)data_sec->Misc.VirtualSize);
             }
-            /* Zero the entire .data section */
-            memset((uint8_t *)base + data_vaddr, 0, data_size);
 
-            DEBUG(".data section: vaddr=0x%lx, size=0x%lx, zeroed",
-                   (unsigned long)data_vaddr, (unsigned long)data_size);
         }
     }
 
