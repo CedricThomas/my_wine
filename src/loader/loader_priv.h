@@ -76,6 +76,7 @@ int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
 void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
                        IMAGE_SECTION_HEADER *sections,
                        void *target_addr);
+int find_dll_path(const char *dll_name, char *path, size_t path_size);
 
 /* ── import_init.c ─────────────────────────────────────────── */
 
@@ -139,6 +140,7 @@ void cleanup_unix_stack(void);
 
 /* resolve_module_imports uses loaded_module_t (declared after include above) */
 int resolve_module_imports(loaded_module_t *mod, int depth);
+loaded_module_t *load_dll(const char *path, int depth);
 
 /* ── export_table.c ────────────────────────────────────────── */
 #include "export_table.h"  /* for EXPORT_CACHE type */

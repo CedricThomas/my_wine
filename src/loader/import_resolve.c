@@ -26,8 +26,8 @@
 #define MAX_IMPORT_DEPTH 8
 
 /* Forward declarations */
-static int find_dll_path(const char *dll_name, char *path, size_t path_size);
-static loaded_module_t *load_dll(const char *path, int depth);
+int find_dll_path(const char *dll_name, char *path, size_t path_size);
+loaded_module_t *load_dll(const char *path, int depth);
 
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
@@ -309,7 +309,7 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
 /* find_dll_path: search for a DLL in standard paths.
  * Search order: current dir, WINE_DLL_PATH env var.
  * Returns 1 if found (path filled), 0 if not found. */
-static int find_dll_path(const char *dll_name, char *path, size_t path_size)
+int find_dll_path(const char *dll_name, char *path, size_t path_size)
 {
     /* Try current directory */
     int ret = snprintf(path, path_size, "./%s", dll_name);
@@ -347,7 +347,7 @@ static int find_dll_path(const char *dll_name, char *path, size_t path_size)
  * Cleanup: if anything fails after add_module(), we undo all allocations
  * (LDR entry, export cache, module slot, mmap) to avoid resource leaks.
  */
-static loaded_module_t *load_dll(const char *path, int depth)
+loaded_module_t *load_dll(const char *path, int depth)
 {
     /* Map the DLL */
     IMAGE_NT_HEADERS64 nt_copy;
