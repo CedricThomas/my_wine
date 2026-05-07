@@ -1,6 +1,10 @@
 #ifndef MY_WINE_COMMON_H
 #define MY_WINE_COMMON_H
 
+#if !defined(__x86_64__)
+#error "my_wine only supports x86_64 architecture"
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 #include "debug.h"
