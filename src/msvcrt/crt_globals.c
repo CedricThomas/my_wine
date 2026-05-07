@@ -33,7 +33,12 @@ uint64_t native_startup_lock = 0;
 int native_startup_state = 0;
 int dowildcard_val = 0;
 int newmode_val = 0;
-/* CRT context — image base and .bss VA */
+/*
+ * SINGLE-THREAD ONLY: g_crt_ctx is not safe for concurrent access.
+ * Written during patch_crt_refptrs() and read in __getmainargs().
+ * No synchronization is applied — this creates a data race if another
+ * thread accesses CRT state while patching is in progress.
+ */
 crt_context_t g_crt_ctx = { 0 };
 
 /*

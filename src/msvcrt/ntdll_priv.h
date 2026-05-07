@@ -65,6 +65,12 @@ typedef struct {
     size_t size;
 } wine_view_t;
 
+/*
+ * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
+ * No mutex, spinlock, or atomic protection is applied.
+ * If multi-threaded guest code is supported in the future, each table
+ * must be protected (e.g., pthread_mutex_t) and all accessors updated.
+ */
 extern wine_view_t views[MAX_SECTIONS];
 extern int view_count;
 
