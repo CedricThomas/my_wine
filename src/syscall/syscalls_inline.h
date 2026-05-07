@@ -11,6 +11,14 @@
  *   INLINE_SYSCALL_EXIT(code);
  * Macros used as statements discard the result:
  *   INLINE_SYSCALL_WRITE_ERR(msg, len);
+ *
+ * ARCHITECTURE NOTE: x86_64 ONLY
+ *   - All inline assembly uses the x86_64-specific "syscall" instruction.
+ *   - Register constraints (rcx, r11, rdi, rsi, rdx, rax, r8, r9, r10)
+ *     are x86_64-specific.
+ *   - Syscall numbers (__NR_*) and the calling convention are Linux x86_64
+ *     specific.
+ *   - This will not compile or function on other architectures.
  */
 
 #ifndef MY_WINE_SYSCALLS_INLINE_H
