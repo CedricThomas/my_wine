@@ -1,8 +1,9 @@
 /*
- * loader_priv.h — Internal loader module declarations
+ * loader_priv.h — Internal loader module aggregator
  *
- * Shared globals, structs, and function declarations for the loader/
- * sub-modules. Not meant to be included outside the loader package.
+ * Aggregates all per-module loader headers. Each module's declarations
+ * are in its own header file; this header simply includes them all
+ * for convenience so any loader .c file can include one header.
  */
 
 #ifndef MY_WINE_LOADER_PRIV_H
@@ -11,166 +12,30 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include "include/pe.h"
 #include "include/pe_parser.h"
 
+/* ── Per-module headers ──────────────────────────────────────── */
 
-/* ── Global state shared across loader modules ─────────────── */
+#include "image_mapper.h"       /* g_image_base, g_host_gs_base, get/set_pe_path, map_image[_at] */
+#include "import_table.h"       /* import_entry_t, import_flat, import_table[], strategies */
+#include "ordinal_table.h"      /* ordinal_lookup */
+#include "import_resolve.h"     /* resolve_imports, find_text_thunk, find_dll_path */
+#include "import_init.h"        /* init_msvcrt_imports */
+#include "relocations.h"        /* apply_relocations */
+#include "teb_peb.h"            /* g_stack_base, g_stack_size, setup_teb_peb, setup_stack */
+#include "crash_handlers.h"     /* setup_signal_handlers, seh_crash_handler */
+#include "guest_setup.h"        /* run_guest_entry, setup_guest_and_run, cleanup_guest */
+#include "gs_base.h"            /* set_gs_base, get_gs_base */
+#include "module_list.h"        /* loaded_module_t, module registry, resolve_module_imports, load_dll */
+#include "export_table.h"       /* parse_export_table, lookup_export, reset_export_cache */
+#include "peb_ldr.h"            /* PEB_LDR_DATA, ldr_add/remove_module, g_peb_ldr */
 
-/* Set by image_mapper.c, read by teb_peb.c and import_resolve.c */
-extern void *g_image_base;
-extern uintptr_t g_host_gs_base;
-const char *get_pe_path(void);
-void set_pe_path(const char *path);
-
-/* Set by teb_peb.c (setup_stack), read by main.c */
-extern void *g_stack_base;
-
-/* Set by teb_peb.c (setup_stack), read by entry.c for cleanup */
-extern size_t g_stack_size;
-
-/* ── Import resolver types ─────────────────────────────────── */
-
-typedef struct {
-    const char *dll_name;
-    const char *name;
-    void *address;
-} import_entry_t;
-
-/* Flat import entry used in pass 2 thunk patching */
-struct import_flat {
-    uint64_t   ilt_value;      /* OriginalFirstThunk[i].AddressOfData */
-    uint64_t   resolved_addr;  /* FirstThunk[i].AddressOfData (from pass 1) */
-    const char *dll_name;
-    const char *func_name;
-};
-
-/* Name→address table for NT, kernel32 and msvcrt functions
- * Defined in import_table.c */
-extern import_entry_t import_table[];
-extern size_t import_table_count;
-
-/* ── import_table.c ────────────────────────────────────────── */
-
-void set_import(const char *name, void *address);
-void init_import_table(void);
-int import_cmp_by_name(const void *key, const void *elem);
-int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
-                            struct import_flat flat[]);
-bool strategy_resolved_overlap(uint64_t current_val,
-                               struct import_flat *flat, int num_flat);
-bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
-                              uint64_t target,
-                              struct import_flat *flat, int num_flat);
-bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
-                               uint64_t current_val,
-                               uint64_t import_dir_va, uint64_t import_dir_end,
-                               struct import_flat *flat, int num_flat);
-bool strategy_positional(uint64_t *target_ptr, uint64_t target,
-                         int thunk_idx,
-                         struct import_flat *flat, int num_flat);
-
-/* ── ordinal_table.c ─────────────────────────────────────── */
-
-const char *ordinal_lookup(const char *dll_name, uint16_t ordinal);
-
-/* ── import_resolve.c ─────────────────────────────────────── */
-
-int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
-void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
-                       IMAGE_SECTION_HEADER *sections,
-                       void *target_addr);
-int find_dll_path(const char *dll_name, char *path, size_t path_size);
-
-/* ── import_init.c ─────────────────────────────────────────── */
-
-void init_msvcrt_imports(void);
-
-/* ── image_mapper.c ────────────────────────────────────────── */
-
-/**
- * Map a PE file at the preferred image base (uses PE's ImageBase).
- *
- * Opens the file, maps read-only, parses headers, maps the image
- * memory, copies sections, sets per-section protections, cleans up.
- *
- * @param  path  path to the PE file
- * @param  out_dos   (optional) receives parsed DOS header
- * @param  out_nt    (optional) receives parsed NT headers
- * @param  out_nt_size (optional) receives size of parsed NT headers struct
- * @return  image base address (virtual), or NULL on failure
- */
-void *map_image(const char *path,
-                IMAGE_DOS_HEADER *out_dos,
-                IMAGE_NT_HEADERS64 *out_nt,
-                size_t *out_nt_size);
-
-/**
- * Map a PE file at a specific base address.
- *
- * When desired_base is non-zero, maps at that address instead of the
- * PE's preferred ImageBase.  Used by load_dll() to keep DLLs below 4GB
- * and avoid the GCC ms_abi 32-bit return truncation bug.
- *
- * @param  path         path to the PE file
- * @param  out_dos      (optional) receives parsed DOS header
- * @param  out_nt       (optional) receives parsed NT headers
- * @param  out_nt_size  (optional) receives size of parsed NT headers struct
- * @param  desired_base forced image base (0 = use PE's preferred ImageBase)
- * @return  image base address (virtual), or NULL on failure
- */
-void *map_image_at(const char *path,
-                   IMAGE_DOS_HEADER *out_dos,
-                   IMAGE_NT_HEADERS64 *out_nt,
-                   size_t *out_nt_size,
-                   uintptr_t desired_base);
-
-/* ── relocations.c ─────────────────────────────────────────── */
-
-int apply_relocations(void *base, IMAGE_NT_HEADERS64 *nt);
-
-/* ── teb_peb.c ─────────────────────────────────────────────── */
-
-void *setup_teb_peb(void);
-void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
-
-/* ── crash_handlers.c ─────────────────────────────────────── */
-
-void setup_signal_handlers(void);
-__attribute__((ms_abi)) void seh_crash_handler(void *, void *, void *, void *);
-
-/* ── entry.c / guest_setup.c ─────────────────────────────── */
-
-__attribute__((noreturn)) void run_guest_entry(uint64_t entry_abs, void *image_base, void *stack_top,
-                                                void *teb, char **guest_argv,
-                                                char **guest_envp);
-__attribute__((noreturn)) void setup_guest_and_run(uint64_t entry_abs, void *image_base, void *stack_top,
-                                                    void *teb, char **guest_argv,
-                                                    char **guest_envp);
-void cleanup_guest(void *teb, void *stack_base);
-
-/* ── gs_base.c ─────────────────────────────────────────────── */
-
-int set_gs_base(void *addr);
-void *get_gs_base(void);
-
-/* ── dispatcher_entry.c ─────────────────────────────────────── */
-
-int setup_unix_stack(void);
-void cleanup_unix_stack(void);
-
-/* ── module_list.c ─────────────────────────────────────────── */
-#include "module_list.h"  /* for loaded_module_t type */
-
-/* resolve_module_imports uses loaded_module_t (declared after include above) */
+/* ── Cross-cutting declarations (moved to dll_loader.h in Task 2) ── */
 int resolve_module_imports(loaded_module_t *mod, int depth);
 loaded_module_t *load_dll(const char *path, int depth);
 
-/* ── export_table.c ────────────────────────────────────────── */
-#include "export_table.h"  /* for EXPORT_CACHE type */
-
-/* ── peb_ldr.c ─────────────────────────────────────────────── */
-/* Full definitions in peb_ldr.h */
-#include "peb_ldr.h"
+/* ── Unix stack setup (from dispatcher_entry.c) ── */
+int setup_unix_stack(void);
+void cleanup_unix_stack(void);
 
 #endif /* MY_WINE_LOADER_PRIV_H */
