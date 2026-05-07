@@ -8,8 +8,9 @@
 ## Findings
 
 ### [FINDING D1] — x86_64-only assumption (no architecture abstraction)
-- **Status**: ❌ OPEN
+- **Status**: ✅ FIXED
 - **Severity**: HIGH
+- **Fixed**: Task 1 — Added `#error` guard in `include/common.h` for non-x86_64; added documentation comments to `include/nt_constants.h`, `src/syscall/syscalls_inline.h`, `src/syscall/thunk_gen.c`
 - **Files**: include/nt_constants.h (all TEB/PEB offsets), src/syscall/syscalls_inline.h (inline asm syscalls), src/syscall/thunk_gen.c (x86 opcodes), src/loader/gs_base.c (arch-specific GS base), include/pe.h (IMAGE_FILE_MACHINE_AMD64 check)
 - **Description**: The entire codebase assumes x86_64:
   - TEB/PEB offsets are x86_64-specific (different on ARM64)
@@ -25,8 +26,9 @@
 ---
 
 ### [FINDING D2] — Syscall numbers tied to specific Windows versions
-- **Status**: ❌ OPEN
+- **Status**: ✅ FIXED
 - **Severity**: HIGH
+- **Fixed**: Task 2 — Added version documentation comments to `nt_syscalls.def`, `gen_dispatcher.py`, `include/nt_constants.h`
 - **Files**: include/nt_constants.h (lines 1–46), src/loader/ordinal_table.c (lines 13–176)
 - **Description**: NT syscall numbers (e.g., NtAllocateVirtualMemory=0x18, NtClose=0x0F) are specific to a particular Windows version. The comments say "Windows 10/11 x64" but different Windows versions (8.1, Server 2012, 11 24H2) have different syscall numbers. The ordinal table is also version-specific.
 
@@ -52,8 +54,9 @@
 ---
 
 ### [FINDING D4] — CRT offset discovery tied to specific mingw-w64 layout
-- **Status**: ❌ OPEN
+- **Status**: ✅ FIXED
 - **Severity**: MEDIUM
+- **Fixed**: Task 3 — Added mingw-w64 limitation documentation to `src/msvcrt/crt_offset_discovery.c` and `gen_crt_offsets.sh`
 - **Files**: src/msvcrt/crt_offset_discovery.c (full file)
 - **Description**: The CRT offset discovery mechanism assumes a specific mingw-w64 CRT layout. It looks for symbols like _argc, __argc, _environ, __envp in .bss at specific offsets. The text-scanning fallback (mov rip+disp pattern matching) is also specific to how mingw-w64 generates .refptr references.
 
@@ -64,8 +67,9 @@
 ---
 
 ### [FINDING D5] — No PE32 (32-bit) support
-- **Status**: ❌ OPEN
+- **Status**: ✅ FIXED
 - **Severity**: MEDIUM
+- **Fixed**: Task 4 — Added explicit PE32 (0x10B) check in `src/pe_headers.c` with clear error message "PE32 (32-bit) not supported — only PE32+ (64-bit) is supported"
 - **Files**: src/pe_headers.c:70
 - **Description**: parse_nt_headers() only accepts IMAGE_NT_OPTIONAL_HDR64_MAGIC (0x20B). PE32 binaries (0x10B magic) are rejected. A 32-bit Windows executable will fail to load with "Invalid NT headers".
 
@@ -81,6 +85,7 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
 
 ### Task 1: Add compile-time architecture guard and documentation
 - **Related Finding(s)**: D1
+- **Status**: ✅ DONE
 - **Impact**: Makes the x86_64 limitation explicit at compile time; prevents confusing errors when building on unsupported architectures
 - **Files to create**: (none)
 - **Files to modify**:
@@ -99,6 +104,7 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
 
 ### Task 2: Document syscall version assumptions and improve nt_syscalls.def
 - **Related Finding(s)**: D2
+- **Status**: ✅ DONE
 - **Impact**: Makes the Windows version dependency explicit; provides a path to regenerate per-version
 - **Files to create**: (none)
 - **Files to modify**:
@@ -116,6 +122,7 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
 
 ### Task 3: Document mingw-w64 limitation for CRT discovery
 - **Related Finding(s)**: D4
+- **Status**: ✅ DONE
 - **Impact**: Prevents confusion when the loader fails with MSVC-compiled PE files
 - **Files to create**: (none)
 - **Files to modify**:
@@ -132,6 +139,7 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
 
 ### Task 4: Improve PE32 rejection error message
 - **Related Finding(s)**: D5
+- **Status**: ✅ DONE
 - **Impact**: Clearer error message for users trying to load 32-bit PE files
 - **Files to modify**:
   - src/pe_headers.c — check for PE32 magic (0x10B) and return a distinct error
@@ -146,3 +154,11 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
   2. Compile and verify
 - **Dependencies**: none
 - **Verification**: Build succeeds; 32-bit PE produces a clear error message
+
+---
+
+## Summary
+
+- **Total findings**: 5
+- **Fixed**: 4/5 (D1, D2, D4, D5)
+- **Open**: 1/5 (D3 — Page size hardcoded)
