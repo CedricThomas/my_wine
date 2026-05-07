@@ -18,7 +18,7 @@
  *     are x86_64-specific.
  *   - Syscall numbers (__NR_*) and the calling convention are Linux x86_64
  *     specific.
- *   - This will not compile or function on other architectures.
+ *   - This will not compile or work on other architectures.
  */
 
 #ifndef MY_WINE_SYSCALLS_INLINE_H
@@ -27,6 +27,7 @@
 #include <asm/unistd_64.h>
 #include <stddef.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 /* ── Write to stderr (fd 2) ─────────────────────────────────── */
 
@@ -63,7 +64,7 @@
         _synct_rax; \
     })
 
-/* ── sys_exit (noreturn) ────────────────────────────────────── */
+/* ── sys_exit (do-while) ────────────────────────────────────── */
 
 #define INLINE_SYSCALL_EXIT(code) \
     do { \
@@ -75,7 +76,7 @@
         __builtin_unreachable(); \
     } while (0)
 
-/* ── sys_exit_group (noreturn) ──────────────────────────────── */
+/* ── sys_exit_group (do-while) ──────────────────────────────── */
 
 #define INLINE_SYSCALL_EXIT_GROUP(code) \
     do { \
@@ -111,7 +112,7 @@
         _synct_rax; \
     })
 
-/* ── sys_mmap ────────────────────────────────────────────────── */
+/* ── sys_mmap ───────────────────────────────────────────────── */
 
 #define INLINE_SYSCALL_MMAP(addr, len, prot, flags, fd, offset) \
     ({ \
@@ -175,7 +176,7 @@
         _synct_rax; \
     })
 
-/* ── sys_clock_gettime ────────────────────────────────────────── */
+/* ── sys_clock_gettime ──────────────────────────────────────── */
 
 #define INLINE_SYSCALL_CLOCK_GETTIME(clk_id, tp) \
     ({ \
