@@ -12,14 +12,12 @@
  * ARCHITECTURE NOTE: x86_64 ONLY
  * =====================================================================
  *
- * All TEB field offsets (TEB_SEH_CHAIN, TEB_PEB_PTR, TEB_STACK_BASE,
- * TEB_STACK_LIMIT, TEB_FIBER_DATA, TEB_TLS_ARRAY) are specific to
- * x86_64 Windows (PE32+ / AMD64).
+ * All TEB field offsets (TEB_SEH_CHAIN, TEB_TEB_SELF_REF,
+ * TEB_THREAD_PTR, TEB_PEB_PTR) are specific to x86_64 Windows
+ * (PE32+ / AMD64).
  *
- * All PEB field offsets (PEB_IMAGE_BASE, PEB_LDR, PEB_LDR_DATA,
- * PEB_LDR_INACTIVE, PEB_LDR_ENTRY_LIST, PEB_LDR_ENTRY_INLOADORDER,
- * PEB_LDR_ENTRY_BASE, PEB_LDR_ENTRY_SIZE) are specific to
- * x86_64 Windows.
+ * All PEB field offsets (PEB_BEING_DEBUGGED, PEB_IMAGE_BASE,
+ * PEB_PROCESS_HEAP, PEB_LDR) are specific to x86_64 Windows.
  *
  * These offsets will differ on x86_32, ARM64, and other architectures.
  * This code will not work on non-x86_64 architectures without updating

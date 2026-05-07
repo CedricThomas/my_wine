@@ -31,6 +31,13 @@
  * return goes to `pop rdi` instead of having to skip past the thunk.
  *
  * All thunks live in a single mmap'd executable blob.
+ *
+ * ARCHITECTURE NOTE: This generated code is x86_64-only.
+ *   - All opcodes (push rdi, mov rdi imm32, mov rax imm64, call rax,
+ *     pop rdi, ret) are x86_64 machine code instructions.
+ *   - The 23-byte thunk layout is specific to x86_64 instruction encoding.
+ *   - REX prefixes (0x48, 0x41) used are x86_64-specific.
+ *   - This generated code will only execute on x86_64 CPUs.
  */
 
 #define THUNK_SIZE 23        /* 2+7+10+2+1+1 bytes: push+mov+rax+call+pop+ret */

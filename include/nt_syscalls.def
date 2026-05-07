@@ -10,6 +10,20 @@
 #
 # call line: references locals as &h_name (wb), h_name (stack/ro value),
 #   argN (direct register), STACK(N) (inline stack read), raw (first ptr(ro) from reg)
+#
+# ──────────────────────────────────────────────────────────────────
+# Windows version / architecture note
+#
+# These syscall numbers are for Windows 10+ (specifically tested on
+# Windows 10 64-bit / Win10+ x86_64).
+#
+# Syscall numbers may differ between Windows versions (Win7, Win8,
+# Win10, Win11).  The numbers here are for the x86_64 syscall
+# interface specifically (native syscall numbers, not sysenter).
+#
+# To update for a different Windows version, replace the syscall
+# numbers in this file and regenerate with gen_dispatcher.py.
+# ──────────────────────────────────────────────────────────────────
 
 0x05  NtCallbackReturn
 handler: handler_NtCallbackReturn
