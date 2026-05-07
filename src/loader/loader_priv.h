@@ -29,10 +29,7 @@
 #include "module_list.h"        /* loaded_module_t, module registry, resolve_module_imports, load_dll */
 #include "export_table.h"       /* parse_export_table, lookup_export, reset_export_cache */
 #include "peb_ldr.h"            /* PEB_LDR_DATA, ldr_add/remove_module, g_peb_ldr */
-
-/* ── Cross-cutting declarations (moved to dll_loader.h in Task 2) ── */
-int resolve_module_imports(loaded_module_t *mod, int depth);
-loaded_module_t *load_dll(const char *path, int depth);
+#include "dll_loader.h"          /* resolve_module_imports, load_dll */
 
 /* ── Unix stack setup (from dispatcher_entry.c) ── */
 int setup_unix_stack(void);
