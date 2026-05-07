@@ -30,7 +30,7 @@
   **Current state**: Now emits a warning via `INLINE_SYSCALL_WRITE(2, warn_msg, ...)` to stderr, and sets `g_alt_stack_available = 0` flag for downstream crash handlers.
 
 - **Remaining improvement**: ~~Consider making this a hard error if the alternate stack cannot be allocated.~~
-  **Evaluated (2026-05-07): No change. The existing warning+flag approach in crash_handlers.c (lines 105-114) is the correct tradeoff. ~8KB mmap failure means critical OOM where even a hard abort cannot be guaranteed to succeed. The crash handler still functions on the guest stack with syscall-safe diagnostics and exit. The project is single-threaded, eliminating concurrent stack corruption risk. Closing.
+  **Evaluated (2026-05-07): No change. The existing warning+flag approach in crash_handlers.c (lines 127-146) is the correct tradeoff. ~64KB mmap failure means critical OOM where even a hard abort cannot be guaranteed to succeed. The crash handler still functions on the guest stack with syscall-safe diagnostics and exit. The project is single-threaded, eliminating concurrent stack corruption risk. Closing.
 
 ---
 

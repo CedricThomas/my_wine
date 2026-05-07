@@ -128,7 +128,7 @@ void setup_signal_handlers(void)
                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     if (sigstack_mem == MAP_FAILED) {
         /*
-         * mmap for SIG_STACK_SIZE (~8KB) failing means the system is critically
+         * mmap for SIG_STACK_SIZE (~64KB) failing means the system is critically
          * out of memory. At that point, even a hard abort via syscall cannot be
          * guaranteed to succeed. We choose graceful degradation over hard error:
          *   - The crash handler still runs (on the guest stack) and can emit
