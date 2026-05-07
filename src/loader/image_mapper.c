@@ -77,7 +77,14 @@ void *map_image_at(const char *path,
     }
 
     IMAGE_NT_HEADERS64 nt;
-    if (parse_nt_headers(file_base, file_size, &dos, &nt) != 0) {
+    int parse_result = parse_nt_headers(file_base, file_size, &dos, &nt);
+    if (parse_result == -2) {
+        /* PE32 (32-bit) detected — error already printed by parse_nt_headers */
+        INLINE_SYSCALL_MUNMAP(file_base, file_size);
+        INLINE_SYSCALL_CLOSE(fd);
+        return NULL;
+    }
+    if (parse_result != 0) {
         DEBUG("Invalid NT headers");
         INLINE_SYSCALL_MUNMAP(file_base, file_size);
         INLINE_SYSCALL_CLOSE(fd);

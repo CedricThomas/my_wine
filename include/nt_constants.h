@@ -26,6 +26,13 @@
  */
 
 /* ── NT syscall numbers (x86_64) ──────────────────────────────── */
+/*
+ * Version: Windows 10+ (specifically tested on Windows 10 64-bit).
+ *
+ * Syscall numbers are NOT stable across Windows versions — they differ
+ * between Win7, Win8.1, Win10, and Win11.  These numbers must be updated
+ * if the target Windows version changes.
+ */
 
 #define NT_SYSCALL_CALLBACK_RETURN       0x05  /* NtCallbackReturn */
 #define NT_SYSCALL_QUERY_INFO_PROCESS    0x07  /* NtQueryInformationProcess */

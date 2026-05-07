@@ -67,6 +67,10 @@ int parse_nt_headers(const void *base, size_t file_size,
         return -1;
 
     /* Validate optional header magic (PE32+) */
+    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        fprintf(stderr, "wine: error: 32-bit PE (PE32) binary detected — only PE32+ (x86_64) is supported\n");
+        return -2;
+    }
     if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
         return -1;
 

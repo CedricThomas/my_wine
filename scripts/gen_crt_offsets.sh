@@ -1,6 +1,23 @@
 #!/bin/bash
 # gen_crt_offsets.sh — Generate CRT offset header from current mingw-w64 toolchain
 # Usage: ./scripts/gen_crt_offsets.sh
+#
+# =====================================================================
+# TOOLCHAIN NOTE: mingw-w64 ONLY
+# =====================================================================
+#
+# This script requires the mingw-w64 cross-compiler toolchain
+# (x86_64-w64-mingw32-gcc) to be available.  It compiles a minimal test
+# program with mingw-w64 to discover CRT BSS offsets (__argc, __argv,
+# __initenv), then parses the resulting PE/COFF symbol table to extract
+# the offsets.
+#
+# The offsets are specific to the mingw-w64 CRT layout.  They will NOT
+# work with other toolchains (e.g., MSVC, Clang/Windows, Cygwin) or
+# other architectures.
+#
+# Requires Docker with the my_wine-samples image containing mingw-w64.
+# =====================================================================
 
 set -e
 

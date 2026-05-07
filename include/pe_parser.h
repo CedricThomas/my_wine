@@ -22,7 +22,8 @@ int parse_dos_header(const void *base, size_t file_size,
 
 /*
  * Parse the NT headers (PE signature + file header + optional header).
- * Returns 0 on success, -1 on error.
+ * Returns 0 on success, -1 on error, -2 if the binary is PE32 (32-bit)
+ * which is not supported (only PE32+ / x86_64 is supported).
  */
 int parse_nt_headers(const void *base, size_t file_size,
                      const IMAGE_DOS_HEADER *dos_header,

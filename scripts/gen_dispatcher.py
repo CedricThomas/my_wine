@@ -9,6 +9,13 @@ Usage:
   python3 scripts/gen_dispatcher.py               # verify mode
   python3 scripts/gen_dispatcher.py --generate     # write dispatcher_generated.c
   python3 scripts/gen_dispatcher.py --help
+
+Version note:
+  The syscall numbers in nt_syscalls.def are version-specific (Windows 10+
+  x86_64).  When regenerating for a different Windows version, ensure the
+  syscall numbers in nt_syscalls.def are updated to match the target version
+  first.  This generator does NOT validate syscall numbers — it assumes
+  nt_syscalls.def contains correct values for the target Windows version.
 """
 
 import sys

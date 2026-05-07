@@ -3,6 +3,18 @@
  *
  * Discover CRT global variable offsets (argc/argv/envp) via COFF symbol
  * table lookup or .text instruction scanning.
+ *
+ * =====================================================================
+ * TOOLCHAIN NOTE: mingw-w64 ONLY
+ * =====================================================================
+ *
+ * This code assumes the target PE was compiled with mingw-w64 (GNU C
+ * runtime for Windows).  The CRT BSS layout (__argc, __argv, __initenv)
+ * and the .refptr instruction patterns it scans for are specific to
+ * mingw-w64.  PEs built with MSVC, LLVM/Clang (clang-cl), or other
+ * toolchains will have different CRT layouts and this discovery will
+ * fail or produce incorrect offsets.
+ * =====================================================================
  */
 
 #define _GNU_SOURCE
