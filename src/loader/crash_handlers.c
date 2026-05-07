@@ -127,6 +127,20 @@ void setup_signal_handlers(void)
     void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     if (sigstack_mem == MAP_FAILED) {
+        /*
+         * mmap for SIG_STACK_SIZE (~8KB) failing means the system is critically
+         * out of memory. At that point, even a hard abort via syscall cannot be
+         * guaranteed to succeed. We choose graceful degradation over hard error:
+         *   - The crash handler still runs (on the guest stack) and can emit
+         *     diagnostics + exit via direct syscall.
+         *   - The g_alt_stack_available flag ensures crash_handler logs a warning
+         *     so the operator knows the dump may be unreliable.
+         *   - The project is single-threaded, so no concurrent stack corruption risk.
+         *   - A catastrophic OOM during init means a crash will likely fail anyway,
+         *     so hard-stop would add no value over the degraded path.
+         *
+         * Verdict: warning + flag is the correct tradeoff for resilience.
+         */
         g_alt_stack_available = 0;
         const char warn_msg[] = "WARNING: alt signal stack mmap failed — crash handlers will run on guest stack (crash may be unrecoverable)\n";
         INLINE_SYSCALL_WRITE(2, warn_msg, sizeof(warn_msg) - 1);
