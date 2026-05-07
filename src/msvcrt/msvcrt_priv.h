@@ -167,12 +167,14 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
                        IMAGE_NT_HEADERS64 *nt,
                        IMAGE_SECTION_HEADER *sections);
 void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
-                        const char *name, uint64_t image_size);
+                        const char *name, uint64_t image_size,
+                        uint64_t ctx_image_base, uint64_t ctx_bss_vaddr);
 
 /* ── CRT offset discovery (defined in crt_offset_discovery.c) ── */
 void discover_crt_offsets(const char *file_path,
                           IMAGE_NT_HEADERS64 *nt,
-                          IMAGE_SECTION_HEADER *sections);
+                          IMAGE_SECTION_HEADER *sections,
+                          crt_context_t *ctx);
 uint64_t find_symbol_rva_from_file(const char *file_path,
                                    IMAGE_NT_HEADERS64 *nt,
                                    IMAGE_SECTION_HEADER *sections,
@@ -180,6 +182,6 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
 void scan_text_for_refptrs(void *image_base,
                            IMAGE_NT_HEADERS64 *nt,
                            IMAGE_SECTION_HEADER *sections,
-                           uint64_t image_size);
+                           uint64_t image_size, void *initenv_stub);
 
 #endif /* MSVCRT_PRIV_H */

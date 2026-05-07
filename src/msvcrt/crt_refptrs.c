@@ -45,6 +45,8 @@ struct refptr_patch_arg {
     void *target;
     const char *name;
     uint64_t rva;
+    uint64_t image_base;   /* image base for reentrant context */
+    uint64_t bss_vaddr;    /* .bss VA for reentrant context */
 };
 
 static void refptr_patch_cb(void *arg)
@@ -57,7 +59,8 @@ static void refptr_patch_cb(void *arg)
 }
 
 void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
-                               const char *name, uint64_t image_size)
+                               const char *name, uint64_t image_size,
+                               uint64_t ctx_image_base, uint64_t ctx_bss_vaddr)
 {
     if (rva >= image_size) {
         return;
@@ -71,6 +74,8 @@ void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
         .target = target,
         .name = name,
         .rva = rva,
+        .image_base = ctx_image_base,
+        .bss_vaddr = ctx_bss_vaddr,
     };
 
     if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &arg, PROT_READ) != 0) {
@@ -83,21 +88,29 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 {
     if (!image_base || !nt || !sections) return;
 
-    g_crt_ctx.image_base = (uint64_t)(uintptr_t)image_base;
+    /* Build local context — avoids reading g_crt_ctx during patching */
+    crt_context_t ctx = {
+        .image_base = (uint64_t)(uintptr_t)image_base,
+        .bss_vaddr = 0,
+        .argc_bss_offset = 0,
+        .argv_bss_offset = 0,
+        .envp_bss_offset = 0,
+    };
 
     IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    void *initenv_stub = NULL;
     if (bss_sec) {
-        g_crt_ctx.bss_vaddr = bss_sec->VirtualAddress;
-        __imp___initenv_stub = (void **)((char *)image_base +
-                                          g_crt_ctx.bss_vaddr + CRT_BSS_INITENV);
-        DEBUG("patch_crt_refptrs: .bss at VA=0x%lx, __imp___initenv_stub=%p",
-                (unsigned long)g_crt_ctx.bss_vaddr, (void *)__imp___initenv_stub);
-    } else {
-        g_crt_ctx.bss_vaddr = 0;
+        ctx.bss_vaddr = bss_sec->VirtualAddress;
+        initenv_stub = (void **)((char *)image_base + ctx.bss_vaddr + CRT_BSS_INITENV);
+        DEBUG("patch_crt_refptrs: .bss at VA=0x%lx, initenv_stub=%p",
+                (unsigned long)ctx.bss_vaddr, (void *)initenv_stub);
     }
 
     /* Discover CRT offsets (argc/argv/envp) from COFF symbol table */
-    discover_crt_offsets(file_path, nt, sections);
+    discover_crt_offsets(file_path, nt, sections, &ctx);
+
+    /* Sync local context into g_crt_ctx for later runtime use */
+    g_crt_ctx = ctx;
 
     /* Set the 'initialized' flag to 1 to skip CRT startup (__do_global_ctors).
      * This is at a fixed offset within .bss (0x30 from .bss start) in mingw-w64 builds.
@@ -105,7 +118,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
      * unpatched __DTOR_LIST__ refptrs or other CRT issues. */
     if (bss_sec) {
         uint32_t *initialized_ptr = (uint32_t *)((char *)image_base +
-                                                  g_crt_ctx.bss_vaddr + CRT_BSS_INITIALIZED);
+                                                  ctx.bss_vaddr + CRT_BSS_INITIALIZED);
         *initialized_ptr = 1;
         DEBUG("patch_crt_refptrs: set initialized=1 at %p", (void *)initialized_ptr);
     }
@@ -128,7 +141,8 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
             if (!patched_any)
                 DEBUG("patch_crt_refptrs: using COFF symbol table");
             apply_refptr_patch(image_base, target_rva, map->target,
-                               map->name, image_size);
+                               map->name, image_size,
+                               ctx.image_base, ctx.bss_vaddr);
             patched_any = 1;
             if (strstr(map->name, "initenv")) patched_initenv = 1;
         }
@@ -180,7 +194,8 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
                             continue;
 
                         apply_refptr_patch(image_base, sec_vaddr + off,
-                                           map->target, map->name, image_size);
+                                           map->target, map->name, image_size,
+                                           ctx.image_base, ctx.bss_vaddr);
                         patched[mi] = true;
                         next_unpatched = (int)(mi + 1);
                         patched_any = 1;
@@ -195,6 +210,6 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
     /* ── Always supplement with .text scanning ── */
     if (!patched_initenv) {
         DEBUG("patch_crt_refptrs: __imp___initenv not in COFF, scanning .text");
-        scan_text_for_refptrs(image_base, nt, sections, image_size);
+        scan_text_for_refptrs(image_base, nt, sections, image_size, initenv_stub);
     }
 }

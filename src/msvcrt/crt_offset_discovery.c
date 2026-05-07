@@ -39,7 +39,7 @@
  */
 void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
                            IMAGE_SECTION_HEADER *sections,
-                           uint64_t image_size)
+                           uint64_t image_size, void *initenv_stub)
 {
     IMAGE_SECTION_HEADER *text_sec = find_section_by_name(nt, sections, ".text");
     if (!text_sec) {
@@ -123,11 +123,12 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
 
         /* Patch refptr targets that point to PE-internal addresses
          * (they likely point to IAT entries or other host-addr data) */
-        if (__imp___initenv_stub != NULL) {
-            /* Patch to our stub — the CRT will deref to get .bss+0x18 */
+        if (initenv_stub != NULL) {
+            /* Patch to the passed stub — the CRT will deref to get .bss+0x18 */
             apply_refptr_patch(image_base, target_rva,
-                               (void *)&__imp___initenv_stub,
-                               "__imp___initenv (text-scan)", image_size);
+                               initenv_stub,
+                               "__imp___initenv (text-scan)", image_size,
+                               (uint64_t)(uintptr_t)image_base, 0);
             found = 1;
         }
     }
@@ -356,16 +357,18 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
 
 /*
  * Discover CRT global variable offsets (argc/argv/envp) from COFF symbol table.
- * Sets g_crt_ctx.argc_bss_offset, g_crt_ctx.argv_bss_offset, g_crt_ctx.envp_bss_offset.
+ * Sets ctx->argc_bss_offset, ctx->argv_bss_offset, ctx->envp_bss_offset.
  * Falls back to hardcoded offsets if COFF lookup is incomplete.
+ * Accepts ctx parameter instead of reading g_crt_ctx directly for reentrancy.
  */
 void discover_crt_offsets(const char *file_path,
                           IMAGE_NT_HEADERS64 *nt,
-                          IMAGE_SECTION_HEADER *sections)
+                          IMAGE_SECTION_HEADER *sections,
+                          crt_context_t *ctx)
 {
-    g_crt_ctx.argc_bss_offset = 0;
-    g_crt_ctx.argv_bss_offset = 0;
-    g_crt_ctx.envp_bss_offset = 0;
+    ctx->argc_bss_offset = 0;
+    ctx->argv_bss_offset = 0;
+    ctx->envp_bss_offset = 0;
 
     const char *crt_sym_names[][2] = {
         { "_argc", "__argc" },
@@ -373,16 +376,16 @@ void discover_crt_offsets(const char *file_path,
         { "_environ", "__envp" },
     };
     uint32_t *offset_targets[3] = {
-        &g_crt_ctx.argc_bss_offset,
-        &g_crt_ctx.argv_bss_offset,
-        &g_crt_ctx.envp_bss_offset,
+        &ctx->argc_bss_offset,
+        &ctx->argv_bss_offset,
+        &ctx->envp_bss_offset,
     };
 
     for (int ci = 0; ci < 3; ci++) {
         for (int ni = 0; ni < 2; ni++) {
             uint64_t rva = find_symbol_rva_from_file(file_path, nt, sections, crt_sym_names[ci][ni]);
             if (rva != 0) {
-                uint32_t off = (uint32_t)(rva - g_crt_ctx.bss_vaddr);
+                uint32_t off = (uint32_t)(rva - ctx->bss_vaddr);
                 *offset_targets[ci] = off;
                 break;
             }
@@ -390,20 +393,20 @@ void discover_crt_offsets(const char *file_path,
     }
 
     /* Fallback: if COFF lookup failed, use generated or hardcoded offsets */
-    if (g_crt_ctx.argc_bss_offset == 0 || g_crt_ctx.argv_bss_offset == 0 || g_crt_ctx.envp_bss_offset == 0) {
+    if (ctx->argc_bss_offset == 0 || ctx->argv_bss_offset == 0 || ctx->envp_bss_offset == 0) {
 #ifdef HAVE_GENERATED_CRT_OFFSETS
         DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, using generated CRT offsets");
-        if (g_crt_ctx.argc_bss_offset == 0) g_crt_ctx.argc_bss_offset = CRT_BSS_ARGC;
-        if (g_crt_ctx.argv_bss_offset == 0) g_crt_ctx.argv_bss_offset = CRT_BSS_ARGV;
-        if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = CRT_BSS_INITENV;
+        if (ctx->argc_bss_offset == 0) ctx->argc_bss_offset = CRT_BSS_ARGC;
+        if (ctx->argv_bss_offset == 0) ctx->argv_bss_offset = CRT_BSS_ARGV;
+        if (ctx->envp_bss_offset == 0) ctx->envp_bss_offset = CRT_BSS_INITENV;
 #else
         DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, using hardcoded CRT offsets (0x%x/0x%x/0x%x)", CRT_BSS_INITENV, CRT_BSS_ARGV, CRT_BSS_ARGC);
-        if (g_crt_ctx.argc_bss_offset == 0) g_crt_ctx.argc_bss_offset = CRT_BSS_ARGC;
-        if (g_crt_ctx.argv_bss_offset == 0) g_crt_ctx.argv_bss_offset = CRT_BSS_ARGV;
-        if (g_crt_ctx.envp_bss_offset == 0) g_crt_ctx.envp_bss_offset = CRT_BSS_INITENV;
+        if (ctx->argc_bss_offset == 0) ctx->argc_bss_offset = CRT_BSS_ARGC;
+        if (ctx->argv_bss_offset == 0) ctx->argv_bss_offset = CRT_BSS_ARGV;
+        if (ctx->envp_bss_offset == 0) ctx->envp_bss_offset = CRT_BSS_INITENV;
 #endif
     }
 
     DEBUG("crt_offset_discovery: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
-            g_crt_ctx.argc_bss_offset, g_crt_ctx.argv_bss_offset, g_crt_ctx.envp_bss_offset);
+            ctx->argc_bss_offset, ctx->argv_bss_offset, ctx->envp_bss_offset);
 }
