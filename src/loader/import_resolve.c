@@ -6,12 +6,6 @@
  * Binary search in import table is hand-rolled (no bsearch dependency).
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
@@ -23,58 +17,10 @@
 #include "peb_ldr.h"
 #include "../syscall/syscalls_inline.h"
 #include "loader_utils.h"
+#include "dll_path.h"
+#include "dll_loader.h"
 
 #define MAX_IMPORT_DEPTH 8
-
-#define DLL_ALLOC_BASE 0x60000000  /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
-/* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
- * Uses atomic operations for allocation — still not fully thread-safe (mmap
- * and module registration are separate steps), but prevents overlapping bases.
- */
-static uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
-
-/* Case-insensitive string equality */
-static int strci_equal(const char *a, const char *b)
-{
-    return dll_strcasecmp(a, b) == 0;
-}
-
-/* Forward declarations */
-int find_dll_path(const char *dll_name, char *path, size_t path_size);
-loaded_module_t *load_dll(const char *path, int depth);
-static void init_exe_dir(void);
-
-static char g_exe_dir[512] = {0};
-
-/**
- * Initialize g_exe_dir with the current working directory (app directory).
- * Called once on first use. Matches Windows behavior where the app directory
- * is searched for DLLs.
- */
-static void init_exe_dir(void)
-{
-    if (g_exe_dir[0] != '\0') return;
-    const char *pe_path = get_pe_path();
-    if (pe_path != NULL && pe_path[0] != '\0') {
-        /* Hand-rolled strrchr */
-        const char *last_slash = NULL;
-        const char *p = pe_path;
-        while (*p) {
-            if (*p == '/') last_slash = p;
-            p++;
-        }
-        if (last_slash != NULL && last_slash != pe_path) {
-            size_t dir_len = last_slash - pe_path;
-            if (dir_len >= sizeof(g_exe_dir)) dir_len = sizeof(g_exe_dir) - 1;
-            __builtin_memcpy(g_exe_dir, pe_path, dir_len);
-            g_exe_dir[dir_len] = '\0';
-            return;
-        }
-    }
-    /* Fallback to CWD — use "." since getcwd needs glibc */
-    g_exe_dir[0] = '.';
-    g_exe_dir[1] = '\0';
-}
 
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
@@ -317,9 +263,9 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
         loaded_module_t *dep = find_module_by_name(dll_name);
         if (dep == NULL) {
             /* Check if this is a known stub library */
-            if (strci_equal("kernel32.dll", dll_name) ||
-                strci_equal("ntdll.dll", dll_name) ||
-                strci_equal("msvcrt.dll", dll_name)) {
+            if (dll_strcasecmp("kernel32.dll", dll_name) == 0 ||
+                dll_strcasecmp("ntdll.dll", dll_name) == 0 ||
+                dll_strcasecmp("msvcrt.dll", dll_name) == 0) {
                 DEBUG("  Skipping stub library '%s' for %s (resolved via import table)",
                       dll_name, mod->name);
                 d++;
@@ -360,164 +306,4 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
     return 0;
 }
 
-int find_dll_path(const char *dll_name, char *path, size_t path_size)
-{
-    /* --- Try current directory --- */
-    if (dll_build_path(path, path_size, ".", dll_name) == 0) {
-        if (dll_path_exists(path))
-            return 1;
-    }
 
-    /* --- Try app directory --- */
-    init_exe_dir();
-    if (g_exe_dir[0] != '.' || g_exe_dir[1] != '\0') {
-        if (dll_build_path(path, path_size, g_exe_dir, dll_name) == 0) {
-            if (dll_path_exists(path))
-                return 1;
-        }
-    }
-
-    /* --- Try WINE_DLL_PATH (semicolon-separated) from cached path ---
-     * Cached from environ in main() before GS switch — syscall-safe. */
-    {
-        if (g_wine_dll_path[0] != '\0') {
-            #define DLL_PATH_MAX_SEGMENTS 32
-            char path_buf[1024];
-            const char *segments[DLL_PATH_MAX_SEGMENTS];
-            int seg_count = 0;
-
-            dll_copy_str(path_buf, g_wine_dll_path, sizeof(path_buf));
-
-            char *p = path_buf;
-            while (seg_count < DLL_PATH_MAX_SEGMENTS && p != NULL) {
-                const char *semi = dll_strchr(p, ';');
-                if (semi != NULL) {
-                    *(char *)semi = '\0';
-                    segments[seg_count++] = p;
-                    p = (char *)semi + 1;
-                } else {
-                    if (*p != '\0') {
-                        segments[seg_count++] = p;
-                    }
-                    break;
-                }
-            }
-
-            int i;
-            for (i = 0; i < seg_count; i++) {
-                if (dll_build_path(path, path_size, segments[i], dll_name) == 0) {
-                    if (dll_path_exists(path))
-                        return 1;
-                }
-            }
-        }
-    }
-
-    return 0;
-}
-
-/* load_dll: map a DLL, apply relocations, register in module list + LDR,
- * resolve its imports. Returns the loaded_module_t or NULL on failure.
- *
- * Glibc-free: all string/memory ops are hand-rolled or __builtin.
- * Suitable for calling from WINE_STUB context on guest stack.
- */
-loaded_module_t *load_dll(const char *path, int depth)
-{
-    /* Save main PE globals — map_image_at overwrites them with the DLL's values */
-    void *saved_image_base = g_image_base;
-    char saved_pe_path[512];
-    const char *cur_pe_path = get_pe_path();
-    if (cur_pe_path) {
-        size_t pe_len = 0;
-        while (cur_pe_path[pe_len] && pe_len < sizeof(saved_pe_path) - 1)
-            pe_len++;
-        __builtin_memcpy(saved_pe_path, cur_pe_path, pe_len);
-        saved_pe_path[pe_len] = '\0';
-    } else {
-        saved_pe_path[0] = '\0';
-    }
-
-    /* Atomically reserve a page-aligned base for this DLL using CAS loop.
-     * This prevents two threads from mapping at the same address.
-     * We reserve at least PAGE_SIZE upfront; the rest is advanced after mapping. */
-    uintptr_t alloc_base;
-    do {
-        uintptr_t expected = __atomic_load_n(&g_dll_base_next, __ATOMIC_SEQ_CST);
-        uintptr_t rounded = (expected + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
-        uintptr_t desired = rounded + PAGE_SIZE;  /* reserve minimum one page */
-        if (__atomic_compare_exchange_n(&g_dll_base_next, &expected, desired,
-                                        false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
-            alloc_base = rounded;
-            break;
-        }
-    } while (1);
-
-    /* Map the DLL at the reserved base below 4GB to avoid GCC ms_abi truncation */
-    IMAGE_NT_HEADERS64 nt_copy;
-    void *base = map_image_at(path, NULL, &nt_copy, NULL, alloc_base);
-
-    /* Restore main PE globals (regardless of success/failure) */
-    g_image_base = saved_image_base;
-    set_pe_path(saved_pe_path);
-
-    if (base == NULL) {
-        DEBUG("  ERROR: map_image_at failed for '%s'", path);
-        return NULL;
-    }
-
-    /* Advance g_dll_base_next past the actual DLL size.
-     * We already reserved PAGE_SIZE atomically above, so only add the remainder. */
-    uintptr_t dll_size = (nt_copy.OptionalHeader.SizeOfImage + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
-    if (dll_size > PAGE_SIZE) {
-        __atomic_add_fetch(&g_dll_base_next, dll_size - PAGE_SIZE, __ATOMIC_SEQ_CST);
-    }
-
-    /* Extract NT headers from image memory */
-    IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
-    IMAGE_NT_HEADERS64 *img_nt = (IMAGE_NT_HEADERS64 *)((char *)base + img_dos->e_lfanew);
-
-    /* Extract DLL name from path (hand-rolled strrchr) */
-    const char *name = path;
-    const char *p = path;
-    while (*p) {
-        if (*p == '/') name = p + 1;
-        p++;
-    }
-
-    /* Register in module list */
-    loaded_module_t *mod = add_module(base, name, img_nt);
-    if (mod == NULL) {
-        DEBUG("  ERROR: module list full, cannot load '%s'", name);
-        munmap(base, img_nt->OptionalHeader.SizeOfImage);
-        return NULL;
-    }
-
-    /* Add to PEB LDR */
-    if (g_peb_ldr != NULL) {
-        ldr_add_module(mod);
-    }
-
-    /* Resolve this DLL's own imports (recursive).
-     * resolve_module_imports also calls parse_export_table internally. */
-    if (resolve_module_imports(mod, depth + 1) != 0) {
-        DEBUG("  ERROR: import resolution failed for '%s'", name);
-        /* Cleanup all resources allocated above */
-        if (g_peb_ldr != NULL && mod->ldr_linked) {
-            ldr_remove_module(mod);
-        }
-        reset_export_cache(mod);
-        remove_module(mod);
-        munmap(base, img_nt->OptionalHeader.SizeOfImage);
-        return NULL;
-    }
-
-    /* Parse exports if not already done (e.g., DLL has no imports but has exports) */
-    if (mod->export_cache.number_of_names == 0 &&
-        img_nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress != 0) {
-        parse_export_table(mod);
-    }
-
-    DEBUG("Loaded DLL: %s at %p", name, base);
-    return mod;
-}

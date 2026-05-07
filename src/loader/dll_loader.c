@@ -103,7 +103,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     loaded_module_t *mod = add_module(base, name, img_nt);
     if (mod == NULL) {
         DEBUG("  ERROR: module list full, cannot load '%s'", name);
-        munmap(base, img_nt->OptionalHeader.SizeOfImage);
+        INLINE_SYSCALL_MUNMAP(base, img_nt->OptionalHeader.SizeOfImage);
         return NULL;
     }
 
@@ -122,7 +122,7 @@ loaded_module_t *load_dll(const char *path, int depth)
         }
         reset_export_cache(mod);
         remove_module(mod);
-        munmap(base, img_nt->OptionalHeader.SizeOfImage);
+        INLINE_SYSCALL_MUNMAP(base, img_nt->OptionalHeader.SizeOfImage);
         return NULL;
     }
 

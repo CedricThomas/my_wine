@@ -35,7 +35,8 @@ PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
 
 IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o $(BUILDDIR)/ordinal_table.o \
-	$(BUILDDIR)/relocations.o $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o
+	$(BUILDDIR)/relocations.o $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o \
+	$(BUILDDIR)/dll_path.o $(BUILDDIR)/dll_loader.o
 
 # Shared objects used by import-resolution and teb_peb tests
 TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) $(HEAP_OBJS) \
@@ -60,7 +61,7 @@ vpath %.S src src/syscall
 # $(SPECIAL_CFLAGS) (entry points, loader core, stubs, syscall infra).
 
 SPECIAL_OBJS = main.o common.o entry.o teb_peb.o guest_setup.o crash_handlers.o gs_base.o \
-	thunk_gen.o dispatcher.o dispatcher_entry_asm.o abi_wrappers.o import_resolve.o image_mapper.o
+	thunk_gen.o dispatcher.o dispatcher_entry_asm.o abi_wrappers.o import_resolve.o image_mapper.o dll_path.o dll_loader.o
 $(foreach obj,$(SPECIAL_OBJS),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(SYSCALL_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
