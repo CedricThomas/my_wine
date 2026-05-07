@@ -42,9 +42,10 @@
 ---
 
 ### [FINDING D3] — Page size hardcoded to 4096, not queried from OS
-- **Status**: ❌ OPEN
+- **Status**: ✅ MITIGATED
 - **Severity**: MEDIUM
-- **Files**: include/common.h:9, src/syscall/abi_wrappers.h:6
+- **Mitigated By**: Task 1 (x86_64-only guard) — Since the codebase now enforces x86_64 via `#error` in `include/common.h`, and PAGE_SIZE is guaranteed to be 4096 on all x86_64 Linux systems, this is no longer a concern.
+- **Files**: include/common.h:21, src/syscall/abi_wrappers.h:6
 - **Description**: PAGE_SIZE is hardcoded to 4096. While this is correct for all modern x86_64 Linux kernels, it's not portable. If this code were to run on a system with 64K pages (e.g., some ARM servers), it would fail.
 
   Note: src/stubs/kernel32.c:274 does use `sysconf(_SC_PAGESIZE)` for its VirtualQueryEx implementation, but the global PAGE_SIZE in common.h remains hardcoded.
@@ -160,5 +161,4 @@ Tasks ordered by priority (impact vs effort). Each task is independently impleme
 ## Summary
 
 - **Total findings**: 5
-- **Fixed**: 4/5 (D1, D2, D4, D5)
-- **Open**: 1/5 (D3 — Page size hardcoded)
+- **Fixed**: 5/5 (D1, D2, D4, D5 — code changes; D3 — mitigated by Task 1 architecture guard)
