@@ -98,13 +98,17 @@ static void seed_bss_vars(void *base,
     }
 }
 
-/* ── main ────────────────────────────────────────────────────── */
+/* ── init_loader ─────────────────────────────────────────────── */
 
-int main(int argc, char *argv[])
+static int init_loader(int argc, char **argv,
+                       uint64_t *out_entry,
+                       void **out_base,
+                       void **out_stack,
+                       void **out_teb)
 {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <pe_binary>\n", argv[0]);
-        return 1;
+        return -1;
     }
 
     /* 0. Parse MY_WINE_DEBUG from environ; set global debug flag before GS switch */
@@ -126,7 +130,7 @@ int main(int argc, char *argv[])
     IMAGE_NT_HEADERS64 nt;
     size_t nt_size;
     void *base = map_image(argv[1], &dos, &nt, &nt_size);
-    if (!base) return 1;
+    if (!base) return -1;
 
     /* 2. Get section headers (from the live image) */
     uint32_t pe_off = dos.e_lfanew;
@@ -146,11 +150,11 @@ int main(int argc, char *argv[])
 
     /* 6. Set up TEB/PEB */
     void *teb = setup_teb_peb();
-    if (!teb) return 1;
+    if (!teb) return -1;
 
     /* 7. Set up stack */
     void *stack_top = setup_stack(&nt.OptionalHeader);
-    if (!stack_top) return 1;
+    if (!stack_top) return -1;
 
     /* 8a. Zero .data section */
     {
@@ -186,7 +190,7 @@ int main(int argc, char *argv[])
     seed_bss_vars(base, &nt, sections);
 
     /* 9. Build guest argv/envp from actual host arguments */
-    char *guest_argv[2];
+    static char *guest_argv[2];
     guest_argv[0] = argv[1];  /* the PE path */
     guest_argv[1] = NULL;
     char **guest_envp = environ;  /* real host environment */
@@ -225,6 +229,26 @@ int main(int argc, char *argv[])
                 (unsigned long)entry_abs);
     }
 
-    run_guest_entry(entry_abs, base, stack_top, teb, guest_argv, guest_envp);
+    /* Write outputs for caller */
+    *out_entry = entry_abs;
+    *out_base = base;
+    *out_stack = stack_top;
+    *out_teb = teb;
+
+    return 0;
+}
+
+/* ── main ────────────────────────────────────────────────────── */
+
+int main(int argc, char *argv[])
+{
+    uint64_t entry;
+    void *base, *stack_top, *teb;
+
+    if (init_loader(argc, argv, &entry, &base, &stack_top, &teb) != 0) {
+        return 1;
+    }
+
+    run_guest_entry(entry, base, stack_top, teb, g_guest_argv, g_guest_envp);
     return 0;
 }

@@ -135,6 +135,42 @@ typedef struct {
 extern wine_thread_t threads[MAX_THREADS];
 extern int thread_count;
 
+/* ── Accessors ──────────────────────────────────────────────────── */
+/*
+ * These accessor functions provide read-only references to the internal
+ * global tables declared above.  They are SINGLE-THREAD ONLY: no locking
+ * is performed because the loader runs single-threaded before guest
+ * entry.  If multi-threaded guest code is supported in the future,
+ * each accessor must acquire the appropriate lock (e.g., the corresponding
+ * pthread_mutex_t) before returning a reference.
+ */
+
+/* Handle table */
+handle_entry_t  *get_handle_table(void);
+
+/* Section tracking */
+wine_section_t  *get_sections(void);
+int              get_section_count(void);
+
+/* View tracking */
+wine_view_t     *get_views(void);
+int              get_view_count(void);
+
+/* Event tracking */
+wine_event_t    *get_events(void);
+int              get_event_count(void);
+
+/* Mutex tracking */
+wine_mutex_t    *get_mutexes(void);
+int              get_mutex_count(void);
+
+/* Synchronization */
+pthread_mutex_t *get_events_global_mutex(void);
+
+/* Thread tracking */
+wine_thread_t   *get_threads(void);
+int              get_thread_count(void);
+
 /* ── Helpers ───────────────────────────────────────────────────── */
 
 int map_protect(uint64_t protect);
