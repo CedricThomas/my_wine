@@ -1,7 +1,7 @@
 # Non-Future-Proof Implementations
 
 > From quality_report.log, generated 2026-05-06, updated 2026-05-07
-> Status verified against current codebase.
+> Status: All 5 findings resolved (D1-D5).
 
 ---
 
