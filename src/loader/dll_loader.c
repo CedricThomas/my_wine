@@ -1,134 +1,41 @@
 /*
- * dll_loader.c — DLL loading and module import resolution
+ * dll_loader.c — DLL loading (map, relocate, register)
  *
- * Handles dynamic DLL loading: mapping at a safe base, registering in the
- * module list and PEB LDR, and resolving imports recursively.
- *
+ * Maps a DLL at a reserved base below 4GB, applies relocations,
+ * registers in module list + LDR, and resolves its imports.
  * Glibc-free: all string/memory ops are hand-rolled or __builtin.
  * Suitable for calling from WINE_STUB context on guest stack.
  *
  * Extracted from import_resolve.c.
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
 #include "include/nt_constants.h"
+#include "loader_priv.h"
 #include "include/debug.h"
-#include "loader_utils.h"
-#include "dll_path.h"
 #include "export_table.h"
 #include "module_list.h"
 #include "peb_ldr.h"
 #include "../syscall/syscalls_inline.h"
+#include "loader_utils.h"
 #include "image_mapper.h"
-#include "import_resolve.h"
+#include "dll_path.h"
 #include "dll_loader.h"
 
-#define MAX_IMPORT_DEPTH 8
-
-#define DLL_ALLOC_BASE 0x60000000  /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
 /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
  * Uses atomic operations for allocation — still not fully thread-safe (mmap
  * and module registration are separate steps), but prevents overlapping bases.
  */
-static uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
-
-/* Case-insensitive string equality */
-static int strci_equal(const char *a, const char *b)
-{
-    return dll_strcasecmp(a, b) == 0;
-}
-
-/* Forward declarations */
-int find_dll_path(const char *dll_name, char *path, size_t path_size);
+volatile uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
 
 /**
- * Resolve imports for a dynamically loaded module.
- */
-int resolve_module_imports(loaded_module_t *mod, int depth)
-{
-    if (depth >= MAX_IMPORT_DEPTH) {
-        DEBUG("  ERROR: import resolution depth exceeded (%d) for %s",
-              MAX_IMPORT_DEPTH, mod->name);
-        return -1;
-    }
-
-    void *base = mod->base;
-    IMAGE_NT_HEADERS64 *nt = mod->nt;
-
-    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
-    if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
-        return 0; /* No imports */
-    }
-
-    uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
-
-    /* First pass: ensure all dependency DLLs are loaded */
-    IMAGE_IMPORT_DESCRIPTOR *d = desc;
-    while (d->Name != 0) {
-        const char *dll_name = (const char *)((char *)base + d->Name);
-
-        /* Check if already loaded */
-        loaded_module_t *dep = find_module_by_name(dll_name);
-        if (dep == NULL) {
-            /* Check if this is a known stub library */
-            if (strci_equal("kernel32.dll", dll_name) ||
-                strci_equal("ntdll.dll", dll_name) ||
-                strci_equal("msvcrt.dll", dll_name)) {
-                DEBUG("  Skipping stub library '%s' for %s (resolved via import table)",
-                      dll_name, mod->name);
-                d++;
-                continue;
-            }
-
-            /* Need to load this DLL */
-            char path[512];
-            if (!find_dll_path(dll_name, path, sizeof(path))) {
-                DEBUG("  ERROR: cannot find DLL '%s' imported by %s",
-                      dll_name, mod->name);
-                return -1;
-            }
-
-            /* Load the DLL (map + relocate + register) */
-            dep = load_dll(path, depth + 1);
-            if (dep == NULL) {
-                DEBUG("  ERROR: failed to load '%s' for %s",
-                      dll_name, mod->name);
-                return -1;
-            }
-        }
-        d++;
-    }
-
-    /* Second pass: resolve all imports using the three-tier resolver */
-    if (resolve_imports(base, nt) != 0) {
-        DEBUG("  ERROR: import resolution failed for %s", mod->name);
-        return -1;
-    }
-
-    /* Parse exports so this module's functions can be found by others */
-    if (parse_export_table(mod) != 0) {
-        /* parse_export_table returns -1 if no export dir — that's OK */
-        DEBUG("  parse_export_table returned -1 for %s (no exports?)", mod->name);
-    }
-
-    return 0;
-}
-
-/* load_dll: map a DLL, apply relocations, register in module list + LDR,
+ * load_dll: map a DLL, apply relocations, register in module list + LDR,
  * resolve its imports. Returns the loaded_module_t or NULL on failure.
  *
  * Glibc-free: all string/memory ops are hand-rolled or __builtin.
- * Suitable for calling from WINE_STUB context on guest stack.
- */
+ * Suitable for calling from WINE_STUB context on guest stack. */
 loaded_module_t *load_dll(const char *path, int depth)
 {
     /* Save main PE globals — map_image_at overwrites them with the DLL's values */

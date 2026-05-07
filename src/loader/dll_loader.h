@@ -10,7 +10,17 @@
 #ifndef MY_WINE_DLL_LOADER_H
 #define MY_WINE_DLL_LOADER_H
 
+#include <stdint.h>
+
 #include "module_list.h"
+
+#define DLL_ALLOC_BASE 0x60000000  /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug */
+
+/* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
+ * Uses atomic operations for allocation — still not fully thread-safe (mmap
+ * and module registration are separate steps), but prevents overlapping bases.
+ */
+extern volatile uintptr_t g_dll_base_next;
 
 /* Resolve imports for a dynamically loaded module (recursive).
  * Calls find_dll_path, load_dll, resolve_imports, and parse_export_table. */
