@@ -17,6 +17,15 @@
 
 #define CRT_BSS_INITIALIZED 0x30
 
+/*
+ * refptr_mappings: patch targets for CRT refptr entries.
+ *
+ * The __image_base__ entry stores &g_crt_ctx.image_base as the target address.
+ * This is a compile-time address computation (not a read), so there is no data
+ * race even under concurrent patching. g_crt_ctx is only written AFTER all
+ * patching completes (via g_crt_ctx = ctx in patch_crt_refptrs), so the CRT
+ * runtime will always read the correct, finalized value.
+ */
 const refptr_mapping_t refptr_mappings[] = {
     { "__CTOR_LIST__",              (void *)&ctor_list_stub },
     { "__DTOR_LIST__",              (void *)&dtor_list_stub },
