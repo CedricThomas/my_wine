@@ -2,13 +2,15 @@
 
 > From quality_report.log, generated 2026-05-06, updated 2026-05-07
 > Status verified against current codebase.
+> All findings resolved — branch merged.
 
 ---
 
 ## Findings
 
 ### [FINDING A1] — Monolithic loader_priv.h — shared state sprawl
-- **Status**: ❌ OPEN
+- **Status**: ✅ RESOLVED (`141df8f`)
+- **Fix**: Split into 10 per-module headers (`crash_handlers.h`, `dll_loader.h`, `dll_path.h`, `gs_base.h`, `guest_setup.h`, `image_mapper.h`, `import_init.h`, `import_table.h`, `ordinal_table.h`, `teb_peb.h`); `loader_priv.h` converted to an aggregator (~50 lines down from 176).
 - **Severity**: HIGH
 - **Files**: src/loader/loader_priv.h (176 lines, 50+ symbols)
 - **Description**: loader_priv.h declares 50+ symbols spanning 8+ modules (image_mapper, import_resolve, import_table, ordinal_table, teb_peb, crash_handlers, entry, guest_setup, gs_base, module_list, export_table, peb_ldr). This creates a god-header: any loader module can access any other's globals and functions. The file has no module boundaries — everything is one flat namespace.
@@ -24,7 +26,8 @@
 ---
 
 ### [FINDING A2] — import_resolve.c is a multipurpose file (import resolution + DLL loading + path finding)
-- **Status**: ❌ OPEN
+- **Status**: ✅ RESOLVED (`d88c814`, `a46f870`, `63a38a7`)
+- **Fix**: Extracted `dll_path.c` (path searching + string helpers) and `dll_loader.c` (DLL loading chain); `import_resolve.c` reduced from 594 lines to ~100, focused on IAT resolution only. Makefile updated to compile new files.
 - **Severity**: HIGH
 - **Files**: src/loader/import_resolve.c (594 lines)
 - **Description**: This file handles three distinct responsibilities:
@@ -42,7 +45,8 @@
 ---
 
 ### [FINDING A3] — main() is the process orchestrator — excessive responsibility
-- **Status**: ❌ OPEN
+- **Status**: ✅ RESOLVED (`4dfb47e` and related)
+- **Fix**: Startup sequence encapsulated in `init_loader()`; `main()` reduced to argument parsing + `init_loader()` call. Numbered step comments replaced with inline comments.
 - **Severity**: MEDIUM
 - **Files**: src/main.c (230 lines)
 - **Description**: main() performs 10+ sequential steps: parse env, map image, init imports, patch refptrs, resolve imports, setup TEB/PEB, setup stack, zero .data, pre-seed BSS, build guest argv, lookup symbol, and run. Each step represents a different subsystem. The function is 230 lines and contains inline logic for section finding and mprotect.
@@ -52,7 +56,8 @@
 ---
 
 ### [FINDING A4] — ntdll_priv.h declares globals shared across all handler modules
-- **Status**: ❌ OPEN
+- **Status**: ✅ RESOLVED (`c46b954`)
+- **Fix**: Added accessor function declarations to `ntdll_priv.h` for shared state (`get_handle_table()`, `alloc_section()`, `alloc_event()`, `alloc_mutex()`, `alloc_thread()`); single-thread limitation documented.
 - **Severity**: MEDIUM
 - **Files**: src/msvcrt/ntdll_priv.h (12 extern declarations)
 - **Description**: This header declares arrays (handle_table, sections, views, events, mutexes, threads) and their counters as external globals. Every ntdll handler file that includes this header can read/write all of them. No synchronization mechanism (mutex, atomic) is used to protect concurrent access.
@@ -62,7 +67,8 @@
 ---
 
 ### [FINDING A5] — PE section table offset computation duplicated in 5 files
-- **Status**: ❌ OPEN
+- **Status**: ✅ RESOLVED (`f24a2fa`, `4dfb47e`)
+- **Fix**: Added `get_image_sections()` inline helper to new `include/pe_priv.h`; replaced all 5 inline occurrences across `main.c`, `guest_setup.c`, `import_resolve.c`, `image_mapper.c`, `pe_headers.c`, `pe_imports.c`, `pe_rip_scan.c`.
 - **Severity**: MEDIUM
 - **Files**: src/main.c:133-134, src/loader/guest_setup.c:190-191, src/loader/import_resolve.c:221-222, src/loader/image_mapper.c:107-108,151-152
 - **Description**: The expression to compute section table offset from image base:
