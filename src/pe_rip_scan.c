@@ -10,7 +10,7 @@
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
-#include "pe_priv.h"
+#include "include/pe_priv.h"
 
 int scan_rip_relative_jumps(void *image_base,
                             const IMAGE_NT_HEADERS64 *nt,

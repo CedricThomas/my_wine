@@ -9,7 +9,7 @@
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
-#include "pe_priv.h"
+#include "include/pe_priv.h"
 
 int parse_imports(const void *base, size_t file_size,
                   const IMAGE_NT_HEADERS64 *nt_headers,
