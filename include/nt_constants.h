@@ -7,6 +7,24 @@
  * Centralized constants for the my_wine PE loader.
  * All magic numbers extracted from the syscall dispatcher, TEB/PEB setup,
  * and thunk generation code.
+ *
+ * =====================================================================
+ * ARCHITECTURE NOTE: x86_64 ONLY
+ * =====================================================================
+ *
+ * All TEB field offsets (TEB_SEH_CHAIN, TEB_PEB_PTR, TEB_STACK_BASE,
+ * TEB_STACK_LIMIT, TEB_FIBER_DATA, TEB_TLS_ARRAY) are specific to
+ * x86_64 Windows (PE32+ / AMD64).
+ *
+ * All PEB field offsets (PEB_IMAGE_BASE, PEB_LDR, PEB_LDR_DATA,
+ * PEB_LDR_INACTIVE, PEB_LDR_ENTRY_LIST, PEB_LDR_ENTRY_INLOADORDER,
+ * PEB_LDR_ENTRY_BASE, PEB_LDR_ENTRY_SIZE) are specific to
+ * x86_64 Windows.
+ *
+ * These offsets will differ on x86_32, ARM64, and other architectures.
+ * This code will not work on non-x86_64 architectures without updating
+ * these offsets.
+ * =====================================================================
  */
 
 /* ── NT syscall numbers (x86_64) ──────────────────────────────── */
