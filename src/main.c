@@ -22,6 +22,7 @@
 #include "include/msvcrt.h"
 #include "include/common.h"
 #include "loader/loader_priv.h"
+#include "include/pe_priv.h"
 #include "include/debug.h"
 
 extern char **environ;  // from libc, for guest envp
@@ -133,10 +134,7 @@ static int init_loader(int argc, char **argv,
     if (!base) return -1;
 
     /* 2. Get section headers (from the live image) */
-    uint32_t pe_off = dos.e_lfanew;
-    uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
-                       nt.FileHeader.SizeOfOptionalHeader;
-    IMAGE_SECTION_HEADER *sections = (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
+    IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
 
     /* 3. Initialize dynamic msvcrt import entries, then sort for bsearch */
     init_msvcrt_imports();

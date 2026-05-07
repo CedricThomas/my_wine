@@ -16,6 +16,7 @@
 #include "include/pe.h"
 #include "include/nt_constants.h"
 #include "include/debug.h"
+#include "include/pe_priv.h"
 #include "loader_priv.h"
 #include "include/common.h"
 
@@ -146,11 +147,7 @@ void *map_image_at(const char *path,
         if (headers_size > 0) {
             memcpy(base, file_base, headers_size);
             /* Re-point sections into the image */
-            const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
-            uint32_t pe_off = img_dos->e_lfanew;
-            size_t sec_off  = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
-                              nt.FileHeader.SizeOfOptionalHeader;
-            sections = (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
+            sections = get_image_sections(base, &nt);
         }
     }
 

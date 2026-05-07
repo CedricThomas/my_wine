@@ -8,6 +8,7 @@
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
+#include "include/pe_priv.h"
 #include "include/common.h"
 #include "include/nt_constants.h"
 #include "loader_priv.h"
@@ -146,11 +147,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
 static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
                                  uint64_t targets[MAX_THUNK_TARGETS])
 {
-    const IMAGE_DOS_HEADER *img_dos = (const IMAGE_DOS_HEADER *)base;
-    uint32_t pe_off = img_dos->e_lfanew;
-    uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
-                       nt->FileHeader.SizeOfOptionalHeader;
-    IMAGE_SECTION_HEADER *sections = (IMAGE_SECTION_HEADER *)((char *)base + sec_off);
+    IMAGE_SECTION_HEADER *sections = get_image_sections(base, nt);
 
     return scan_rip_relative_jumps(base, nt, sections,
                                     nt->FileHeader.NumberOfSections,

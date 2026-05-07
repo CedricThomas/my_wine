@@ -23,6 +23,7 @@
 #include "include/syscall/dispatcher.h"
 #include "include/syscall/dispatcher_entry.h"
 #include "include/common.h"
+#include "include/pe_priv.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -187,10 +188,7 @@ static void parse_pe_headers(uint64_t entry_abs, void *image_base,
     }
     uint32_t pe_off = img_dos->e_lfanew;
     IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((char *)image_base + pe_off);
-    uint32_t sec_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) +
-                       nt->FileHeader.SizeOfOptionalHeader;
-    IMAGE_SECTION_HEADER *sections =
-        (IMAGE_SECTION_HEADER *)((char *)image_base + sec_off);
+    IMAGE_SECTION_HEADER *sections = get_image_sections(image_base, nt);
 
     *out_nt = nt;
     *out_sections = sections;
