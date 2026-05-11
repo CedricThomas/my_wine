@@ -102,7 +102,7 @@ $(BUILDDIR)/%.o: %.S | $(BUILDDIR)
 SHELL.EXE = samples/hello_world/hello_world.exe
 
 $(SHELL.EXE):
-	@bash samples/samples.sh build hello_world
+	@bash scripts/samples.sh build hello_world
 
 # test builds the test binaries; run-test builds + runs them
 
@@ -153,7 +153,7 @@ $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 
 # ── Samples ──────────────────────────────────────────────────────
 # Cross-compile samples to PE .exe via Docker (mingw-w64)
-# See: samples/samples.sh
+# See: scripts/samples.sh
 #
 #   make samples              build all samples
 #   make samples SAMPLE=foo     build one sample
@@ -162,10 +162,10 @@ $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 SAMPLE ?=
 
 samples:
-	@bash samples/samples.sh build $(SAMPLE)
+	@bash scripts/samples.sh build $(SAMPLE)
 
 run-sample: all
-	@bash samples/samples.sh run $(SAMPLE)
+	@bash scripts/samples.sh run $(SAMPLE)
 
 clean:
 	@echo "  CLEAN build artifacts"

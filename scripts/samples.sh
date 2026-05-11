@@ -232,7 +232,7 @@ run_sample() {
     fi
 
     if [ ! -f "$exe" ]; then
-        echo "  ERR: $exe not built. Run './samples/samples.sh build $name' first."
+        echo "  ERR: $exe not built. Run './scripts/samples.sh build $name' first."
         return 1
     fi
 

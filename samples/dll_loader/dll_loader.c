@@ -2,8 +2,8 @@
  * dll_loader.c — Test LoadLibraryA / GetProcAddress / GetModuleHandleA /
  *                FreeLibraryA using only kernel32 WriteFile + ExitProcess.
  *
- * Build:  ./samples/samples.sh build dll_loader
- * Run:    ./samples/samples.sh run dll_loader
+ * Build:  ./scripts/samples.sh build dll_loader
+ * Run:    ./scripts/samples.sh run dll_loader
  */
 
 #include <windows.h>
