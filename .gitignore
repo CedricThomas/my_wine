@@ -31,12 +31,5 @@ src/syscall/dispatcher_generated.c
 __pycache__/
 *.pyc
 
-# DOOM95 binary assets (zip is tracked; unpacked files are ignored)
-doom95/*.EXE
-doom95/*.dll
-doom95/*.DLL
-doom95/*.wad
-doom95/*.WAD
-doom95/*.vxd
-doom95/*.VXD
-doom95/DIRECTX/
+# Sample game assets (zip is tracked; unpacked folder is ignored)
+doom95/unpacked/
