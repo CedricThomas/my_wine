@@ -28,9 +28,10 @@ unpack_one() {
         return
     fi
 
-    # Read archive name from the first line of sample.info
+    # Read archive name from sample.info (key=value format)
     local zip_name
-    zip_name="$(head -1 "$info" | tr -d '\r')"
+    zip_name="$(grep '^archive=' "$info" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r' || true)"
+    [[ -z "$zip_name" ]] && { echo "  $name: no archive= in sample.info, skipping"; return; }
     local zip="$dir/$zip_name"
 
     if [[ ! -f "$zip" ]]; then
@@ -55,8 +56,10 @@ else
     for dir in "$SAMPLES_DIR"/*/; do
         name="$(basename "$dir")"
         if [[ -f "$dir/sample.info" ]]; then
-            zip_name="$(head -1 "$dir/sample.info" | tr -d '\r')"
-            [[ -f "$dir/$zip_name" ]] && unpack_one "$name"
+            zip_name="$(grep '^archive=' "$dir/sample.info" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r' || true)"
+            if [[ -n "$zip_name" ]] && [[ -f "$dir/$zip_name" ]]; then
+                unpack_one "$name"
+            fi
         fi
     done
 fi
