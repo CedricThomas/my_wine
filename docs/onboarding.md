@@ -147,7 +147,7 @@ Practical advice for new contributors:
 - **Run tests** with `make run-test` after any changes.
 - **Debug tip:** Start with `hello_world` as your test case — it's the simplest PE and exercises the core flow.
 - **Understanding a new import:** Search the PE's import table for the function name, then check `src/loader/import_table.c` to see if it's already registered. If not, add a `WINE_STUB` function and a dispatcher case.
-- **Adding a new sample:** Create a C file in `samples/`, add it to `samples/samples.sh`, and run `make samples SAMPLE=your_sample` to cross-compile it.
+- **Adding a new sample:** Create a C file in `samples/`, add it to `scripts/samples.sh`, and run `make samples SAMPLE=your_sample` to cross-compile it.
 
 ### Useful Commands
 
