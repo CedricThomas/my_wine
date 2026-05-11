@@ -8,8 +8,6 @@
 #   - DLL build: .c + .def files in dlls/ subdirectory → parent sample dir
 #   - A sample with dlls/ builds BOTH its DLLs and its EXE (if .c exists)
 #   - Run mode: reads expected exit code / timeout from sample.info
-#   - Before running: all .dll outputs from every sample are copied into
-#     the target sample's directory (so LoadLibraryA("foo.dll") just works)
 #   - Samples with no .c in the main dir (DLL-producers only) are SKIPPED
 #
 # Usage:
@@ -204,19 +202,6 @@ has_main_c_files() {
     find "$src_dir" -maxdepth 1 -name '*.c' 2>/dev/null | head -1 | grep -q .
 }
 
-# Distribute all .dll files from every sample directory into the target dir.
-# This ensures LoadLibraryA("foo.dll") works without path manipulation.
-distribute_dlls() {
-    local target_dir="$1"
-    find "$SAMPLES_DIR" -maxdepth 2 -name '*.dll' 2>/dev/null | while IFS= read -r dll; do
-        # Skip DLLs already in the target directory (avoids "same file" errors)
-        local dll_dir
-        dll_dir=$(dirname "$dll")
-        [ "$dll_dir" = "$target_dir" ] && continue
-        cp "$dll" "$target_dir/" 2>/dev/null || true
-    done
-}
-
 # Run a single sample under my_wine.
 # Returns: 0 = PASS, 1 = FAIL, 2 = SKIP
 run_sample() {
@@ -225,9 +210,9 @@ run_sample() {
     local exe="$src_dir/${name}.exe"
     local info="$src_dir/sample.info"
 
-    # Skip samples with no .c in the main dir (DLL producers only)
+    # Skip samples with no .c in the main dir
     if ! has_main_c_files "$name"; then
-        echo "  SKIP  $name (no .c in main dir — DLL-only sample)"
+        echo "  SKIP  $name (no .c in main dir sample)"
         return 2
     fi
 
@@ -248,9 +233,6 @@ run_sample() {
         expected_exit=$(parse_sample_info "$info" "exit")
         timeout_sec=$(parse_sample_info "$info" "timeout")
     fi
-
-    # Distribute all .dll outputs from every sample into this sample's dir
-    distribute_dlls "$src_dir"
 
     echo "  RUN $name (under my_wine, expect exit=$expected_exit, timeout=${timeout_sec}s)"
 
