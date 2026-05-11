@@ -9,7 +9,7 @@
 # Directories without sample.info are silently skipped during auto-discovery.
 # Explicit arguments bypass this check (you can always force-unpack).
 #
-# Each registered sample must have <name>.zip in samples/<name>/.
+# Each registered sample has sample.info with the archive name on the first line.
 # The unpacked folders are ignored by git; only archives and docs are tracked.
 
 set -euo pipefail
@@ -21,10 +21,20 @@ SAMPLES_DIR="$PROJECT_DIR/samples"
 unpack_one() {
     local name="$1"
     local dir="$SAMPLES_DIR/$name"
-    local zip="$dir/$name.zip"
+    local info="$dir/sample.info"
+
+    if [[ ! -f "$info" ]]; then
+        echo "  $name: no sample.info, skipping"
+        return
+    fi
+
+    # Read archive name from the first line of sample.info
+    local zip_name
+    zip_name="$(head -1 "$info" | tr -d '\r')"
+    local zip="$dir/$zip_name"
 
     if [[ ! -f "$zip" ]]; then
-        echo "  $name: no $zip found, skipping"
+        echo "  $name: archive $zip not found, skipping"
         return
     fi
 
@@ -44,8 +54,9 @@ else
     # Auto-discover only registered samples (those with sample.info)
     for dir in "$SAMPLES_DIR"/*/; do
         name="$(basename "$dir")"
-        if [[ -f "$dir/sample.info" ]] && [[ -f "$dir/$name.zip" ]]; then
-            unpack_one "$name"
+        if [[ -f "$dir/sample.info" ]]; then
+            zip_name="$(head -1 "$dir/sample.info" | tr -d '\r')"
+            [[ -f "$dir/$zip_name" ]] && unpack_one "$name"
         fi
     done
 fi
