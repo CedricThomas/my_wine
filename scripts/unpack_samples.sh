@@ -28,7 +28,7 @@ unpack_one() {
         return
     fi
 
-    local dest="$dir/unpacked"
+    local dest="$SAMPLES_DIR/unpacked/$name"
     mkdir -p "$dest"
     echo "  $name: unpacking $zip → $dest/"
     unzip -oq "$zip" -d "$dest"

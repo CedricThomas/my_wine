@@ -31,5 +31,5 @@ src/syscall/dispatcher_generated.c
 __pycache__/
 *.pyc
 
-# Sample game assets (zip is tracked; unpacked folders are ignored)
-samples/*/unpacked/
+# Sample game assets (zip is tracked; unpacked folder is ignored)
+samples/unpacked/
