@@ -174,10 +174,11 @@ clean:
 	rm -f src/syscall/dispatcher_generated.c
 
 fclean: clean
-	@echo "  FCLEAN end targets"
+	@echo "  FCLEAN all end targets"
 	rm -f my_wine
 	find samples/ -name '*.exe' -delete 2>/dev/null || true
 	find samples/ -name '*.dll' -delete 2>/dev/null || true
+	rm -rf samples/unpacked/
 	find tests/ -maxdepth 1 -type f -executable ! -name '*.c' -delete 2>/dev/null || true
 
 re: fclean
