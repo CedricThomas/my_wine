@@ -58,7 +58,7 @@
   - Keyboard: `rb_keyboard_get_async_state`
 
 ### 1.8 Test
-- [ ] Run `./my_wine analysis/doom95/DOOM95.EXE`
+- [ ] Run `./my_wine samples/doom95/unpacked/DOOM95.EXE`
 - [ ] Expected: parses PE32 headers, maps sections, resolves imports, reaches entry point
 - [ ] Expected: will crash at first API call (no stubs yet), but loader itself succeeds
 

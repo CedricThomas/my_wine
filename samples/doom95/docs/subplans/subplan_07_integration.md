@@ -45,7 +45,7 @@
 - [ ] Ensure all user32 dialog entries are in `import_table.c`
 
 ### 7.4 DOOM95 Init Test
-- [ ] Launch `./my_wine analysis/doom95/DOOM95.EXE`
+- [ ] Launch `./my_wine samples/doom95/unpacked/DOOM95.EXE`
 - [ ] Expected: no crash during init (window created, DDraw init, DSound init, MIDI init, registry access)
 - [ ] Expected: SDL window appears (may be empty or show title screen)
 - [ ] Expected: init messages/errors don't crash (registry stubs return `ERROR_SUCCESS`, DPlay returns graceful error)
