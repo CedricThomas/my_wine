@@ -1,4 +1,4 @@
-# DOOM95 Subplan Tracking
+# DOOM95 Implementation Tracking
 
 7 independent subplans. One per session. Check off as you go.
 
@@ -14,8 +14,12 @@
 | **Total** | | **~40** | **~7,390** | **~30-38** | |
 
 **Reference docs** (read as needed, not loaded into context):
-- `imports.md` — 164 DOOM95 import functions
-- `sdl2_mapping.md` — SDL2 equivalent for every import
-- `loader_analysis.md` — my_wine loader architecture
-- `runtime_analysis.md` — DOOM95 init sequence, rendering, audio, game loop
-- `scope.md` — complete architecture (render_backend.h interface, file layout, risks)
+- `by_dll/*.md` — all import functions + SDL2 mappings, one file per DLL (8 files, 542 lines total)
+- `reference/render_backend.md` — render_backend.h interface
+- `reference/file_layout.md` — project file layout + size estimates
+- `reference/milestones.md` — 8 implementation milestones
+- `reference/risks.md` — 5 risks + mitigations
+- `reference/init_sequence.md` — DOOM95 init sequence
+- `reference/rendering.md` — surface hierarchy, rendering pattern
+- `reference/audio_config.md` — audio subsystem details
+- `reference/loader_notes.md` — loader architecture + what changes for new DLLs
