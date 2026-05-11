@@ -2,12 +2,15 @@
 # Unpack sample game archives into their unpacked/ folders.
 #
 # Usage:
-#   ./scripts/unpack_samples.sh          # unpack all samples
-#   ./scripts/unpack_samples.sh doom95   # unpack a specific sample
+#   ./scripts/unpack_samples.sh              # unpack all registered samples
+#   ./scripts/unpack_samples.sh doom95       # unpack a specific sample
 #
-# Each sample archive (<name>.zip) inside samples/<name>/ is extracted
-# into samples/<name>/unpacked/. The unpacked folders are ignored by git;
-# only the archives and docs are tracked.
+# A sample is "registered" when its directory contains a sample.info file.
+# Directories without sample.info are silently skipped during auto-discovery.
+# Explicit arguments bypass this check (you can always force-unpack).
+#
+# Each registered sample must have <name>.zip in samples/<name>/.
+# The unpacked folders are ignored by git; only archives and docs are tracked.
 
 set -euo pipefail
 
@@ -33,13 +36,16 @@ unpack_one() {
 }
 
 if [[ $# -gt 0 ]]; then
+    # Explicit args — unpack regardless of sample.info
     for name in "$@"; do
         unpack_one "$name"
     done
 else
-    # Discover all sample dirs that contain a matching .zip
+    # Auto-discover only registered samples (those with sample.info)
     for dir in "$SAMPLES_DIR"/*/; do
         name="$(basename "$dir")"
-        [[ -f "$dir/$name.zip" ]] && unpack_one "$name"
+        if [[ -f "$dir/sample.info" ]] && [[ -f "$dir/$name.zip" ]]; then
+            unpack_one "$name"
+        fi
     done
 fi
