@@ -1,12 +1,11 @@
 /*
- * main.c — PE loader orchestrator
+ * main.c — PE32+ loader orchestrator (my_wine64)
  *
- * Opens a PE/PE32+ binary, maps sections with correct protections,
+ * Opens a PE32+ binary, maps sections with correct protections,
  * resolves imports, sets up TEB/PEB, allocates a guest stack,
  * and jumps to the entry point.
  *
- * For PE32 images: forks a 32-bit child (my_wine_32) that
- * independently loads the image and runs it.
+ * PE32 images are rejected — use my_wine wrapper or my_wine32 directly.
  *
  * All heavy lifting is delegated to src/loader/ sub-modules.
  */
@@ -20,7 +19,6 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 
 #include "include/pe.h"
 #include "include/msvcrt.h"
@@ -125,8 +123,7 @@ static void seed_bss_vars(void *base,
 
 /**
  * Map the PE, detect PE32 vs PE32+, and either:
- *   - For PE32:  map+parse headers only, unmap, return PE_TYPE_32.
- *                Caller will fork+exec my_wine_32.
+ *   - For PE32:  unmap, print error, return -1 (use my_wine32 instead).
  *   - For PE32+: full loader setup (imports, TEB, PEB, etc.),
  *                return PE_TYPE_64 with outputs filled.
  */
@@ -171,15 +168,14 @@ static int init_loader(int argc, char **argv,
     /* 2. Get section headers (from the live image) */
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
 
-    /* ── PE32 fast-path: unmap and let child handle it ─────── */
+    /* ── PE32: not supported by this binary ─────────────────── */
     if (pe_is_pe32(&nt)) {
-        DEBUG("my_wine: PE32 detected, will fork my_wine_32 child");
-        /* Unmap the image — child will remap from the file */
+        /* Unmap the temporary image before erroring */
         if (munmap(base, (size_t)nt_size) != 0) {
-            perror("WARNING: munmap before fork");
+            perror("WARNING: munmap on PE32 reject");
         }
-        *out_pe_type = PE_TYPE_32;
-        return 0;
+        fprintf(stderr, "Error: PE32 binary detected. Use my_wine wrapper or my_wine32 directly.\n");
+        return -1;
     }
 
     /* ── PE32+ path: full loader setup ─────────────────────── */
@@ -318,57 +314,6 @@ int main(int argc, char *argv[])
     int pe_type;
 
     if (init_loader(argc, argv, &entry, &base, &stack_top, &teb, &pe_type) != 0) {
-        return 1;
-    }
-
-    if (pe_type == PE_TYPE_32) {
-        /* ── PE32: fork + exec my_wine_32 ─────────────────── */
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("fork");
-            return 1;
-        }
-
-        if (pid == 0) {
-            /* Child: set env, exec my_wine_32 */
-            char env_var[4096];
-            snprintf(env_var, sizeof(env_var), "WINE32_PE_PATH=%s", argv[1]);
-            putenv(env_var);
-
-            /* Find my_wine_32 next to this binary via /proc/self/exe */
-            char exe_path[4096];
-            ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-            char *exec_target = "my_wine_32";
-            if (len > 0) {
-                exe_path[len] = '\0';
-                char *slash = strrchr(exe_path, '/');
-                if (slash) {
-                    strcpy(slash + 1, "my_wine_32");
-                    exec_target = exe_path;
-                }
-            }
-
-            char *child_argv[] = { exec_target, argv[1], NULL };
-            execvp(exec_target, child_argv);
-
-            /* execvp only returns on failure */
-            perror("execvp my_wine_32");
-            _exit(127);
-        }
-
-        /* Parent: wait for child */
-        int status;
-        if (waitpid(pid, &status, 0) < 0) {
-            perror("waitpid");
-            return 1;
-        }
-
-        if (WIFEXITED(status)) {
-            return WEXITSTATUS(status);
-        }
-        if (WIFSIGNALED(status)) {
-            return 128 + WTERMSIG(status);
-        }
         return 1;
     }
 
