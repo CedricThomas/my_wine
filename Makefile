@@ -30,7 +30,7 @@ SYSCALL_OBJS = $(patsubst src/syscall/%.c,$(BUILDDIR)/%.o,$(SYSCALL_SRC))
 HEAP_OBJS    = $(patsubst src/heap/%.c,$(BUILDDIR)/%.o,$(HEAP_SRC))
 CRT_OBJS     = $(patsubst src/crt/%.c,$(BUILDDIR)/%.o,$(CRT_SRC))
 
-OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(CRT_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o
+OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(CRT_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o $(BUILDDIR)/clone64.o
 
 # ── Named object groups for test targets ────────────────────────
 PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
@@ -45,7 +45,7 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) $(HEAP_OBJS) \
 	$(CRT_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
-	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o
+	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o $(BUILDDIR)/clone64.o
 
 # Non-crt stubs (syscall dispatch test doesn't need the CRT stubs)
 STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o, $(STUBS_OBJS))
@@ -54,7 +54,7 @@ STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o, $(STUBS_OBJS))
 # kernel32_module.c depends on loader functions not available in syscall test,
 # so exclude it from the non-CRT stubs used here.
 STUBS_SYSCALL_OBJS = $(filter-out $(BUILDDIR)/kernel32_module.o, $(STUBS_NO_CRT_OBJS))
-TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_SYSCALL_OBJS) $(HEAP_OBJS) $(BUILDDIR)/common.o
+TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_SYSCALL_OBJS) $(HEAP_OBJS) $(BUILDDIR)/common.o $(BUILDDIR)/clone64.o
 
 # ── vpath ───────────────────────────────────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt tests
@@ -65,7 +65,7 @@ vpath %.S src src/syscall
 # $(SPECIAL_CFLAGS) (entry points, loader core, stubs, syscall infra).
 
 SPECIAL_OBJS = main.o common.o entry.o teb_peb.o guest_setup.o crash_handlers.o gs_base.o \
-	thunk_gen.o dispatcher.o dispatcher_entry_asm.o abi_wrappers.o import_resolve.o image_mapper.o dll_path.o dll_loader.o crt.o crt_mingw.o crt_watcom.o
+	thunk_gen.o dispatcher.o dispatcher_entry_asm.o clone64.o abi_wrappers.o import_resolve.o image_mapper.o dll_path.o dll_loader.o crt.o crt_mingw.o crt_watcom.o
 $(foreach obj,$(SPECIAL_OBJS),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(SYSCALL_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
@@ -92,7 +92,7 @@ my_wine: $(OBJS)
 
 MY_WINE_32_CC = $(CC) -m32
 MY_WINE_32_CFLAGS = $(CFLAGS) -DMY_WINE_32 -mno-red-zone -fno-stack-protector \
-	-fno-exceptions -mno-sse -fno-pie -no-pie
+	-fno-exceptions -mno-sse -fno-pie -no-pie -Werror
 BUILDDIR32 = build32
 
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager
@@ -133,6 +133,7 @@ MY_WINE_32_OBJS = \
 	$(BUILDDIR32)/ordinal_table.o \
 	$(BUILDDIR32)/import_resolve.o \
 	$(BUILDDIR32)/mmap2_asm.o \
+	$(BUILDDIR32)/clone.o \
 	$(MY_WINE_32_STUBS_OBJS) \
 	$(MY_WINE_32_HEAP_OBJS)
 
@@ -167,6 +168,11 @@ $(BUILDDIR32)/dispatcher_entry_asm.o: src/syscall/dispatcher_entry_asm.S | $(BUI
 
 # Explicit rule for mmap2_asm.S from src/syscall/
 $(BUILDDIR32)/mmap2_asm.o: src/syscall/mmap2_asm.S | $(BUILDDIR32)
+	@echo "  AS32 $<"
+	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+
+# Explicit rule for clone.S from src/syscall/
+$(BUILDDIR32)/clone.o: src/syscall/clone.S | $(BUILDDIR32)
 	@echo "  AS32 $<"
 	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
 

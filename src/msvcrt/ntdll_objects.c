@@ -58,7 +58,7 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
     return STATUS_SUCCESS;
 }
 
-static __attribute__((unused)) void thread_wrapper(void *arg)
+static void thread_wrapper(void *arg)
 {
     uintptr_t routine = (uintptr_t)((void **)arg)[0];
     uintptr_t param   = (uintptr_t)((void **)arg)[1];

@@ -122,7 +122,8 @@ wine_clone:
      * In the child, ESP will be set to new_sp (our aligned stack top + 8).
      * In the parent, EAX will contain the child PID.
      */
-    movl 20(%esp), %ebx         /* reload flags (may have been clobbered by mmap2) */
+    movl 20(%esp), %ebx         /* reload flags (clobbered by mmap2) */
+    movl 28(%esp), %edx         /* reload parent_tid (clobbered by mmap2 prot arg) */
     xorl %ebp, %ebp             /* tls = NULL (5th clone arg on i386) */
 
     movl $__NR_clone, %eax      /* syscall 120 */
