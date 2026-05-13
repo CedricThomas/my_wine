@@ -29,6 +29,7 @@
 #include <unistd.h>
 
 #include "include/common.h"
+#include "include/crt.h"
 #include "include/pe_parser.h"
 #include "include/pe_priv.h"
 #include "msvcrt_priv.h"
@@ -406,19 +407,30 @@ void discover_crt_offsets(const char *file_path,
         }
     }
 
-    /* Fallback: if COFF lookup failed, use generated or hardcoded offsets */
+    /* Fallback: if COFF lookup failed, try CRT module accessor, then hardcoded */
     if (ctx->argc_bss_offset == 0 || ctx->argv_bss_offset == 0 || ctx->envp_bss_offset == 0) {
-#ifdef HAVE_GENERATED_CRT_OFFSETS
-        DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, using generated CRT offsets");
-        if (ctx->argc_bss_offset == 0) ctx->argc_bss_offset = CRT_BSS_ARGC;
-        if (ctx->argv_bss_offset == 0) ctx->argv_bss_offset = CRT_BSS_ARGV;
-        if (ctx->envp_bss_offset == 0) ctx->envp_bss_offset = CRT_BSS_INITENV;
-#else
-        DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, using hardcoded CRT offsets (0x%x/0x%x/0x%x)", CRT_BSS_INITENV, CRT_BSS_ARGV, CRT_BSS_ARGC);
-        if (ctx->argc_bss_offset == 0) ctx->argc_bss_offset = CRT_BSS_ARGC;
-        if (ctx->argv_bss_offset == 0) ctx->argv_bss_offset = CRT_BSS_ARGV;
-        if (ctx->envp_bss_offset == 0) ctx->envp_bss_offset = CRT_BSS_INITENV;
-#endif
+        const crt_module_t *mod = crt_get_module(CRT_TYPE_MINGW);
+        if (mod && crt_bss_init_offset(mod)) {
+            DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
+                  "using CRT module fallback (0x%x/0x%x/0x%x)",
+                  crt_bss_initenv_offset(mod), crt_bss_argv_offset(mod),
+                  crt_bss_init_offset(mod));
+            if (ctx->argc_bss_offset == 0) ctx->argc_bss_offset = crt_bss_init_offset(mod);
+            if (ctx->argv_bss_offset == 0) ctx->argv_bss_offset = crt_bss_argv_offset(mod);
+            if (ctx->envp_bss_offset == 0) ctx->envp_bss_offset = crt_bss_initenv_offset(mod);
+        } else {
+            /* Hardcoded fallback if CRT module isn't available */
+            #define FALLBACK_ARGC 0x028
+            #define FALLBACK_ARGV 0x020
+            #define FALLBACK_INITENV 0x018
+            #define FALLBACK_ACMDLN 0x030
+            DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
+                  "using hardcoded CRT offsets (0x%x/0x%x/0x%x)",
+                  FALLBACK_INITENV, FALLBACK_ARGV, FALLBACK_ARGC);
+            if (ctx->argc_bss_offset == 0) ctx->argc_bss_offset = FALLBACK_ARGC;
+            if (ctx->argv_bss_offset == 0) ctx->argv_bss_offset = FALLBACK_ARGV;
+            if (ctx->envp_bss_offset == 0) ctx->envp_bss_offset = FALLBACK_INITENV;
+        }
     }
 
     DEBUG("crt_offset_discovery: CRT offsets argc=0x%x argv=0x%x envp=0x%x",

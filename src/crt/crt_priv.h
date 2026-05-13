@@ -28,6 +28,7 @@ struct crt_module {
 
     // BSS init offsets (0 = skip)
     uint32_t bss_init_offset;
+    uint32_t bss_argv_offset;
     uint32_t bss_initenv_offset;
 
     // Vtable functions

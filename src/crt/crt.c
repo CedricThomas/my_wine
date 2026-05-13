@@ -43,6 +43,7 @@ const crt_module_t crt_module_watcom = {
     .entry_symbols     = NULL,
     .refptr_mappings   = NULL,
     .bss_init_offset   = 0,
+    .bss_argv_offset   = 0,
     .bss_initenv_offset = 0,
     .patch_refptrs     = NULL,
     .discover_offsets  = NULL,
@@ -154,6 +155,12 @@ uint32_t crt_bss_init_offset(const crt_module_t *mod)
 {
     if (!mod) return 0;
     return mod->bss_init_offset;
+}
+
+uint32_t crt_bss_argv_offset(const crt_module_t *mod)
+{
+    if (!mod) return 0;
+    return mod->bss_argv_offset;
 }
 
 uint32_t crt_bss_initenv_offset(const crt_module_t *mod)

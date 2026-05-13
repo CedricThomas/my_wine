@@ -76,6 +76,9 @@ void crt_seed_bss(const crt_module_t *mod, void *image_base,
 /* Get the default BSS offset for the init (argc) slot */
 uint32_t crt_bss_init_offset(const crt_module_t *mod);
 
+/* Get the default BSS offset for the argv slot */
+uint32_t crt_bss_argv_offset(const crt_module_t *mod);
+
 /* Get the default BSS offset for the initenv slot */
 uint32_t crt_bss_initenv_offset(const crt_module_t *mod);
 

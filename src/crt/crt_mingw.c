@@ -441,6 +441,7 @@ const crt_module_t crt_module_mingw = {
     .entry_symbols      = mingw_entry_symbols,
     .refptr_mappings    = mingw_refptr_mappings,
     .bss_init_offset    = MINWG_BSS_ARGC,
+    .bss_argv_offset    = MINWG_BSS_ARGV,
     .bss_initenv_offset = MINWG_BSS_INITENV,
     .patch_refptrs      = mingw_patch_refptrs,
     .discover_offsets   = mingw_discover_offsets,

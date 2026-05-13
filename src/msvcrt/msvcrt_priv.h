@@ -160,10 +160,12 @@ extern void *__msvcrt_wcslen;
 
 /* ── Refptr patching (defined in crt_refptrs.c) ─────────── */
 
+#ifndef MY_WINE_CRT_H
 typedef struct {
     const char *name;
     void       *target;
 } refptr_mapping_t;
+#endif /* MY_WINE_CRT_H */
 
 extern const refptr_mapping_t refptr_mappings[];
 #define REF_MAP_COUNT (sizeof(refptr_mappings) / sizeof(refptr_mappings[0]) - 1)
