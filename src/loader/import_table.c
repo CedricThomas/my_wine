@@ -225,11 +225,13 @@ void set_import(const char *name, void *address)
     DEBUG("ERROR: set_import: symbol '%s' not found", name);
 }
 
+#ifndef MY_WINE_32
 static int import_entry_cmp(const void *a, const void *b)
 {
     return strcmp(((const import_entry_t *)a)->name,
                   ((const import_entry_t *)b)->name);
 }
+#endif
 
 /* Standalone 32-bit: can't use strcmp (libc TLS not initialized) */
 #if defined(MY_WINE_32)
