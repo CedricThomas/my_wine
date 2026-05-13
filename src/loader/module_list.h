@@ -88,8 +88,10 @@ loaded_module_t *find_module_by_name_safe(const char *name);
 loaded_module_t *find_module_by_addr(void *addr);
 void remove_module(loaded_module_t *mod);
 
-/* Direct access (for PEB LDR integration) */
-extern loaded_module_t module_list[MAX_MODULES];
-extern int module_count;
+/*
+ * Direct array access: use g_loader.modules[] and g_loader.module_count
+ * (defined in loader_state.h). These externs were removed during
+ * global consolidation.
+ */
 
 #endif /* MY_WINE_MODULE_LIST_H */
