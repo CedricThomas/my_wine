@@ -239,9 +239,64 @@ exits from the same process.
 
 ---
 
-## 3. Direct Syscall Dispatch
+## 3. PE32 Dual-Process Model
 
-### 3.1 The 23-Byte Thunk
+> For full details, see [PE32.md](PE32.md).
+
+### Why Dual-Process?
+
+Linux blocks `ljmp`/`lcall` to a 32-bit code segment at CPL=3 in a 64-bit process. A 32-bit PE **cannot** execute inside a 64-bit ELF — it must run in a native 32-bit process. The in-process mode-switch approach was tried and found fundamentally unfixed.
+
+### Architecture
+
+`my_wine` (64-bit) detects PE32 → forks + execs `my_wine_32` (a 32-bit static ELF built with `-static -nostartfiles`). Communication is via `WINE32_PE_PATH` env var. The parent `waitpid()`s and returns the child's exit code. No IPC, no shared memory.
+
+### `my_wine_32` Entry Point
+
+`_start` (`pe32_entry.S`) → `wine32_main()` (`pe32_entry.c`), which independently:
+- Maps PE from disk, allocates TEB32/PEB32 at fixed 32-bit addresses
+- Generates 15-byte thunks, resolves imports, seeds BSS vars
+- Sets up **FS → TEB via `set_thread_area`** (syscall 243, LDT-based)
+- Jumps to PE entry via `pe32_run_guest.S`
+
+### Key Differences From Single-Process (PE32+)
+
+| | PE32+ (single) | PE32 (dual) |
+|---|---|---|
+| Thunk size | 23 bytes | 15 bytes: `push rdi; mov rdi,nr; mov eax,dispatcher; call eax; pop rdi; ret` |
+| Syscall | `syscall` (RAX) | `int $0x80` (EAX) |
+| mmap | `mmap` (syscall 9) | `mmap2` (syscall 192) |
+| TEB base | GS via `arch_prctl` / `wrgsbase` | FS via `set_thread_area` (LDT, syscall 243) |
+| Calling ABI | Microsoft x64 (RCX/RDX/R8/R9) | cdecl (stack-based) |
+| libc calls | glibc available | No — all replaced with `INLINE_SYSCALL_*` macros (no TLS in `-nostartfiles`) |
+
+### Process Flow
+
+```
+my_wine (64-bit)                      my_wine_32 (32-bit static ELF)
+ ──────────────────                      ──────────────────────────────────
+  detect PE32                              _start (pe32_entry.S)
+  fork() ─── exec("my_wine_32") ─────►     wine32_main() (pe32_entry.c)
+  setenv(WINE32_PE_PATH)                         ├─ map_image()
+  waitpid()                                      ├─ setup_teb_peb()
+  │                                              ├─ set_thread_area(FS → TEB)
+  │                                              ├─ resolve_imports()
+  │                                              ├─ generate_all_thunks() (15-byte)
+  │                                              ├─ seed_bss_vars()
+  │                                              └─ pe32_run_guest()
+  │                                                    │
+  │                                              guest code runs (32-bit)
+  │                                              syscalls via int $0x80
+  │                                                    │
+  ◄─── exit(child_code) ───────────────────────────────┘
+  return child exit code
+```
+
+---
+
+## 4. Direct Syscall Dispatch
+
+### 4.1 The 23-Byte Thunk
 
 Each NT syscall has a dynamically generated **23-byte thunk**
 (`src/syscall/thunk_gen.c`):
@@ -274,7 +329,7 @@ The IAT entries in the PE point to these thunks so that when guest
 code calls `NtWriteFile`, it jumps to the thunk, which loads the NT
 syscall number, calls the dispatcher, and returns.
 
-### 3.2 `__wine_dispatcher` Assembly Trampoline
+### 4.2 `__wine_dispatcher` Assembly Trampoline
 
 `__wine_dispatcher` (in `src/syscall/dispatcher_entry_asm.S`) bridges
 guest code on the guest stack to our C handler on the UNIX stack:
@@ -330,7 +385,7 @@ __wine_dispatcher:
 The dispatcher is position-independent (all accesses use `%rip`-relative
 offsets) and does not use the red zone.
 
-### 3.3 `c_dispatch_syscall` C Handler
+### 4.3 `c_dispatch_syscall` C Handler
 
 `c_dispatch_syscall()` in `src/syscall/dispatcher.c`:
 
@@ -369,7 +424,7 @@ offsets) and does not use the red zone.
   → guest code continues with result in RAX
 ```
 
-### 3.4 `__wine_guest_regs` — Global Saved State
+### 4.4 `__wine_guest_regs` — Global Saved State
 
 `__wine_guest_regs` is a **global struct** (defined in
 `src/syscall/dispatcher_entry.c`, declared in
@@ -395,7 +450,7 @@ struct guest_regs __wine_guest_regs = {0};
 directly — the syscall number comes from `RDI` (the C function's
 `rdi` parameter per System V ABI, which is already set by the thunk).
 
-### 3.5 Handler Implementation
+### 4.5 Handler Implementation
 
 NT handlers (`src/stubs/ntdll_*.c`) implement Windows syscalls using
 Linux primitives:
@@ -433,7 +488,7 @@ maps to Linux fd 1, `STD_ERROR_HANDLE` (0x7FFFFFFD) to fd 2.
 
 ---
 
-## 4. Stack Switching
+## 5. Stack Switching
 
 The guest PE runs on its own stack (allocated from the PE's
 `SizeOfStackReserve`/`SizeOfStackCommit`). The C dispatcher handlers
@@ -486,7 +541,7 @@ Using a separate UNIX stack:
 
 ---
 
-## 5. Crash Handlers
+## 6. Crash Handlers
 
 `src/loader/crash_handlers.c` installs both Windows-style SEH handlers
 and POSIX signal handlers.
@@ -520,7 +575,7 @@ TLS access via GS-relative offsets will crash.
 
 ---
 
-## 6. Jumping to Guest Code
+## 7. Jumping to Guest Code
 
 ### `run_guest_entry()` in `src/loader/entry.c`
 
@@ -587,7 +642,7 @@ Key behaviors:
 
 ---
 
-## 7. Guest Setup Flow (Detailed)
+## 8. Guest Setup Flow (Detailed)
 
 The complete flow inside `setup_guest_and_run()`:
 
@@ -639,7 +694,7 @@ setup_guest_and_run(entry_abs, stack_top, teb, guest_argv, guest_envp)
 
 ---
 
-## 8. Cleanup
+## 9. Cleanup
 
 `cleanup_guest()` in `src/loader/guest_setup.c` is called from
 `NtTerminateProcess` to reclaim all guest resources:
@@ -654,7 +709,7 @@ Note: the UNIX stack is cleaned up by `cleanup_unix_stack()` in
 
 ---
 
-## 9. Key File References
+## 10. Key File References
 
 | File | Purpose |
 |---|---|
@@ -680,7 +735,7 @@ Note: the UNIX stack is cleaned up by `cleanup_unix_stack()` in
 
 ---
 
-## 10. `force_align_arg_pointer` and `WINE_STUB`
+## 11. `force_align_arg_pointer` and `WINE_STUB`
 
 ### What `force_align_arg_pointer` Does
 
