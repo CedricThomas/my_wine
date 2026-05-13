@@ -335,7 +335,7 @@ void *setup_teb_peb(void)
  * @param  commit      stack commit size
  * @return  new base pointer, or NULL on failure
  */
-static void *remap_stack_below_4gb(void *stack_base, size_t commit)
+static __attribute__((unused)) void *remap_stack_below_4gb(void *stack_base, size_t commit)
 {
     uintptr_t stack_hint = 0x7FFDC000U - (uintptr_t)commit;
     /* Ensure we don't go below 0x01000000 to avoid conflicts */
