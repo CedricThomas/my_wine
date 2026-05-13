@@ -82,13 +82,20 @@ For broader PE32 support, consider:
 
 -------
 
-Add a wrapper called my_wine and then 2 binarries called my_wine32 and mi_wine64
+NEW enhancements
+
+-------
+
+Add a wrapper called my_wine and then 2 binaries called my_wine32 and my_wine64 that are more specialized and have the same features / behaviors (same env usage, same arg pparsing etc)
 
 
 --------
 
-Try to use the DEBUG flag on all tests and samples to see if it crash
+Try to use the DEBUG flag on all tests and samples to see if it crash.
+Try to use the DEBUG mode in the AI workflow too 
 
 --------
 
-Unify the samples output => sample.info should have an expected output field and we should compare it top the real output
+Unify the samples output for better readability
+=> sample.info should have an expected output field and we should compare it top the real output
+Have a single test output with the sum of all cases instead of several lists ?

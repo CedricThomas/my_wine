@@ -195,6 +195,16 @@ build_exe() {
     local CC
     CC=$(select_compiler "$src_dir")
 
+    # Read optimization level from sample.info (default: 2)
+    local OPT_LEVEL="2"
+    if [ -f "$src_dir/sample.info" ]; then
+        local opt_val
+        opt_val=$(parse_sample_info "$src_dir/sample.info" "optimize")
+        if [[ "$opt_val" =~ ^[012]$ ]]; then
+            OPT_LEVEL="$opt_val"
+        fi
+    fi
+
     # 32-bit MinGW-w64 enables -fstack-protector-strong by default, which crashes
     # at -O2 when EBP is used as a data register. Disable it for 32-bit builds.
     local EXTRA_FLAGS=""
@@ -208,7 +218,7 @@ build_exe() {
         -v "$src_dir:/out" \
         "$IMAGE_NAME" \
         "$CC" \
-        -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -mconsole \
+        -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O${OPT_LEVEL} -mconsole \
         $EXTRA_FLAGS \
         -o "/out/${name}.exe" \
         $container_srcs 2>&1 || {
