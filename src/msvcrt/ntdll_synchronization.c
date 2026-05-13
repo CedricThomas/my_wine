@@ -7,7 +7,6 @@
 
 #define _GNU_SOURCE
 #include <stdint.h>
-#include <pthread.h>
 #include <time.h>
 #include "handler_abi.h"
 #include "ntdll_priv.h"
@@ -15,10 +14,11 @@
 
 /* ── Globals ───────────────────────────────────────────────────── */
 
-pthread_mutex_t events_global_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 wine_mutex_t mutexes[MAX_MUTEXES];
 int mutex_count = 0;
+
+wine_semaphore_t semaphores[MAX_SEMAPHORES];
+int semaphore_count = 0;
 
 /* ── Helper: find event by handle ──────────────────────────────── */
 
@@ -42,6 +42,17 @@ static int find_mutex(int handle)
     return -1;
 }
 
+/* ── Helper: find semaphore by handle ────────────────────────────── */
+/* UNUSED until NtWaitForSingleObject gains semaphore support. */
+static int __attribute__((unused)) find_semaphore(int handle)
+{
+    for (int i = 0; i < semaphore_count; i++) {
+        if (semaphores[i].handle == handle)
+            return i;
+    }
+    return -1;
+}
+
 /* ── NtSetEvent (0x5C) ───────────────────────────────────────────
  *
  * Set an event to the signaled state and broadcast any waiting threads.
@@ -59,7 +70,6 @@ uint64_t handler_NtSetEvent(uint64_t handle, uint64_t previous_state)
         *(uint64_t *)(uintptr_t)previous_state = events[slot].signaled;
 
     events[slot].signaled = 1;
-    pthread_cond_broadcast(&events[slot].cond);
     return STATUS_SUCCESS;
 }
 
@@ -182,27 +192,16 @@ uint64_t handler_NtCreateMutex(uint64_t *mutex_handle, uint64_t desired_access,
     if (mutex_count >= MAX_MUTEXES)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
-    /* Find a free slot in the handle table */
-    uint64_t handle = 0;
-    {
-        unsigned idx;
-        for (idx = 3; idx < HANDLE_TABLE_SIZE; idx++) {
-            if (!handle_table[idx].used) {
-                handle_table[idx].fd   = -1;
-                handle_table[idx].used = 1;
-                handle = (uint64_t)idx;
-                break;
-            }
-        }
+    int slot = mutex_count++;
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_MUTEX, (void *)&mutexes[slot]);
+
+    if (handle == 0) {
+        mutex_count--;
+        return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
-    if (handle == 0)
-        return STATUS_MEMORY_NOT_AVAILABLE;
-
-    int slot = mutex_count++;
     mutexes[slot].handle = (int)handle;
     mutexes[slot].locked = 0;
-    pthread_mutex_init(&mutexes[slot].mutex, NULL);
 
     if (mutex_handle != NULL)
         *mutex_handle = handle;
@@ -228,6 +227,49 @@ uint64_t handler_NtReleaseMutex(uint64_t handle, uint64_t alertable)
         return STATUS_INVALID_HANDLE; /* not locked by anyone */
 
     mutexes[slot].locked = 0;
-    pthread_mutex_unlock(&mutexes[slot].mutex);
+    return STATUS_SUCCESS;
+}
+
+/* ── NtCreateSemaphore (0x4C) ─────────────────────────────────────
+ *
+ * Create a semaphore object.
+ * arg1: semaphore_handle (pointer to write handle)
+ * arg2: desired_access (ignored)
+ * arg3: object_attributes (ignored)
+ * arg4: initial_count
+ * arg5: maximum_count
+ */
+HANDLER
+uint64_t handler_NtCreateSemaphore(uint64_t *semaphore_handle, uint64_t desired_access,
+                                    uint64_t object_attributes, uint64_t initial_count,
+                                    uint64_t maximum_count)
+{
+    (void)desired_access;
+    (void)object_attributes;
+
+    if (maximum_count == 0)
+        return STATUS_INVALID_PARAMETER;
+
+    if (semaphore_count >= MAX_SEMAPHORES)
+        return STATUS_MEMORY_NOT_AVAILABLE;
+
+    if (initial_count > maximum_count)
+        initial_count = maximum_count;
+
+    int slot = semaphore_count++;
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_SEMAPHORE, (void *)&semaphores[slot]);
+
+    if (handle == 0) {
+        semaphore_count--;
+        return STATUS_MEMORY_NOT_AVAILABLE;
+    }
+
+    semaphores[slot].handle = (int)handle;
+    semaphores[slot].count = (int)initial_count;
+    semaphores[slot].max_count = (int)maximum_count;
+
+    if (semaphore_handle != NULL)
+        *semaphore_handle = handle;
+
     return STATUS_SUCCESS;
 }

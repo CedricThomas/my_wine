@@ -16,8 +16,29 @@
 
 #include <stdint.h>
 
+#if defined(__i386__)
 /*
- * Guest register snapshot at dispatch time.
+ * 32-bit guest register snapshot at dispatch time.
+ * Input arguments follow the Windows x86 cdecl calling convention
+ * (all on stack). The assembly dispatcher saves EAX-EBP, EFLAGS,
+ * the thunk return EIP, and the original ESP before switching
+ * to the UNIX stack.
+ */
+struct guest_regs {
+    uint32_t eax;       /* output: result for guest */
+    uint32_t ebx;       /* callee-saved */
+    uint32_t ecx;       /* volatile */
+    uint32_t edx;       /* volatile (syscall nr from thunk) */
+    uint32_t esi;       /* callee-saved */
+    uint32_t edi;       /* callee-saved */
+    uint32_t ebp;       /* frame pointer / callee-saved */
+    uint32_t esp;       /* original guest ESP at dispatch time */
+    uint32_t eip;       /* return address pushed by thunk call */
+    uint32_t eflags;    /* guest EFLAGS at dispatch time */
+};
+#else
+/*
+ * 64-bit guest register snapshot at dispatch time.
  * Input arguments follow the Windows x64 calling convention
  * (RCX, RDX, R8, R9). The remaining fields capture the guest
  * stack pointer, thunk return address, and the output result.
@@ -38,6 +59,7 @@ struct guest_regs {
     uint64_t r14;       /* guest callee-saved */
     uint64_t r15;       /* guest callee-saved */
 };
+#endif
 
 /* Shared global state between assembly dispatcher and C dispatcher */
 extern struct guest_regs __wine_guest_regs;
@@ -46,9 +68,19 @@ extern struct guest_regs __wine_guest_regs;
 extern void *unix_stack_ptr_val;
 
 /* C dispatcher entry point — implemented in dispatcher.c */
+#if defined(__i386__)
+uint32_t c_dispatch_syscall(uint32_t nr);
+#else
 uint64_t c_dispatch_syscall(uint64_t nr);
+#endif
+
+/* Guest pointer type in native width */
+typedef uintptr_t wine_gptr;
 
 /* Return the address of the assembly dispatcher for thunk generation */
 void *wine_dispatcher_addr(void);
+
+/* Allocate and switch to the UNIX stack for dispatcher use */
+int setup_unix_stack(void);
 
 #endif /* DISPATCHER_ENTRY_H */

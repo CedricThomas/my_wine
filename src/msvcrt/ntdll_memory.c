@@ -14,6 +14,7 @@
 #include "../syscall/syscalls_inline.h"
 #include "../syscall/abi_wrappers.h"
 #include "include/common.h"
+#include "include/handle_manager.h"
 
 /* ── Section / View storage ────────────────────────────────────── */
 
@@ -101,12 +102,10 @@ uint64_t handler_NtMapViewOfSection(uint64_t section_handle, uint64_t process,
     (void)allocation_type;
     (void)view_untyped;
 
-    /* Look up section by handle (handle = index+3) */
-    unsigned idx = (unsigned)(section_handle - 3);
-    if (section_handle < 3 || idx >= (unsigned)section_count)
+    /* Look up section by handle via handle_manager */
+    wine_section_t *sec = wine_handle_get((uint32_t)section_handle);
+    if (!sec)
         return STATUS_INVALID_HANDLE;
-
-    wine_section_t *sec = &sections[idx];
     size_t view_sz = (commit_size != 0) ? (size_t)commit_size : sec->size;
     if (view_sz > sec->size)
         view_sz = sec->size;
@@ -240,8 +239,8 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
     sections[idx].fd       = fd;
     sections[idx].max_size = *max_size;
 
-    /* Return section handle (index+3 to avoid stdin/stdout/stderr) */
-    *section_handle = (uint64_t)(idx + 3);
+    /* Return section handle via handle_manager */
+    *section_handle = wine_handle_alloc(HANDLE_TYPE_SECTION, &sections[idx]);
 
     return STATUS_SUCCESS;
 }

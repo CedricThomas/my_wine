@@ -27,11 +27,14 @@ extern int _commode;
 extern int _fmode;
 extern char **_msvcrt_environ;
 
+extern char **__initenv;
+
 extern char **g_guest_argv;
 extern char **g_guest_envp;
 
 extern char _cmdline_storage[PAGE_SIZE];
 extern char *_acmdln;
+extern char *__p__acmdln;
 
 extern uint64_t native_startup_lock;
 extern int native_startup_state;
@@ -51,6 +54,8 @@ extern uint64_t xi_a_stub;
 extern uint64_t xi_z_stub;
 
 extern void **__imp___initenv_stub;
+
+/* PE32 flag: declared in common.h, set by image_mapper */
 
 /* ── FILE structures (defined in crt_file.c) ───────────── */
 
@@ -164,23 +169,25 @@ extern const refptr_mapping_t refptr_mappings[];
 #define REF_MAP_COUNT (sizeof(refptr_mappings) / sizeof(refptr_mappings[0]) - 1)
 
 void patch_crt_refptrs(const char *file_path, void *image_base,
-                       IMAGE_NT_HEADERS64 *nt,
+                       IMAGE_NT_HEADERS *nt,
                        IMAGE_SECTION_HEADER *sections);
 void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
                         const char *name, uint64_t image_size,
-                        uint64_t ctx_image_base, uint64_t ctx_bss_vaddr);
+                        uint64_t ctx_image_base, uint64_t ctx_bss_vaddr,
+                        IMAGE_NT_HEADERS *nt,
+                        IMAGE_SECTION_HEADER *sections);
 
 /* ── CRT offset discovery (defined in crt_offset_discovery.c) ── */
 void discover_crt_offsets(const char *file_path,
-                          IMAGE_NT_HEADERS64 *nt,
+                          IMAGE_NT_HEADERS *nt,
                           IMAGE_SECTION_HEADER *sections,
                           crt_context_t *ctx);
 uint64_t find_symbol_rva_from_file(const char *file_path,
-                                   IMAGE_NT_HEADERS64 *nt,
+                                   IMAGE_NT_HEADERS *nt,
                                    IMAGE_SECTION_HEADER *sections,
                                    const char *name);
 void scan_text_for_refptrs(void *image_base,
-                           IMAGE_NT_HEADERS64 *nt,
+                           IMAGE_NT_HEADERS *nt,
                            IMAGE_SECTION_HEADER *sections,
                            uint64_t image_size, void *initenv_stub);
 

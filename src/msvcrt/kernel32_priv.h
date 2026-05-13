@@ -21,6 +21,6 @@ WINE_STUB
 void write_to_stderr(const char *msg);
 
 /* Thread-local last-error code (defined in kernel32_misc.c) */
-extern __thread uint32_t g_last_error;
+extern uint32_t g_last_error;
 
 #endif /* MY_WINE_KERNEL32_PRIV_H */

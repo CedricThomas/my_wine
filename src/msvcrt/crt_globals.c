@@ -27,6 +27,7 @@ char **g_guest_envp  = NULL;
 
 char _cmdline_storage[PAGE_SIZE];
 char *_acmdln = _cmdline_storage;
+char *__p__acmdln = _cmdline_storage; // same as _acmdln, constant init
 
 /* Static variables for additional CRT refptr patches */
 uint64_t native_startup_lock = 0;
@@ -79,3 +80,16 @@ uint64_t xi_z_stub = 0;
  * Initialize to 0, fix up in patch_crt_refptrs.
  */
 void **__imp___initenv_stub = 0;
+
+/*
+ * Wrapper functions that return pointer values.
+ * These MUST be functions (not data) because MinGW CRT imports them
+ * via JMP thunks — if the IAT contains a data address, the CPU will
+ * try to execute it as instructions → SIGSEGV.
+ * These are for the 64-bit build (crt_32_stub.c has its own for 32-bit).
+ */
+char *__p__acmdln_func(void) { return _acmdln; }
+char **__initenv_func(void) { return __initenv; }
+char *__p__fmode_func(void) { return (char*)&_fmode; }
+char *__p__commode_func(void) { return (char*)&_commode; }
+

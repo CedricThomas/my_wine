@@ -30,6 +30,7 @@
 
 #include "include/common.h"
 #include "include/pe_parser.h"
+#include "include/pe_priv.h"
 #include "msvcrt_priv.h"
 #include "include/debug.h"
 
@@ -49,7 +50,7 @@
  * We collect all such target addresses and try to match them against
  * known CRT symbols by checking their current values.
  */
-void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
+void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS *nt,
                            IMAGE_SECTION_HEADER *sections,
                            uint64_t image_size, void *initenv_stub)
 {
@@ -115,7 +116,7 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
         uint64_t current = *target_ptr;
         int in_data_section = 0;
         const char *sec_name = "unknown";
-        for (uint16_t si = 0; si < nt->FileHeader.NumberOfSections; si++) {
+        for (uint16_t si = 0; si < pe_section_count(nt); si++) {
             IMAGE_SECTION_HEADER *sec = &sections[si];
             if (sec == text_sec) continue;
             uint64_t sec_end = sec->VirtualAddress +
@@ -140,7 +141,8 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
             apply_refptr_patch(image_base, target_rva,
                                initenv_stub,
                                "__imp___initenv (text-scan)", image_size,
-                               (uint64_t)(uintptr_t)image_base, 0);
+                               (uint64_t)(uintptr_t)image_base, 0,
+                               nt, sections);
             found = 1;
         }
     }
@@ -157,14 +159,14 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS64 *nt,
  */
 static int open_and_map_symbols(
     const char *file_path,
-    IMAGE_NT_HEADERS64 *nt,
+    IMAGE_NT_HEADERS *nt,
     void **out_file_map,
     IMAGE_SYMBOL **out_symbols,
     char **out_string_table,
     size_t *out_file_size)
 {
-    uint32_t sym_ptr = nt->FileHeader.PointerToSymbolTable;
-    uint32_t sym_count = nt->FileHeader.NumberOfSymbols;
+    uint32_t sym_ptr = pe_pointer_to_symbol_table(nt);
+    uint32_t sym_count = pe_number_of_symbols(nt);
 
     if (sym_ptr == 0 || sym_count == 0)
         return -1;
@@ -206,12 +208,12 @@ static int open_and_map_symbols(
  * Returns the RVA or 0 if the symbol can't be converted.
  */
 static uint64_t compute_rva_from_symbol(
-    const IMAGE_SYMBOL *sym, IMAGE_NT_HEADERS64 *nt,
+    const IMAGE_SYMBOL *sym, IMAGE_NT_HEADERS *nt,
     IMAGE_SECTION_HEADER *sections)
 {
     int32_t section_num = sym->SectionNumber;
 
-    if (section_num > 0 && (size_t)section_num <= nt->FileHeader.NumberOfSections) {
+    if (section_num > 0 && (size_t)section_num <= pe_section_count(nt)) {
         IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
         return sec->VirtualAddress + sym->Value;
     }
@@ -276,7 +278,7 @@ static int match_symbol_name(const char *sym_name, size_t sym_name_len,
 static int find_matching_symbol(
     IMAGE_SYMBOL *symbols, char *string_table, uint32_t sym_count,
     const char *name,
-    IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections,
+    IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections,
     uint64_t *out_best_rva)
 {
     uint64_t best_rva = 0;
@@ -313,7 +315,7 @@ static int find_matching_symbol(
         if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
             DEBUG("DBG_COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d",
                     i, (int)sym_name_len, sym_name, sym->SectionNumber, sym->Value,
-                    nt->FileHeader.NumberOfSections, has_section_match);
+                    pe_section_count(nt), has_section_match);
         }
 
         int32_t section_num = sym->SectionNumber;
@@ -321,7 +323,7 @@ static int find_matching_symbol(
         /* Prefer section-bound symbols. If we already have one, skip.
          * For absolute symbols (sec=0), remember as fallback only. */
         if (section_num > 0 && (size_t)section_num <=
-            nt->FileHeader.NumberOfSections) {
+            pe_section_count(nt)) {
             if (!has_section_match) {
                 best_rva = compute_rva_from_symbol(sym, nt, sections);
                 best_idx = i;
@@ -343,11 +345,11 @@ static int find_matching_symbol(
  * Returns the RVA (relative virtual address) of the symbol, or 0 if not found.
  */
 uint64_t find_symbol_rva_from_file(const char *file_path,
-                                   IMAGE_NT_HEADERS64 *nt,
+                                   IMAGE_NT_HEADERS *nt,
                                    IMAGE_SECTION_HEADER *sections,
                                    const char *name)
 {
-    uint32_t sym_count = nt->FileHeader.NumberOfSymbols;
+    uint32_t sym_count = pe_number_of_symbols(nt);
 
     void *file_map;
     size_t file_size;
@@ -374,7 +376,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
  * Accepts ctx parameter instead of reading g_crt_ctx directly for reentrancy.
  */
 void discover_crt_offsets(const char *file_path,
-                          IMAGE_NT_HEADERS64 *nt,
+                          IMAGE_NT_HEADERS *nt,
                           IMAGE_SECTION_HEADER *sections,
                           crt_context_t *ctx)
 {

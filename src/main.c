@@ -1,9 +1,12 @@
 /*
  * main.c — PE loader orchestrator
  *
- * Opens a PE32+ binary, maps sections with correct protections,
+ * Opens a PE/PE32+ binary, maps sections with correct protections,
  * resolves imports, sets up TEB/PEB, allocates a guest stack,
  * and jumps to the entry point.
+ *
+ * For PE32 images: forks a 32-bit child (my_wine_32) that
+ * independently loads the image and runs it.
  *
  * All heavy lifting is delegated to src/loader/ sub-modules.
  */
@@ -17,6 +20,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #include "include/pe.h"
 #include "include/msvcrt.h"
@@ -45,7 +49,7 @@ static const char *envp_lookup(char *const envp[], const char *key)
 /* Pre-seed argc/argv/envp in .bss using COFF-derived offsets
  * from g_crt_ctx. Explicit mprotect ensures .bss is writable. */
 static void seed_bss_vars(void *base,
-                          const IMAGE_NT_HEADERS64 *nt,
+                          const IMAGE_NT_HEADERS *nt,
                           IMAGE_SECTION_HEADER *sections)
 {
     if (g_crt_ctx.bss_vaddr == 0) {
@@ -83,7 +87,11 @@ static void seed_bss_vars(void *base,
     }
 
     if (g_crt_ctx.argv_bss_offset != 0) {
-        *(uint64_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+        if (pe_is_pe32(nt)) {
+            *(uint32_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+        } else {
+            *(uint64_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+        }
         DEBUG(".bss: wrote argv=NULL at offset 0x%x", g_crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
@@ -91,7 +99,11 @@ static void seed_bss_vars(void *base,
     }
 
     if (g_crt_ctx.envp_bss_offset != 0) {
-        *(uint64_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+        if (pe_is_pe32(nt)) {
+            *(uint32_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+        } else {
+            *(uint64_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+        }
         DEBUG(".bss: wrote envp=NULL at offset 0x%x", g_crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "
@@ -101,11 +113,19 @@ static void seed_bss_vars(void *base,
 
 /* ── init_loader ─────────────────────────────────────────────── */
 
+/**
+ * Map the PE, detect PE32 vs PE32+, and either:
+ *   - For PE32:  map+parse headers only, unmap, return PE_TYPE_32.
+ *                Caller will fork+exec my_wine_32.
+ *   - For PE32+: full loader setup (imports, TEB, PEB, etc.),
+ *                return PE_TYPE_64 with outputs filled.
+ */
 static int init_loader(int argc, char **argv,
                        uint64_t *out_entry,
                        void **out_base,
                        void **out_stack,
-                       void **out_teb)
+                       void **out_teb,
+                       int *out_pe_type)
 {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <pe_binary>\n", argv[0]);
@@ -128,13 +148,26 @@ static int init_loader(int argc, char **argv,
 
     /* 1. Map the PE image (open file, parse headers, copy sections, set protections) */
     IMAGE_DOS_HEADER dos;
-    IMAGE_NT_HEADERS64 nt;
+    IMAGE_NT_HEADERS nt;
     size_t nt_size;
     void *base = map_image(argv[1], &dos, &nt, &nt_size);
     if (!base) return -1;
 
     /* 2. Get section headers (from the live image) */
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
+
+    /* ── PE32 fast-path: unmap and let child handle it ─────── */
+    if (pe_is_pe32(&nt)) {
+        DEBUG("my_wine: PE32 detected, will fork my_wine_32 child");
+        /* Unmap the image — child will remap from the file */
+        if (munmap(base, (size_t)nt_size) != 0) {
+            perror("WARNING: munmap before fork");
+        }
+        *out_pe_type = PE_TYPE_32;
+        return 0;
+    }
+
+    /* ── PE32+ path: full loader setup ─────────────────────── */
 
     /* 3. Initialize dynamic msvcrt import entries, then sort for bsearch */
     init_msvcrt_imports();
@@ -151,7 +184,7 @@ static int init_loader(int argc, char **argv,
     if (!teb) return -1;
 
     /* 7. Set up stack */
-    void *stack_top = setup_stack(&nt.OptionalHeader);
+    void *stack_top = setup_stack(&nt);
     if (!stack_top) return -1;
 
     /* 8a. Zero .data section */
@@ -197,20 +230,38 @@ static int init_loader(int argc, char **argv,
     g_guest_argv = guest_argv;
     g_guest_envp = guest_envp;
 
-    /* Fill _cmdline_storage so _acmdln points to the actual PE path */
+    /* Fill _cmdline_storage so _acmdln points to the actual PE path
+     * For PE32, GetCommandLineA() returns _acmdln which points here */
     strncpy(_cmdline_storage, argv[1], sizeof(_cmdline_storage) - 1);
     _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
 
-    /* 10. Look up user main() symbol; fall back to entry point if not found */
+    /* 10. Look up user entry symbol
+     *  - PE32: try "D_DoomMain" then "_D_DoomMain" (Watcom-compiled DOOM95)
+     *  - PE32+: try "main"
+     *  - Fall back to PE entry point if no symbol found
+     */
     uint64_t main_rva = 0;
     {
         IMAGE_SYMBOL *symbols = NULL;
         char *string_table = NULL;
         int sym_count = parse_symbol_table_from_file(argv[1], &nt, &symbols, &string_table);
         if (sym_count > 0) {
-            main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
-                                          sections, nt.FileHeader.NumberOfSections,
-                                          "main");
+            if (pe_is_pe32(&nt)) {
+                /* Watcom-compiled PE32 (e.g. DOOM95): entry is D_DoomMain */
+                main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                              sections, pe_section_count(&nt),
+                                              "D_DoomMain");
+                if (main_rva == 0) {
+                    main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                                  sections, pe_section_count(&nt),
+                                                  "_D_DoomMain");
+                }
+            } else {
+                /* PE32+: standard "main" entry */
+                main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                              sections, pe_section_count(&nt),
+                                              "main");
+            }
             free(symbols);  // free the malloc'd buffer
         }
     }
@@ -218,13 +269,24 @@ static int init_loader(int argc, char **argv,
     uint64_t entry_abs;
     if (main_rva != 0) {
         entry_abs = (uint64_t)(uintptr_t)base + main_rva;
-        DEBUG("Bypassing CRT: jumping to main() at 0x%lx instead of entry 0x%lx",
-                (unsigned long)entry_abs,
-                (unsigned long)((uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint));
+        if (pe_is_pe32(&nt)) {
+            DEBUG("Bypassing CRT: jumping to D_DoomMain() at 0x%lx instead of entry 0x%lx",
+                    (unsigned long)entry_abs,
+                    (unsigned long)((uint64_t)(uintptr_t)base + pe_entry_rva(&nt)));
+        } else {
+            DEBUG("Bypassing CRT: jumping to main() at 0x%lx instead of entry 0x%lx",
+                    (unsigned long)entry_abs,
+                    (unsigned long)((uint64_t)(uintptr_t)base + pe_entry_rva(&nt)));
+        }
     } else {
-        entry_abs = (uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint;
-        fprintf(stderr, "WARNING: 'main' symbol not found, using entry point 0x%lx\n",
-                (unsigned long)entry_abs);
+        entry_abs = (uint64_t)(uintptr_t)base + pe_entry_rva(&nt);
+        if (pe_is_pe32(&nt)) {
+            fprintf(stderr, "WARNING: 'D_DoomMain'/'_D_DoomMain' symbol not found, "
+                    "using PE entry point 0x%lx\n", (unsigned long)entry_abs);
+        } else {
+            fprintf(stderr, "WARNING: 'main' symbol not found, "
+                    "using entry point 0x%lx\n", (unsigned long)entry_abs);
+        }
     }
 
     /* Write outputs for caller */
@@ -232,6 +294,7 @@ static int init_loader(int argc, char **argv,
     *out_base = base;
     *out_stack = stack_top;
     *out_teb = teb;
+    *out_pe_type = PE_TYPE_64;
 
     return 0;
 }
@@ -242,11 +305,64 @@ int main(int argc, char *argv[])
 {
     uint64_t entry;
     void *base, *stack_top, *teb;
+    int pe_type;
 
-    if (init_loader(argc, argv, &entry, &base, &stack_top, &teb) != 0) {
+    if (init_loader(argc, argv, &entry, &base, &stack_top, &teb, &pe_type) != 0) {
         return 1;
     }
 
+    if (pe_type == PE_TYPE_32) {
+        /* ── PE32: fork + exec my_wine_32 ─────────────────── */
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            return 1;
+        }
+
+        if (pid == 0) {
+            /* Child: set env, exec my_wine_32 */
+            char env_var[4096];
+            snprintf(env_var, sizeof(env_var), "WINE32_PE_PATH=%s", argv[1]);
+            putenv(env_var);
+
+            /* Find my_wine_32 next to this binary via /proc/self/exe */
+            char exe_path[4096];
+            ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+            char *exec_target = "my_wine_32";
+            if (len > 0) {
+                exe_path[len] = '\0';
+                char *slash = strrchr(exe_path, '/');
+                if (slash) {
+                    strcpy(slash + 1, "my_wine_32");
+                    exec_target = exe_path;
+                }
+            }
+
+            char *child_argv[] = { exec_target, argv[1], NULL };
+            execvp(exec_target, child_argv);
+
+            /* execvp only returns on failure */
+            perror("execvp my_wine_32");
+            _exit(127);
+        }
+
+        /* Parent: wait for child */
+        int status;
+        if (waitpid(pid, &status, 0) < 0) {
+            perror("waitpid");
+            return 1;
+        }
+
+        if (WIFEXITED(status)) {
+            return WEXITSTATUS(status);
+        }
+        if (WIFSIGNALED(status)) {
+            return 128 + WTERMSIG(status);
+        }
+        return 1;
+    }
+
+    /* ── PE32+: single-process flow ───────────────────────── */
     run_guest_entry(entry, base, stack_top, teb, g_guest_argv, g_guest_envp);
     return 0;
 }

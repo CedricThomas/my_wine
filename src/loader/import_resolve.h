@@ -11,10 +11,10 @@
 #include "module_list.h"
 
 /* Pass 1 + Pass 2 import resolution */
-int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt);
+int resolve_imports(void *base, IMAGE_NT_HEADERS *nt);
 
 /* Find .text jmp-thunk whose IAT entry resolves to target_addr */
-void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
+void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS *nt,
                        IMAGE_SECTION_HEADER *sections,
                        void *target_addr);
 

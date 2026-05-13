@@ -21,9 +21,7 @@
 #include "ntdll.h"
 #include "syscall/dispatcher_entry.h"
 #include "syscall/dispatcher.h"
-
-/* ── Forward declaration for handle table init ───────────────── */
-extern void init_handle_table(void);
+#include "handle_manager.h"
 
 /* ── Test harness ───────────────────────────────────────────── */
 
@@ -521,9 +519,9 @@ int main(void)
 {
     install_crash_safety();
 
-    /* Initialize the handle table (constructor in ntdll_handle.c may
+    /* Initialize the handle manager (constructor in handle_manager.c may
      * not run reliably in test binaries; do it explicitly) */
-    init_handle_table();
+    wine_handle_manager_init();
 
     printf("=== Syscall Dispatch Unit Tests ===\n");
 

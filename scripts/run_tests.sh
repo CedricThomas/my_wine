@@ -51,4 +51,8 @@ timeout 5 ./"$BUILDDIR"/test_module_registry
 echo "=== Running test_export_parsing ==="
 timeout 5 ./"$BUILDDIR"/test_export_parsing
 
+# test_pe32
+echo "=== Running test_pe32 ==="
+timeout 5 ./"$BUILDDIR"/test_pe32
+
 echo "=== Tests completed ==="

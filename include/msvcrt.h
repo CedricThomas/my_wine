@@ -26,18 +26,26 @@ __attribute__((ms_abi))
 void __set_app_type(int type);
 __attribute__((ms_abi))
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *pStartInfo);
+#ifdef MY_WINE_32
+/* 32-bit: these are data symbols (from crt_32_stub.c) */
+extern char **__initenv;
+extern char *__p__acmdln;
+extern char *__p__commode;
+extern char *__p__fmode;
+#else
+/* 64-bit: __initenv is a data symbol, __p__commode/__p__fmode are function stubs (from crt_startup.c) */
+extern char **__initenv;
 __attribute__((ms_abi))
-void __initenv(void);
+void *__p__commode(void);
+__attribute__((ms_abi))
+void *__p__fmode(void);
+#endif
 __attribute__((ms_abi))
 void _initterm(void);
 __attribute__((ms_abi))
 void *_initterm_e(const void **pi, const void **pe);
 __attribute__((ms_abi))
 void *_onexit(void (*func)(void));
-__attribute__((ms_abi))
-void *__p__commode(void);
-__attribute__((ms_abi))
-void *__p__fmode(void);
 
 /* IO buffers */
 __attribute__((ms_abi))
@@ -112,6 +120,6 @@ extern crt_context_t g_crt_ctx;
 
 /* Patch refptrs in the PE's .rdata to point to our globals */
 #include "pe.h"
-void patch_crt_refptrs(const char *file_path, void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections);
+void patch_crt_refptrs(const char *file_path, void *image_base, IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections);
 
 #endif /* MY_WINE_MSVCRT_H */

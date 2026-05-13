@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "export_table.h"
+#include "include/pe_priv.h"
 #include "include/nt_constants.h"
 #include "include/debug.h"
 
@@ -23,15 +24,13 @@ int parse_export_table(loaded_module_t *mod)
         return -1;
     }
 
-    const IMAGE_DATA_DIRECTORY *dir =
-        &mod->nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT];
-
-    if (dir->VirtualAddress == 0) {
+    IMAGE_DATA_DIRECTORY dir;
+    if (!pe_get_data_dir(mod->nt, DIRECTORY_ENTRY_EXPORT, &dir) || dir.VirtualAddress == 0) {
         return -1;  /* No export directory */
     }
 
     IMAGE_EXPORT_DIRECTORY *exp =
-        (IMAGE_EXPORT_DIRECTORY *)((uint8_t *)mod->base + dir->VirtualAddress);
+        (IMAGE_EXPORT_DIRECTORY *)((uint8_t *)mod->base + dir.VirtualAddress);
 
     EXPORT_CACHE *cache = &mod->export_cache;
 
@@ -39,8 +38,8 @@ int parse_export_table(loaded_module_t *mod)
     __builtin_memset(cache, 0, sizeof(EXPORT_CACHE));
 
     cache->base = mod->base;
-    cache->export_dir_rva = dir->VirtualAddress;
-    cache->export_dir_size = dir->Size;
+    cache->export_dir_rva = dir.VirtualAddress;
+    cache->export_dir_size = dir.Size;
     cache->address_of_functions = exp->AddressOfFunctions;
     cache->address_of_names = exp->AddressOfNames;
     cache->address_of_name_ordinals = exp->AddressOfNameOrdinals;

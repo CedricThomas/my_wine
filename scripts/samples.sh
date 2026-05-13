@@ -61,6 +61,23 @@ ensure_image() {
     fi
 }
 
+# Select MinGW compiler based on arch field in sample.info (default: 64).
+# Args: $1 = sample source directory
+# Returns: compiler name via stdout
+select_compiler() {
+    local src_dir="$1"
+    local info="$src_dir/sample.info"
+    local arch="64"
+    if [ -f "$info" ]; then
+        arch=$(parse_sample_info "$info" "arch")
+    fi
+    if [ "$arch" = "32" ]; then
+        echo "i686-w64-mingw32-gcc"
+    else
+        echo "x86_64-w64-mingw32-gcc"
+    fi
+}
+
 # Rewrite a host path to its /project/... equivalent inside the Docker container.
 to_container_path() {
     local host_path="$1"
@@ -115,12 +132,16 @@ build_dlls() {
         container_src=$(to_container_path "$c_src")
         container_def=$(to_container_path "$def")
 
+        # Select compiler based on arch field in sample.info (default: 64)
+        local CC
+        CC=$(select_compiler "$src_dir")
+
         echo "  CC  ${name}/dlls/${dll_base}.dll (mingw-dll)"
         docker run --rm \
             -v "$PROJECT_DIR:/project:ro" \
             -v "$src_dir:/out" \
             "$IMAGE_NAME" \
-            x86_64-w64-mingw32-gcc \
+            "$CC" \
             -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -shared \
             -Wl,"$container_def" \
             -o "/out/${dll_base}.dll" \
@@ -170,12 +191,16 @@ build_exe() {
         container_srcs="$container_srcs $(to_container_path "$src")"
     done
 
+    # Select compiler based on arch field in sample.info (default: 64)
+    local CC
+    CC=$(select_compiler "$src_dir")
+
     echo "  CC  $name (mingw)"
     docker run --rm \
         -v "$PROJECT_DIR:/project:ro" \
         -v "$src_dir:/out" \
         "$IMAGE_NAME" \
-        x86_64-w64-mingw32-gcc \
+        "$CC" \
         -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -mconsole \
         -o "/out/${name}.exe" \
         $container_srcs 2>&1 || {

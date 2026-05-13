@@ -112,7 +112,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     const char *open_path = path ? path : "/dev/null";
 
     /* Open the file via openat syscall (avoids libc after GS base change) */
-    long res = INLINE_SYSCALL_OPENAT(AT_FDCWD, open_path, oflags);
+    long res = INLINE_SYSCALL_OPENAT(AT_FDCWD, open_path, oflags, 0);
     int fd = (int)res;
     if (fd < 0) {
         return STATUS_UNSUCCESSFUL;

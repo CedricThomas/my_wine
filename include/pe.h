@@ -1,5 +1,5 @@
 /*
- * pe.h — PE32+ (x86_64 Windows PE) structures
+ * pe.h — PE32 (x86) and PE32+ (x86_64) Windows PE structures
  *
  * Structures based on the Microsoft PE/COFF specification.
  * See: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
@@ -18,16 +18,29 @@
 #define IMAGE_NT_SIGNATURE          0x4550   /* "PE\0\0" */
 
 #define IMAGE_FILE_MACHINE_AMD64    0x8664
+#define IMAGE_FILE_MACHINE_I386     0x14c
 
 #define IMAGE_NT_OPTIONAL_HDR32_MAGIC 0x10B
 #define IMAGE_NT_OPTIONAL_HDR64_MAGIC 0x20B
 
+/* ── PE Type ───────────────────────────────────────────────────── */
+
+typedef enum {
+    PE_TYPE_32,
+    PE_TYPE_64
+} pe_type_t;
+
+#define IMAGE_DIRECTORY_ENTRY_EXPORT     0
 #define IMAGE_DIRECTORY_ENTRY_IMPORT     1
 #define IMAGE_DIRECTORY_ENTRY_BASERELOC  3
 
 #ifndef IMAGE_REL_BASED_DIR64
 #define IMAGE_REL_BASED_DIR64       0x000A
 #define IMAGE_REL_BASED_ABSOLUTE    0x0000
+#define IMAGE_REL_BASED_HIGH        0x0001
+#define IMAGE_REL_BASED_LOW         0x0002
+#define IMAGE_REL_BASED_HIGHLOW     0x0003
+#define IMAGE_REL_BASED_DIR32       0x0004
 #endif
 #ifndef IMAGE_FILE_RELOCS_STRIPPED
 #define IMAGE_FILE_RELOCS_STRIPPED  0x0001
@@ -80,6 +93,42 @@ typedef struct {
     uint32_t Size;
 } IMAGE_DATA_DIRECTORY;
 
+/* ── Optional Header (PE32) ────────────────────────────────────── */
+
+typedef struct {
+    uint16_t  Magic;
+    uint8_t   MajorLinkerVersion;
+    uint8_t   MinorLinkerVersion;
+    uint32_t  SizeOfCode;
+    uint32_t  SizeOfInitializedData;
+    uint32_t  SizeOfUninitializedData;
+    uint32_t  AddressOfEntryPoint;
+    uint32_t  BaseOfCode;
+    uint32_t  BaseOfData;          /* PE32-only */
+    uint32_t  ImageBase;
+    uint32_t  SectionAlignment;
+    uint32_t  FileAlignment;
+    uint16_t  MajorOperatingSystemVersion;
+    uint16_t  MinorOperatingSystemVersion;
+    uint16_t  MajorImageVersion;
+    uint16_t  MinorImageVersion;
+    uint16_t  MajorSubsystemVersion;
+    uint16_t  MinorSubsystemVersion;
+    uint32_t  Win32VersionValue;
+    uint32_t  SizeOfImage;
+    uint32_t  SizeOfHeaders;
+    uint32_t  CheckSum;
+    uint16_t  Subsystem;
+    uint16_t  DllCharacteristics;
+    uint32_t  SizeOfStackReserve;
+    uint32_t  SizeOfStackCommit;
+    uint32_t  SizeOfHeapReserve;
+    uint32_t  SizeOfHeapCommit;
+    uint32_t  LoaderFlags;
+    uint32_t  NumberOfRvaAndSizes;
+    IMAGE_DATA_DIRECTORY DataDirectory[16];
+} IMAGE_OPTIONAL_HEADER32;
+
 /* ── Optional Header (PE32+) ───────────────────────────────────── */
 
 typedef struct {
@@ -115,13 +164,31 @@ typedef struct {
     IMAGE_DATA_DIRECTORY DataDirectory[16];
 } IMAGE_OPTIONAL_HEADER64;
 
-/* ── NT Headers ────────────────────────────────────────────────── */
+/* ── NT Headers (PE32) ─────────────────────────────────────────── */
+
+typedef struct {
+    uint32_t              Signature;
+    IMAGE_FILE_HEADER     FileHeader;
+    IMAGE_OPTIONAL_HEADER32 OptionalHeader;
+} IMAGE_NT_HEADERS32;
+
+/* ── NT Headers (PE32+) ────────────────────────────────────────── */
 
 typedef struct {
     uint32_t          Signature;
     IMAGE_FILE_HEADER FileHeader;
     IMAGE_OPTIONAL_HEADER64 OptionalHeader;
 } IMAGE_NT_HEADERS64;
+
+/* ── NT Headers (tagged union) ─────────────────────────────────── */
+
+typedef struct {
+    pe_type_t pe_type;
+    union {
+        IMAGE_NT_HEADERS32 nt32;
+        IMAGE_NT_HEADERS64 nt64;
+    } u;
+} IMAGE_NT_HEADERS;
 
 /* ── Section Header ────────────────────────────────────────────── */
 
@@ -141,17 +208,23 @@ typedef struct {
     uint32_t Characteristics;
 } IMAGE_SECTION_HEADER;
 
-/* ── Import Descriptor ─────────────────────────────────────────── */
+/* ── Import Descriptor (20 bytes, same for PE32 and PE32+) ───────
+ *
+ * Per the Microsoft PE/COFF specification, all fields are 32-bit RVAs
+ * regardless of PE type. OriginalFirstThunk and FirstThunk are RVAs
+ * that point to thunk arrays: IMAGE_THUNK_DATA32 (4-byte) for PE32,
+ * IMAGE_THUNK_DATA64 (8-byte) for PE32+.
+ */
 
 typedef struct {
     union {
         uint32_t Characteristics;
-        uint32_t OriginalFirstThunk; /* RVA to IAT */
+        uint32_t OriginalFirstThunk; /* RVA to ILT */
     } u1;
     uint32_t TimeDateStamp;
     uint32_t ForwarderChain;
-    uint32_t Name;            /* RVA to DLL name string */
-    uint32_t FirstThunk;      /* RVA to IAT */
+    uint32_t Name;                   /* RVA to DLL name string */
+    uint32_t FirstThunk;             /* RVA to IAT */
 } IMAGE_IMPORT_DESCRIPTOR;
 
 /* ── Import By Name ────────────────────────────────────────────── */
@@ -160,6 +233,15 @@ typedef struct {
     uint16_t Hint;
     char     Name[1]; /* null-terminated */
 } IMAGE_IMPORT_BY_NAME;
+
+/* ── Thunk Data (32-bit) ───────────────────────────────────────── */
+
+typedef union {
+    uint32_t ForwarderString;
+    uint32_t Function;
+    uint32_t Ordinal;        /* high bit set when this is an ordinal */
+    uint32_t AddressOfData;
+} IMAGE_THUNK_DATA32;
 
 /* ── Thunk Data (64-bit) ───────────────────────────────────────── */
 

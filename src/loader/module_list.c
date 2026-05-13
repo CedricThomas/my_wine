@@ -6,6 +6,7 @@
  */
 
 #include "module_list.h"
+#include "include/pe_priv.h"
 #include "loader_utils.h"
 
 loaded_module_t module_list[MAX_MODULES];
@@ -38,16 +39,16 @@ static void module_list_entry_init(LIST_ENTRY *entry)
 }
 
 /* Populate the LDR_DATA_TABLE_ENTRY from module metadata */
-static void module_init_ldr_entry(loaded_module_t *m, IMAGE_NT_HEADERS64 *nt)
+static void module_init_ldr_entry(loaded_module_t *m, IMAGE_NT_HEADERS *nt)
 {
     LDR_DATA_TABLE_ENTRY *entry = &m->ldr_entry;
 
     dll_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
 
     entry->DllBase = m->base;
-    entry->EntryPoint = (char *)m->base + nt->OptionalHeader.AddressOfEntryPoint;
-    entry->SizeOfImage = nt->OptionalHeader.SizeOfImage;
-    entry->TimeDateStamp = nt->FileHeader.TimeDateStamp;
+    entry->EntryPoint = (char *)m->base + pe_entry_rva(nt);
+    entry->SizeOfImage = pe_size_of_image(nt);
+    entry->TimeDateStamp = pe_time_date_stamp(nt);
     entry->LoadCount = 1;
 
     module_make_unicode_string(&entry->FullDllName, m->name);
@@ -68,7 +69,7 @@ void init_module_list(void)
     module_count = 0;
 }
 
-loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS64 *nt)
+loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS *nt)
 {
     int i;
     for (i = 0; i < MAX_MODULES; i++) {
@@ -128,7 +129,7 @@ loaded_module_t *find_module_by_addr(void *addr)
     for (i = 0; i < MAX_MODULES; i++) {
         if (module_list[i].base != NULL && module_list[i].nt != NULL) {
             uintptr_t base = (uintptr_t)module_list[i].base;
-            uintptr_t end = base + module_list[i].nt->OptionalHeader.SizeOfImage;
+            uintptr_t end = base + pe_size_of_image(module_list[i].nt);
             if (a >= base && a < end) {
                 return &module_list[i];
             }

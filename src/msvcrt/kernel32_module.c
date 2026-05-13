@@ -4,10 +4,10 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <pthread.h>
 #include <sys/mman.h>
 
 #include "kernel32_priv.h"
+#include "include/pe_priv.h"
 #include "../loader/loader_priv.h"
 
 static char g_dll_path[512];
@@ -103,7 +103,7 @@ int FreeLibraryA(void *hModule)
         ldr_remove_module(mod);
 
     if (mod->base && mod->nt) {
-        uint32_t size = mod->nt->OptionalHeader.SizeOfImage;
+        uint32_t size = pe_size_of_image(mod->nt);
         munmap(mod->base, size);
     }
 
@@ -123,7 +123,11 @@ WINE_STUB
 __attribute__((noreturn)) void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)
 {
     FreeLibraryA(hModule);
-    pthread_exit((void *)(uintptr_t)exitCode);
+#ifdef MY_WINE_32
+    INLINE_SYSCALL_EXIT((int)exitCode);
+#else
+    _exit((int)exitCode);
+#endif
 }
 
 void _FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)

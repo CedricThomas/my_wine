@@ -1,6 +1,6 @@
 # ── Toolchain ───────────────────────────────────────────────────
 CC       = gcc
-CFLAGS   = -Wall -Wextra -O2 -g -I. -MMD -MP -mno-sse
+CFLAGS   = -Wall -Wextra -O2 -g -I. -Iinclude -MMD -MP -mno-sse
 LDFLAGS  = -lrt -lpthread -ldl
 
 # Special flags for entry points, loader core, stubs, syscall infra
@@ -16,8 +16,9 @@ BUILDDIR = build
 
 # Auto-discover .c per source group; objects flatten into build/
 ROOT_SRC     = $(sort $(shell find src/   -maxdepth 1 -name '*.c'))
-STUBS_SRC    = $(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c'))
-LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c'))
+STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c, \
+		$(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c')))
+LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
 HEAP_SRC     = $(sort $(shell find src/heap    -maxdepth 1 -name '*.c'))
 
@@ -53,7 +54,7 @@ STUBS_SYSCALL_OBJS = $(filter-out $(BUILDDIR)/kernel32_module.o, $(STUBS_NO_CRT_
 TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_SYSCALL_OBJS) $(HEAP_OBJS) $(BUILDDIR)/common.o
 
 # ── vpath ───────────────────────────────────────────────────────
-vpath %.c src src/msvcrt src/loader src/syscall src/heap
+vpath %.c src src/msvcrt src/loader src/syscall src/heap tests
 vpath %.S src src/syscall
 
 # ── Per-target CFLAGS overrides ─────────────────────────────────
@@ -72,14 +73,102 @@ CFLAGS_musl_malloc_wrapper.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/hea
 
 # ── Targets ─────────────────────────────────────────────────────
 
-all: my_wine samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+all: my_wine my_wine_32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
-	$(BUILDDIR)/test_export_parsing
+	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
 
 my_wine: $(OBJS)
 	@echo "==== Link my_wine ===="
 	@$(CC) $(CFLAGS) -o my_wine $(OBJS) $(LDFLAGS)
+
+# ── 32-bit child binary ─────────────────────────────────────────
+# my_wine_32: standalone 32-bit ELF that loads PE32 images.
+# Compiled with -m32, statically linked, uses pe32_entry.S as _start.
+# No CRT startup (pe32_entry.S provides _start).
+
+MY_WINE_32_CC = $(CC) -m32
+MY_WINE_32_CFLAGS = $(CFLAGS) -DMY_WINE_32 -mno-red-zone -fno-stack-protector \
+	-fno-exceptions -mno-sse -fno-pie -no-pie
+BUILDDIR32 = build32
+
+# 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager
+# Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child)
+MY_WINE_32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c, \
+	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) src/msvcrt/crt_32_stub.c
+# 32-bit heap: use mmap-based allocator instead of musl (musl atomics are x86_64-only)
+MY_WINE_32_HEAP_SRC = src/heap/wine_heap.c src/heap/musl_malloc_32_compat.c
+# Flatten paths: src/msvcrt/foo.c → build32/foo.o, src/heap/foo.c → build32/foo.o
+MY_WINE_32_STUBS_OBJS = $(patsubst src/msvcrt/%.c,$(BUILDDIR32)/%.o,$(MY_WINE_32_STUBS_SRC))
+MY_WINE_32_HEAP_OBJS  = $(patsubst src/heap/%.c,$(BUILDDIR32)/%.o,$(MY_WINE_32_HEAP_SRC))
+
+MY_WINE_32_OBJS = \
+	$(BUILDDIR32)/pe32_entry.o \
+	$(BUILDDIR32)/pe32_entry.S.o \
+	$(BUILDDIR32)/pe32_run_guest.o \
+	$(BUILDDIR32)/crash_handlers.o \
+	$(BUILDDIR32)/teb_peb.o \
+	$(BUILDDIR32)/image_mapper.o \
+	$(BUILDDIR32)/module_list.o \
+	$(BUILDDIR32)/peb_ldr.o \
+	$(BUILDDIR32)/relocations.o \
+	$(BUILDDIR32)/pe_symbols.o \
+	$(BUILDDIR32)/thunk_gen.o \
+	$(BUILDDIR32)/dispatcher.o \
+	$(BUILDDIR32)/dispatcher_entry.o \
+	$(BUILDDIR32)/dispatcher_entry_asm.o \
+	$(BUILDDIR32)/abi_wrappers.o \
+	$(BUILDDIR32)/pe_headers.o \
+	$(BUILDDIR32)/pe_imports.o \
+	$(BUILDDIR32)/pe_rip_scan.o \
+	$(BUILDDIR32)/export_table.o \
+	$(BUILDDIR32)/dll_path.o \
+	$(BUILDDIR32)/dll_loader.o \
+	$(BUILDDIR32)/common.o \
+	$(BUILDDIR32)/import_table.o \
+	$(BUILDDIR32)/import_init.o \
+	$(BUILDDIR32)/ordinal_table.o \
+	$(BUILDDIR32)/import_resolve.o \
+	$(BUILDDIR32)/mmap2_asm.o \
+	$(MY_WINE_32_STUBS_OBJS) \
+	$(MY_WINE_32_HEAP_OBJS)
+
+my_wine_32: $(MY_WINE_32_OBJS)
+	@echo "==== Link my_wine_32 ===="
+	@$(MY_WINE_32_CC) -static -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) \
+		-nostartfiles -Wl,--no-dynamic-linker -lpthread \
+		-Wl,--defsym=_DYNAMIC=0
+
+# 32-bit pattern rules — compile with -m32 into build32/
+$(BUILDDIR32):
+	@mkdir -p $(BUILDDIR32)
+
+$(BUILDDIR32)/%.o: %.c | $(BUILDDIR32)
+	@echo "  CC32 $<"
+	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+
+# Explicit rule for pe32_entry.S (avoids name clash with pe32_entry.c)
+$(BUILDDIR32)/pe32_entry.S.o: src/loader/pe32_entry.S | $(BUILDDIR32)
+	@echo "  AS32 $<"
+	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+
+# Explicit rule for pe32_run_guest.S (avoids name clash with pe32_entry.c)
+$(BUILDDIR32)/pe32_run_guest.o: src/loader/pe32_run_guest.S | $(BUILDDIR32)
+	@echo "  AS32 $<"
+	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+
+# Explicit rule for dispatcher_entry_asm.S from src/syscall/
+$(BUILDDIR32)/dispatcher_entry_asm.o: src/syscall/dispatcher_entry_asm.S | $(BUILDDIR32)
+	@echo "  AS32 $<"
+	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+
+# Explicit rule for mmap2_asm.S from src/syscall/
+$(BUILDDIR32)/mmap2_asm.o: src/syscall/mmap2_asm.S | $(BUILDDIR32)
+	@echo "  AS32 $<"
+	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+
+# 32-bit dispatcher.o needs the generated dispatch switch
+$(BUILDDIR32)/dispatcher.o: src/syscall/dispatcher_generated.c
 
 # ── Directory creation ──────────────────────────────────────────
 $(BUILDDIR):
@@ -111,7 +200,7 @@ TEST ?=
 tests: my_wine $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
-		$(BUILDDIR)/test_export_parsing
+		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
 
 run-test: tests
 	@echo "==== Running tests ===="
@@ -120,19 +209,24 @@ run-test: tests
 # Per-test object groups
 TEST_parse_OBJS = $(PE_OBJS) $(BUILDDIR)/debug.o
 TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/module_list.o \
-	$(BUILDDIR)/export_table.o $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/debug.o
+	$(BUILDDIR)/export_table.o $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/debug.o \
+	$(BUILDDIR)/test_helpers.o
 TEST_teb_peb_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/module_list.o $(BUILDDIR)/debug.o
 TEST_syscall_dispatch_OBJS = $(TEST_SYSCALL_OBJS) $(BUILDDIR)/debug.o
 TEST_relocations_OBJS = $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o \
-	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/image_mapper.o
+	$(BUILDDIR)/pe_headers.o $(BUILDDIR)/image_mapper.o $(BUILDDIR)/common.o
 
 # Module registry + PEB LDR test
 TEST_module_registry_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o \
-	$(BUILDDIR)/peb_ldr.o $(BUILDDIR)/module_list.o $(BUILDDIR)/debug.o
+	$(BUILDDIR)/peb_ldr.o $(BUILDDIR)/module_list.o $(BUILDDIR)/debug.o \
+	$(BUILDDIR)/test_helpers.o
 
 # Export parsing test
 TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o \
 	$(BUILDDIR)/debug.o $(PE_OBJS)
+
+# PE32 (32-bit) parsing and relocation test
+TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 
 define TEST_RULE
 $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
@@ -147,6 +241,7 @@ $(eval $(call TEST_RULE,syscall_dispatch,$(TEST_syscall_dispatch_OBJS)))
 $(eval $(call TEST_RULE,relocations,$(TEST_relocations_OBJS)))
 $(eval $(call TEST_RULE,module_registry,$(TEST_module_registry_OBJS)))
 $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
+$(eval $(call TEST_RULE,pe32,$(TEST_pe32_OBJS)))
 
 # ── Auto-generated header dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
@@ -169,13 +264,13 @@ run-sample: all
 
 clean:
 	@echo "  CLEAN build artifacts"
-	rm -rf $(BUILDDIR)
+	rm -rf $(BUILDDIR) $(BUILDDIR32)
 	rm -f include/crt_offsets_generated.h
 	rm -f src/syscall/dispatcher_generated.c
 
 fclean: clean
 	@echo "  FCLEAN all end targets"
-	rm -f my_wine
+	rm -f my_wine my_wine_32
 	find samples/ -name '*.exe' -delete 2>/dev/null || true
 	find samples/ -name '*.dll' -delete 2>/dev/null || true
 	rm -rf samples/unpacked/
@@ -202,4 +297,4 @@ gen-crt-offsets:
 gen-dispatcher: src/syscall/dispatcher_generated.c
 	@echo "Generated dispatcher switch bodies."
 
-.PHONY: all clean fclean re tests run-test samples run-sample build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR)
+.PHONY: all clean fclean re tests run-test samples run-sample build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR) $(BUILDDIR32)

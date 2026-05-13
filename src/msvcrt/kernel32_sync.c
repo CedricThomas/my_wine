@@ -12,7 +12,6 @@
 #define _GNU_SOURCE
 #include <unistd.h>
 #include "kernel32_priv.h"
-#include <pthread.h>
 
 /* ── CreateEventA ────────────────────────────────────────────── */
 /*

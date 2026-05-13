@@ -13,6 +13,7 @@
 
 #include "include/common.h"
 #include "include/debug.h"
+#include "include/pe_priv.h"
 #include "msvcrt_priv.h"
 
 #define CRT_BSS_INITIALIZED 0x30
@@ -69,7 +70,9 @@ static void refptr_patch_cb(void *arg)
 
 void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
                                const char *name, uint64_t image_size,
-                               uint64_t ctx_image_base, uint64_t ctx_bss_vaddr)
+                               uint64_t ctx_image_base, uint64_t ctx_bss_vaddr,
+                               IMAGE_NT_HEADERS *nt,
+                               IMAGE_SECTION_HEADER *sections)
 {
     if (rva >= image_size) {
         return;
@@ -77,6 +80,34 @@ void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
 
     uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
     char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)PAGE_MASK);
+
+    /* Compute the correct restore_prot from the section that contains this refptr.
+     * For PE32, refptrs in .idata (which is R+W) must be restored to PROT_READ|PROT_WRITE
+     * so that resolve_imports can later write to the IAT in the same page.
+     * Hardcoding PROT_READ (the previous behavior) would leave .idata read-only and
+     * crash when resolve_imports tries to write IAT entries. */
+    int restore_prot = PROT_READ;  /* fallback */
+    if (nt && sections) {
+        /* Convert page_start to an RVA for comparison against section RVAs */
+        uint64_t page_rva = (uint64_t)(uintptr_t)page_start - (uint64_t)(uintptr_t)image_base;
+        for (uint16_t i = 0; i < pe_section_count(nt); i++) {
+            uint64_t sec_start = sections[i].VirtualAddress;
+            uint64_t sec_end = sec_start +
+                (sections[i].Misc.VirtualSize > 0
+                 ? sections[i].Misc.VirtualSize
+                 : sections[i].SizeOfRawData);
+            if (page_rva >= sec_start && page_rva < sec_end) {
+                restore_prot = 0;
+                if (sections[i].Characteristics & IMAGE_SCN_MEM_READ)
+                    restore_prot |= PROT_READ;
+                if (sections[i].Characteristics & IMAGE_SCN_MEM_WRITE)
+                    restore_prot |= PROT_WRITE;
+                if (sections[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)
+                    restore_prot |= PROT_EXEC;
+                break;
+            }
+        }
+    }
 
     struct refptr_patch_arg arg = {
         .refptr = refptr,
@@ -87,13 +118,13 @@ void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
         .bss_vaddr = ctx_bss_vaddr,
     };
 
-    if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &arg, PROT_READ) != 0) {
+    if (with_mprotect_rw(page_start, PAGE_SIZE, refptr_patch_cb, &arg, restore_prot) != 0) {
         perror("patch_crt_refptrs: with_mprotect_rw");
     }
 }
 
 void patch_crt_refptrs(const char *file_path, void *image_base,
-                       IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
+                       IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections)
 {
     if (!image_base || !nt || !sections) return;
 
@@ -132,7 +163,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
         DEBUG("patch_crt_refptrs: set initialized=1 at %p", (void *)initialized_ptr);
     }
 
-    uint64_t image_size = nt->OptionalHeader.SizeOfImage;
+    uint64_t image_size = pe_size_of_image(nt);
     int patched_any = 0;
     int patched_initenv = 0;
 
@@ -151,7 +182,8 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
                 DEBUG("patch_crt_refptrs: using COFF symbol table");
             apply_refptr_patch(image_base, target_rva, map->target,
                                map->name, image_size,
-                               ctx.image_base, ctx.bss_vaddr);
+                               ctx.image_base, ctx.bss_vaddr,
+                               nt, sections);
             patched_any = 1;
             if (strstr(map->name, "initenv")) patched_initenv = 1;
         }
@@ -204,7 +236,8 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 
                         apply_refptr_patch(image_base, sec_vaddr + off,
                                            map->target, map->name, image_size,
-                                           ctx.image_base, ctx.bss_vaddr);
+                                           ctx.image_base, ctx.bss_vaddr,
+                                           nt, sections);
                         patched[mi] = true;
                         next_unpatched = (int)(mi + 1);
                         patched_any = 1;

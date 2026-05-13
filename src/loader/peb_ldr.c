@@ -10,21 +10,16 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include "peb_ldr.h"
+#include "image_mapper.h"
+#include "include/common.h"
+#include "loader_utils.h"
+#include "../syscall/syscalls_inline.h"
 
 /* ── Global state ──────────────────────────────────────────────── */
 PEB_LDR_DATA *g_peb_ldr = NULL;
-
-/* ── Hand-rolled helpers (no glibc for guest-stack safety) ─────── */
-
-static void pdr_memset(void *ptr, int c, size_t n)
-{
-    uint8_t *p = (uint8_t *)ptr;
-    size_t i;
-    for (i = 0; i < n; i++)
-        p[i] = (uint8_t)c;
-}
 
 /* ── List helpers ───────────────────────────────────────────────── */
 
@@ -59,8 +54,17 @@ static void list_remove(LIST_ENTRY *entry)
 
 PEB_LDR_DATA *init_peb_ldr(void)
 {
-    PEB_LDR_DATA *ldr = (PEB_LDR_DATA *)malloc(sizeof(PEB_LDR_DATA));
-    if (!ldr) return NULL;
+    PEB_LDR_DATA *ldr;
+    if (g_is_32bit) {
+        /* For PE32, allocate below 4GB so the truncated pointer is valid */
+        ldr = (PEB_LDR_DATA *)INLINE_SYSCALL_MMAP(NULL, sizeof(PEB_LDR_DATA),
+                    PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+        if (ldr == (void *)-1 || ldr == NULL) return NULL;
+    } else {
+        ldr = (PEB_LDR_DATA *)malloc(sizeof(PEB_LDR_DATA));
+        if (!ldr) return NULL;
+    }
 
     memset(ldr, 0, sizeof(PEB_LDR_DATA));
 
@@ -111,7 +115,7 @@ int ldr_remove_module(loaded_module_t *mod)
     list_remove(&entry->DoubleList[2]);
 
     /* Reset the entry */
-    pdr_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
+    dll_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
 
     mod->ldr_linked = 0;
 

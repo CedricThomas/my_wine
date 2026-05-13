@@ -29,14 +29,20 @@
 
 static int g_alt_stack_available = 1;  /* Flipped to 0 if signal stack mmap fails */
 
-/**
+/*
  * SEH handler — called when an exception occurs in guest code.
- * On x86_64, SEH handlers receive (ExceptionRecord, EstablisherFrame,
- * ContextRecord, DispatcherContext) in RCX, RDX, R8, R9 per Microsoft x64 ABI.
+ * On x86_64: args in RCX/RDX/R8/R9 (ms_abi).
+ * On i386:   args on stack (cdecl, no ms_abi).
  */
+#if defined(__i386__)
+__attribute__((used, noreturn))
+void seh_crash_handler(void *exception_record, void *establisher_frame,
+                       void *context_record, void *dispatcher_context)
+#else
 __attribute__((ms_abi, used, noreturn))
 void seh_crash_handler(void *exception_record, void *establisher_frame,
                        void *context_record, void *dispatcher_context)
+#endif
 {
     (void)exception_record;
     (void)establisher_frame;
@@ -89,8 +95,20 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         greg_t *regs = uc->uc_mcontext.gregs;
         char hex_buf[200];
         int off = 0;
-        const char *labels[] = {" RIP=", " RSP=", " RAX="};
-        int reg_indices[] = {REG_RIP, REG_RSP, REG_RAX};
+        const char *labels[] = {
+#if defined(__i386__)
+            " EIP=", " ESP=", " EAX="
+#else
+            " RIP=", " RSP=", " RAX="
+#endif
+        };
+        int reg_indices[] = {
+#if defined(__i386__)
+            REG_EIP, REG_ESP, REG_EAX
+#else
+            REG_RIP, REG_RSP, REG_RAX
+#endif
+        };
         for (int j = 0; j < 3; j++) {
             for (int k = 0; labels[j][k]; k++) hex_buf[off++] = labels[j][k];
             uint64_t val = (uint64_t)regs[reg_indices[j]];
@@ -124,8 +142,13 @@ void setup_signal_handlers(void)
      * the handler runs on the safe signal stack instead of the
      * potentially-corrupted current stack.
      */
+#ifdef MY_WINE_32
+    void *sigstack_mem = INLINE_SYSCALL_MMAP(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
+                              MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+#else
     void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+#endif
     if (sigstack_mem == MAP_FAILED) {
         /*
          * mmap for SIG_STACK_SIZE (~64KB) failing means the system is critically
@@ -149,19 +172,41 @@ void setup_signal_handlers(void)
         ss.ss_sp = sigstack_mem;
         ss.ss_size = SIG_STACK_SIZE;
         ss.ss_flags = 0;
+#ifdef MY_WINE_32
+        INLINE_SYSCALL_SIGALTSTACK(&ss, NULL);
+#else
         sigaltstack(&ss, NULL);
+#endif
     }
 
     struct sigaction sa;
+#ifdef MY_WINE_32
+    __builtin_memset(&sa, 0, sizeof(sa));
+#else
     memset(&sa, 0, sizeof(sa));
+#endif
     sa.sa_sigaction = crash_handler;
     sa.sa_flags = SA_SIGINFO;
+#ifdef MY_WINE_32
+    for (int _si = 0; _si < (int)(sizeof(sa.sa_mask.__val)/sizeof(sa.sa_mask.__val[0])); _si++)
+        sa.sa_mask.__val[_si] = 0;
+#else
     sigemptyset(&sa.sa_mask);
+#endif
+#ifdef MY_WINE_32
+    INLINE_SYSCALL_SIGACTION(SIGSEGV, &sa, NULL);
+    INLINE_SYSCALL_SIGACTION(SIGILL, &sa, NULL);
+    INLINE_SYSCALL_SIGACTION(SIGABRT, &sa, NULL);
+    INLINE_SYSCALL_SIGACTION(SIGFPE, &sa, NULL);
+    INLINE_SYSCALL_SIGACTION(SIGBUS, &sa, NULL);
+    INLINE_SYSCALL_SIGACTION(SIGTRAP, &sa, NULL);
+#else
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGILL, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGFPE, &sa, NULL);
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGTRAP, &sa, NULL);
+#endif
     DEBUG("GUEST: all handlers set");
 }

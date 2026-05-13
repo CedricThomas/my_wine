@@ -42,7 +42,7 @@ int parse_dos_header(const void *base, size_t file_size, IMAGE_DOS_HEADER *out_h
 
 int parse_nt_headers(const void *base, size_t file_size,
                      const IMAGE_DOS_HEADER *dos_header,
-                     IMAGE_NT_HEADERS64 *out_nt_headers)
+                     IMAGE_NT_HEADERS *out_nt_headers)
 {
     uint32_t pe_offset = dos_header->e_lfanew;
 
@@ -54,37 +54,70 @@ int parse_nt_headers(const void *base, size_t file_size,
     if (!sig_ptr || *sig_ptr != IMAGE_NT_SIGNATURE)
         return -1;
 
-    /* Need full NT headers */
-    if (pe_offset + sizeof(IMAGE_NT_HEADERS64) > file_size)
+    /* Need at least the file header after the PE signature */
+    uint32_t file_header_off = pe_offset + sizeof(uint32_t);
+    if (file_header_off + sizeof(IMAGE_FILE_HEADER) > file_size)
         return -1;
 
-    const IMAGE_NT_HEADERS64 *nt = safe_ptr_at(base, pe_offset, sizeof(IMAGE_NT_HEADERS64), file_size);
-    if (!nt)
+    const IMAGE_FILE_HEADER *file_hdr = safe_ptr_at(base, file_header_off, sizeof(IMAGE_FILE_HEADER), file_size);
+    if (!file_hdr)
         return -1;
 
-    /* Validate machine type */
-    if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
+    /* Validate machine type: must be I386 or AMD64 */
+    if (file_hdr->Machine != IMAGE_FILE_MACHINE_AMD64 &&
+        file_hdr->Machine != IMAGE_FILE_MACHINE_I386)
         return -1;
 
-    /* Validate optional header magic (PE32+) */
-    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-        fprintf(stderr, "wine: error: 32-bit PE (PE32) binary detected — only PE32+ (x86_64) is supported\n");
-        return -2;
+    /* Read OptionalHeader.Magic from raw bytes to determine PE type.
+     * The Magic field is the first field (2 bytes) of the optional header. */
+    uint32_t opt_header_off = file_header_off + sizeof(IMAGE_FILE_HEADER);
+    if (opt_header_off + sizeof(uint16_t) > file_size)
+        return -1;
+
+    const uint16_t *magic_ptr = safe_ptr_at(base, opt_header_off, sizeof(uint16_t), file_size);
+    if (!magic_ptr)
+        return -1;
+
+    uint16_t magic = *magic_ptr;
+
+    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        /* PE32 */
+        uint32_t nt32_end = pe_offset + sizeof(IMAGE_NT_HEADERS32);
+        if (nt32_end > file_size)
+            return -1;
+
+        const IMAGE_NT_HEADERS32 *nt = safe_ptr_at(base, pe_offset, sizeof(IMAGE_NT_HEADERS32), file_size);
+        if (!nt)
+            return -1;
+
+        out_nt_headers->pe_type = PE_TYPE_32;
+        memcpy(&out_nt_headers->u.nt32, nt, sizeof(IMAGE_NT_HEADERS32));
+    } else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        /* PE32+ */
+        uint32_t nt64_end = pe_offset + sizeof(IMAGE_NT_HEADERS64);
+        if (nt64_end > file_size)
+            return -1;
+
+        const IMAGE_NT_HEADERS64 *nt = safe_ptr_at(base, pe_offset, sizeof(IMAGE_NT_HEADERS64), file_size);
+        if (!nt)
+            return -1;
+
+        out_nt_headers->pe_type = PE_TYPE_64;
+        memcpy(&out_nt_headers->u.nt64, nt, sizeof(IMAGE_NT_HEADERS64));
+    } else {
+        return -1;
     }
-    if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
-        return -1;
 
-    memcpy(out_nt_headers, nt, sizeof(IMAGE_NT_HEADERS64));
     return 0;
 }
 
 /* ── Sections ───────────────────────────────────────────────────── */
 
 int parse_sections(const void *base, size_t file_size,
-                   const IMAGE_NT_HEADERS64 *nt_headers,
+                   const IMAGE_NT_HEADERS *nt_headers,
                    IMAGE_SECTION_HEADER **out_sections)
 {
-    uint16_t num = nt_headers->FileHeader.NumberOfSections;
+    uint16_t num = pe_section_count(nt_headers);
     size_t section_table_size = num * sizeof(IMAGE_SECTION_HEADER);
 
     /* Re-parse DOS header to get the PE offset for section table location */
@@ -116,42 +149,58 @@ int parse_sections(const void *base, size_t file_size,
 
 /* ── Find section by name ───────────────────────────────────────── */
 
-IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS64 *nt_headers,
+/* In the 32-bit standalone build, musl's strncasecmp is an ifunc whose PLT
+ * resolver returns without executing the actual comparison (same bug as
+ * strncpy). Use our hand-rolled _m_strncasecmp from crt_32_stub.c instead. */
+#ifdef MY_WINE_32
+extern int _m_strncasecmp(const char *a, const char *b, size_t n);
+#endif
+
+IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
                                             const IMAGE_SECTION_HEADER *sections,
                                             const char *name)
 {
-    uint16_t num = nt_headers->FileHeader.NumberOfSections;
+    uint16_t num = pe_section_count(nt_headers);
     size_t name_len = strlen(name);
     if (name_len > 8)
         return NULL;
 
     for (uint16_t i = 0; i < num; i++) {
         /* Case-insensitive comparison of the 8-byte name field */
-        if (strncasecmp((const char *)sections[i].Name, name, name_len) == 0 &&
-            sections[i].Name[name_len] == '\0') {
+#ifdef MY_WINE_32
+        int cmp = _m_strncasecmp((const char *)sections[i].Name, name, name_len);
+#else
+        int cmp = strncasecmp((const char *)sections[i].Name, name, name_len);
+#endif
+        if (cmp == 0 && sections[i].Name[name_len] == '\0') {
             return (IMAGE_SECTION_HEADER *)&sections[i];
         }
     }
+    DEBUG("find_section_by_name: not found '%s' (searched %d sections)", name, num);
     return NULL;
 }
 
 /* ── Dump headers (debug) ───────────────────────────────────────── */
 
-void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
+void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,
                   const IMAGE_SECTION_HEADER *sections)
 {
     (void)dos;
 
     DEBUG("=== PE Header Dump ===");
+    uint16_t machine = pe_machine(nt);
     DEBUG("Machine:           0x%04x (%s)",
-            nt->FileHeader.Machine,
-            nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "unknown");
-    DEBUG("Entry point:       0x%08x", nt->OptionalHeader.AddressOfEntryPoint);
-    DEBUG("Image base:        0x%016" PRIx64, nt->OptionalHeader.ImageBase);
-    DEBUG("Section count:     %u", nt->FileHeader.NumberOfSections);
+            machine,
+            machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" :
+            machine == IMAGE_FILE_MACHINE_I386 ? "I386" : "unknown");
+    DEBUG("PE type:           %s",
+            pe_is_pe32(nt) ? "PE32" : "PE32+");
+    DEBUG("Entry point:       0x%08x", pe_entry_rva(nt));
+    DEBUG("Image base:        0x%016" PRIx64, pe_image_base(nt));
+    DEBUG("Section count:     %u", pe_section_count(nt));
     DEBUG("");
 
-    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+    for (uint16_t i = 0; i < pe_section_count(nt); i++) {
         const IMAGE_SECTION_HEADER *s = &sections[i];
         char name[9];
         memcpy(name, s->Name, 8);

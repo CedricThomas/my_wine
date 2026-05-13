@@ -227,6 +227,36 @@ __attribute__((ms_abi))
 int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect);
 __attribute__((ms_abi))
 uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength);
+__attribute__((ms_abi))
+void *VirtualAlloc(void *lpAddress,
+#if defined(__i386__)
+                   uint32_t dwSize,
+#else
+                   uint64_t dwSize,
+#endif
+                   uint32_t flAllocationType, uint32_t flProtect);
+__attribute__((ms_abi))
+int VirtualFree(void *lpAddress,
+#if defined(__i386__)
+                uint32_t dwSize,
+#else
+                uint64_t dwSize,
+#endif
+                uint32_t dwFreeType);
+
+/* File I/O */
+__attribute__((ms_abi))
+int CloseHandle(void *hObject);
+
+#define INVALID_HANDLE_VALUE ((void *)(uintptr_t)(intptr_t)-1)
+
+__attribute__((ms_abi))
+void *CreateFileA(const char *lpFileName, uint32_t dwDesiredAccess,
+                  uint32_t dwShareMode, void *lpSecurityAttributes,
+                  uint32_t dwCreationDisposition, uint32_t dwFlagsAndAttributes,
+                  void *hTemplateFile);
+__attribute__((ms_abi))
+int DeleteFileA(const char *lpFileName);
 
 /* SEH handler */
 __attribute__((ms_abi))

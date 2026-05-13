@@ -24,14 +24,14 @@
 int parse_dos_header(const void *base, size_t file_size, IMAGE_DOS_HEADER *out_header);
 int parse_nt_headers(const void *base, size_t file_size,
                      const IMAGE_DOS_HEADER *dos_header,
-                     IMAGE_NT_HEADERS64 *out_nt_headers);
+                     IMAGE_NT_HEADERS *out_nt_headers);
 int parse_sections(const void *base, size_t file_size,
-                   const IMAGE_NT_HEADERS64 *nt_headers,
+                   const IMAGE_NT_HEADERS *nt_headers,
                    IMAGE_SECTION_HEADER **out_sections);
 int parse_imports(const void *base, size_t file_size,
-                  const IMAGE_NT_HEADERS64 *nt_headers,
+                  const IMAGE_NT_HEADERS *nt_headers,
                   IMAGE_IMPORT_DESCRIPTOR **out_first_descriptor);
-void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
+void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,
                   const IMAGE_SECTION_HEADER *sections);
 
 /* ── Test harness ─────────────────────────────────────────────── */
@@ -134,15 +134,15 @@ static void test_positive(const char *path)
     }
 
     /* 2. NT Headers */
-    IMAGE_NT_HEADERS64 nt_headers;
+    IMAGE_NT_HEADERS nt_headers;
     rc = parse_nt_headers(base, file_size, &dos_header, &nt_headers);
     check("NT headers parse succeeds", rc == 0);
     check("PE signature valid",
-          nt_headers.Signature == IMAGE_NT_SIGNATURE);
+          nt_headers.u.nt64.Signature == IMAGE_NT_SIGNATURE);
     check("Machine == IMAGE_FILE_MACHINE_AMD64",
-          nt_headers.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64);
+          nt_headers.u.nt64.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64);
     check("Optional header magic == PE32+",
-          nt_headers.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
+          nt_headers.u.nt64.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
 
     if (rc != 0) {
         munmap((void *)base, file_size);
@@ -217,7 +217,7 @@ static void test_bad_pe_signature(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds (MZ is valid)", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt;
+    IMAGE_NT_HEADERS nt;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt);
     check("parse_nt_headers fails on bad PE signature", rc == -1);
 
@@ -225,24 +225,26 @@ static void test_bad_pe_signature(void)
     close(fd);
 }
 
-static void test_non_amd64_machine(void)
+static void test_unsupported_machine(void)
 {
-    printf("\n--- Non-AMD64 machine type ---\n");
+    printf("\n--- Unsupported machine type ---\n");
 
-    /* Build a minimal PE32+ header with x86 (0x14c) machine type */
+    /* Build a minimal PE32+ header with ARM (0x1c0) machine type — not supported */
     unsigned char buf[1024] = {0};
     IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)buf;
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 64;
 
-    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(buf + 64);
-    nt->Signature = IMAGE_NT_SIGNATURE;
-    nt->FileHeader.Machine = 0x14c; /* IMAGE_FILE_MACHINE_I386 */
-    nt->FileHeader.NumberOfSections = 0;
-    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
-    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    /* Write raw PE32+ data to buffer (IMAGE_NT_HEADERS64 layout = raw PE layout) */
+    IMAGE_NT_HEADERS64 *nt64 = (IMAGE_NT_HEADERS64 *)(buf + 64);
+    memset(nt64, 0, sizeof(IMAGE_NT_HEADERS64));
+    nt64->Signature = IMAGE_NT_SIGNATURE;
+    nt64->FileHeader.Machine = 0x1c0; /* IMAGE_FILE_MACHINE_ARM — unsupported */
+    nt64->FileHeader.NumberOfSections = 0;
+    nt64->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt64->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
 
-    int fd = create_temp_file(buf, sizeof(buf), "non_amd64");
+    int fd = create_temp_file(buf, sizeof(buf), "unsupported_machine");
     if (fd < 0) return;
 
     void *base = map_temp_fd(fd, sizeof(buf));
@@ -252,9 +254,9 @@ static void test_non_amd64_machine(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt_out;
+    IMAGE_NT_HEADERS nt_out;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt_out);
-    check("parse_nt_headers fails on non-AMD64 machine", rc == -1);
+    check("parse_nt_headers fails on unsupported machine (ARM)", rc == -1);
 
     munmap(base, sizeof(buf));
     close(fd);
@@ -290,7 +292,9 @@ static void test_empty_imports_directory(void)
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 64;
 
+    /* Write raw PE data as IMAGE_NT_HEADERS64 (matches raw PE file layout) */
     IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(buf + 64);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS64));
     nt->Signature = IMAGE_NT_SIGNATURE;
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
     nt->FileHeader.NumberOfSections = 0;
@@ -309,7 +313,7 @@ static void test_empty_imports_directory(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt_out;
+    IMAGE_NT_HEADERS nt_out;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt_out);
     check("parse_nt_headers succeeds", rc == 0);
 
@@ -333,7 +337,9 @@ static void test_overlapping_sections(void)
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 64;
 
+    /* Write raw PE data as IMAGE_NT_HEADERS64 (matches raw PE file layout) */
     IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(buf + 64);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS64));
     nt->Signature = IMAGE_NT_SIGNATURE;
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
     nt->FileHeader.NumberOfSections = 2;
@@ -370,7 +376,7 @@ static void test_overlapping_sections(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt_out;
+    IMAGE_NT_HEADERS nt_out;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt_out);
     check("parse_nt_headers succeeds", rc == 0);
 
@@ -489,7 +495,7 @@ int main(int argc, char *argv[])
     printf("\n=== Error Case Tests ===\n");
     test_bad_mz_signature();
     test_bad_pe_signature();
-    test_non_amd64_machine();
+    test_unsupported_machine();
     test_truncated_file();
     test_empty_imports_directory();
     test_overlapping_sections();

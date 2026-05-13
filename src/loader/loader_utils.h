@@ -82,7 +82,7 @@ static inline int dll_build_path(char *dst, size_t dst_size,
 
 static inline int dll_path_exists(const char *p)
 {
-    long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, p, O_RDONLY);
+    long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, p, O_RDONLY, 0);
     if (fd >= 0) {
         INLINE_SYSCALL_CLOSE(fd);
         return 1;

@@ -12,35 +12,49 @@
 #include <stdint.h>
 
 /*
- * WINE_STUB — marks a non-static function as using the Microsoft x64 calling
+ * WINE_STUB — marks a non-static function as using the guest calling
  * convention. Use for all exported stub functions called from guest PE code
  * (kernel32, msvcrt, ntdll exports).
+ *
+ * x86_64: Microsoft x64 calling convention (ms_abi).
+ * i386:   standard cdecl (all args on stack).
  *
  * NOTE: We cannot use force_align_arg_pointer because its prologue uses
  * 32-bit mov %ebp, %rsp which zero-extends guest RSP when above 4GB.
  * Instead, stack alignment is ensured by the Windows x64 ABI guarantee
  * (RSP+8 is 16-byte aligned on call) and by the prologue pushes.
  */
+#if defined(__i386__)
+#define WINE_STUB
+#else
 #define WINE_STUB __attribute__((ms_abi))
+#endif
 
 /*
  * WINE_STUB_STATIC — same as WINE_STUB but for static/internal functions.
  */
+#if defined(__i386__)
+#define WINE_STUB_STATIC static
+#else
 #define WINE_STUB_STATIC static __attribute__((ms_abi))
+#endif
 
 /*
- * FORCE_PTR_RETURN(p) — force a 64-bit pointer return in ms_abi functions.
+ * FORCE_PTR_RETURN(p) — force a pointer return in the correct register.
  *
- * GCC with ms_abi may emit 32-bit "mov $imm, %eax" for pointer returns,
- * which zero-extends to RAX. If the pointer has upper bits (which won't for
- * our <4GB mappings) but more importantly this ensures the return value
- * is written to the full RAX register. Use for all pointer-returning stubs.
+ * x86_64: GCC with ms_abi may emit 32-bit "mov $imm, %eax" for pointer
+ *   returns. Force the full RAX register write.
+ * i386:   Just return normally — EAX is 32 bits, which is all we need.
  */
+#if defined(__i386__)
+#define FORCE_PTR_RETURN(p) ((void *)(uintptr_t)(p))
+#else
 #define FORCE_PTR_RETURN(p) ({                      \
     uintptr_t _pr = (uintptr_t)(p);                 \
     __asm__ __volatile__("movq %0,%%rax"           \
         : : "r"(_pr) : "rax", "memory");            \
     (void *)(uintptr_t)_pr;                         \
 })
+#endif
 
 #endif /* WINE_ABI_H */

@@ -71,7 +71,7 @@ typedef struct export_cache {
 typedef struct {
     void *base;                  /* Mapped base address */
     char name[260];             /* Module name (e.g., "kernel32.dll") */
-    IMAGE_NT_HEADERS64 *nt;     /* Pointer to NT headers in image memory */
+    IMAGE_NT_HEADERS *nt;     /* Pointer to NT headers in image memory */
     EXPORT_CACHE export_cache;  /* Embedded export cache (no malloc) */
     LDR_DATA_TABLE_ENTRY ldr_entry; /* Embedded PEB LDR entry (no malloc) */
     int load_count;              /* Reference count */
@@ -82,7 +82,7 @@ typedef struct {
 
 /* Public API */
 void init_module_list(void);
-loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS64 *nt);
+loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS *nt);
 loaded_module_t *find_module_by_name(const char *name);
 loaded_module_t *find_module_by_name_safe(const char *name);
 loaded_module_t *find_module_by_addr(void *addr);

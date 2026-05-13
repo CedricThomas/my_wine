@@ -9,8 +9,11 @@
  * Extracted from import_resolve.c.
  */
 
+#include <string.h>
+#include <stdlib.h>
 #include "include/pe.h"
 #include "include/pe_parser.h"
+#include "include/pe_priv.h"
 #include "include/common.h"
 #include "include/nt_constants.h"
 #include "loader_priv.h"
@@ -40,6 +43,7 @@ loaded_module_t *load_dll(const char *path, int depth)
 {
     /* Save main PE globals — map_image_at overwrites them with the DLL's values */
     void *saved_image_base = g_image_base;
+    int saved_is_32bit = g_is_32bit;
     char saved_pe_path[512];
     const char *cur_pe_path = get_pe_path();
     if (cur_pe_path) {
@@ -68,11 +72,12 @@ loaded_module_t *load_dll(const char *path, int depth)
     } while (1);
 
     /* Map the DLL at the reserved base below 4GB to avoid GCC ms_abi truncation */
-    IMAGE_NT_HEADERS64 nt_copy;
+    IMAGE_NT_HEADERS nt_copy;
     void *base = map_image_at(path, NULL, &nt_copy, NULL, alloc_base);
 
     /* Restore main PE globals (regardless of success/failure) */
     g_image_base = saved_image_base;
+    g_is_32bit = saved_is_32bit;
     set_pe_path(saved_pe_path);
 
     if (base == NULL) {
@@ -82,14 +87,47 @@ loaded_module_t *load_dll(const char *path, int depth)
 
     /* Advance g_dll_base_next past the actual DLL size.
      * We already reserved PAGE_SIZE atomically above, so only add the remainder. */
-    uintptr_t dll_size = (nt_copy.OptionalHeader.SizeOfImage + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
+    uintptr_t dll_size = (pe_size_of_image(&nt_copy) + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
     if (dll_size > PAGE_SIZE) {
         __atomic_add_fetch(&g_dll_base_next, dll_size - PAGE_SIZE, __ATOMIC_SEQ_CST);
     }
 
-    /* Extract NT headers from image memory */
+    /* Extract NT headers from image memory — reconstruct union from raw bytes */
     IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
-    IMAGE_NT_HEADERS64 *img_nt = (IMAGE_NT_HEADERS64 *)((char *)base + img_dos->e_lfanew);
+    uint32_t pe_off = img_dos->e_lfanew;
+
+    /* Allocate NT headers on heap so they survive past this function */
+    IMAGE_NT_HEADERS *img_nt = malloc(sizeof(IMAGE_NT_HEADERS));
+    if (!img_nt) {
+        INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
+        return NULL;
+    }
+    {
+        uint32_t opt_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER);
+        const uint16_t *magic = (const uint16_t *)((char *)base + opt_off);
+        if (*magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+            img_nt->pe_type = PE_TYPE_32;
+            memcpy(&img_nt->u.nt32, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS32));
+        } else {
+            img_nt->pe_type = PE_TYPE_64;
+            memcpy(&img_nt->u.nt64, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS64));
+        }
+    }
+
+    /* Check PE32/PE32+ mixing — DLL must match the main binary's PE type.
+     * Use saved_is_32bit since map_image_at() overwrote g_is_32bit with the DLL's type. */
+    if (saved_is_32bit && img_nt->pe_type == PE_TYPE_64) {
+        DEBUG("  ERROR: cannot load PE32+ DLL '%s' for PE32 binary", path);
+        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
+        return NULL;
+    }
+    if (!saved_is_32bit && img_nt->pe_type == PE_TYPE_32) {
+        DEBUG("  ERROR: cannot load PE32 DLL '%s' for PE32+ binary", path);
+        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
+        return NULL;
+    }
 
     /* Extract DLL name from path (hand-rolled strrchr) */
     const char *name = path;
@@ -103,7 +141,9 @@ loaded_module_t *load_dll(const char *path, int depth)
     loaded_module_t *mod = add_module(base, name, img_nt);
     if (mod == NULL) {
         DEBUG("  ERROR: module list full, cannot load '%s'", name);
-        INLINE_SYSCALL_MUNMAP(base, img_nt->OptionalHeader.SizeOfImage);
+        uintptr_t sz = pe_size_of_image(img_nt);
+        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(base, sz);
         return NULL;
     }
 
@@ -122,13 +162,17 @@ loaded_module_t *load_dll(const char *path, int depth)
         }
         reset_export_cache(mod);
         remove_module(mod);
-        INLINE_SYSCALL_MUNMAP(base, img_nt->OptionalHeader.SizeOfImage);
+        uintptr_t sz = pe_size_of_image(img_nt);
+        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(base, sz);
         return NULL;
     }
 
     /* Parse exports if not already done (e.g., DLL has no imports but has exports) */
+    IMAGE_DATA_DIRECTORY exp_dir;
     if (mod->export_cache.number_of_names == 0 &&
-        img_nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress != 0) {
+        pe_get_data_dir(img_nt, DIRECTORY_ENTRY_EXPORT, &exp_dir) &&  /* check export dir */
+        exp_dir.VirtualAddress != 0) {
         parse_export_table(mod);
     }
 

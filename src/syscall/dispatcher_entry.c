@@ -12,6 +12,15 @@
 #include "include/syscall/dispatcher_entry.h"
 #include "include/debug.h"
 
+#if defined(MY_WINE_32)
+#include "syscalls_inline.h"
+#define wine_mmap(a, l, p, f, fd, o) INLINE_SYSCALL_MMAP(a, l, p, f, fd, o)
+#define wine_munmap(a, l) INLINE_SYSCALL_MUNMAP(a, l)
+#else
+#define wine_mmap(a, l, p, f, fd, o) mmap(a, l, p, f, fd, o)
+#define wine_munmap(a, l) munmap(a, l)
+#endif
+
 #define UNIX_STACK_SIZE (128 * 1024)  /* 128 KB */
 
 struct guest_regs __wine_guest_regs = {0};
@@ -21,7 +30,7 @@ void *unix_stack_ptr_val = NULL;
 
 int setup_unix_stack(void)
 {
-    void *base = mmap(NULL, UNIX_STACK_SIZE,
+    void *base = wine_mmap(NULL, UNIX_STACK_SIZE,
                       PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
@@ -40,7 +49,7 @@ void cleanup_unix_stack(void)
 {
     if (unix_stack_ptr_val != NULL) {
         void *base = (char *)unix_stack_ptr_val - UNIX_STACK_SIZE;
-        munmap(base, UNIX_STACK_SIZE);
+        wine_munmap(base, UNIX_STACK_SIZE);
         unix_stack_ptr_val = NULL;
     }
 }

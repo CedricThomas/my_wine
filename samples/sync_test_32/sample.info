@@ -1,0 +1,4 @@
+arch=32
+exit=0
+timeout=5
+status=known-issue: crashes in PE32 mode — pthread_mutex_lock in handle_manager fails after FS base switch to guest TEB

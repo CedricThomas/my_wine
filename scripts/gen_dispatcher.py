@@ -151,7 +151,7 @@ def gen_decls(args):
         if a["type"] == "stack":
             n = a["name"]  # already h_xxx
             declared.add(n)
-            lines.append("        uint64_t %s = read_guest_stack(%s);" % (n, a["index"]))
+            lines.append("        uint64_t %s = STACK(%s);" % (n, a["index"]))
 
     # ptr(wb) locals: skip uint64_t if already declared by stack
     for a in args:
@@ -179,7 +179,7 @@ def gen_validation(args):
                 '        if (dispatch_ptr_inout(%s, &%s, &%s, "%s", &result) != 0) break;' %
                 (a["src"], n, a["p_name"], a.get("label", a["name"])))
     # ptr(ro) — reuse `status` var across multiple read_guest_ptr calls
-    ret = "return (uint64_t)status;"
+    ret = "return STATUS_CAST(status);"
     first_ro = True
     for a in args:
         if a["type"] == "ro":
@@ -194,10 +194,12 @@ def gen_validation(args):
 
 
 def expand_call(call_template, args):
-    """Expand STACK(N) and raw in the call template."""
+    """Expand STACK(N), (PVOID)&h_xxx in the call template."""
     result = call_template
-    # STACK(N)
-    result = re.sub(r'STACK\((\d+)\)', lambda m: "read_guest_stack(%s)" % m.group(1), result)
+    # STACK(N) → STACK(N) (macro defined by dispatcher.c)
+    # (no substitution needed — STACK is a macro)
+    # (PVOID)&h_xxx → WINE_GPTR(&h_xxx) for architecture-aware pointer cast
+    result = re.sub(r'\(PVOID\)&(\w+)', lambda m: "WINE_GPTR(&%s)" % m.group(1), result)
     # raw → first ptr(ro) from register
     raw_src = find_raw_source(args)
     if raw_src and "raw" in result:
@@ -206,17 +208,19 @@ def expand_call(call_template, args):
 
 
 def gen_writeback(args):
-    """Generate write-back code for ptr(wb) and ptr(wb32) args."""
+    """Generate write-back code for ptr(wb) and ptr(wb32) args.
+
+    Uses writeback_ptr() macro which is architecture-aware:
+    writes 8 bytes on x86_64, 4 bytes on x86.
+    Both wb and wb32 use the same macro since the handler always
+    returns a 64-bit value; the macro truncates appropriately on 32-bit.
+    """
     lines = []
     for a in args:
-        if a["type"] == "wb":
+        if a["type"] in ("wb", "wb32"):
             n = a["name"]
             pn = p_name_for(n)
-            lines.append("        if (%s) *(uint64_t *)%s = %s;" % (pn, pn, n))
-        elif a["type"] == "wb32":
-            n = a["name"]
-            pn = p_name_for(n)
-            lines.append("        if (%s) *(uint32_t *)%s = (uint32_t)%s;" % (pn, pn, n))
+            lines.append("        writeback_ptr(%s, %s);" % (pn, n))
     return "\n".join(lines)
 
 
@@ -251,7 +255,7 @@ def gen_default():
     """Generate the default case."""
     return """    default:
     {
-        char buf[39];
+        char buf[48];
         format_err_unhandled_syscall(buf, nr);
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
     }

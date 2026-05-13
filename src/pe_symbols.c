@@ -18,6 +18,7 @@
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
+#include "include/pe_priv.h"
 
 /*
  * Parse the COFF symbol table directly from the PE file on disk.
@@ -31,12 +32,12 @@
  * Returns number of symbols, or 0 on failure.
  */
 int parse_symbol_table_from_file(const char *path,
-                                  const IMAGE_NT_HEADERS64 *nt_headers,
+                                  const IMAGE_NT_HEADERS *nt_headers,
                                   IMAGE_SYMBOL **out_symbols,
                                   char **out_string_table)
 {
-    uint32_t ptr   = nt_headers->FileHeader.PointerToSymbolTable;
-    uint32_t count = nt_headers->FileHeader.NumberOfSymbols;
+    uint32_t ptr   = pe_pointer_to_symbol_table(nt_headers);
+    uint32_t count = pe_number_of_symbols(nt_headers);
 
     *out_symbols = NULL;
     *out_string_table = NULL;

@@ -62,5 +62,4 @@ Self-contained extracts from the original large documents. Each 50–150 lines.
 
 ## Legacy
 
-Original large documents moved to [.deprecated/](.deprecated/).
 Kept for reference only — the content has been redistributed above.

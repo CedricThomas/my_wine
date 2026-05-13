@@ -13,7 +13,6 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <signal.h>
-#include <pthread.h>
 #include "../syscall/syscalls_inline.h"
 #include "handler_abi.h"
 #include "ntdll_priv.h"
@@ -41,28 +40,17 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
     if (event_count >= MAX_EVENTS)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
-    /* Find a free slot in the handle table for this event */
-    uint64_t handle = 0;
-    {
-        unsigned idx;
-        for (idx = 3; idx < HANDLE_TABLE_SIZE; idx++) {
-            if (!handle_table[idx].used) {
-                handle_table[idx].fd   = -1; /* not an fd, marks event slot */
-                handle_table[idx].used = 1;
-                handle = (uint64_t)idx;
-                break;
-            }
-        }
+    int slot = event_count++;
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_EVENT, (void *)&events[slot]);
+
+    if (handle == 0) {
+        event_count--;
+        return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
-    if (handle == 0)
-        return STATUS_MEMORY_NOT_AVAILABLE;
-
-    int slot = event_count++;
     events[slot].handle   = (int)handle;
     events[slot].signaled = (initial_state != 0) ? 1 : 0;
     events[slot].event_type = (int)event_type;
-    pthread_cond_init(&events[slot].cond, NULL);
 
     if (event_handle != 0)
         *event_handle = handle;
@@ -130,27 +118,17 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
         return STATUS_UNSUCCESSFUL;
     }
 
-    /* Find a free slot in the handle table */
-    uint64_t handle = 0;
-    {
-        unsigned idx;
-        for (idx = 3; idx < HANDLE_TABLE_SIZE; idx++) {
-            if (!handle_table[idx].used) {
-                handle_table[idx].fd   = -1; /* not an fd, marks thread slot */
-                handle_table[idx].used = 1;
-                handle = (uint64_t)idx;
-                break;
-            }
-        }
-    }
+    int slot = thread_count++;
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_THREAD, (void *)&threads[slot]);
 
     if (handle == 0) {
+        thread_count--;
         INLINE_SYSCALL_KILL(tid, SIGKILL);
         return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
-    int slot = thread_count++;
-    threads[slot].tid       = (pthread_t)(uintptr_t)tid;
+    threads[slot].tid       = (int)tid;
+    threads[slot].handle    = (int)handle;
     threads[slot].suspended = (create_flags & 4) ? 1 : 0; /* CREATE_SUSPENDED */
 
     if (thread_handle != 0)

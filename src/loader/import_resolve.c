@@ -26,12 +26,12 @@
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
  */
-void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS64 *nt,
+void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS *nt,
                        IMAGE_SECTION_HEADER *sections,
                        void *target_addr)
 {
     return find_rip_relative_jump_to(image_base, nt, sections,
-                                      nt->FileHeader.NumberOfSections,
+                                      pe_section_count(nt),
                                       target_addr);
 }
 
@@ -79,17 +79,24 @@ static void *resolve_import(const char *dll_name, const char *func_name)
 /**
  * Pass 1: resolve import names and write to the descriptor's FirstThunk (IAT).
  */
-static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
+static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
 {
-    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
-
-    if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
+    IMAGE_DATA_DIRECTORY imp_dir;
+    if (!pe_get_import_dir(nt, &imp_dir)) {
+        DEBUG("No imports to resolve");
+        return 0;
+    }
+    if (imp_dir.Size == 0) {
         DEBUG("No imports to resolve");
         return 0;
     }
 
-    uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    uint64_t import_rva = imp_dir.VirtualAddress;
     IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
+
+    bool is32 = pe_is_pe32(nt);
+    uint64_t high_bit_mask = is32 ? 0x80000000 : 0x8000000000000000ULL;
+    size_t thunk_size = is32 ? sizeof(uint32_t) : sizeof(uint64_t);
 
     DEBUG("Resolving imports:");
 
@@ -98,17 +105,25 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
 
         DEBUG("  DLL: %s", dll_name);
 
-        IMAGE_THUNK_DATA64 *orig_thunks = (IMAGE_THUNK_DATA64 *)((char *)base + desc->u1.OriginalFirstThunk);
-        IMAGE_THUNK_DATA64 *iath = (IMAGE_THUNK_DATA64 *)((char *)base + desc->FirstThunk);
-
+        uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
+        uint8_t *iat_base  = (uint8_t *)((char *)base + desc->FirstThunk);
         int i;
-        for (i = 0; orig_thunks[i].AddressOfData != 0; i++) {
+
+        for (i = 0; ; i++) {
+            uint64_t thunk_val;
+            if (is32) {
+                thunk_val = (uint32_t)*((uint32_t *)(orig_base + i * thunk_size));
+            } else {
+                thunk_val = *((uint64_t *)(orig_base + i * thunk_size));
+            }
+            if (thunk_val == 0) break;
+
             void *addr = NULL;
             const char *func_name_for_debug = NULL;
 
-            if (orig_thunks[i].AddressOfData & 0x8000000000000000ULL) {
+            if (thunk_val & high_bit_mask) {
                 /* Ordinal import (high bit set) */
-                uint16_t ordinal = (uint16_t)(orig_thunks[i].AddressOfData & 0xFFFF);
+                uint16_t ordinal = (uint16_t)(thunk_val & 0xFFFF);
                 const char *func_name = ordinal_lookup(dll_name, ordinal);
                 if (func_name != NULL) {
                     addr = resolve_import(dll_name, func_name);
@@ -121,14 +136,18 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
                 func_name_for_debug = "<ordinal>";
             } else {
                 /* Name import */
-                IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData);
+                IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk_val);
                 func_name_for_debug = (const char *)imp_name->Name;
                 addr = resolve_import(dll_name, func_name_for_debug);
             }
 
             if (addr != NULL) {
                 DEBUG("    Resolved %s -> %p", func_name_for_debug, addr);
-                iath[i].AddressOfData = (uint64_t)(uintptr_t)addr;
+                if (is32) {
+                    *(uint32_t *)(iat_base + i * thunk_size) = (uint32_t)(uintptr_t)addr;
+                } else {
+                    *(uint64_t *)(iat_base + i * thunk_size) = (uint64_t)(uintptr_t)addr;
+                }
             } else {
                 DEBUG("    FAILED to resolve import at index %d", i);
             }
@@ -144,41 +163,46 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS64 *nt)
  * Scan .text for "ff 25" (jmp *disp32(%rip)) instructions, collect and
  * deduplicate unique IAT target addresses, sort by address.
  */
-static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
+static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS *nt,
                                  uint64_t targets[MAX_THUNK_TARGETS])
 {
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, nt);
 
     return scan_rip_relative_jumps(base, nt, sections,
-                                    nt->FileHeader.NumberOfSections,
+                                    pe_section_count(nt),
                                     targets, MAX_THUNK_TARGETS);
 }
 
 /**
  * Match thunk IAT targets against the flat import array and patch mismatches.
  */
-static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
+static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS *nt,
                                uint64_t *targets, int num_targets,
                                struct import_flat *flat, int num_flat)
 {
-    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
-    uint64_t import_dir_va = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-    uint64_t import_dir_end = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
-
+    bool is32 = pe_is_pe32(nt);
+    size_t thunk_size = is32 ? sizeof(uint32_t) : sizeof(uint64_t);
     int matched = 0;
-    int t;
-    for (t = 0; t < num_targets; t++) {
+    for (int t = 0; t < num_targets; t++) {
         uint64_t target = targets[t];
-        uint64_t *target_ptr = (uint64_t *)((char *)base + target);
-        uint64_t current_val = *target_ptr;
+        void *target_ptr = (char *)base + target;
+        uint64_t current_val;
+        if (is32) {
+            current_val = (uint32_t)*((uint32_t *)target_ptr);
+        } else {
+            current_val = *((uint64_t *)target_ptr);
+        }
 
-        int did_match = strategy_resolved_overlap(current_val, flat, num_flat) ||
-            strategy_ilt_value_match(target_ptr, current_val, target, flat, num_flat) ||
-            strategy_ilt_offset_match(target_ptr, target, current_val,
-                                      import_dir_va, import_dir_end, flat, num_flat) ||
-            strategy_positional(target_ptr, target, t, flat, num_flat);
+        int did_match = strategy_resolved_overlap(current_val, target_ptr, flat, num_flat) ||
+            strategy_ilt_value_match(target_ptr, current_val, target, thunk_size,
+                                     flat, num_flat) ||
+            strategy_ilt_offset_match(target_ptr, target, current_val, thunk_size,
+                                      flat, num_flat);
         if (did_match) {
             matched++;
+        } else {
+            DEBUG("    Thunk patch UNMATCHED at 0x%lx (current=0x%lx)",
+                  (unsigned long)target, (unsigned long)current_val);
         }
     }
 
@@ -188,11 +212,13 @@ static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS64 *nt,
 /**
  * Pass 2: patch thunk IAT targets found by scanning .text
  */
-static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
+static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS *nt)
 {
-    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
-
-    if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
+    IMAGE_DATA_DIRECTORY imp_dir;
+    if (!pe_get_import_dir(nt, &imp_dir)) {
+        return 0;
+    }
+    if (imp_dir.Size == 0) {
         return 0;
     }
 
@@ -222,7 +248,7 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS64 *nt)
 /**
  * Resolve all imports in the PE image.
  */
-int resolve_imports(void *base, IMAGE_NT_HEADERS64 *nt)
+int resolve_imports(void *base, IMAGE_NT_HEADERS *nt)
 {
     if (resolve_import_pass1(base, nt) != 0)
         return -1;
@@ -241,14 +267,17 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
     }
 
     void *base = mod->base;
-    IMAGE_NT_HEADERS64 *nt = mod->nt;
+    IMAGE_NT_HEADERS *nt = mod->nt;
 
-    IMAGE_OPTIONAL_HEADER64 *opt = &nt->OptionalHeader;
-    if (opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0) {
+    IMAGE_DATA_DIRECTORY imp_dir;
+    if (!pe_get_import_dir(nt, &imp_dir)) {
+        return 0; /* No imports */
+    }
+    if (imp_dir.Size == 0) {
         return 0; /* No imports */
     }
 
-    uint64_t import_rva = opt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    uint64_t import_rva = imp_dir.VirtualAddress;
     IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
 
     /* First pass: ensure all dependency DLLs are loaded */
