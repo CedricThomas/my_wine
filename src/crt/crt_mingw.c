@@ -78,11 +78,10 @@ void scan_text_for_refptrs(void *image_base,
 
 /* ── MinGW BSS layout offsets (relative to .bss base) ────────── */
 
-#define MINWG_BSS_INITENV     0x018   /* __initenv / _environ pointer */
-#define MINWG_BSS_ARGV        0x020   /* _argv pointer */
-#define MINWG_BSS_ARGC        0x028   /* _argc */
-#define MINWG_BSS_ACMDLN      0x030   /* _acmdln pointer (for GetCommandLineA) */
-#define MINWG_BSS_INITIALIZED 0x030   /* "initialized" flag — overlaps _acmdln at 0x030 in MinGW layout */
+#define MINGW_BSS_INITENV     0x018   /* __initenv / _environ pointer */
+#define MINGW_BSS_ARGV        0x020   /* _argv pointer */
+#define MINGW_BSS_ARGC        0x028   /* _argc */
+#define MINGW_BSS_INITIALIZED 0x030   /* "initialized" flag — overlaps _acmdln at 0x030 in MinGW layout */
 
 /* ── MinGW entry symbols ──────────────────────────────────────── */
 
@@ -177,7 +176,7 @@ static int mingw_detect(const char *file_path, IMAGE_NT_HEADERS *nt)
  * crt_offset_discovery.c, adapted for the module interface.
  *
  * Looks up _argc/__argc, _argv/__argv, _environ/__envp symbols via COFF
- * symbol table. Falls back to hardcoded MINWG_BSS_* offsets if incomplete.
+ * symbol table. Falls back to hardcoded MINGW_BSS_* offsets if incomplete.
  */
 static void mingw_discover_offsets(const char *file_path,
                                     IMAGE_NT_HEADERS *nt,
@@ -216,13 +215,13 @@ static void mingw_discover_offsets(const char *file_path,
         ctx->envp_bss_offset == 0) {
         DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
               "using hardcoded MinGW BSS offsets (0x%x/0x%x/0x%x)",
-              MINWG_BSS_INITENV, MINWG_BSS_ARGV, MINWG_BSS_ARGC);
+              MINGW_BSS_INITENV, MINGW_BSS_ARGV, MINGW_BSS_ARGC);
         if (ctx->argc_bss_offset == 0)
-            ctx->argc_bss_offset = MINWG_BSS_ARGC;
+            ctx->argc_bss_offset = MINGW_BSS_ARGC;
         if (ctx->argv_bss_offset == 0)
-            ctx->argv_bss_offset = MINWG_BSS_ARGV;
+            ctx->argv_bss_offset = MINGW_BSS_ARGV;
         if (ctx->envp_bss_offset == 0)
-            ctx->envp_bss_offset = MINWG_BSS_INITENV;
+            ctx->envp_bss_offset = MINGW_BSS_INITENV;
     }
 
     DEBUG("mingw_discover_offsets: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
@@ -263,7 +262,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
     if (bss_sec) {
         ctx.bss_vaddr = bss_sec->VirtualAddress;
         initenv_stub = (void **)((char *)image_base + ctx.bss_vaddr +
-                                 MINWG_BSS_INITENV);
+                                 MINGW_BSS_INITENV);
         DEBUG("mingw_patch_refptrs: .bss at VA=0x%lx, initenv_stub=%p",
               (unsigned long)ctx.bss_vaddr, (void *)initenv_stub);
     }
@@ -281,7 +280,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
     if (bss_sec) {
         uint32_t *initialized_ptr = (uint32_t *)((char *)image_base +
                                                   ctx.bss_vaddr +
-                                                  MINWG_BSS_INITIALIZED);
+                                                  MINGW_BSS_INITIALIZED);
         *initialized_ptr = 1;
         DEBUG("mingw_patch_refptrs: set initialized=1 at %p",
               (void *)initialized_ptr);
@@ -471,9 +470,9 @@ const crt_module_t crt_module_mingw = {
     .detect             = mingw_detect,
     .entry_symbols      = mingw_entry_symbols,
     .refptr_mappings    = mingw_refptr_mappings,
-    .bss_init_offset    = MINWG_BSS_ARGC,
-    .bss_argv_offset    = MINWG_BSS_ARGV,
-    .bss_initenv_offset = MINWG_BSS_INITENV,
+    .bss_init_offset    = MINGW_BSS_ARGC,
+    .bss_argv_offset    = MINGW_BSS_ARGV,
+    .bss_initenv_offset = MINGW_BSS_INITENV,
     .patch_refptrs      = mingw_patch_refptrs,
     .discover_offsets   = mingw_discover_offsets,
     .seed_bss           = mingw_seed_bss,
