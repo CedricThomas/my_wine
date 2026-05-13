@@ -101,7 +101,7 @@ extern void pe32_run_guest(uint32_t entry_abs, void *stack_top) __attribute__((n
  * setup_fs_and_jump() to provide consistent CRT globals.
  */
 static uint32_t g_argv_ptr = 0;  /* 32-bit address of the argv array */
-static void *g_argv_page = NULL; /* backing page (MAP_32BIT) */
+void *g_argv_page = NULL; /* backing page (MAP_32BIT) */
 
 /**
  * ensure_argv_setup — allocate 32-bit argv/envp arrays and path copy.

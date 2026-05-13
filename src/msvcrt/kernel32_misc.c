@@ -13,6 +13,7 @@
  * get an undefined reference. When weak, _acmdln is NULL if not linked.
  */
 extern char *_acmdln __attribute__((weak));
+extern void *g_argv_page;
 
 /* Thread-local last-error code */
 /* In PE32 mode, __thread uses GS-relative access but GS=0 (only FS is set to TEB).
@@ -242,14 +243,20 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
 /* ── GetCommandLineA ───────────────────────────────────────── */
 /*
  * Returns the command-line string for the current process.
- * In our runtime, _acmdln is set from main.c before the PE entry.
- * _acmdln is a weak symbol — may be NULL in build targets that don't
- * link crt_globals.o.
+ * In 32-bit mode, g_argv_page is allocated with MAP_32BIT (below 4GB)
+ * and holds the PE path at offset 0, so the base pointer IS the string.
+ * In 64-bit mode, _acmdln (from crt_globals) is fine since all addresses
+ * are accessible to the guest.
  */
 WINE_STUB
 const char *GetCommandLineA(void)
 {
+#ifdef __i386__
+    if (g_argv_page) return FORCE_PTR_RETURN((const char *)g_argv_page);
+    return FORCE_PTR_RETURN("");
+#else
     return FORCE_PTR_RETURN(_acmdln ? _acmdln : "");
+#endif
 }
 
 /* ── GetEnvironmentStringsA ────────────────────────────────── */
