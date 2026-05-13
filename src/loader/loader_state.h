@@ -3,7 +3,7 @@
  *
  * All loader-wide scalar and small-array globals are collected into
  * a single struct to avoid scattered extern declarations across modules.
- * The struct is defined in image_mapper.c as `g_loader`.
+ * The struct is defined in common.c as `g_loader`.
  */
 
 #ifndef MY_WINE_LOADER_STATE_H
