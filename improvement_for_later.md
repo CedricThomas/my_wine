@@ -80,10 +80,6 @@ For broader support, consider:
 
 -------
 
-NEW enhancements
-
--------
-
 Add a wrapper called my_wine and then 2 binaries called my_wine32 and my_wine64 that are more specialized and have the same features / behaviors (same env usage, same arg pparsing etc)
 
 
