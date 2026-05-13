@@ -1,7 +1,8 @@
 /*
  * image_mapper.h — PE image mapping
  *
- * Globals and function declarations for mapping PE files into memory.
+ * Function declarations for mapping PE files into memory.
+ * Global loader state is consolidated in loader_state.h (g_loader).
  */
 
 #ifndef MY_WINE_IMAGE_MAPPER_H
@@ -12,11 +13,7 @@
 #include <stdbool.h>
 
 #include "include/pe.h"
-
-/* Global state set by image_mapper, read by other modules */
-extern void *g_image_base;
-extern uintptr_t g_host_gs_base;
-/* g_is_32bit is declared in common.h */
+#include "loader_state.h"  /* wine_loader_state_t, g_loader, accessors */
 
 /* Accessors for the PE path */
 const char *get_pe_path(void);

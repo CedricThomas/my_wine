@@ -5,7 +5,7 @@
  * section data, sets per-section memory protections, and cleans up.
  *
  * PE32 support: maps at 0x00400000 (default PE32 image base), sets
- * g_is_32bit flag for use by other loader modules.
+ * is_32bit flag in g_loader for use by other loader modules.
  */
 
 #include <stdio.h>
@@ -20,7 +20,7 @@
 #include "include/nt_constants.h"
 #include "include/debug.h"
 #include "include/pe_priv.h"
-#include "loader_priv.h"
+#include "loader_state.h"
 #include "include/common.h"
 
 #if defined(MY_WINE32)
@@ -34,10 +34,7 @@
 #define wine_mprotect(a, l, p) mprotect(a, l, p)
 #endif
 
-void *g_image_base = NULL;
-static char g_pe_path[512] = {0};
-uintptr_t g_host_gs_base = 0;  /* Saved before GS→TEB for unix stack calls */
-/* g_is_32bit is defined in common.c — set here when loading PE32 */
+wine_loader_state_t g_loader = {0};
 
 /**
  * Internal core: map a PE file at the given desired base address.
@@ -66,9 +63,9 @@ void *map_image_at(const char *path,
     /* Save PE path for DLL search — hand-rolled copy, no glibc */
     {
         size_t i;
-        for (i = 0; path[i] && i < sizeof(g_pe_path) - 1; i++)
-            g_pe_path[i] = path[i];
-        g_pe_path[i] = '\0';
+        for (i = 0; path[i] && i < sizeof(g_loader.pe_path) - 1; i++)
+            g_loader.pe_path[i] = path[i];
+        g_loader.pe_path[i] = '\0';
     }
 
     /* 1. Open the PE file */
@@ -130,9 +127,10 @@ void *map_image_at(const char *path,
     }
 
     /* Detect 32-bit vs 64-bit image and set global flag.
-     * g_is_32bit is derived from nt.pe_type for use by other loader modules
-     * that don't have direct access to the NT headers struct. */
-    g_is_32bit = pe_is_pe32(&nt) ? 1 : 0;
+     * g_loader.is_32bit is derived from nt.pe_type for use by other loader modules
+     * that don't have direct access to the NT headers struct.
+     * Transitional: also set g_is_32bit until task-5 migrates cross-module refs. */
+    g_loader.is_32bit = g_is_32bit = pe_is_pe32(&nt) ? 1 : 0;
 
     /* 4. Map image */
     size_t image_size = pe_size_of_image(&nt);
@@ -255,7 +253,7 @@ void *map_image_at(const char *path,
     INLINE_SYSCALL_CLOSE(fd);
 
     /* Save the image base for later use (import resolution, TEB/PEB, etc.) */
-    g_image_base = base;
+    g_loader.image_base = base;
     return base;
 }
 
@@ -279,11 +277,11 @@ void *map_image(const char *path,
     return map_image_at(path, out_dos, out_nt, out_nt_size, 0);
 }
 
-const char *get_pe_path(void) { return g_pe_path; }
+const char *get_pe_path(void) { return g_loader.pe_path; }
 void set_pe_path(const char *path)
 {
     size_t i;
-    for (i = 0; path[i] && i < sizeof(g_pe_path) - 1; i++)
-        g_pe_path[i] = path[i];
-    g_pe_path[i] = '\0';
+    for (i = 0; path[i] && i < sizeof(g_loader.pe_path) - 1; i++)
+        g_loader.pe_path[i] = path[i];
+    g_loader.pe_path[i] = '\0';
 }
