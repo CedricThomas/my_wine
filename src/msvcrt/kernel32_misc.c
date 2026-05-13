@@ -86,6 +86,21 @@ char *lstrcpyA(char *dest, const char *src)
     return FORCE_PTR_RETURN(dest);
 }
 
+/* ── lstrcatA ───────────────────────────────────────────────── */
+
+WINE_STUB
+char *lstrcatA(char *dest, const char *src)
+{
+    char *d = dest;
+    const char *s = src;
+    if (d == NULL) return FORCE_PTR_RETURN(NULL);
+    if (s == NULL) return FORCE_PTR_RETURN(dest);
+    while (*d) d++;
+    while (*s) { *d++ = *s++; }
+    *d = '\0';
+    return FORCE_PTR_RETURN(dest);
+}
+
 /* ── GetLastError ───────────────────────────────────────────── */
 
 WINE_STUB

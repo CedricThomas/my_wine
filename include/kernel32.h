@@ -95,6 +95,8 @@ int lstrlenA(const char *lpString);
 
 __attribute__((ms_abi))
 char *lstrcpyA(char *dest, const char *src);
+__attribute__((ms_abi))
+char *lstrcatA(char *dest, const char *src);
 
 /* ── FILETIME / LARGE_INTEGER types ───────────────────────── */
 

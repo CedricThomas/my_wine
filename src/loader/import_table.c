@@ -117,6 +117,7 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "GetProcessHeap", (void*)GetProcessHeap },
     { "kernel32.dll", "lstrlenA", (void*)lstrlenA },
     { "kernel32.dll", "lstrcpyA", (void*)lstrcpyA },
+    { "kernel32.dll", "lstrcatA", (void*)lstrcatA },
     { "kernel32.dll", "DeleteCriticalSection", (void*)DeleteCriticalSection },
     { "kernel32.dll", "EnterCriticalSection", (void*)EnterCriticalSection },
     { "kernel32.dll", "GetLastError", (void*)GetLastError },

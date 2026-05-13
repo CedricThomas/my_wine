@@ -19,7 +19,9 @@
 #include <signal.h>
 #include <ucontext.h>
 #include <sys/syscall.h>
+#ifdef __x86_64__
 #include <asm/unistd_64.h>
+#endif
 #include <sys/mman.h>
 
 #include "include/common.h"
