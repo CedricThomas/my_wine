@@ -45,7 +45,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     void *saved_image_base = g_loader.image_base;
     int saved_is_32bit = g_loader.is_32bit;
     char saved_pe_path[512];
-    snprintf(saved_pe_path, sizeof(saved_pe_path), "%s", g_loader.pe_path);
+    dll_copy_str(saved_pe_path, g_loader.pe_path, sizeof(saved_pe_path));
 
     /* Atomically reserve a page-aligned base for this DLL using CAS loop.
      * This prevents two threads from mapping at the same address.
@@ -69,7 +69,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     /* Restore main PE globals (regardless of success/failure) */
     g_loader.image_base = saved_image_base;
     g_loader.is_32bit = saved_is_32bit;
-    snprintf(g_loader.pe_path, sizeof(g_loader.pe_path), "%s", saved_pe_path);
+    dll_copy_str(g_loader.pe_path, saved_pe_path, sizeof(g_loader.pe_path));
 
     if (base == NULL) {
         DEBUG("  ERROR: map_image_at failed for '%s'", path);
