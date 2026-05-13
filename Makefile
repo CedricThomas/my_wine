@@ -21,14 +21,16 @@ STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c, \
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
 HEAP_SRC     = $(sort $(shell find src/heap    -maxdepth 1 -name '*.c'))
+CRT_SRC      = $(sort $(shell find src/crt     -maxdepth 1 -name '*.c'))
 
 ROOT_OBJS    = $(patsubst src/%.c,$(BUILDDIR)/%.o,$(ROOT_SRC))
 STUBS_OBJS   = $(patsubst src/msvcrt/%.c,$(BUILDDIR)/%.o,$(STUBS_SRC))
 LOADER_OBJS  = $(patsubst src/loader/%.c,$(BUILDDIR)/%.o,$(LOADER_SRC))
 SYSCALL_OBJS = $(patsubst src/syscall/%.c,$(BUILDDIR)/%.o,$(SYSCALL_SRC))
 HEAP_OBJS    = $(patsubst src/heap/%.c,$(BUILDDIR)/%.o,$(HEAP_SRC))
+CRT_OBJS     = $(patsubst src/crt/%.c,$(BUILDDIR)/%.o,$(CRT_SRC))
 
-OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o
+OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(CRT_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o
 
 # ── Named object groups for test targets ────────────────────────
 PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
@@ -54,7 +56,7 @@ STUBS_SYSCALL_OBJS = $(filter-out $(BUILDDIR)/kernel32_module.o, $(STUBS_NO_CRT_
 TEST_SYSCALL_OBJS = $(SYSCALL_OBJS) $(STUBS_SYSCALL_OBJS) $(HEAP_OBJS) $(BUILDDIR)/common.o
 
 # ── vpath ───────────────────────────────────────────────────────
-vpath %.c src src/msvcrt src/loader src/syscall src/heap tests
+vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt tests
 vpath %.S src src/syscall
 
 # ── Per-target CFLAGS overrides ─────────────────────────────────
@@ -62,7 +64,7 @@ vpath %.S src src/syscall
 # $(SPECIAL_CFLAGS) (entry points, loader core, stubs, syscall infra).
 
 SPECIAL_OBJS = main.o common.o entry.o teb_peb.o guest_setup.o crash_handlers.o gs_base.o \
-	thunk_gen.o dispatcher.o dispatcher_entry_asm.o abi_wrappers.o import_resolve.o image_mapper.o dll_path.o dll_loader.o
+	thunk_gen.o dispatcher.o dispatcher_entry_asm.o abi_wrappers.o import_resolve.o image_mapper.o dll_path.o dll_loader.o crt.o
 $(foreach obj,$(SPECIAL_OBJS),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(SYSCALL_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))

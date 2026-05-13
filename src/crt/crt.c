@@ -118,12 +118,12 @@ crt_type_t crt_detect_type(const char *file_path, IMAGE_NT_HEADERS *nt)
             }
             if (rva != 0) {
                 active_crt = &crt_module_watcom;
+                /* Only free symbols — string_table is a pointer into the same
+                 * combined malloc'd buffer (see parse_symbol_table_from_file). */
                 free(symbols);
-                free(string_table);
                 return CRT_TYPE_WATCOM;
             }
             free(symbols);
-            free(string_table);
         }
     }
 
