@@ -19,7 +19,6 @@
 #include "include/crt.h"
 #include "include/common.h"
 #include "include/debug.h"
-#include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/pe_priv.h"
 
