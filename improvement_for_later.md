@@ -165,5 +165,107 @@ There is no mechanism to verify that a sample produces the expected output.
   memory addresses) can be handled via regex patterns in the file or a separate
   `expected_output_regex.txt` variant.
 
+## GLOBAL-CONSOLIDATION — Consolidate Global Variables into Context Structs
+
+**Problem:** The codebase carries ~45 non-static global variables and ~13 large
+static arrays/structs scattered across multiple files. No globals are inherently
+bad — file-scope state in a single-process loader is acceptable. However, the
+current layout has three concrete issues:
+
+1. **Duplicate definitions** — `stubs/msvcrt.c` and `src/msvcrt/crt_globals.c`
+   both define `__msvcrt_app_type`, `_commode`, `_fmode`, `_msvcrt_environ`,
+   `_acmdln` (static in stubs, non-static in CRT). `crt_32_stub.c` has its own
+   32-bit copies. Three copies of the same state.
+
+2. **Scattered kernel object tracking** — `sections[64]`, `views[64]`,
+   `events[64]`, `mutexes[64]`, `semaphores[64]`, `threads[32]` plus individual
+   `*_count` int globals are spread across `stubs/ntdll.c`, `ntdll_priv.h`,
+   `ntdll_memory.c`, `ntdll_objects.c`, and `ntdll_synchronization.c`. All marked
+   "SINGLE-THREAD ONLY" with no shared lock.
+
+3. **CRT globals sprawl** — `crt_globals.c` holds `g_crt_ctx` (already a struct)
+   alongside 15+ individual scalar globals for app type, commode, fmode, argv,
+   envp, cmdline, startup state, and 8+ stub variables.
+
+**Proposed action:**
+
+- **Consolidate ntdll object tracking** into `struct kernel_objects {`
+  `wine_section_t sections[64]; int section_count;` `wine_view_t views[64];`
+  `int view_count; ... wine_spinlock_t lock; }`. Single definition, shared lock.
+
+- **Consolidate CRT state** into `struct crt_runtime_state { crt_context_t ctx;`
+  `int app_type, commode, fmode; char **environ; char *_acmdln; ... }`. One
+  global struct instead of 15+ individual globals.
+
+- **Consolidate loader state** into `struct loader_state { void *image_base;`
+  `uintptr_t host_gs_base; char pe_path[512]; loaded_module_t modules[MAX_MODULES];`
+  `int module_count; }` to group `image_mapper.c` and `module_list.c` globals.
+
+- **Deduplicate CRT globals** across `stubs/msvcrt.c`, `crt_globals.c`, and
+  `crt_32_stub.c` by having them all reference a single shared struct definition.
+
+**Trade-offs:**
+- Globals aren't inherently bad in a single-process loader — this is about
+  organization, correctness, and maintainability, not eliminating globals
+  wholesale
+- Adding a shared `wine_spinlock_t` to kernel object tracking adds a small
+  runtime cost but makes the single-thread assumption explicit (and upgradeable)
+- The `loader_state` consolidation is the cleanest win — those globals are
+  already logically grouped, just not in one struct
+- CRT consolidation has the most payoff since it eliminates the 3-copy
+  duplication across stubs, CRT, and 32-bit stub files
+- Higher effort than most entries here — requires touching many files
+  and updating all access paths
+
 ---
- Reduce global variable usage? Are they bad?
+
+## BUILD-WARNINGS — Resolve Remaining Build Warnings
+
+**Problem:** The 32-bit build (`my_wine_32`) produces 16 warnings across 6 files.
+The 64-bit build is clean. No `-Werror` is set, so warnings pass silently.
+
+**Categories:**
+
+**Unused functions (4 warnings, 3 files):**
+| File | Function | Status |
+|---|---|---|
+| `src/loader/pe32_entry.c:320` | `coff_lookup_entry` | Dead code? |
+| `src/loader/import_table.c:228` | `import_entry_cmp` | Dead code? |
+| `src/msvcrt/ntdll_objects.c:61` | `thread_wrapper` | Stub for future? |
+| `src/msvcrt/ntdll_synchronization.c:47` | `find_semaphore` | Has `__attribute__((unused))` |
+
+**Comparison always false — `-Wtype-limits` (5 warnings):**
+All in `src/loader/teb_peb.c` (lines 141, 190, 235, 246, 400).
+Pattern: `if (g_is_32bit && (uintptr_t)x >= ADDR32_LIMIT)` — on 32-bit builds
+`uintptr_t` is always `<= ADDR32_LIMIT`, so the check is provably dead.
+
+**Pointer↔int size mismatch — `-Wpointer-to-int-cast`, `-Wint-to-pointer-cast` (7 warnings, 3 files):**
+| File | Direction | Example |
+|---|---|---|
+| `src/msvcrt/kernel32_sync.c` | pointer → `uint64_t` | `(uint64_t)&prev` on 32-bit |
+| `src/msvcrt/ntdll_io.c` | `uint64_t` → pointer | `uint64_t`→`void*` on 32-bit |
+| `src/msvcrt/ntdll_objects.c` | `uint64_t` → function ptr | `uint64_t`→`void(*)(void*)` on 32-bit |
+
+**Proposed action:**
+- **Unused functions:** Remove `coff_lookup_entry` and `import_entry_cmp` if unused.
+  Keep `thread_wrapper` and `find_semaphore` with `__attribute__((unused))` if
+  they're intentional stubs for future multi-threading support.
+- **Type-limits:** Guard with `#if __SIZEOF_POINTER__ == 8` around the
+  `g_is_32bit && addr >= ADDR32_LIMIT` checks, since they're dead on 32-bit.
+- **Pointer↔int casts:** Use `uintptr_t` instead of `uint64_t` for pointer
+  intermediaries in the 32- to 64-bit transition code. The casts work but
+  trigger warnings because 32-bit pointers are 32 bits, not 64.
+- **Consider adding `-Werror`** once all warnings are resolved to catch future
+  regressions at build time.
+
+**Trade-offs:**
+- The pointer↔int casts are functionally correct (the code works), just
+  noisy — fixing them is cosmetic but improves build hygiene
+- The type-limits warnings are genuinely dead code on 32-bit; the fix
+  is straightforward (`#if __SIZEOF_POINTER__ == 8`)
+- Adding `-Werror` is a good long-term goal but requires all warnings
+  to be clean first (including in the musl wrapper, which already uses
+  `#pragma GCC diagnostic push/pop`) — this entry addresses the 16
+  active warnings; musl wrapper warnings are expected and suppressed
+
+---

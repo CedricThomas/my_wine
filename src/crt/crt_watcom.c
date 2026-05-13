@@ -35,6 +35,10 @@ extern crt_context_t g_crt_ctx;
  * Same as MinGW for DOOM95, may need adjustment once a real Watcom
  * binary is analyzed. */
 
+// TODO: These WATCOM_BSS_* offsets are copied from the MinGW module.
+// Verify against a real Watcom-compiled PE (e.g., DOOM95) by inspecting
+// the .bss section layout in a debugger or with objdump -s -j .bss.
+
 #define WATCOM_BSS_INITENV     0x018   /* __initenv / _environ pointer */
 #define WATCOM_BSS_ARGV        0x020   /* _argv pointer */
 #define WATCOM_BSS_ARGC        0x028   /* _argc */
@@ -52,6 +56,10 @@ static const char *watcom_entry_symbols[] = {
 /* ── Refptr mappings for Watcom CRT ──────────────────────────────
  * Empty for now — Watcom CRT layout and required stubs are not yet
  * reverse-engineered. Fill in once a real Watcom PE is analyzed. */
+
+// TODO: Discover Watcom-specific CRT symbols (e.g., _cstartup, __heapinit)
+// by reverse-engineering a real Watcom-compiled DOOM95 binary. Map each
+// MSVCRT refptr to its Watcom equivalent here.
 
 const refptr_mapping_t watcom_refptr_mappings[] = {
     { NULL, NULL }
