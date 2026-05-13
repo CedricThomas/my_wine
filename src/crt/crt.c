@@ -7,6 +7,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -105,9 +106,8 @@ crt_type_t crt_detect_type(const char *file_path, IMAGE_NT_HEADERS *nt)
         }
     }
 
-    // Heuristic fallback
-    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-        // PE32 — check for D_DoomMain (Watcom indicator)
+    // Heuristic fallback: PE32 → try watcom (look for D_DoomMain symbol)
+    if (nt->pe_type == PE_TYPE_32) {
         IMAGE_SYMBOL *symbols = NULL;
         char *string_table = NULL;
         int count = parse_symbol_table_from_file(file_path, nt, &symbols, &string_table);
