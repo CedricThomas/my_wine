@@ -203,6 +203,8 @@ def expand_call(call_template, args, variant):
     raw_src = find_raw_source(args)
     if raw_src and "raw" in result:
         result = result.replace("raw", raw_src)
+    # Suppress pointer-to-int-cast warnings on 32-bit: cast through uintptr_t first
+    result = result.replace("(PVOID)", "(PVOID)(uintptr_t)")
     return result
 
 
