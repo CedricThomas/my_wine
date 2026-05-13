@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <string.h>
+#include <stdio.h>
 
 #include "module_list.h"  /* loaded_module_t, MAX_MODULES */
 
