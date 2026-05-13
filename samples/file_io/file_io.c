@@ -107,11 +107,20 @@ int main(void)
         WriteFile(hStdout, msg, sizeof(msg)-1, &written, NULL);
         ExitProcess(1);
     }
-    if (__builtin_memcmp(readBuf, writeData, read) != 0) {
-        const char msg[] = "Read/Write data mismatch\r\n";
-        CloseHandle(hFile);
-        WriteFile(hStdout, msg, sizeof(msg)-1, &written, NULL);
-        ExitProcess(1);
+    {
+        int mismatch = 0;
+        for (int i = 0; (DWORD)i < read; i++) {
+            if (readBuf[i] != writeData[i]) {
+                mismatch = 1;
+                break;
+            }
+        }
+        if (mismatch) {
+            const char msg[] = "Read/Write data mismatch\r\n";
+            CloseHandle(hFile);
+            WriteFile(hStdout, msg, sizeof(msg)-1, &written, NULL);
+            ExitProcess(1);
+        }
     }
     { const char msg[] = "Data verification OK\r\n";
       WriteFile(hStdout, msg, sizeof(msg)-1, &written, NULL); }
