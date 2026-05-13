@@ -132,11 +132,10 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 {
     if (!image_base || !nt || !sections) return;
 
-    /* Detect CRT type and get the active module. If the module provides
+    /* Use the already-detected CRT module. If the module provides
      * a patch_refptrs vtable entry, delegate entirely — no fallback needed.
      * Otherwise, fall through to the inline logic below. */
-    crt_type_t type = crt_detect_type(file_path, nt);
-    const crt_module_t *mod = crt_get_module(type);
+    const crt_module_t *mod = crt_get_active();
     if (mod) {
         crt_patch_refptrs(mod, file_path, image_base, nt, sections);
         return;

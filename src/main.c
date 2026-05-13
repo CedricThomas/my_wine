@@ -166,6 +166,7 @@ static int init_loader(int argc, char **argv,
     /* 1b. Detect CRT type and select the active CRT module */
     crt_type_t crt_type = crt_detect_type(argv[1], &nt);
     const crt_module_t *mod = crt_get_module(crt_type);
+    crt_set_active(mod);
 
     /* 2. Get section headers (from the live image) */
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
@@ -227,20 +228,20 @@ static int init_loader(int argc, char **argv,
 
     /* 8b. Pre-seed argc/argv/envp in .bss
      *
-     * If the active CRT module provides a seed_bss vtable entry, use it
-     * via the accessor function. Then always fall back to the local
-     * seed_bss_vars() for safety — both write the same values (argc=1,
-     * argv=NULL, envp=NULL) so double-seeding is harmless.
+     * If the active CRT module provides a seed_bss vtable entry, use it.
+     * Otherwise fall back to the local seed_bss_vars().
      *
      * g_crt_ctx is populated by patch_crt_refptrs (step 4) via the module's
      * discover_offsets, which looks up _argc/__argc, _argv/__argv,
      * _environ/__envp in the COFF symbol table and computes offsets
      * relative to .bss base.
      */
-    if (mod) {
-        crt_seed_bss(mod, base, &nt, sections);
+    const crt_module_t *active = crt_get_active();
+    if (crt_has_seed_bss(active)) {
+        crt_seed_bss(active, base, &nt, sections);
+    } else {
+        seed_bss_vars(base, &nt, sections);
     }
-    seed_bss_vars(base, &nt, sections);
 
     /* 9. Build guest argv/envp from actual host arguments */
     static char *guest_argv[2];

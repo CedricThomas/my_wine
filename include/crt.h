@@ -82,4 +82,13 @@ uint32_t crt_bss_argv_offset(const crt_module_t *mod);
 /* Get the default BSS offset for the initenv slot */
 uint32_t crt_bss_initenv_offset(const crt_module_t *mod);
 
+/* Set the globally active CRT module (call once after detection) */
+void crt_set_active(const crt_module_t *mod);
+
+/* Get the globally active CRT module without re-detection */
+const crt_module_t *crt_get_active(void);
+
+/* Check whether the module provides a seed_bss vtable entry */
+int crt_has_seed_bss(const crt_module_t *mod);
+
 #endif /* MY_WINE_CRT_H */

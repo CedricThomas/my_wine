@@ -151,3 +151,18 @@ uint32_t crt_bss_initenv_offset(const crt_module_t *mod)
     if (!mod) return 0;
     return mod->bss_initenv_offset;
 }
+
+void crt_set_active(const crt_module_t *mod)
+{
+    active_crt = mod;
+}
+
+const crt_module_t *crt_get_active(void)
+{
+    return active_crt;
+}
+
+int crt_has_seed_bss(const crt_module_t *mod)
+{
+    return mod != NULL && mod->seed_bss != NULL;
+}
