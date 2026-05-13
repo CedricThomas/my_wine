@@ -2,41 +2,29 @@
 
 ## ~~LINK-DYNAMIC~~ — COMPLETED: Switched my_wine_32 to dynamic linking
 
-**Problem:** `my_wine_32` is built with `-static -no-pie -Wl,--no-dynamic-linker`,
-pulling the entire glibc static archive into the binary. Result: 1.2MB binary
-(~885KB text is glibc internals that are never called).
+**Result:** Binary dropped from ~1.2MB (static) to ~431KB unstripped / ~111KB stripped (dynamic).
+All 22 samples pass, zero regressions.
 
-**Current (Makefile line 138):**
-```make
-@$(MY_WINE_32_CC) -static -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) \
-	-nostartfiles -Wl,--no-dynamic-linker -lpthread \
-	-Wl,--defsym=_DYNAMIC=0
-```
+**Changes applied:**
+- **Makefile**: Removed `-static -nostartfiles -Wl,--no-dynamic-linker -Wl,--defsym=_DYNAMIC=0`;
+  link line is now `$(MY_WINE_32_CC) -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) -lpthread`
+- **src/loader/pe32_entry.S**: Deleted — glibc CRT `crt1.o` provides `_start` → `__libc_start_main` → `main`
+- **src/loader/pe32_entry.c**: `wine32_main` → `main`; fixed stack overflow in `setup_fs_and_jump`
+  (`memset` reduced from 68→16 bytes, stack alignment adjusted from -8 to -24)
+- **src/heap/musl_malloc_32_compat.c**: Removed `_init`/`_fini` no-op stubs (glibc CRT provides real ones);
+  keeping them would have overridden glibc's and broken `.init_array` constructor execution
+- **Documentation**: `docs/architecture.md`, `docs/PE32.md` updated to reflect glibc CRT entry chain
 
-**Proposed action:**
-```make
-@$(MY_WINE_32_CC) -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) -lpthread
-```
-
-Remove `-static`, `-Wl,--no-dynamic-linker`, `-Wl,--defsym=_DYNAMIC=0`.
-
-**Expected result:** Binary drops from ~1.2MB to ~200-300KB. The linker
-delegates `libc.so.6` and `ld-linux.so.2` resolution to the dynamic loader.
-
-**Safety:** The 32-bit code path always switches FS→TEB as the last step
-before guest entry. All glibc calls (`mmap`, `setenv`, `qsort`) happen
-while FS still points to glibc TLS. No glibc is called after the switch.
-
-**Trade-offs:**
-- Requires `glibc.i686` (Arch: `glibc` multilib provides `/usr/lib32/`)
-  on any machine that runs the binary
-- Static linking was chosen for portability (distribute `my_wine_32`
-  without glibc dependency)
-- If you only run on your own machine, dynamic is fine
-- Revert to static if cross-machine portability is ever needed
-
-**Prerequisites on Arch:** `/lib/ld-linux.so.2` and `/usr/lib32/libc.so.6`
-must exist. Already present on multilib-enabled Arch installs.
+**Additional findings during implementation:**
+- Stack overflow risk in `setup_fs_and_jump`: with dynamic linking, the kernel can place the stack
+  immediately below read-only libc.so.6. The 68-byte `memset` extending past the committed stack
+  region caused SIGSEGV. Fixed by reducing to 16 bytes (only the needed argument frame) and
+  adjusting `setup_stack` alignment to reserve headroom.
+- Two `__attribute__((constructor))` functions now run correctly: `frame_dummy` (glibc)
+  and `handle_manager_ctor` (our code). Previously silently skipped under `-nostartfiles`.
+- The KNOWN LIMITATION comment about `sync_test_32` pthread crash in `pe32_entry.c` was stale —
+  the workaround (spinlocks instead of pthread mutexes) was already in place in `handle_manager.c`.
+  Comment updated to reflect resolved state.
 
 ---
 

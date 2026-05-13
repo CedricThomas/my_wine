@@ -60,29 +60,16 @@
 #define CRT_BSS_ACMDLN    0x030   /* _acmdln pointer (for GetCommandLineA) */
 
 /*
- * KNOWN LIMITATION: sync_test_32 crash in PE32 mode
+ * PE32 threading safety
  *
- * sync_test_32.exe crashes during pthread_mutex_lock in PE32 mode.
+ * The handle manager (src/msvcrt/handle_manager.c) uses spinlocks
+ * (wine_spinlock_t) instead of pthread mutexes. This avoids glibc's
+ * GS-relative TLS accesses which would break after the FS→TEB switch.
+ * Similarly, wine_heap.c gates all pthread_mutex_* behind #ifndef MY_WINE_32.
  *
- * Root cause:
- *   The handle manager (wine_handle_alloc / wine_handle_free) uses
- *   pthread mutexes for synchronization. glibc's pthread implementation
- *   internally performs GS-relative accesses to reach thread-local data.
- *   After the FS base is switched to point to the guest TEB
- *   (via set_thread_area / ARCH_SET_FS), glibc's pthread code may
- *   execute stale or broken GS-relative instructions, causing a crash
- *   inside pthread_mutex_lock.
- *
- * Affected:
- *   - sync_test_32.exe (reproduces the crash reliably)
- *   - Any PE32 binary that goes through handle_manager with pthreads
- *     after the FS register has been redirected to the guest TEB
- *
- * Workaround:
- *   Replace pthread mutexes in the handle manager with a spinlock-based
- *   synchronization primitive, or use a non-pthread mutex that does not
- *   rely on GS-relative TLS accesses. This ensures the handle manager
- *   remains safe even after the FS base switch in PE32 mode.
+ * glibc uses GS for TLS on i386 — no conflict with FS→TEB.
+ * The 64-bit build (src/stubs/ntdll.c) uses pthreads since GS is not
+ * redirected in the single-process model.
  */
 
 /* Declarations from image_mapper.c (linked into my_wine_32) */

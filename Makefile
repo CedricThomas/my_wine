@@ -15,7 +15,7 @@ endif
 BUILDDIR = build
 
 # Auto-discover .c per source group; objects flatten into build/
-ROOT_SRC     = $(sort $(shell find src/   -maxdepth 1 -name '*.c'))
+ROOT_SRC     = $(filter-out src/wrapper_main.c, $(sort $(shell find src/   -maxdepth 1 -name '*.c')))
 STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c, \
 		$(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c')))
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c))
@@ -76,14 +76,25 @@ CFLAGS_musl_malloc_wrapper.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/hea
 
 # ── Targets ─────────────────────────────────────────────────────
 
-all: my_wine my_wine_32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+all: my_wine my_wine64 my_wine_32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
 
-my_wine: $(OBJS)
+# ── Wrapper binary ──────────────────────────────────────────────
+# my_wine: standalone wrapper that detects PE format and dispatches
+# to my_wine64 (PE32+) or my_wine32 (PE32).
+
+my_wine: $(BUILDDIR)/wrapper_main.o
 	@echo "==== Link my_wine ===="
-	@$(CC) $(CFLAGS) -o my_wine $(OBJS) $(LDFLAGS)
+	@$(CC) $(CFLAGS) -o my_wine $(BUILDDIR)/wrapper_main.o $(LDFLAGS)
+
+# ── Main 64-bit binary ──────────────────────────────────────────
+# my_wine64: loads PE32+ images directly.
+
+my_wine64: $(OBJS)
+	@echo "==== Link my_wine64 ===="
+	@$(CC) $(CFLAGS) -o my_wine64 $(OBJS) $(LDFLAGS)
 
 # ── 32-bit child binary ─────────────────────────────────────────
 # my_wine_32: standalone 32-bit ELF that loads PE32 images.
@@ -198,7 +209,7 @@ $(SHELL.EXE):
 
 TEST ?=
 
-tests: my_wine $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
@@ -271,7 +282,7 @@ clean:
 
 fclean: clean
 	@echo "  FCLEAN all end targets"
-	rm -f my_wine my_wine_32
+	rm -f my_wine my_wine64 my_wine_32
 	find samples/ -name '*.exe' -delete 2>/dev/null || true
 	find samples/ -name '*.dll' -delete 2>/dev/null || true
 	rm -rf samples/unpacked/

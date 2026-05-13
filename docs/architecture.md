@@ -249,11 +249,11 @@ Linux blocks `ljmp`/`lcall` to a 32-bit code segment at CPL=3 in a 64-bit proces
 
 ### Architecture
 
-`my_wine` (64-bit) detects PE32 → forks + execs `my_wine_32` (a 32-bit static ELF built with `-static -nostartfiles`). Communication is via `WINE32_PE_PATH` env var. The parent `waitpid()`s and returns the child's exit code. No IPC, no shared memory.
+`my_wine` (64-bit) detects PE32 → forks + execs `my_wine_32` (a 32-bit dynamically-linked ELF built with `-no-pie`). Communication is via `WINE32_PE_PATH` env var. The parent `waitpid()`s and returns the child's exit code. No IPC, no shared memory.
 
 ### `my_wine_32` Entry Point
 
-`_start` (`pe32_entry.S`) → `wine32_main()` (`pe32_entry.c`), which independently:
+glibc CRT (`crt1.o`) → `__libc_start_main` → `main()` (`pe32_entry.c`), which independently:
 - Maps PE from disk, allocates TEB32/PEB32 at fixed 32-bit addresses
 - Generates 15-byte thunks, resolves imports, seeds BSS vars
 - Sets up **FS → TEB via `set_thread_area`** (syscall 243, LDT-based)
@@ -268,15 +268,15 @@ Linux blocks `ljmp`/`lcall` to a 32-bit code segment at CPL=3 in a 64-bit proces
 | mmap | `mmap` (syscall 9) | `mmap2` (syscall 192) |
 | TEB base | GS via `arch_prctl` / `wrgsbase` | FS via `set_thread_area` (LDT, syscall 243) |
 | Calling ABI | Microsoft x64 (RCX/RDX/R8/R9) | cdecl (stack-based) |
-| libc calls | glibc available | No — all replaced with `INLINE_SYSCALL_*` macros (no TLS in `-nostartfiles`) |
+| libc calls | glibc available | glibc available before FS→TEB switch, `INLINE_SYSCALL_*` after |
 
 ### Process Flow
 
 ```
-my_wine (64-bit)                      my_wine_32 (32-bit static ELF)
+my_wine (64-bit)                      my_wine_32 (32-bit dynamic ELF)
  ──────────────────                      ──────────────────────────────────
-  detect PE32                              _start (pe32_entry.S)
-  fork() ─── exec("my_wine_32") ─────►     wine32_main() (pe32_entry.c)
+  detect PE32                              glibc CRT (crt1.o)
+  fork() ─── exec("my_wine_32") ─────►     __libc_start_main → main() (pe32_entry.c)
   setenv(WINE32_PE_PATH)                         ├─ map_image()
   waitpid()                                      ├─ setup_teb_peb()
   │                                              ├─ set_thread_area(FS → TEB)
