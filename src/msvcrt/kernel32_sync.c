@@ -33,13 +33,13 @@ void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, cons
 WINE_STUB
 int SetEvent(void *hEvent)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hEvent;
+    uintptr_t handle = (uintptr_t)hEvent;
     if (handle == 0) {
         g_last_error = 6; /* ERROR_INVALID_HANDLE */
         return 0;
     }
     uint64_t prev = 0;
-    uint64_t status = handler_NtSetEvent(handle, (uint64_t)&prev);
+    uint64_t status = handler_NtSetEvent(handle, (uint64_t)(uintptr_t)&prev);
     if (status != 0) {
         g_last_error = 6;
         return 0;
@@ -52,13 +52,13 @@ int SetEvent(void *hEvent)
 WINE_STUB
 int ResetEvent(void *hEvent)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hEvent;
+    uintptr_t handle = (uintptr_t)hEvent;
     if (handle == 0) {
         g_last_error = 6;
         return 0;
     }
     uint64_t prev = 0;
-    uint64_t status = handler_NtResetEvent(handle, (uint64_t)&prev);
+    uint64_t status = handler_NtResetEvent(handle, (uint64_t)(uintptr_t)&prev);
     if (status != 0) {
         g_last_error = 6;
         return 0;
@@ -74,7 +74,7 @@ int ResetEvent(void *hEvent)
 WINE_STUB
 uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hHandle;
+    uintptr_t handle = (uintptr_t)hHandle;
     if (handle == 0) {
         g_last_error = 6;
         return 0x00000103UL; /* WAIT_ABANDONED - placeholder */
@@ -90,14 +90,14 @@ uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 
     if (dwMilliseconds == 0) {
         timeout_100ns = 0;
-        uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uint64_t)&timeout_100ns);
+        uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uintptr_t)&timeout_100ns);
         if (status == 0) return 0; /* WAIT_OBJECT_0 */
         return 0x00000102UL; /* WAIT_TIMEOUT */
     }
 
     /* Convert ms → 100ns (relative = negative) */
     timeout_100ns = -((int64_t)dwMilliseconds * 10000LL);
-    uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uint64_t)&timeout_100ns);
+    uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uintptr_t)&timeout_100ns);
     if (status == 0) return 0; /* WAIT_OBJECT_0 */
     if (status == 0x00000080UL) return 0x00000102UL; /* WAIT_TIMEOUT */
     return 0x00000103UL; /* WAIT_FAILED */
@@ -121,7 +121,7 @@ void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName)
 WINE_STUB
 int ReleaseMutex(void *hMutex)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hMutex;
+    uintptr_t handle = (uintptr_t)hMutex;
     uint64_t status = handler_NtReleaseMutex(handle, 0);
     if (status != 0) {
         g_last_error = 6;
