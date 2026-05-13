@@ -107,7 +107,6 @@ MY_WINE_32_HEAP_OBJS  = $(patsubst src/heap/%.c,$(BUILDDIR32)/%.o,$(MY_WINE_32_H
 
 MY_WINE_32_OBJS = \
 	$(BUILDDIR32)/pe32_entry.o \
-	$(BUILDDIR32)/pe32_entry.S.o \
 	$(BUILDDIR32)/pe32_run_guest.o \
 	$(BUILDDIR32)/crash_handlers.o \
 	$(BUILDDIR32)/teb_peb.o \
@@ -151,12 +150,7 @@ $(BUILDDIR32)/%.o: %.c | $(BUILDDIR32)
 	@echo "  CC32 $<"
 	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
 
-# Explicit rule for pe32_entry.S (avoids name clash with pe32_entry.c)
-$(BUILDDIR32)/pe32_entry.S.o: src/loader/pe32_entry.S | $(BUILDDIR32)
-	@echo "  AS32 $<"
-	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
-
-# Explicit rule for pe32_run_guest.S (avoids name clash with pe32_entry.c)
+# Explicit rule for pe32_run_guest.S
 $(BUILDDIR32)/pe32_run_guest.o: src/loader/pe32_run_guest.S | $(BUILDDIR32)
 	@echo "  AS32 $<"
 	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
