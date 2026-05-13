@@ -43,12 +43,6 @@ void set_wine_dll_path(const char *path);
 #define X86_SYSCALL_BYTE1    0x0F
 #define X86_SYSCALL_BYTE2    0x05
 
-// CRT BSS offsets (MinGW CRT layout, relative to .bss base)
-#define CRT_BSS_INITENV     0x018   /* __initenv / _environ pointer */
-#define CRT_BSS_ARGV        0x020   /* _argv pointer */
-#define CRT_BSS_ARGC        0x028   /* _argc */
-#define CRT_BSS_ACMDLN      0x030   /* _acmdln pointer (for GetCommandLineA) */
-
 // Windows pseudo-handle values
 // Note: These must use unsigned literals so they zero-extend to uint64_t
 // on 32-bit (where the dispatcher zero-extends the 32-bit stack value).

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "common.h"
+#include "crt.h"
 
 /* ── MSVCRT CRT Startup Stubs ──────────────────────────────── */
 
@@ -106,20 +107,5 @@ extern void *__msvcrt_exit;
 extern void *__msvcrt__exit;
 extern void *__msvcrt_abort;
 extern void *__msvcrt_signal;
-
-/* CRT context — image base and .bss VA */
-typedef struct {
-    uint64_t image_base;       /* Base address of the loaded PE image */
-    uint64_t bss_vaddr;        /* VirtualAddress of the .bss section */
-    uint32_t argc_bss_offset;  /* offset within .bss for argc (default 0x028) */
-    uint32_t argv_bss_offset;  /* offset within .bss for argv (default 0x020) */
-    uint32_t envp_bss_offset;  /* offset within .bss for envp (default 0x018) */
-} crt_context_t;
-
-extern crt_context_t g_crt_ctx;
-
-/* Patch refptrs in the PE's .rdata to point to our globals */
-#include "pe.h"
-void patch_crt_refptrs(const char *file_path, void *image_base, IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections);
 
 #endif /* MY_WINE_MSVCRT_H */
