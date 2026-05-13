@@ -1,10 +1,19 @@
 #!/bin/bash
 set -e
 
+# Usage: run_tests.sh [--debug]
+#   --debug  Export MY_WINE_DEBUG=1 for all test invocations (verbose debug output)
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
+
+if [ "$1" = "--debug" ]; then
+	export MY_WINE_DEBUG=1
+	echo ">>> DEBUG MODE ACTIVE (MY_WINE_DEBUG=1)"
+	echo ""
+fi
 
 SHELL_EXE="samples/hello_world/hello_world.exe"
 BUILDDIR="build"

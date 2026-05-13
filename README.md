@@ -65,7 +65,7 @@ For example:
 
 | Target | Description |
 |---|---|
-| `make` or `make all` | Build the `my_wine` binary |
+| `make` or `make all` | Build `my_wine` (wrapper), `my_wine64` (PE32+), `my_wine32` (PE32) |
 | `make clean` | Remove the `build/` directory |
 | `make test` | Build and run unit tests |
 | `make samples` | Cross-compile all samples via Docker |
@@ -91,7 +91,8 @@ Example:
 ./my_wine samples/hello_world/hello_world.exe
 ```
 
-The loader will:
+The `my_wine` wrapper detects PE type and dispatches to `my_wine64`
+(PE32+) or `my_wine32` (PE32). For PE32+, the loader:
 
 1. Open and parse the PE file.
 2. Map sections at the preferred image base with correct protections.
@@ -110,7 +111,12 @@ The loader will:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│                     my_wine (single process)               │
+│   my_wine (wrapper) ──► my_wine64 (PE32+) / my_wine32     │
+│   Thin wrapper reads PE headers, dispatches to correct    │
+│   backend via execvp(). The diagram below shows the       │
+│   PE32+ path (my_wine64).                                 │
+│                                                            │
+│                     my_wine64 (single process)             │
 │                                                            │
 │  main()                                                    │
 │   │                                                        │
@@ -182,7 +188,8 @@ architectural walkthrough.
 ```
 ├── Makefile                    # build system
 ├── src/
-│   ├── main.c                  # entry point: map, resolve, run
+│   ├── wrapper_main.c          # my_wine wrapper: detect PE32 vs PE32+, execvp backend
+│   ├── main.c                  # my_wine64: PE32+ entry point — map, resolve, run
 │   ├── common.c                # shared utilities
 │   ├── pe_headers.c            # PE DOS/NT header parsing
 │   ├── pe_imports.c            # import descriptor chain traversal
@@ -197,7 +204,8 @@ architectural walkthrough.
 │   │   ├── import_resolve.c    # IAT resolution (pass 1 + pass 2)
 │   │   ├── import_init.c       # import resolution orchestrator
 │   │   ├── teb_peb.c           # TEB + PEB allocation and setup
-│   │   ├── entry.c             # fork(), child setup, __acrt_iob patch
+│   │   ├── entry.c             # call setup_guest_and_run() → jump to PE entry point
+│   │   ├── pe32_entry.c        # my_wine32: PE32 entry point (32-bit, glibc CRT + FS→TEB)
 │   │   ├── guest_setup.c       # guest process initialization
 │   │   ├── crash_handlers.c    # exception/crash handling in child
 │   │   ├── gs_base.c           # GS segment base setup via arch_prctl

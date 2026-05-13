@@ -20,6 +20,14 @@
 
 set -euo pipefail
 
+# Parse --debug flag from arguments (can appear anywhere)
+DEBUG=0
+for arg in "$@"; do
+    if [ "$arg" = "--debug" ]; then
+        DEBUG=1
+    fi
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SAMPLES_DIR="$PROJECT_DIR/samples"
@@ -279,10 +287,15 @@ run_sample() {
 
     echo "  RUN $name (under my_wine, expect exit=$expected_exit, timeout=${timeout_sec}s)"
 
+    # Export MY_WINE_DEBUG when in debug mode
+    if [ "${DEBUG}" != "0" ]; then
+        export MY_WINE_DEBUG=1
+    fi
+
     # Run with timeout; capture exit code without triggering set -e
     # Suppress my_wine debug logs (DBG_*) on stderr unless DEBUG is set
     local ret=0
-    if [ -n "${DEBUG:-}" ]; then
+    if [ "${DEBUG}" != "0" ]; then
         timeout "$timeout_sec" "$MY_WINE" "$exe" || ret=$?
     else
         timeout "$timeout_sec" "$MY_WINE" "$exe" 2>/dev/null || ret=$?
@@ -299,8 +312,20 @@ run_sample() {
 
 # ── Main ──────────────────────────────────────────────────────────
 
-MODE="${1:-build}"
-TARGET="${2:-}"
+# Strip --debug from positional args for MODE/TARGET parsing
+filter_args() {
+    local args=()
+    for arg in "$@"; do
+        if [ "$arg" != "--debug" ]; then
+            args+=("$arg")
+        fi
+    done
+    printf '%s\n' "${args[@]}"
+}
+
+FILTERED=($(filter_args "$@"))
+MODE="${FILTERED[0]:-build}"
+TARGET="${FILTERED[1]:-}"
 
 case "$MODE" in
     build)
@@ -329,6 +354,11 @@ case "$MODE" in
             exit 0
         fi
         pass=0 fail=0 skip=0
+        if [ "${DEBUG}" != "0" ]; then
+            echo "============================"
+            echo "  DEBUG MODE (MY_WINE_DEBUG=1)"
+            echo "============================"
+        fi
         for name in $samples; do
             # Build the sample first
             if ! build_sample "$name"; then

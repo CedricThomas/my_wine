@@ -16,8 +16,10 @@ build/
 # Windows libraries
 *.dll
 
-# Main binary
+# Main binaries
 my_wine
+my_wine64
+my_wine32
 
 # Test binaries (ignore all in tests/, keep .c sources)
 tests/*
@@ -34,4 +36,3 @@ __pycache__/
 
 # Sample game assets (zip is tracked; unpacked folder is ignored)
 samples/unpacked/
-my_wine32
