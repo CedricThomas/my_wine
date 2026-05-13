@@ -4,6 +4,13 @@
 
 ---
 
+## WoW64 In-Process Migration: ABORTED
+
+The in-process mode-switching approach (GDT setup + `lcall` + dual-stack) was studied
+but abandoned. The dual-process fork+exec model is the permanent architecture.
+
+---
+
 ## my_wine_32: Switch from Static to Dynamic Linking
 
 **Problem:** `my_wine_32` is built with `-static -no-pie -Wl,--no-dynamic-linker`,
