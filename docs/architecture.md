@@ -496,7 +496,7 @@ directly — the syscall number comes from `RDI` (the C function's
 
 ### 4.5 Handler Implementation
 
-NT handlers (`src/stubs/ntdll_*.c`) implement Windows syscalls using
+NT handlers (`src/msvcrt/ntdll_*.c`) implement Windows syscalls using
 Linux primitives:
 
 | NT Handler | Linux Implementation |

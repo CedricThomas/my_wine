@@ -248,7 +248,7 @@ When the PE retains its COFF symbol table, we discover the exact RVAs of
 regardless of linker ordering.
 
 ```c
-// src/stubs/crt_offset_discovery.c — find_symbol_rva_from_file()
+// src/msvcrt/crt_offset_discovery.c — find_symbol_rva_from_file()
 uint64_t find_symbol_rva_from_file(const char *file_path,
                                    IMAGE_NT_HEADERS64 *nt,
                                    IMAGE_SECTION_HEADER *sections,
@@ -273,7 +273,7 @@ we scan `.rdata` and `.data` sections for 8-byte values that point into
 `.bss`, and patch them to our stubs.
 
 ```c
-// src/stubs/crt_refptrs.c — fallback data scan
+// src/msvcrt/crt_refptrs.c — fallback data scan
 for each entry in .rdata/.data at 8-byte boundaries:
     if entry value points into .bss:
         match to next unpatched .bss mapping
@@ -289,7 +289,7 @@ and patch the discovered target. This handles builds where `__imp___initenv`
 is entirely absent from the COFF symbol table.
 
 ```c
-// src/stubs/crt_offset_discovery.c — scan_text_for_refptrs()
+// src/msvcrt/crt_offset_discovery.c — scan_text_for_refptrs()
 for each instruction in .text:
     if pattern matches "mov reg, [rip+disp]" + deref + store:
         patch target to __imp___initenv_stub
@@ -321,7 +321,7 @@ whose IAT target resolves to `__iob_func` and overwrites it.
 
 | What | Where | When |
 |------|-------|------|
-| `.refptr` redirection | `src/stubs/crt_refptrs.c` | `main()` (loader phase) |
+| `.refptr` redirection | `src/msvcrt/crt_refptrs.c` | `main()` (loader phase) |
 | `__acrt_iob_func` patch | `src/loader/guest_setup.c` | Guest setup (before entry) |
 
 See [CRT refptr Patching](refptr.md) for full implementation details.

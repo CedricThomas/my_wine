@@ -161,7 +161,7 @@ static arrays/structs scattered across multiple files. No globals are inherently
 bad — file-scope state in a single-process loader is acceptable. However, the
 current layout has three concrete issues:
 
-1. **Duplicate definitions** — `stubs/msvcrt.c` and `src/msvcrt/crt_globals.c`
+1. **Duplicate definitions** — `src/msvcrt/crt_globals.c` and `crt_32_stub.c` both define CRT globals (`_acmdln`, etc.) that should be consolidated.
    both define `__msvcrt_app_type`, `_commode`, `_fmode`, `_msvcrt_environ`,
    `_acmdln` (static in stubs, non-static in CRT). `crt_32_stub.c` has its own
    32-bit copies. Three copies of the same state.
