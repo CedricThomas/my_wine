@@ -78,7 +78,7 @@
 #define TEB32_PEB_PTR        0x30   /* PEB pointer */
 #define TEB32_FIBER_DATA     0x10   /* FiberData field in x86_32 TEB */
 #define TEB32_GDI_TEB_OFFSET 0x18   /* GdiTebOffset field in x86_32 TEB */
-#define TEB32_GDI_PROCESS_LOCAL 0x200  /* GdiProcessLocals field in x86_32 TEB */
+#define TEB32_GDI_PROCESS_LOCAL 0x1C  /* GdiProcessLocals field in x86_32 TEB */
 
 /* ── PEB field offsets (x86_64 Windows) ───────────────────────── */
 

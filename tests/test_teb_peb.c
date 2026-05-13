@@ -256,16 +256,16 @@ static void test_teb32_fields(void)
               gdi_offset == (uint32_t)(uintptr_t)teb + TEB32_GDI_PROCESS_LOCAL);
     }
 
-    /* GdiProcessLocals (TEB+0x200) — should be 0 */
+    /* GdiProcessLocals (TEB+0x1C) — should be 0 */
     {
         uint32_t gdi_process = *(uint32_t *)((uint8_t *)teb + TEB32_GDI_PROCESS_LOCAL);
-        check("TEB32 GdiProcessLocals (offset 0x200) is zero", gdi_process == 0);
+        check("TEB32 GdiProcessLocals (offset 0x1C) is zero", gdi_process == 0);
     }
 
-    /* GdiThreadLocals (TEB+0x204) — should be 0 */
+    /* GdiThreadLocals (TEB+0x20) — should be 0 */
     {
         uint32_t gdi_thread = *(uint32_t *)((uint8_t *)teb + TEB32_GDI_PROCESS_LOCAL + 4);
-        check("TEB32 GdiThreadLocals (offset 0x204) is zero", gdi_thread == 0);
+        check("TEB32 GdiThreadLocals (offset 0x20) is zero", gdi_thread == 0);
     }
 
     /* Cleanup */
