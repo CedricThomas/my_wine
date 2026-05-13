@@ -195,6 +195,13 @@ build_exe() {
     local CC
     CC=$(select_compiler "$src_dir")
 
+    # 32-bit MinGW-w64 enables -fstack-protector-strong by default, which crashes
+    # at -O2 when EBP is used as a data register. Disable it for 32-bit builds.
+    local EXTRA_FLAGS=""
+    if [ "$CC" = "i686-w64-mingw32-gcc" ]; then
+        EXTRA_FLAGS="-fno-stack-protector"
+    fi
+
     echo "  CC  $name (mingw)"
     docker run --rm \
         -v "$PROJECT_DIR:/project:ro" \
@@ -202,6 +209,7 @@ build_exe() {
         "$IMAGE_NAME" \
         "$CC" \
         -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -mconsole \
+        $EXTRA_FLAGS \
         -o "/out/${name}.exe" \
         $container_srcs 2>&1 || {
             echo "  FAIL $name"

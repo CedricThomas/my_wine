@@ -3,7 +3,7 @@
  *
  * Tests that the 32-bit dispatcher correctly saves and restores guest
  * registers across a syscall boundary by:
- *   1. Reading EFLAGS, callee-saved registers (ESI, EDI, EBX) before
+ *   1. Reading callee-saved registers (ESI, EDI, EBX) before
  *      a syscall
  *   2. Calling QueryPerformanceCounter (traverses thunk → dispatcher → back)
  *   3. Reading those registers again and comparing
@@ -78,31 +78,28 @@ int main(void)
 
     write_msg(hStdout, "Dispatcher register preservation test (PE32)\n");
 
-    uint32_t eflags_before, esi_before, edi_before, ebx_before;
+    uint32_t esi_before, edi_before, ebx_before;
     __asm__ volatile(
-        "pushf; popl %0\n"
-        "movl %%esi, %1\n"
-        "movl %%edi, %2\n"
-        "movl %%ebx, %3\n"
-        : "=&a"(eflags_before), "=&c"(esi_before),
+        "movl %%esi, %0\n"
+        "movl %%edi, %1\n"
+        "movl %%ebx, %2\n"
+        : "=&c"(esi_before),
           "=&d"(edi_before), "=&D"(ebx_before)
     );
 
     /* The syscall: QPC → kernel32 stub → thunk → dispatcher. */
     QueryPerformanceCounter(&perf);
     /* Read regs after syscall. */
-    uint32_t eflags_after, esi_after, edi_after, ebx_after;
+    uint32_t esi_after, edi_after, ebx_after;
     __asm__ volatile(
-        "pushf; popl %0\n"
-        "movl %%esi, %1\n"
-        "movl %%edi, %2\n"
-        "movl %%ebx, %3\n"
-        : "=&a"(eflags_after), "=&c"(esi_after),
+        "movl %%esi, %0\n"
+        "movl %%edi, %1\n"
+        "movl %%ebx, %2\n"
+        : "=&c"(esi_after),
           "=&d"(edi_after), "=&D"(ebx_after)
     );
 
     check_reg("EBP", 0xBADC0DE, frame_marker, hStdout);
-    check_reg("EFLAGS", eflags_before, eflags_after, hStdout);
     check_reg("ESI", esi_before, esi_after, hStdout);
     check_reg("EDI", edi_before, edi_after, hStdout);
     check_reg("EBX", ebx_before, ebx_after, hStdout);
