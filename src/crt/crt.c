@@ -33,23 +33,6 @@ static const crt_module_t *modules[] = {
 /* Active CRT module (set after detection) */
 static const crt_module_t *active_crt = NULL;
 
-/* ── Stub modules (full implementations in phase-specific files) ── */
-
-/* Watcom CRT module stub (replaced by crt_watcom.c when implemented) */
-const crt_module_t crt_module_watcom = {
-    .name              = "watcom",
-    .type              = CRT_TYPE_WATCOM,
-    .detect            = NULL,
-    .entry_symbols     = NULL,
-    .refptr_mappings   = NULL,
-    .bss_init_offset   = 0,
-    .bss_argv_offset   = 0,
-    .bss_initenv_offset = 0,
-    .patch_refptrs     = NULL,
-    .discover_offsets  = NULL,
-    .seed_bss          = NULL,
-};
-
 /* ── Accessor implementations ─────────────────────────────────── */
 
 crt_type_t crt_detect_type(const char *file_path, IMAGE_NT_HEADERS *nt)
