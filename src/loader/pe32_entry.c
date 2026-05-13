@@ -22,7 +22,7 @@
  * accesses that may be broken if GS has been switched).
  *
  * Compiled with -m32, uses int $0x80 syscalls via syscalls_inline.h.
- * Called from pe32_entry.S (_start → wine32_main).
+ * Called from glibc CRT (__libc_start_main → main).
  */
 
 #include <stdint.h>
@@ -101,7 +101,7 @@ extern void seh_crash_handler(void *, void *, void *, void *);
 /* Declaration from pe32_run_guest.S */
 
 /* _acmdln — command-line string buffer from crt_32_stub.c (256 bytes).
- * Seeded in wine32_main() so GetCommandLineA() returns the PE path. */
+ * Seeded in main() so GetCommandLineA() returns the PE path. */
 extern char _acmdln[];
 extern void pe32_run_guest(uint32_t entry_abs, void *stack_top) __attribute__((noreturn));
 
@@ -678,17 +678,17 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
     pe32_run_guest(entry_abs, stack_top);
 }
 
-/* ── wine32_main ─────────────────────────────────────────────── */
+/* ── main ─────────────────────────────────────────────────────── */
 
 /**
- * wine32_main — C entry point for my_wine_32.
+ * main — C entry point for my_wine_32.
  *
  * Orchestrates: read env → map PE → resolve entry → init PEB/TEB →
  * generate thunks → jump to entry.
  *
  * @return never returns (jumps to PE code or exits via syscall)
  */
-int wine32_main(int argc, char **argv)
+int main(int argc, char **argv)
 {
     const char *pe_path;
     uint32_t entry_rva;

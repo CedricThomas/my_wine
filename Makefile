@@ -87,8 +87,8 @@ my_wine: $(OBJS)
 
 # ── 32-bit child binary ─────────────────────────────────────────
 # my_wine_32: standalone 32-bit ELF that loads PE32 images.
-# Compiled with -m32, statically linked, uses pe32_entry.S as _start.
-# No CRT startup (pe32_entry.S provides _start).
+# Compiled with -m32, dynamically linked with glibc CRT.
+# Uses pe32_entry.c as main() entry point.
 
 MY_WINE_32_CC = $(CC) -m32
 MY_WINE_32_CFLAGS = $(CFLAGS) -DMY_WINE_32 -mno-red-zone -fno-stack-protector \
@@ -138,9 +138,7 @@ MY_WINE_32_OBJS = \
 
 my_wine_32: $(MY_WINE_32_OBJS)
 	@echo "==== Link my_wine_32 ===="
-	@$(MY_WINE_32_CC) -static -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) \
-		-nostartfiles -Wl,--no-dynamic-linker -lpthread \
-		-Wl,--defsym=_DYNAMIC=0
+	@$(MY_WINE_32_CC) -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) -lpthread
 
 # 32-bit pattern rules — compile with -m32 into build32/
 $(BUILDDIR32):

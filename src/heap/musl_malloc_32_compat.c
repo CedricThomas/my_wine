@@ -18,17 +18,6 @@
 #define MIN_ALLOC 4096
 
 /*
- * _init and _fini — no-op initialization/finalization.
- *
- * When using -nostartfiles, libc's libc-start.o still expects
- * _init() and _fini() symbols. These are normally provided by
- * crti.o/crtn.o. Since -nostartfiles skips those, we provide
- * trivial no-op replacements.
- */
-void _init(void) { }
-void _fini(void) { }
-
-/*
  * musl_malloc — allocate via mmap (MAP_32BIT to stay in 32-bit space).
  * Each allocation includes a 4-byte size header before the user pointer.
  */
