@@ -66,10 +66,9 @@
  * (wine_spinlock_t) instead of pthread mutexes. This avoids glibc's
  * GS-relative TLS accesses which would break after the FS→TEB switch.
  * Similarly, wine_heap.c gates all pthread_mutex_* behind #ifndef MY_WINE32.
+ * The 64-bit build (src/msvcrt/ntdll_*.c) uses the same spinlock approach.
  *
  * glibc uses GS for TLS on i386 — no conflict with FS→TEB.
- * The 64-bit build (src/stubs/ntdll.c) uses pthreads since GS is not
- * redirected in the single-process model.
  */
 
 /* Declarations from image_mapper.c (linked into my_wine32) */
