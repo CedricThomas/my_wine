@@ -218,6 +218,10 @@ run-test: tests
 	@echo "==== Running tests ===="
 	@bash scripts/run_tests.sh $(TEST)
 
+debug-test: tests
+	@echo "==== Running tests with debug ===="
+	@bash scripts/run_tests.sh --debug
+
 # Per-test object groups
 TEST_parse_OBJS = $(PE_OBJS) $(BUILDDIR)/debug.o
 TEST_import_resolution_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/module_list.o \
@@ -274,6 +278,10 @@ samples:
 run-sample: all
 	@bash scripts/samples.sh run $(SAMPLE)
 
+debug-samples: all
+	@echo "==== Running samples with debug ===="
+	@bash scripts/samples.sh run --debug
+
 clean:
 	@echo "  CLEAN build artifacts"
 	rm -rf $(BUILDDIR) $(BUILDDIR32)
@@ -309,4 +317,4 @@ gen-crt-offsets:
 gen-dispatcher: src/syscall/dispatcher_generated.c
 	@echo "Generated dispatcher switch bodies."
 
-.PHONY: all clean fclean re tests run-test samples run-sample build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-test debug-test samples run-sample debug-samples build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR) $(BUILDDIR32)
