@@ -58,10 +58,10 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
     return STATUS_SUCCESS;
 }
 
-static void thread_wrapper(void *arg)
+static __attribute__((unused)) void thread_wrapper(void *arg)
 {
-    uint64_t routine = (uint64_t)(uintptr_t)((void **)arg)[0];
-    uint64_t param   = (uint64_t)(uintptr_t)((void **)arg)[1];
+    uintptr_t routine = (uintptr_t)((void **)arg)[0];
+    uintptr_t param   = (uintptr_t)((void **)arg)[1];
     /* munmap the args page — safe since we extracted values above */
     (void)INLINE_SYSCALL_MUNMAP(arg, PAGE_SIZE);
     void (*fn)(void *) = (void (*)(void *))routine;
