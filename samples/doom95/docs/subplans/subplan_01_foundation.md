@@ -1,19 +1,19 @@
 # Subplan 1: Foundation
 
-**Goal**: PE32 loader support + 32-bit ELF helper (`my_wine_32`) + handle manager + `render_backend.h` header + CRT bootstrap.
+**Goal**: PE32 loader support + 32-bit ELF helper (`my_wine32`) + handle manager + `render_backend.h` header + CRT bootstrap.
 
 **Architecture**: Dual-process model. On 64-bit Linux, a 64-bit user-space process **cannot switch to 32-bit compat mode** (`ljmp`/`lcall` to 32-bit CS is blocked by kernel at CPL=3). The only way to execute 32-bit x86 instructions is to run as a native 32-bit ELF process — the kernel handles all GDT, vDSO, and segment setup.
 
-**History**: We first attempted a 64→32 mode-switch approach within a single process (~40 commits). It was abandoned when we hit the kernel CPL=3 wall and the return path proved too fragile. **Pivot**: dual-process architecture where `my_wine_32` is a standalone 32-bit ELF.
+**History**: We first attempted a 64→32 mode-switch approach within a single process (~40 commits). It was abandoned when we hit the kernel CPL=3 wall and the return path proved too fragile. **Pivot**: dual-process architecture where `my_wine32` is a standalone 32-bit ELF.
 
-- `my_wine` (64-bit ELF): PE32 detection → fork+exec `my_wine_32` with `WINE32_PE_PATH` env var
-- `my_wine_32` (32-bit ELF): independently opens PE, maps at 0x00400000, allocates TEB (0x7FFDE000) + PEB (0x7FFDF000), generates 15-byte 32-bit thunks, installs signal handlers, jumps to PE entry
+- `my_wine` (64-bit ELF): PE32 detection → fork+exec `my_wine32` with `WINE32_PE_PATH` env var
+- `my_wine32` (32-bit ELF): independently opens PE, maps at 0x00400000, allocates TEB (0x7FFDE000) + PEB (0x7FFDF000), generates 15-byte 32-bit thunks, installs signal handlers, jumps to PE entry
 - PE32 code runs natively in 32-bit compat mode (CS=0x23)
 - Syscall dispatch: 15-byte thunks → 32-bit dispatcher → `int $0x80` syscalls
 
 **✅ ALL BLOCKERS RESOLVED** (see Gap Categories below)
 
-**Outcome**: `./my_wine DOOM95.EXE` forks `my_wine_32` which loads the PE, sets up TEB/PEB, and reaches `D_DoomMain`. PE32 samples running; PE32+ samples running.
+**Outcome**: `./my_wine DOOM95.EXE` forks `my_wine32` which loads the PE, sets up TEB/PEB, and reaches `D_DoomMain`. PE32 samples running; PE32+ samples running.
 
 ---
 
@@ -121,10 +121,10 @@ The only remaining work for full DOOM95 execution is unblocking the Watcom CRT b
 **None.** All previously identified blockers have been resolved:
 
 ### BLOCKER A: `fork()` + `exec()` destroys mmap'd memory (Critical) ✅ RESOLVED
-Resolved by having `my_wine_32` rebuild everything from scratch: re-map PE from the same file, re-allocate TEB/PEB, re-resolve imports with 32-bit thunks. Communication via env vars (`WINE32_PE_PATH`).
+Resolved by having `my_wine32` rebuild everything from scratch: re-map PE from the same file, re-allocate TEB/PEB, re-resolve imports with 32-bit thunks. Communication via env vars (`WINE32_PE_PATH`).
 
 ### BLOCKER B: `arch_prctl(ARCH_SET_FS)` in 32-bit mode (Critical) ✅ RESOLVED
-`arch_prctl(ARCH_SET_FS)` returns `EINVAL` in 32-bit compat mode. **Resolution**: `my_wine_32` uses `set_thread_area` (syscall 243) to allocate an LDT entry pointing at the TEB, then sets FS to that selector. TEB remains at fixed address (`0x7FFDE000`).
+`arch_prctl(ARCH_SET_FS)` returns `EINVAL` in 32-bit compat mode. **Resolution**: `my_wine32` uses `set_thread_area` (syscall 243) to allocate an LDT entry pointing at the TEB, then sets FS to that selector. TEB remains at fixed address (`0x7FFDE000`).
 
 ### BLOCKER C: No 32-bit syscall dispatch infrastructure (High) ✅ RESOLVED
 All three components have `#if defined(__i386__)` code paths:

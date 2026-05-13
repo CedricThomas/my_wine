@@ -17,7 +17,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
-#if defined(MY_WINE_32)
+#if defined(MY_WINE32)
 #include "../syscall/syscalls_inline.h"
 /* Standalone 32-bit: use inline syscalls instead of libc */
 #define wine_mmap(a, l, p, f, fd, o) INLINE_SYSCALL_MMAP(a, l, p, f, fd, o)

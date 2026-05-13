@@ -1,13 +1,13 @@
 # Improvements for Later
 
-## ~~LINK-DYNAMIC~~ — COMPLETED: Switched my_wine_32 to dynamic linking
+## ~~LINK-DYNAMIC~~ — COMPLETED: Switched my_wine32 to dynamic linking
 
 **Result:** Binary dropped from ~1.2MB (static) to ~431KB unstripped / ~111KB stripped (dynamic).
 All 22 samples pass, zero regressions.
 
 **Changes applied:**
 - **Makefile**: Removed `-static -nostartfiles -Wl,--no-dynamic-linker -Wl,--defsym=_DYNAMIC=0`;
-  link line is now `$(MY_WINE_32_CC) -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) -lpthread`
+  link line is now `$(MY_WINE32_CC) -no-pie -o my_wine32 $(MY_WINE32_OBJS) -lpthread`
 - **src/loader/pe32_entry.S**: Deleted — glibc CRT `crt1.o` provides `_start` → `__libc_start_main` → `main`
 - **src/loader/pe32_entry.c**: `wine32_main` → `main`; fixed stack overflow in `setup_fs_and_jump`
   (`memset` reduced from 68→16 bytes, stack alignment adjusted from -8 to -24)
@@ -58,8 +58,8 @@ adapting syscall wrappers. Not worth the effort for this project scope.
 ## WRAPPER-SPLIT — Wrapper Binary: Split my_wine into my_wine + my_wine32/my_wine64
 
 **Description:** Currently there is a single `my_wine` binary that handles both
-PE32 and PE32+ binaries (dispatching to `my_wine_32` for 32-bit via fork+exec).
-The build also produces `my_wine_32` as a standalone 32-bit ELF binary.
+PE32 and PE32+ binaries (dispatching to `my_wine32` for 32-bit via fork+exec).
+The build also produces `my_wine32` as a standalone 32-bit ELF binary.
 
 **Proposed action:** Introduce a thin wrapper binary `my_wine` that delegates
 to architecture-specific backends:
@@ -67,7 +67,7 @@ to architecture-specific backends:
 - `my_wine` — wrapper/dispatcher: parses args, detects PE architecture,
   selects the appropriate backend binary
 - `my_wine64` — the current `my_wine` PE32+ loader (renamed)
-- `my_wine32` — the current `my_wine_32` PE32 loader (renamed)
+- `my_wine32` — the current `my_wine32` PE32 loader (renamed)
 
 All three share the same CLI interface, environment variable behavior,
 and argument parsing conventions.

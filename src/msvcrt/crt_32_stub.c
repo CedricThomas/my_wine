@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
 #include "../syscall/syscalls_inline.h"
 #else
 #include <stdlib.h>
@@ -110,7 +110,7 @@ void __set_app_type(int type)
 }
 
 /* _amsg_exit — error exit */
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
 void _amsg_exit(int msg)
 {
     (void)msg;
@@ -125,7 +125,7 @@ void _amsg_exit(int msg)
 #endif
 
 /* _cexit — clean exit */
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
 void _cexit(void)
 {
     INLINE_SYSCALL_EXIT(0);
@@ -253,7 +253,7 @@ int _m_strncasecmp(const char *a, const char *b, size_t n) {
 int _m_memcmp(const void *a, const void *b, size_t n) { return __builtin_memcmp(a, b, n); }
 
 /* abort / exit */
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
 void _m_abort(void) { INLINE_SYSCALL_EXIT(1); }
 void _m_exit(int code) { INLINE_SYSCALL_EXIT(code); }
 #else
@@ -274,7 +274,7 @@ struct lconv *_m_localeconv(void) { return NULL; }
 char *_m_strerror(int n) { (void)n; return "error"; }
 
 /* fprintf / fwrite / vfprintf / fputc */
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
 /* 32-bit: minimal stubs (no stdio in the build) */
 int _m_fprintf(void *stream, const char *fmt, ...) { (void)stream; (void)fmt; return 0; }
 int _m_fwrite(const void *ptr, size_t size, size_t nmemb, void *stream) { (void)ptr; (void)size; (void)nmemb; (void)stream; return 0; }

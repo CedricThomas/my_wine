@@ -12,7 +12,7 @@
 #include "include/syscall/dispatcher_entry.h"
 #include "include/debug.h"
 
-#if defined(MY_WINE_32)
+#if defined(MY_WINE32)
 #include "syscalls_inline.h"
 #define wine_mmap(a, l, p, f, fd, o) INLINE_SYSCALL_MMAP(a, l, p, f, fd, o)
 #define wine_munmap(a, l) INLINE_SYSCALL_MUNMAP(a, l)

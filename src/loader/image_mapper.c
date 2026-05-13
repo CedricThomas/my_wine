@@ -23,7 +23,7 @@
 #include "loader_priv.h"
 #include "include/common.h"
 
-#if defined(MY_WINE_32)
+#if defined(MY_WINE32)
 /* Standalone 32-bit: use inline syscalls instead of libc */
 #define wine_mmap(a, l, p, f, fd, o) INLINE_SYSCALL_MMAP(a, l, p, f, fd, o)
 #define wine_munmap(a, l) INLINE_SYSCALL_MUNMAP(a, l)
@@ -112,7 +112,7 @@ void *map_image_at(const char *path,
 
     dump_headers(&dos, &nt, sections);
 
-#if !defined(MY_WINE_32)
+#if !defined(MY_WINE32)
     /* Force flush before debug output (stdout not initialized in standalone 32-bit) */
     fflush(stdout);
 #endif

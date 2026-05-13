@@ -123,7 +123,7 @@ WINE_STUB
 __attribute__((noreturn)) void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)
 {
     FreeLibraryA(hModule);
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     INLINE_SYSCALL_EXIT((int)exitCode);
 #else
     _exit((int)exitCode);

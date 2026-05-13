@@ -65,7 +65,7 @@ extern char *__p__commode_func(void);
 extern char **__initenv_func(void);
 /* Data symbols needed by import table — already declared in msvcrt.h (e.g. _acmdln, __p__acmdln) */
 extern char **__initenv;
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
 /* 32-bit only: these are data symbols (from crt_32_stub.c) */
 extern char *__p__commode;
 extern char *__p__fmode;
@@ -193,7 +193,7 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "fputc", (void*)_m_fputc },
     { "msvcrt.dll", "localeconv", (void*)_m_localeconv },
     { "msvcrt.dll", "strerror", (void*)_m_strerror },
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     /* 32-bit: __p__* must be wrapper functions (JMP thunks in PE).
      * __initenv is DATA (PE writes to it, not calls it). */
     { "msvcrt.dll", "__initenv", (void*)&__initenv },
@@ -225,7 +225,7 @@ void set_import(const char *name, void *address)
     DEBUG("ERROR: set_import: symbol '%s' not found", name);
 }
 
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
 static int import_entry_cmp(const void *a, const void *b)
 {
     return strcmp(((const import_entry_t *)a)->name,
@@ -234,7 +234,7 @@ static int import_entry_cmp(const void *a, const void *b)
 #endif
 
 /* Standalone 32-bit: can't use strcmp (libc TLS not initialized) */
-#if defined(MY_WINE_32)
+#if defined(MY_WINE32)
 static int import_entry_cmp_nolibc(const char *a, const char *b)
 {
     unsigned char ua, ub;
@@ -250,7 +250,7 @@ static int import_entry_cmp_nolibc(const char *a, const char *b)
 
 int import_cmp_by_name(const void *key, const void *elem)
 {
-#if defined(MY_WINE_32)
+#if defined(MY_WINE32)
     return import_entry_cmp_nolibc((const char *)key, ((const import_entry_t *)elem)->name);
 #else
     return strcmp((const char *)key, ((const import_entry_t *)elem)->name);
@@ -264,7 +264,7 @@ void init_import_table(void)
 {
     /* Sort import_table by name for bsearch. Exclude the sentinel entry. */
     size_t count = sizeof(import_table) / sizeof(import_entry_t) - 1;
-#if defined(MY_WINE_32)
+#if defined(MY_WINE32)
     /* Standalone 32-bit: can't use qsort/strcmp (libc TLS not initialized).
      * Use insertion sort with local strcmp that doesn't need libc. */
     for (size_t i = 1; i < count; i++) {

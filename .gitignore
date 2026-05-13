@@ -34,4 +34,4 @@ __pycache__/
 
 # Sample game assets (zip is tracked; unpacked folder is ignored)
 samples/unpacked/
-my_wine_32
+my_wine32

@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
         return 126;
     }
 
-    const char *backend = (pe_type == PE_TYPE_32) ? "my_wine_32" : "my_wine64";
+    const char *backend = (pe_type == PE_TYPE_32) ? "my_wine32" : "my_wine64";
     char *slash = strrchr(dir, '/');
     /* Replace the filename component with the backend name. Use snprintf for bounds safety. */
     size_t remaining = sizeof(dir) - (size_t)(slash + 1 - dir);

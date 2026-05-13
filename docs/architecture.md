@@ -249,9 +249,9 @@ Linux blocks `ljmp`/`lcall` to a 32-bit code segment at CPL=3 in a 64-bit proces
 
 ### Architecture
 
-`my_wine` (64-bit) detects PE32 → forks + execs `my_wine_32` (a 32-bit dynamically-linked ELF built with `-no-pie`). Communication is via `WINE32_PE_PATH` env var. The parent `waitpid()`s and returns the child's exit code. No IPC, no shared memory.
+`my_wine` (64-bit) detects PE32 → forks + execs `my_wine32` (a 32-bit dynamically-linked ELF built with `-no-pie`). Communication is via `WINE32_PE_PATH` env var. The parent `waitpid()`s and returns the child's exit code. No IPC, no shared memory.
 
-### `my_wine_32` Entry Point
+### `my_wine32` Entry Point
 
 glibc CRT (`crt1.o`) → `__libc_start_main` → `main()` (`pe32_entry.c`), which independently:
 - Maps PE from disk, allocates TEB32/PEB32 at fixed 32-bit addresses
@@ -273,10 +273,10 @@ glibc CRT (`crt1.o`) → `__libc_start_main` → `main()` (`pe32_entry.c`), whic
 ### Process Flow
 
 ```
-my_wine (64-bit)                      my_wine_32 (32-bit dynamic ELF)
+my_wine (64-bit)                      my_wine32 (32-bit dynamic ELF)
  ──────────────────                      ──────────────────────────────────
   detect PE32                              glibc CRT (crt1.o)
-  fork() ─── exec("my_wine_32") ─────►     __libc_start_main → main() (pe32_entry.c)
+  fork() ─── exec("my_wine32") ─────►     __libc_start_main → main() (pe32_entry.c)
   setenv(WINE32_PE_PATH)                         ├─ map_image()
   waitpid()                                      ├─ setup_teb_peb()
   │                                              ├─ set_thread_area(FS → TEB)

@@ -76,7 +76,7 @@ CFLAGS_musl_malloc_wrapper.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/hea
 
 # ── Targets ─────────────────────────────────────────────────────
 
-all: my_wine my_wine64 my_wine_32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
@@ -97,26 +97,26 @@ my_wine64: $(OBJS)
 	@$(CC) $(CFLAGS) -o my_wine64 $(OBJS) $(LDFLAGS)
 
 # ── 32-bit child binary ─────────────────────────────────────────
-# my_wine_32: standalone 32-bit ELF that loads PE32 images.
+# my_wine32: standalone 32-bit ELF that loads PE32 images.
 # Compiled with -m32, dynamically linked with glibc CRT.
 # Uses pe32_entry.c as main() entry point.
 
-MY_WINE_32_CC = $(CC) -m32
-MY_WINE_32_CFLAGS = $(CFLAGS) -DMY_WINE_32 -mno-red-zone -fno-stack-protector \
+MY_WINE32_CC = $(CC) -m32
+MY_WINE32_CFLAGS = $(CFLAGS) -DMY_WINE32 -mno-red-zone -fno-stack-protector \
 	-fno-exceptions -mno-sse -fno-pie -no-pie -Werror
 BUILDDIR32 = build32
 
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager
 # Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child)
-MY_WINE_32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c, \
+MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c, \
 	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) src/msvcrt/crt_32_stub.c
 # 32-bit heap: use mmap-based allocator instead of musl (musl atomics are x86_64-only)
-MY_WINE_32_HEAP_SRC = src/heap/wine_heap.c src/heap/musl_malloc_32_compat.c
+MY_WINE32_HEAP_SRC = src/heap/wine_heap.c src/heap/musl_malloc_32_compat.c
 # Flatten paths: src/msvcrt/foo.c → build32/foo.o, src/heap/foo.c → build32/foo.o
-MY_WINE_32_STUBS_OBJS = $(patsubst src/msvcrt/%.c,$(BUILDDIR32)/%.o,$(MY_WINE_32_STUBS_SRC))
-MY_WINE_32_HEAP_OBJS  = $(patsubst src/heap/%.c,$(BUILDDIR32)/%.o,$(MY_WINE_32_HEAP_SRC))
+MY_WINE32_STUBS_OBJS = $(patsubst src/msvcrt/%.c,$(BUILDDIR32)/%.o,$(MY_WINE32_STUBS_SRC))
+MY_WINE32_HEAP_OBJS  = $(patsubst src/heap/%.c,$(BUILDDIR32)/%.o,$(MY_WINE32_HEAP_SRC))
 
-MY_WINE_32_OBJS = \
+MY_WINE32_OBJS = \
 	$(BUILDDIR32)/pe32_entry.o \
 	$(BUILDDIR32)/pe32_run_guest.o \
 	$(BUILDDIR32)/crash_handlers.o \
@@ -144,12 +144,12 @@ MY_WINE_32_OBJS = \
 	$(BUILDDIR32)/import_resolve.o \
 	$(BUILDDIR32)/mmap2_asm.o \
 	$(BUILDDIR32)/clone.o \
-	$(MY_WINE_32_STUBS_OBJS) \
-	$(MY_WINE_32_HEAP_OBJS)
+	$(MY_WINE32_STUBS_OBJS) \
+	$(MY_WINE32_HEAP_OBJS)
 
-my_wine_32: $(MY_WINE_32_OBJS)
-	@echo "==== Link my_wine_32 ===="
-	@$(MY_WINE_32_CC) -no-pie -o my_wine_32 $(MY_WINE_32_OBJS) -lpthread
+my_wine32: $(MY_WINE32_OBJS)
+	@echo "==== Link my_wine32 ===="
+	@$(MY_WINE32_CC) -no-pie -o my_wine32 $(MY_WINE32_OBJS) -lpthread
 
 # 32-bit pattern rules — compile with -m32 into build32/
 $(BUILDDIR32):
@@ -157,27 +157,27 @@ $(BUILDDIR32):
 
 $(BUILDDIR32)/%.o: %.c | $(BUILDDIR32)
 	@echo "  CC32 $<"
-	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
 
 # Explicit rule for pe32_run_guest.S
 $(BUILDDIR32)/pe32_run_guest.o: src/loader/pe32_run_guest.S | $(BUILDDIR32)
 	@echo "  AS32 $<"
-	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
 
 # Explicit rule for dispatcher_entry_asm.S from src/syscall/
 $(BUILDDIR32)/dispatcher_entry_asm.o: src/syscall/dispatcher_entry_asm.S | $(BUILDDIR32)
 	@echo "  AS32 $<"
-	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
 
 # Explicit rule for mmap2_asm.S from src/syscall/
 $(BUILDDIR32)/mmap2_asm.o: src/syscall/mmap2_asm.S | $(BUILDDIR32)
 	@echo "  AS32 $<"
-	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
 
 # Explicit rule for clone.S from src/syscall/
 $(BUILDDIR32)/clone.o: src/syscall/clone.S | $(BUILDDIR32)
 	@echo "  AS32 $<"
-	@$(MY_WINE_32_CC) $(MY_WINE_32_CFLAGS) -c $< -o $@
+	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
 
 # 32-bit dispatcher.o needs the generated dispatch switch
 $(BUILDDIR32)/dispatcher.o: src/syscall/dispatcher_generated.c
@@ -282,7 +282,7 @@ clean:
 
 fclean: clean
 	@echo "  FCLEAN all end targets"
-	rm -f my_wine my_wine64 my_wine_32
+	rm -f my_wine my_wine64 my_wine32
 	find samples/ -name '*.exe' -delete 2>/dev/null || true
 	find samples/ -name '*.dll' -delete 2>/dev/null || true
 	rm -rf samples/unpacked/

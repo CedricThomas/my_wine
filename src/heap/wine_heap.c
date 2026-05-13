@@ -29,7 +29,7 @@ void *g_process_heap = NULL;
 
 /* wine_heap_t: wrapper around a named heap */
 typedef struct wine_heap {
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_t mutex;
 #endif
     int is_valid;  /* flag to validate heap handles */
@@ -57,7 +57,7 @@ void *HeapCreate(uint32_t flOptions, uint64_t dwInitialSize, uint64_t dwMaximumS
     }
 
     heap = (wine_heap_t *)mem;
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_init(&heap->mutex, NULL);
 #endif
     heap->is_valid = 1;
@@ -83,11 +83,11 @@ void *HeapAlloc(void *hHeap, uint32_t dwFlags, uint64_t dwBytes)
     }
 
     void *ptr;
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_lock(&heap->mutex);
 #endif
     ptr = musl_malloc((size_t)dwBytes);
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_unlock(&heap->mutex);
 #endif
 
@@ -115,11 +115,11 @@ int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem)
         return 1;  /* Windows: HeapFree(heap, 0, NULL) is a valid no-op */
     }
 
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_lock(&heap->mutex);
 #endif
     musl_free(lpMem);
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_unlock(&heap->mutex);
 #endif
 
@@ -143,7 +143,7 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
     void *ptr;
     size_t old_size = 0;
 
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_lock(&heap->mutex);
 #endif
     if (lpMem) {
@@ -153,7 +153,7 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
         /* lpMem == NULL → treat as fresh HeapAlloc */
         ptr = musl_malloc((size_t)dwBytes);
     }
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_unlock(&heap->mutex);
 #endif
 
@@ -185,7 +185,7 @@ int HeapDestroy(void *hHeap)
     }
 
     heap->is_valid = 0;
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     pthread_mutex_destroy(&heap->mutex);
 #endif
 

@@ -144,7 +144,7 @@ void setup_signal_handlers(void)
      * the handler runs on the safe signal stack instead of the
      * potentially-corrupted current stack.
      */
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     void *sigstack_mem = INLINE_SYSCALL_MMAP(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 #else
@@ -174,7 +174,7 @@ void setup_signal_handlers(void)
         ss.ss_sp = sigstack_mem;
         ss.ss_size = SIG_STACK_SIZE;
         ss.ss_flags = 0;
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
         INLINE_SYSCALL_SIGALTSTACK(&ss, NULL);
 #else
         sigaltstack(&ss, NULL);
@@ -182,20 +182,20 @@ void setup_signal_handlers(void)
     }
 
     struct sigaction sa;
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     __builtin_memset(&sa, 0, sizeof(sa));
 #else
     memset(&sa, 0, sizeof(sa));
 #endif
     sa.sa_sigaction = crash_handler;
     sa.sa_flags = SA_SIGINFO;
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     for (int _si = 0; _si < (int)(sizeof(sa.sa_mask.__val)/sizeof(sa.sa_mask.__val[0])); _si++)
         sa.sa_mask.__val[_si] = 0;
 #else
     sigemptyset(&sa.sa_mask);
 #endif
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     INLINE_SYSCALL_SIGACTION(SIGSEGV, &sa, NULL);
     INLINE_SYSCALL_SIGACTION(SIGILL, &sa, NULL);
     INLINE_SYSCALL_SIGACTION(SIGABRT, &sa, NULL);

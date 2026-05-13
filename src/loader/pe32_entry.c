@@ -1,5 +1,5 @@
 /*
- * pe32_entry.c — 32-bit ELF entry point for my_wine_32
+ * pe32_entry.c — 32-bit ELF entry point for my_wine32
  *
  * This is the C entry point for the 32-bit child process in the
  * dual-process PE32 execution model.
@@ -65,14 +65,14 @@
  * The handle manager (src/msvcrt/handle_manager.c) uses spinlocks
  * (wine_spinlock_t) instead of pthread mutexes. This avoids glibc's
  * GS-relative TLS accesses which would break after the FS→TEB switch.
- * Similarly, wine_heap.c gates all pthread_mutex_* behind #ifndef MY_WINE_32.
+ * Similarly, wine_heap.c gates all pthread_mutex_* behind #ifndef MY_WINE32.
  *
  * glibc uses GS for TLS on i386 — no conflict with FS→TEB.
  * The 64-bit build (src/stubs/ntdll.c) uses pthreads since GS is not
  * redirected in the single-process model.
  */
 
-/* Declarations from image_mapper.c (linked into my_wine_32) */
+/* Declarations from image_mapper.c (linked into my_wine32) */
 extern void *g_image_base;
 extern int g_is_32bit;
 
@@ -81,7 +81,7 @@ static IMAGE_NT_HEADERS g_nt_headers;
 void *map_image(const char *path, IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS *out_nt, size_t *out_nt_size);
 
-/* Declarations from crash_handlers.c (linked into my_wine_32) */
+/* Declarations from crash_handlers.c (linked into my_wine32) */
 extern void setup_signal_handlers(void);
 extern void seh_crash_handler(void *, void *, void *, void *);
 
@@ -123,7 +123,7 @@ static void ensure_argv_setup(const char *pe_path)
         PROT_READ | PROT_WRITE,
         MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
     if (page == MAP_FAILED || page == NULL) {
-        const char err[] = "my_wine_32: failed to alloc 32-bit argv page\n";
+        const char err[] = "my_wine32: failed to alloc 32-bit argv page\n";
         INLINE_SYSCALL_WRITE_ERR(err, sizeof(err) - 1);
         INLINE_SYSCALL_EXIT_GROUP(1);
     }
@@ -158,15 +158,15 @@ static void ensure_argv_setup(const char *pe_path)
 }
 
 /* ── Error messages (null-terminated, written via syscall to stderr) ── */
-static const char err_bad_env[]    = "my_wine_32: missing or invalid WINE32_PE_PATH\n";
-static const char err_map[]        = "my_wine_32: failed to map PE image\n";
-static const char err_teb[]        = "my_wine_32: failed to allocate TEB\n";
-static const char err_peb[]        = "my_wine_32: failed to allocate PEB\n";
-static const char err_unix_stack[] = "my_wine_32: failed to setup UNIX stack\n";
-static const char err_thunks[]     = "my_wine_32: failed to generate thunks\n";
-static const char err_stack[]      = "my_wine_32: failed to setup guest stack\n";
-static const char err_fs[]         = "my_wine_32: set_thread_area (FS→TEB) failed\n";
-static const char err_import[]     = "my_wine_32: import resolution failed\n";
+static const char err_bad_env[]    = "my_wine32: missing or invalid WINE32_PE_PATH\n";
+static const char err_map[]        = "my_wine32: failed to map PE image\n";
+static const char err_teb[]        = "my_wine32: failed to allocate TEB\n";
+static const char err_peb[]        = "my_wine32: failed to allocate PEB\n";
+static const char err_unix_stack[] = "my_wine32: failed to setup UNIX stack\n";
+static const char err_thunks[]     = "my_wine32: failed to generate thunks\n";
+static const char err_stack[]      = "my_wine32: failed to setup guest stack\n";
+static const char err_fs[]         = "my_wine32: set_thread_area (FS→TEB) failed\n";
+static const char err_import[]     = "my_wine32: import resolution failed\n";
 
 /* ── Externs for PEB wiring ──────────────────────────────────── */
 extern void *g_process_heap;
@@ -190,7 +190,7 @@ static struct exception_registration_record g_seh_frame = {
 
 /* ── Custom getenv — no glibc TLS dependency ──────────────────── */
 
-/* String helpers from crt_32_stub.c (linked into my_wine_32) */
+/* String helpers from crt_32_stub.c (linked into my_wine32) */
 extern size_t _m_strnlen(const char *s, size_t n);
 extern int _m_strncmp(const char *a, const char *b, size_t n);
 
@@ -232,7 +232,7 @@ static void *map_pe(const char *path)
 
     /* Verify we got a PE32 image */
     if (!pe_is_pe32(&nt)) {
-        const char err_type[] = "my_wine_32: not a PE32 image\n";
+        const char err_type[] = "my_wine32: not a PE32 image\n";
         INLINE_SYSCALL_WRITE_ERR(err_type, sizeof(err_type) - 1);
         INLINE_SYSCALL_EXIT_GROUP(1);
     }
@@ -673,7 +673,7 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
 /* ── main ─────────────────────────────────────────────────────── */
 
 /**
- * main — C entry point for my_wine_32.
+ * main — C entry point for my_wine32.
  *
  * Orchestrates: read env → map PE → resolve entry → init PEB/TEB →
  * generate thunks → jump to entry.
@@ -686,10 +686,11 @@ int main(int argc, char **argv)
     uint32_t entry_rva;
     uint32_t entry_abs;
 
-    /* 1. Read PE path from environment, fall back to argv[1] */
-    pe_path = my_getenv("WINE32_PE_PATH");
-    if (!pe_path && argc > 1) {
+    /* 1. Check argv[1] first for PE path, fall back to WINE32_PE_PATH env var */
+    if (argc > 1) {
         pe_path = argv[1];
+    } else {
+        pe_path = my_getenv("WINE32_PE_PATH");
     }
     if (!pe_path) {
         INLINE_SYSCALL_WRITE_ERR(err_bad_env, sizeof(err_bad_env) - 1);
@@ -707,7 +708,7 @@ int main(int argc, char **argv)
 
     /* Resolve imports — must happen after map_pe() which sets g_is_32bit
      * and before any other PE operations that depend on patched IAT entries. */
-    init_msvcrt_imports();       /* Fill dynamic msvcrt entries (no-op under MY_WINE_32) */
+    init_msvcrt_imports();       /* Fill dynamic msvcrt entries (no-op under MY_WINE32) */
     init_import_table();         /* Sort import_table for binary search */
     if (resolve_imports(g_image_base, &g_nt_headers) != 0) {
         INLINE_SYSCALL_WRITE_ERR(err_import, sizeof(err_import) - 1);

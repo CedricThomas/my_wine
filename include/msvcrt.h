@@ -27,7 +27,7 @@ __attribute__((ms_abi))
 void __set_app_type(int type);
 __attribute__((ms_abi))
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *pStartInfo);
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
 /* 32-bit: these are data symbols (from crt_32_stub.c) */
 extern char **__initenv;
 extern char *__p__acmdln;

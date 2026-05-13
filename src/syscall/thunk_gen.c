@@ -71,7 +71,7 @@ static const uint16_t nt_syscall_list[] = {
 static void validate_dispatcher_addr(void *addr)
 {
     if (addr == NULL) {
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
         INLINE_SYSCALL_WRITE_ERR("wine: fatal: dispatcher address is NULL, cannot generate thunks\n", sizeof("wine: fatal: dispatcher address is NULL, cannot generate thunks\n") - 1);
         INLINE_SYSCALL_EXIT(1);
 #else
@@ -209,7 +209,7 @@ void **generate_all_thunks(void)
     size_t alloc = (needed + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
     if (alloc < PAGE_SIZE) alloc = PAGE_SIZE;
 
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     thunk_blob = INLINE_SYSCALL_MMAP(NULL, alloc, PROT_READ | PROT_WRITE | PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (thunk_blob == MAP_FAILED) {
@@ -228,7 +228,7 @@ void **generate_all_thunks(void)
 
     void *dispatcher = wine_dispatcher_addr();
 
-#ifdef MY_WINE_32
+#ifdef MY_WINE32
     {
         char msg[64];
         int off = 0;

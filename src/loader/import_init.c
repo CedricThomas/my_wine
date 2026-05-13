@@ -9,7 +9,7 @@
 
 #include "loader_priv.h"
 
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
 #include "../msvcrt/msvcrt_priv.h"
 #endif
 
@@ -27,7 +27,7 @@ extern char *__p__commode_func(void);
  */
 void init_msvcrt_imports(void)
 {
-#ifndef MY_WINE_32
+#ifndef MY_WINE32
     /* 64-bit build: fill dynamic msvcrt entries with CRT stub addresses.
      * These __msvcrt_* symbols come from crt_*.c which is excluded from
      * the 32-bit build. */
