@@ -16,6 +16,9 @@
 
 #include "module_list.h"  /* loaded_module_t, MAX_MODULES */
 
+/* DLL base allocator start address (1.5GB) to avoid GCC ms_abi truncation bug */
+#define DLL_ALLOC_BASE 0x60000000
+
 /* ── Consolidated loader state ─────────────────────────────────── */
 typedef struct {
     void         *image_base;            /* Mapped base of the main PE image */
