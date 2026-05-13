@@ -21,14 +21,6 @@
 #define PAGE_SIZE 4096
 #endif
 
-/* ── Event / Thread storage ────────────────────────────────────── */
-
-wine_event_t events[MAX_EVENTS];
-int event_count = 0;
-
-wine_thread_t threads[MAX_THREADS];
-int thread_count = 0;
-
 HANDLER
 uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
                                uint64_t object_attributes, uint64_t event_type,
@@ -37,20 +29,22 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
     (void)desired_access;
     (void)object_attributes;
 
-    if (event_count >= MAX_EVENTS)
+    if (ko_event_count() >= MAX_EVENTS)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
-    int slot = event_count++;
-    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_EVENT, (void *)&events[slot]);
+    int slot = ko_event_count();
+    ko_set_event_count(slot + 1);
+    wine_event_t *ev = ko_event(slot);
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_EVENT, (void *)ev);
 
     if (handle == 0) {
-        event_count--;
+        ko_set_event_count(slot);
         return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
-    events[slot].handle   = (int)handle;
-    events[slot].signaled = (initial_state != 0) ? 1 : 0;
-    events[slot].event_type = (int)event_type;
+    ev->handle   = (int)handle;
+    ev->signaled = (initial_state != 0) ? 1 : 0;
+    ev->event_type = (int)event_type;
 
     if (event_handle != 0)
         *event_handle = handle;
@@ -85,7 +79,7 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
     (void)attribute;
     (void)attr_list;
 
-    if (thread_count >= MAX_THREADS)
+    if (ko_thread_count() >= MAX_THREADS)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
     /* Prepare arguments for the wrapper — use mmap instead of malloc */
@@ -118,18 +112,20 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
         return STATUS_UNSUCCESSFUL;
     }
 
-    int slot = thread_count++;
-    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_THREAD, (void *)&threads[slot]);
+    int slot = ko_thread_count();
+    ko_set_thread_count(slot + 1);
+    wine_thread_t *thr = ko_thread(slot);
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_THREAD, (void *)thr);
 
     if (handle == 0) {
-        thread_count--;
+        ko_set_thread_count(slot);
         INLINE_SYSCALL_KILL(tid, SIGKILL);
         return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
-    threads[slot].tid       = (int)tid;
-    threads[slot].handle    = (int)handle;
-    threads[slot].suspended = (create_flags & 4) ? 1 : 0; /* CREATE_SUSPENDED */
+    thr->tid       = (int)tid;
+    thr->handle    = (int)handle;
+    thr->suspended = (create_flags & 4) ? 1 : 0; /* CREATE_SUSPENDED */
 
     if (thread_handle != 0)
         *thread_handle = handle;
