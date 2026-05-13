@@ -128,12 +128,26 @@ int main(int argc, char *argv[])
         return 126;
     }
 
-    const char *backend = (pe_type == PE_TYPE_32) ? "my_wine32" : "my_wine64";
+    const char *backend = (pe_type == PE_TYPE_32) ? "my_wine_32" : "my_wine64";
     char *slash = strrchr(dir, '/');
-    strcpy(slash + 1, backend);
+    /* Replace the filename component with the backend name. Use snprintf for bounds safety. */
+    size_t remaining = sizeof(dir) - (size_t)(slash + 1 - dir);
+    snprintf(slash + 1, remaining, "%s", backend);
 
-    /* execvp the backend, passing through argv[1..] as the PE and any user args */
-    execvp(dir, &argv[1]);
+    /* Build a new argv: new_argv[0] = backend path, new_argv[1..] = original args */
+    char **new_argv = malloc(sizeof(char *) * (argc + 1));
+    if (!new_argv) {
+        perror("my_wine: malloc");
+        return 127;
+    }
+    new_argv[0] = dir;         /* backend path becomes argv[0] */
+    for (int i = 1; i < argc; i++) {
+        new_argv[i] = argv[i]; /* pass through PE path + any user args */
+    }
+    new_argv[argc] = NULL;
+
+    /* execvp the backend — child sees argv[0]=backend, argv[1]=PE path, argv[2..]=user args */
+    execvp(dir, new_argv);
 
     /* Only reached on exec failure */
     perror("my_wine: execvp");
