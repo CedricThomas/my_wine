@@ -604,7 +604,7 @@ int VirtualFree(void *lpAddress,
             /* Try section views as fallback */
             int vidx = find_view(lpAddress);
             if (vidx >= 0)
-                region_size = (uint64_t)views[vidx].size;
+                region_size = (uint64_t)ko_view(vidx)->size;
             else {
                 return 0;  /* can't find the mapping */
             }
