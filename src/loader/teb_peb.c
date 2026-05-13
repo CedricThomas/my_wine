@@ -415,12 +415,14 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
 #endif
 
     /* Top of stack (aligned to 16 bytes for Microsoft x64 ABI: rsp%16==8).
-     * PE32 (stdcall) doesn't strictly require this, but it's harmless.
-     * Sub 8 BEFORE alignment to ensure stack_top - 8 never exceeds
-     * the mmap'd region. Without this, page-aligned bases + page-aligned
-     * commits can push stack_top past the region boundary under ASLR. */
+     * Sub 24 BEFORE alignment to ensure the argument frame (16 bytes written
+     * from sp = stack_top - 12) never exceeds the mmap'd region. The frame
+     * extends from stack_top - 12 to stack_top + 4, so we need at least 4
+     * bytes of headroom above stack_top within the committed region.
+     * Without this, page-aligned bases + page-aligned commits can push
+     * the frame past the region boundary under ASLR. */
     uintptr_t stack_top = (uintptr_t)stack_base + (size_t)commit;
-    stack_top = ((stack_top - 8) & ~(uintptr_t)15) + 8;  /* ABI requires rsp%16==8 */
+    stack_top = ((stack_top - 24) & ~(uintptr_t)15) + 8;  /* ABI requires rsp%16==8 */
 
     /* Print stack info */
     DEBUG("Stack: base=%p, top=%p, reserve=0x%lx, commit=0x%lx",

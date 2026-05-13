@@ -630,7 +630,12 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
      */
     uintptr_t aligned_sp = ((uintptr_t)stack_top & ~(uintptr_t)15) - 4;
     uint8_t *sp = (uint8_t *)aligned_sp;
-    __builtin_memset(sp, 0, 68);
+    /* Zero the argument frame region (16 bytes: return addr + 3 args).
+     * sp = stack_top - 12, so sp + 16 = stack_top + 4.
+     * The stack grows downward from stack_top, so the usable region
+     * is below stack_top. We zero only the 16 bytes we actually use,
+     * staying within the last page of the committed stack. */
+    __builtin_memset(sp, 0, 16);
 
     /*
      * Write a proper cdecl argument frame with fake return address.
