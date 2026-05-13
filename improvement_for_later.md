@@ -1,38 +1,5 @@
 # Improvements for Later
 
-> Non-blocking enhancements that can be tackled after the core PE32 path works.
-
-## Metadata
-
-| ID | Item | Priority | Effort | Status |
-|----|------|----------|--------|--------|
-| ABORTED-WOW64 | WoW64 In-Process Migration | — | — | Aborted |
-| LINK-DYNAMIC | my_wine_32: Static → Dynamic Linking | High | Low | Deferred |
-| MUSL-MALLOC | musl_malloc_32_compat vs glibc malloc | Med | Med | Deferred |
-| CRT-GEN | Generalize CRT Support | Low | High | Deferred |
-| WRAPPER-SPLIT | Wrapper Binary: Split my_wine into my_wine + my_wine32/my_wine64 | Med | Med | Deferred |
-| DEBUG-TEST | Run All Samples/Tests Under DEBUG | High | Low | Deferred |
-| SAMPLE-OUTPUT | Unify Samples Output with Expected Output Comparison | Med | Med | Deferred |
-
----
-
-## ABORTED-WOW64 — WoW64 In-Process Migration
-
-**Status:** Aborted
-
-The in-process mode-switching approach (GDT setup + `lcall` + dual-stack) was studied
-but abandoned. The dual-process fork+exec model is the permanent architecture.
-
-**Description:** Originally explored running 32-bit PE binaries by switching CPU mode
-within the same process. This required GDT manipulation and `lcall` transitions
-between 64-bit and 32-bit code segments.
-
-**Abort reason:** Too fragile and complex for the project scope. The fork+exec
-dual-process model (`my_wine` → `my_wine_32`) is simpler, more reliable, and
-avoids the kernel-level mode-switching complexity entirely.
-
----
-
 ## LINK-DYNAMIC — my_wine_32: Switch from Static to Dynamic Linking
 
 **Problem:** `my_wine_32` is built with `-static -no-pie -Wl,--no-dynamic-linker`,
@@ -97,32 +64,6 @@ adapting syscall wrappers. Not worth the effort for this project scope.
 - Removing musl shim: simpler build, but lose explicit heap control
 - Full musl replacement: smallest binary, but large rewrite cost
 
----
-
-## CRT-GEN — Generalize CRT Support
-
-**Description:** The current CRT stubs and entry path are optimized for MinGW-w64
-and specifically Doom95. For broader PE compatibility, the CRT layer needs
-to detect and handle different runtime conventions.
-
-**Proposed action:**
-- Design a pluggable CRT layer: each CRT variant (MinGW, Watcom, MSVC, Doom-specific)
-  gets a dedicated module with its own initialization and entry strategy
-- The loader auto-detects the CRT type from PE headers or import table and loads
-  the matching module at runtime
-- Implement minimal `HeapAlloc`/`HeapCreate` stubs so Win32 heap APIs work
-  beyond the custom allocator
-- Add `LoadLibraryA`/`GetProcAddress` stubs for dynamic DLL loading at runtime
-- Implement `GetModuleHandle` to return the PE base address
-- The Doom95-specific CRT quirks (custom entry, CRT offsets, refptr patching)
-  are encapsulated in their own module — adding a new CRT type means adding
-  one new file without touching the core loader
-
-**Trade-offs:**
-- Requires upfront investment in the pluggable architecture
-- Increases the surface area of stubs that need maintenance and testing
-- The current MinGW-only path works well for the project's scope;
-  this is a "nice to have" for broader PE loader coverage
 ---
 
 ## WRAPPER-SPLIT — Wrapper Binary: Split my_wine into my_wine + my_wine32/my_wine64
@@ -225,3 +166,4 @@ There is no mechanism to verify that a sample produces the expected output.
   `expected_output_regex.txt` variant.
 
 ---
+ Reduce global variable usage? Are they bad?

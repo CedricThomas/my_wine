@@ -61,21 +61,7 @@ static const crt_module_t *active_crt = NULL;
 
 /* ── Stub modules (full implementations in phase-specific files) ── */
 
-/* MinGW-w64 CRT module stub */
-const crt_module_t crt_module_mingw = {
-    .name              = "mingw-w64",
-    .type              = CRT_TYPE_MINGW,
-    .detect            = NULL,
-    .entry_symbols     = NULL,
-    .refptr_mappings   = NULL,
-    .bss_init_offset   = 0,
-    .bss_initenv_offset = 0,
-    .patch_refptrs     = NULL,
-    .discover_offsets  = NULL,
-    .seed_bss          = NULL,
-};
-
-/* Watcom CRT module stub */
+/* Watcom CRT module stub (replaced by crt_watcom.c when implemented) */
 const crt_module_t crt_module_watcom = {
     .name              = "watcom",
     .type              = CRT_TYPE_WATCOM,
