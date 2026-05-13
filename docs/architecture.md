@@ -263,7 +263,7 @@ Linux blocks `ljmp`/`lcall` to a 32-bit code segment at CPL=3 in a 64-bit proces
 
 | | PE32+ (single) | PE32 (dual) |
 |---|---|---|
-| Thunk size | 23 bytes | 15 bytes: `push rdi; mov rdi,nr; mov eax,dispatcher; call eax; pop rdi; ret` |
+| Thunk size | 23 bytes | 15 bytes: `push ebp; mov eax,dispatcher; mov edx,nr; call eax; pop ebp; ret` |
 | Syscall | `syscall` (RAX) | `int $0x80` (EAX) |
 | mmap | `mmap` (syscall 9) | `mmap2` (syscall 192) |
 | TEB base | GS via `arch_prctl` / `wrgsbase` | FS via `set_thread_area` (LDT, syscall 243) |
