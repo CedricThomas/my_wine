@@ -4,7 +4,43 @@ Deep-dive into how my_wine loads and runs a PE binary on Linux.
 
 ---
 
+## 0. Three-Binary Layout
+
+The project ships three binaries:
+
+| Binary | Source | Role |
+|---|---|---|
+| `my_wine` | `src/wrapper_main.c` | Thin wrapper — reads PE headers, detects PE32 vs PE32+, `execvp` the correct backend |
+| `my_wine64` | `src/main.c` | PE32+ loader — single-process, loads and runs 64-bit PE in-place |
+| `my_wine32` | `src/loader/pe32_entry.c` | PE32 loader — 32-bit dynamic ELF (`-no-pie`), runs 32-bit PE natively |
+
+Users and tests invoke `my_wine`. It dispatches transparently to the right backend.
+Each backend can also be run directly for debugging.
+
+### 0.1 `my_wine` Wrapper
+
+`src/wrapper_main.c` implements a standalone PE-type detector and dispatcher:
+
+1. **Resolve candidate paths** — determine the directory of the `my_wine` binary (via `argv[0]` or `/proc/self/exe`), then construct paths to `my_wine64` and `my_wine32`.
+2. **Read PE headers** — `open()` the target PE, `read()` the DOS + NT headers (just enough bytes to read `OptionalHeader.Magic`), detect PE32 (`IMAGE_FILE_MACHINE_I386`) vs PE32+ (`IMAGE_FILE_MACHINE_AMD64`).
+3. **`execvp` the backend** — call `execvp()` with the resolved backend path, passing the PE path and any user arguments. No `fork()`, no `waitpid()` — `execvp` replaces the wrapper entirely.
+
+```
+my_wine hello.exe
+ │
+ ├─ open("hello.exe") → read headers → detect PE type
+ │
+ ├─ if PE32+:  execvp("my_wine64", ["my_wine64", "hello.exe", ...])
+ │
+ └─ if PE32:   execvp("my_wine32", ["my_wine32", "hello.exe", ...])
+```
+
+---
+
 ## 1. High-Level Data Flow
+
+> The following describes the PE32+ path (`my_wine64`).
+> For PE32, see [Section 3](#3-pe32-dual-process-model).
 
 ```
   PE file (hello.exe)
@@ -169,10 +205,10 @@ the x86_64 ABI (`rsp % 16 == 8` before `call`).
 
 ---
 
-## 2. Single-Process Model
+## 2. PE32+ Single-Process Model (`my_wine64`)
 
-`main()` runs entirely in a **single process**. There is no `fork()` —
-the guest PE loads and executes in the same process that orchestrated
+`my_wine64` (`src/main.c`) runs entirely in a **single process**. There is no `fork()` —
+the guest PE32+ loads and executes in the same process that orchestrated
 the loading.
 
 ```
@@ -243,13 +279,13 @@ exits from the same process.
 
 > For full details, see [PE32.md](PE32.md).
 
-### Why Dual-Process?
+### Why a Separate 32-Bit Binary?
 
 Linux blocks `ljmp`/`lcall` to a 32-bit code segment at CPL=3 in a 64-bit process. A 32-bit PE **cannot** execute inside a 64-bit ELF — it must run in a native 32-bit process. The in-process mode-switch approach was tried and found fundamentally unfixed.
 
 ### Architecture
 
-`my_wine` (64-bit) detects PE32 → forks + execs `my_wine32` (a 32-bit dynamically-linked ELF built with `-no-pie`). Communication is via `WINE32_PE_PATH` env var. The parent `waitpid()`s and returns the child's exit code. No IPC, no shared memory.
+`my_wine` (the wrapper) detects PE32 → `execvp()`s `my_wine32` (a 32-bit dynamically-linked ELF built with `-no-pie`). The wrapper is replaced entirely by `my_wine32` via `execvp` — no `fork()`, no `waitpid()`. The PE path is passed as `argv[1]`. No IPC, no shared memory.
 
 ### `my_wine32` Entry Point
 
@@ -261,7 +297,7 @@ glibc CRT (`crt1.o`) → `__libc_start_main` → `main()` (`pe32_entry.c`), whic
 
 ### Key Differences From Single-Process (PE32+)
 
-| | PE32+ (single) | PE32 (dual) |
+| | PE32+ (`my_wine64`) | PE32 (`my_wine32`) |
 |---|---|---|
 | Thunk size | 23 bytes | 15 bytes: `push ebp; mov eax,dispatcher; mov edx,nr; call eax; pop ebp; ret` |
 | Syscall | `syscall` (RAX) | `int $0x80` (EAX) |
@@ -273,23 +309,31 @@ glibc CRT (`crt1.o`) → `__libc_start_main` → `main()` (`pe32_entry.c`), whic
 ### Process Flow
 
 ```
-my_wine (64-bit)                      my_wine32 (32-bit dynamic ELF)
- ──────────────────                      ──────────────────────────────────
-  detect PE32                              glibc CRT (crt1.o)
-  fork() ─── exec("my_wine32") ─────►     __libc_start_main → main() (pe32_entry.c)
-  setenv(WINE32_PE_PATH)                         ├─ map_image()
-  waitpid()                                      ├─ setup_teb_peb()
-  │                                              ├─ set_thread_area(FS → TEB)
-  │                                              ├─ resolve_imports()
-  │                                              ├─ generate_all_thunks() (15-byte)
-  │                                              ├─ seed_bss_vars()
-  │                                              └─ pe32_run_guest()
-  │                                                    │
-  │                                              guest code runs (32-bit)
-  │                                              syscalls via int $0x80
-  │                                                    │
-  ◄─── exit(child_code) ───────────────────────────────┘
-  return child exit code
+my_wine (wrapper, src/wrapper_main.c)
+  ┌─────────────────────────────────────┐
+  │ open(PE) → read headers             │
+  │ detect PE32                         │
+  │ execvp("my_wine32", [PE_path, ...]) │
+  └──────────────┬──────────────────────┘
+                 │  (wrapper replaced by my_wine32)
+                 ▼
+my_wine32 (32-bit dynamic ELF, src/loader/pe32_entry.c)
+  ┌───────────────────────────────────────────────────────┐
+  │ glibc CRT (crt1.o)                                    │
+  │ __libc_start_main → main() (pe32_entry.c)             │
+  │     ├─ map_image()                                    │
+  │     ├─ setup_teb_peb()                                │
+  │     ├─ set_thread_area(FS → TEB)                      │
+  │     ├─ resolve_imports()                              │
+  │     ├─ generate_all_thunks() (15-byte)                │
+  │     ├─ seed_bss_vars()                                │
+  │     └─ pe32_run_guest()                               │
+  │               │                                        │
+  │           guest code runs (32-bit)                     │
+  │           syscalls via int $0x80                       │
+  │               │                                        │
+  │           guest exits → exit(code)                     │
+  └───────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -713,7 +757,8 @@ Note: the UNIX stack is cleaned up by `cleanup_unix_stack()` in
 
 | File | Purpose |
 |---|---|
-| `src/main.c` | Orchestrator — 10-step pipeline |
+| `src/wrapper_main.c` | `my_wine` wrapper — reads PE headers, detects PE32 vs PE32+, `execvp` correct backend |
+| `src/main.c` | `my_wine64` — PE32+ orchestrator, 10-step pipeline (rejects PE32) |
 | `src/loader/image_mapper.c` | `map_image()` — open, mmap, parse, copy sections, mprotect |
 | `src/loader/teb_peb.c` | `setup_teb_peb()` + `setup_stack()` — allocate TEB, PEB, guest stack |
 | `src/loader/guest_setup.c` | `setup_guest_and_run()` — signal handlers, SEH, thunks, __acrt_iob, GS base, jump to guest |
