@@ -1,6 +1,6 @@
 # Improvements for Later
 
-## LINK-DYNAMIC — my_wine_32: Switch from Static to Dynamic Linking
+## ~~LINK-DYNAMIC~~ — COMPLETED: Switched my_wine_32 to dynamic linking
 
 **Problem:** `my_wine_32` is built with `-static -no-pie -Wl,--no-dynamic-linker`,
 pulling the entire glibc static archive into the binary. Result: 1.2MB binary
@@ -42,17 +42,19 @@ must exist. Already present on multilib-enabled Arch installs.
 
 ## MUSL-MALLOC — musl_malloc_32_compat.c vs glibc malloc
 
-**Problem:** The 32-bit build links `musl_malloc_32_compat.c` (a custom
-mmap-based allocator), but the `-static` glibc linkage also pulls in
-glibc's `malloc` arena machinery. The musl allocator code is compiled
-but may never actually be used — glibc's `malloc` is the default
-allocator for any glibc function that allocates.
+**Status:** With dynamic linking now in place (LINK-DYNAMIC completed),
+`musl_malloc_32_compat.c` is actively used for `MAP_32BIT` allocations
+in the 32-bit child. The musl shim provides a dedicated low-memory
+allocator for guest heap regions that must reside below the 2GB boundary,
+while glibc `malloc` (via the shared `libc.so.6`) handles all other
+allocation needs.
 
-**Proposed action:** If we switch to dynamic linking (see LINK-DYNAMIC),
-glibc malloc is available via the shared library and the musl shim
-becomes irrelevant unless we actively route `malloc` calls to it.
-At that point, the musl shim can be audited and either kept (if
-we want to control heap layout for the 32-bit child) or removed.
+**Current state:**
+- Dynamic glibc is linked, so glibc `malloc` is available through `libc.so.6`
+- `musl_malloc_32_compat.c` is deliberately kept and used for `MAP_32BIT`
+  allocations where the guest needs memory below 2GB
+- The two allocators serve distinct purposes: musl for constrained 32-bit
+  guest regions, glibc for loader-internal bookkeeping
 
 **Alternative path (high effort):** Replace glibc entirely with musl libc
 for the 32-bit build. This gives a small static binary (~100KB) with
@@ -60,8 +62,7 @@ no TLS issues. Requires: musl-i686 toolchain, rewriting `#include` paths,
 adapting syscall wrappers. Not worth the effort for this project scope.
 
 **Trade-offs:**
-- Keeping musl shim with dynamic glibc: extra code that may never execute
-- Removing musl shim: simpler build, but lose explicit heap control
+- Musl shim + dynamic glibc gives both low-memory control and standard libc
 - Full musl replacement: smallest binary, but large rewrite cost
 
 ---
