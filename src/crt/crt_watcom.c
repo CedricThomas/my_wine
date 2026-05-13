@@ -28,8 +28,7 @@
 
 #include "crt_priv.h"
 
-/* ── Global variable extern (defined in crt_globals.c) ─────────── */
-extern crt_context_t g_crt_ctx;
+/* g_crt is declared in include/crt.h, defined in crt_globals.c */
 
 /* ── Watcom BSS layout offsets (relative to .bss base) ───────────
  * Same as MinGW for DOOM95, may need adjustment once a real Watcom
@@ -234,8 +233,8 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
     /* Discover CRT offsets (argc/argv/envp) from COFF symbol table */
     watcom_discover_offsets(file_path, nt, sections, &ctx);
 
-    /* Sync local context into g_crt_ctx for later runtime use */
-    g_crt_ctx = ctx;
+    /* Sync local context into g_crt.crt_ctx for later runtime use */
+    g_crt.crt_ctx = ctx;
 
     /* Set the 'initialized' flag to 1 to skip CRT startup */
     if (bss_sec) {
@@ -259,13 +258,13 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
 static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
                             IMAGE_SECTION_HEADER *sections)
 {
-    if (g_crt_ctx.bss_vaddr == 0) {
+    if (g_crt.crt_ctx.bss_vaddr == 0) {
         fprintf(stderr, "WARNING: .bss section not found, "
                 "skipping argc/argv/envp pre-seed\n");
         return;
     }
 
-    uint8_t *bss_base = (uint8_t *)image_base + g_crt_ctx.bss_vaddr;
+    uint8_t *bss_base = (uint8_t *)image_base + g_crt.crt_ctx.bss_vaddr;
 
     IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec == NULL) {
@@ -286,36 +285,36 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
         return;
     }
 
-    if (g_crt_ctx.argc_bss_offset != 0) {
-        *(uint32_t *)(bss_base + g_crt_ctx.argc_bss_offset) = 1;
+    if (g_crt.crt_ctx.argc_bss_offset != 0) {
+        *(uint32_t *)(bss_base + g_crt.crt_ctx.argc_bss_offset) = 1;
         DEBUG(".bss: wrote argc=1 at offset 0x%x",
-              g_crt_ctx.argc_bss_offset);
+              g_crt.crt_ctx.argc_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argc_bss_offset is 0, "
                 "skipping argc pre-seed\n");
     }
 
-    if (g_crt_ctx.argv_bss_offset != 0) {
+    if (g_crt.crt_ctx.argv_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
-            *(uint32_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         } else {
-            *(uint64_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+            *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         }
         DEBUG(".bss: wrote argv=NULL at offset 0x%x",
-              g_crt_ctx.argv_bss_offset);
+              g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
                 "skipping argv pre-seed\n");
     }
 
-    if (g_crt_ctx.envp_bss_offset != 0) {
+    if (g_crt.crt_ctx.envp_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
-            *(uint32_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         } else {
-            *(uint64_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+            *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         }
         DEBUG(".bss: wrote envp=NULL at offset 0x%x",
-              g_crt_ctx.envp_bss_offset);
+              g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "
                 "skipping envp pre-seed\n");

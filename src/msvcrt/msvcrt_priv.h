@@ -21,100 +21,11 @@
 #include "include/common.h"
 #include "include/crt.h"
 
-/* ── FILE structures (defined in crt_file.c) ───────────── */
-/*
- * Defined here first because wine_crt_state_t references iob_union.
- * __wine_iob extern is kept for task-3 (crt_file.c migration to g_crt.iob).
- */
-
-#define WINE_FILE_SIZE 48
-
-#pragma pack(push, 1)
-typedef struct {
-    int            _fd;
-    unsigned char *_ptr;
-    int            _cnt;
-    unsigned char *_base;
-    uintptr_t      _flag;
-    unsigned char  _pad[16];
-} wine_FILE;
-#pragma pack(pop)
-
-_Static_assert(sizeof(wine_FILE) == WINE_FILE_SIZE, "wine_FILE size mismatch");
-
-#define WINE_IOEOF  0x8000
-#define WINE_IOWRT  0x0002
-#define WINE_IONBF  0x4000
-#define WINE_IOREAD 0x0001
-#define WINE_IOFBF  0x0200
-
-typedef union {
-    wine_FILE f[3];
-    char      bytes[48 * 3];
-} iob_union;
-
-extern iob_union __wine_iob;
-
-/* ── CRT state struct (defined in crt_globals.c) ───────────── */
-/*
- * wine_crt_state_t — Consolidated CRT global state.
- *
- * All scalar CRT globals that were previously individual extern
- * declarations are now fields of this struct, defined as g_crt.
- *
- * Replaces ~20+ individual global variable declarations.
- *
+/* ── wine_crt_state_t, g_crt, wine_FILE, iob_union ─────────────
+ * All defined in include/crt.h (included above via msvcrt.h → crt.h).
+ * g_crt is defined in crt_globals.c.
  * SINGLE-THREAD ONLY: g_crt is not safe for concurrent access.
- * g_crt.crt_ctx is written during patch_crt_refptrs() and read in
- * __getmainargs(). No synchronization is applied.
  */
-
-typedef struct {
-    /* App / mode flags */
-    int app_type;             // was __msvcrt_app_type
-    int commode;              // was _commode
-    int fmode;                // was _fmode
-
-    /* Environment / argv pointers */
-    char **environ;           // was _msvcrt_environ
-    char **initenv;           // was __initenv
-    char **guest_argv;        // was g_guest_argv
-    char **guest_envp;        // was g_guest_envp
-
-    /* Command line storage */
-    char cmdline_storage[PAGE_SIZE]; // was _cmdline_storage
-    char *acmdln;             // was _acmdln
-    char *p_acmdln;           // was __p__acmdln
-
-    /* Startup state */
-    uint64_t native_startup_lock;
-    int native_startup_state;
-    int dowildcard;           // was dowildcard_val
-    int newmode;              // was newmode_val
-    crt_context_t crt_ctx;    // was g_crt_ctx
-
-    /* Two-level refptr stubs (zero-valued for safe CRT startup) */
-    uint64_t dyn_tls_callback_stub;
-    uint64_t mingw_excpt_handler_stub;
-    uint64_t xc_a_stub;
-    uint64_t xc_z_stub;
-
-    /* Constructor/destructor list stubs */
-    uint32_t ctor_list_stub[1];
-    uint32_t dtor_list_stub[1];
-
-    /* Constructor range markers */
-    uint64_t xi_a_stub;
-    uint64_t xi_z_stub;
-
-    /* Initenv stub */
-    void **imp_initenv_stub;  // was __imp___initenv_stub
-
-    /* FILE structures (defined in crt_file.c, migrated to g_crt in task-3) */
-    iob_union iob;            // was __wine_iob
-} wine_crt_state_t;
-
-extern wine_crt_state_t g_crt;
 
 /* ── Internal wine_* functions (defined in crt_stdio.c / crt_stdlib.c) ── */
 /*

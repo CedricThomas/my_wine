@@ -64,7 +64,13 @@ extern char *__p__fmode_func(void);
 extern char *__p__commode_func(void);
 extern char **__initenv_func(void);
 /* Data symbols needed by import table — already declared in msvcrt.h (e.g. _acmdln, __p__acmdln) */
+/* __initenv for 32-bit build — defined in crt_32_stub.c */
+#ifdef MY_WINE32
 extern char **__initenv;
+extern char _acmdln[256];
+extern int _commode;
+extern int _fmode;
+#endif
 #ifdef MY_WINE32
 /* 32-bit only: these are data symbols (from crt_32_stub.c) */
 extern char *__p__commode;
@@ -161,11 +167,17 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "__lconv_init", (void*)__lconv_init },
     { "msvcrt.dll", "__set_app_type", (void*)__set_app_type },
     { "msvcrt.dll", "__setusermatherr", (void*)__setusermatherr },
+#ifdef MY_WINE32
     { "msvcrt.dll", "_acmdln", (void*)&_acmdln },
-    { "msvcrt.dll", "_amsg_exit", (void*)_amsg_exit },
-    { "msvcrt.dll", "_cexit", (void*)_cexit },
     { "msvcrt.dll", "_commode", (void*)&_commode },
     { "msvcrt.dll", "_fmode", (void*)&_fmode },
+#else
+    { "msvcrt.dll", "_acmdln", (void*)&g_crt.acmdln },
+    { "msvcrt.dll", "_commode", (void*)&g_crt.commode },
+    { "msvcrt.dll", "_fmode", (void*)&g_crt.fmode },
+#endif
+    { "msvcrt.dll", "_amsg_exit", (void*)_amsg_exit },
+    { "msvcrt.dll", "_cexit", (void*)_cexit },
     { "msvcrt.dll", "_initterm", (void*)_initterm },
     { "msvcrt.dll", "_onexit", (void*)_onexit },
     { "msvcrt.dll", "___lc_codepage_func", (void*)___lc_codepage_func },
@@ -202,8 +214,8 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "__p__fmode", (void*)__p__fmode_func },
     { "msvcrt.dll", "_iob", (void*)__iob_func },
 #else
-    /* 64-bit: __p__* must also be functions. __initenv stays as data. */
-    { "msvcrt.dll", "__initenv", (void*)&__initenv },
+    /* 64-bit: __p__* must also be functions. __initenv is g_crt.initenv. */
+    { "msvcrt.dll", "__initenv", (void*)&g_crt.initenv },
     { "msvcrt.dll", "__p__acmdln", (void*)__p__acmdln_func },
     { "msvcrt.dll", "__p__commode", (void*)__p__commode_func },
     { "msvcrt.dll", "__p__fmode", (void*)__p__fmode_func },

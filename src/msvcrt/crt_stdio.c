@@ -22,7 +22,7 @@ WINE_STUB_STATIC
 int wine_vfprintf(wine_FILE *stream, const char *format, va_list ap)
 {
     if (stream == NULL) return -1;
-    uintptr_t base = (uintptr_t)__wine_iob.bytes;
+    uintptr_t base = (uintptr_t)g_crt.iob.bytes;
     uintptr_t addr = (uintptr_t)stream;
     if (addr < base || addr >= base + WINE_FILE_SIZE * 3) return -1;
     int fd = stream->_fd;
@@ -54,7 +54,7 @@ WINE_STUB_STATIC
 size_t wine_fwrite(const void *ptr, size_t size, size_t nmemb, wine_FILE *stream)
 {
     if (stream == NULL) return 0;
-    uintptr_t base = (uintptr_t)__wine_iob.bytes;
+    uintptr_t base = (uintptr_t)g_crt.iob.bytes;
     uintptr_t addr = (uintptr_t)stream;
     if (addr < base || addr >= base + WINE_FILE_SIZE * 3) return 0;
     int fd = stream->_fd;

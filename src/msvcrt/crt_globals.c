@@ -20,6 +20,11 @@
 wine_crt_state_t g_crt = {
     .ctor_list_stub = { 0 },
     .dtor_list_stub = { 0 },
+    .iob = {
+        .f[0] = { ._fd = 0, ._flag = (uintptr_t)(WINE_IOREAD | WINE_IONBF) },
+        .f[1] = { ._fd = 1, ._flag = (uintptr_t)(WINE_IOWRT  | WINE_IONBF) },
+        .f[2] = { ._fd = 2, ._flag = (uintptr_t)(WINE_IOWRT  | WINE_IONBF) },
+    },
 };
 
 /*

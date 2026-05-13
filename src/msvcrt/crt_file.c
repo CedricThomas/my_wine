@@ -11,17 +11,12 @@
 #include "msvcrt_priv.h"
 
 /* ── Fake FILE structures for __iob_func ──────────────────── */
-
-iob_union __wine_iob = {
-    .f[0] = { ._fd = 0, ._flag = (uintptr_t)(WINE_IOREAD | WINE_IONBF) },
-    .f[1] = { ._fd = 1, ._flag = (uintptr_t)(WINE_IOWRT  | WINE_IONBF) },
-    .f[2] = { ._fd = 2, ._flag = (uintptr_t)(WINE_IOWRT  | WINE_IONBF) },
-};
+/* Defined as g_crt.iob in crt_globals.c (wine_crt_state_t) */
 
 /* Accessor for use from main.c to patch __acrt_iob_func */
 void *__wine_iob_data(void)
 {
-    return __wine_iob.bytes;
+    return g_crt.iob.bytes;
 }
 
 /*
@@ -39,7 +34,7 @@ void *__wine_iob_data(void)
 WINE_STUB
 void *__iob_func(void)
 {
-    return FORCE_PTR_RETURN(__wine_iob.bytes);
+    return FORCE_PTR_RETURN(g_crt.iob.bytes);
 }
 
 /*
@@ -49,5 +44,5 @@ void *__iob_func(void)
 WINE_STUB
 void *__acrt_iob_func(void)
 {
-    return FORCE_PTR_RETURN(__wine_iob.bytes);
+    return FORCE_PTR_RETURN(g_crt.iob.bytes);
 }

@@ -28,8 +28,7 @@
 #include "include/pe_priv.h"
 #include "include/debug.h"
 
-/* Forward declarations from msvcrt/crt_globals.c and crt_refptrs.c */
-extern crt_context_t g_crt_ctx;
+/* g_crt is declared in include/crt.h (via msvcrt.h) and defined in crt_globals.c */
 void patch_crt_refptrs(const char *file_path, void *image_base,
                        IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections);
 
@@ -60,13 +59,13 @@ static void seed_bss_vars(void *base,
                           const IMAGE_NT_HEADERS *nt,
                           IMAGE_SECTION_HEADER *sections)
 {
-    if (g_crt_ctx.bss_vaddr == 0) {
+    if (g_crt.crt_ctx.bss_vaddr == 0) {
         fprintf(stderr, "WARNING: .bss section not found, "
                 "skipping argc/argv/envp pre-seed\n");
         return;
     }
 
-    uint8_t *bss_base = (uint8_t *)base + g_crt_ctx.bss_vaddr;
+    uint8_t *bss_base = (uint8_t *)base + g_crt.crt_ctx.bss_vaddr;
 
     IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec == NULL) {
@@ -86,33 +85,33 @@ static void seed_bss_vars(void *base,
         return;
     }
 
-    if (g_crt_ctx.argc_bss_offset != 0) {
-        *(uint32_t *)(bss_base + g_crt_ctx.argc_bss_offset) = 1;
-        DEBUG(".bss: wrote argc=1 at offset 0x%x", g_crt_ctx.argc_bss_offset);
+    if (g_crt.crt_ctx.argc_bss_offset != 0) {
+        *(uint32_t *)(bss_base + g_crt.crt_ctx.argc_bss_offset) = 1;
+        DEBUG(".bss: wrote argc=1 at offset 0x%x", g_crt.crt_ctx.argc_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argc_bss_offset is 0, "
                 "skipping argc pre-seed\n");
     }
 
-    if (g_crt_ctx.argv_bss_offset != 0) {
+    if (g_crt.crt_ctx.argv_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
-            *(uint32_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         } else {
-            *(uint64_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
+            *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote argv=NULL at offset 0x%x", g_crt_ctx.argv_bss_offset);
+        DEBUG(".bss: wrote argv=NULL at offset 0x%x", g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
                 "skipping argv pre-seed\n");
     }
 
-    if (g_crt_ctx.envp_bss_offset != 0) {
+    if (g_crt.crt_ctx.envp_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
-            *(uint32_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         } else {
-            *(uint64_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
+            *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote envp=NULL at offset 0x%x", g_crt_ctx.envp_bss_offset);
+        DEBUG(".bss: wrote envp=NULL at offset 0x%x", g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "
                 "skipping envp pre-seed\n");
@@ -227,7 +226,7 @@ static int init_loader(int argc, char **argv,
      * If the active CRT module provides a seed_bss vtable entry, use it.
      * Otherwise fall back to the local seed_bss_vars().
      *
-     * g_crt_ctx is populated by patch_crt_refptrs (step 4) via the module's
+     * g_crt.crt_ctx is populated by patch_crt_refptrs (step 4) via the module's
      * discover_offsets, which looks up _argc/__argc, _argv/__argv,
      * _environ/__envp in the COFF symbol table and computes offsets
      * relative to .bss base.
@@ -246,13 +245,13 @@ static int init_loader(int argc, char **argv,
     char **guest_envp = environ;  /* real host environment */
 
     /* Set msvcrt globals so __getmainargs can return the real values */
-    g_guest_argv = guest_argv;
-    g_guest_envp = guest_envp;
+    g_crt.guest_argv = guest_argv;
+    g_crt.guest_envp = guest_envp;
 
-    /* Fill _cmdline_storage so _acmdln points to the actual PE path
-     * For PE32, GetCommandLineA() returns _acmdln which points here */
-    strncpy(_cmdline_storage, argv[1], sizeof(_cmdline_storage) - 1);
-    _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
+    /* Fill g_crt.cmdline_storage so g_crt.acmdln points to the actual PE path
+     * g_crt.acmdln is initialized to point to g_crt.cmdline_storage by crt_init_self_refs */
+    strncpy(g_crt.cmdline_storage, argv[1], sizeof(g_crt.cmdline_storage) - 1);
+    g_crt.cmdline_storage[sizeof(g_crt.cmdline_storage) - 1] = '\0';
 
     /* 10. Look up user entry symbol
      *  - Use crt_entry_symbols() from the active CRT module to iterate
@@ -318,6 +317,6 @@ int main(int argc, char *argv[])
     }
 
     /* ── PE32+: single-process flow ───────────────────────── */
-    run_guest_entry(entry, base, stack_top, teb, g_guest_argv, g_guest_envp);
+    run_guest_entry(entry, base, stack_top, teb, g_crt.guest_argv, g_crt.guest_envp);
     return 0;
 }

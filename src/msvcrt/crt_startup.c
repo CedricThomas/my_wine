@@ -9,7 +9,7 @@
 #include "msvcrt_priv.h"
 
 /* ── Data symbols and functions needed by import table (not in other msvcrt files) ── */
-char **__initenv = NULL;
+/* __initenv is now g_crt.initenv (in crt_globals.c) */
 
 /* _errno — return errno pointer (crt_misc.c has _errno_func, not _errno) */
 static int __my_wine_errno;
@@ -71,7 +71,7 @@ __attribute__((ms_abi)) int _m_fputc(int c, void *stream) { return fputc(c, (FIL
 WINE_STUB
 void __set_app_type(int type)
 {
-    __msvcrt_app_type = type;
+    g_crt.app_type = type;
 }
 
 /* __initenv is a data symbol (char**), not a function — MSVCRT exports it as such.
@@ -106,13 +106,13 @@ void *_onexit(void (*func)(void))
 WINE_STUB
 void *__p__commode(void)
 {
-    return FORCE_PTR_RETURN(&_commode);
+    return FORCE_PTR_RETURN(&g_crt.commode);
 }
 
 WINE_STUB
 void *__p__fmode(void)
 {
-    return FORCE_PTR_RETURN(&_fmode);
+    return FORCE_PTR_RETURN(&g_crt.fmode);
 }
 
 /* __getmainargs: return the actual argv/envp passed from main.c */
@@ -120,32 +120,32 @@ WINE_STUB
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *pStartInfo)
 {
     if (argc) *argc = 1;
-    if (argv) *argv = g_guest_argv ? g_guest_argv : (char **)(uintptr_t)0;
-    if (envp) *envp = g_guest_envp ? g_guest_envp : (char **)(uintptr_t)0;
+    if (argv) *argv = g_crt.guest_argv ? g_crt.guest_argv : (char **)(uintptr_t)0;
+    if (envp) *envp = g_crt.guest_envp ? g_crt.guest_envp : (char **)(uintptr_t)0;
 
     /* Also write to the PE's .bss section so the CRT can find them.
-     * The .bss section VA is found dynamically via g_crt_ctx.bss_vaddr (set in patch_crt_refptrs).
-     * The offsets come from COFF symbol lookup (with hardcoded fallback) in g_crt_ctx.
+     * The .bss section VA is found dynamically via g_crt.crt_ctx.bss_vaddr (set in patch_crt_refptrs).
+     * The offsets come from COFF symbol lookup (with hardcoded fallback) in g_crt.crt_ctx.
      * The CRT reads argv from this location and does two-level indirection: mov (%r13),%rcx
      * If argv is NULL there, dereferencing 0 → SIGSEGV. */
-    uint64_t image_base = g_crt_ctx.image_base;
-    if (image_base && g_crt_ctx.bss_vaddr != 0) {
-        char *bss = (char *)image_base + g_crt_ctx.bss_vaddr;
-        if (g_crt_ctx.argc_bss_offset)
-            *(uint32_t *)(bss + g_crt_ctx.argc_bss_offset) = 1;
+    uint64_t image_base = g_crt.crt_ctx.image_base;
+    if (image_base && g_crt.crt_ctx.bss_vaddr != 0) {
+        char *bss = (char *)image_base + g_crt.crt_ctx.bss_vaddr;
+        if (g_crt.crt_ctx.argc_bss_offset)
+            *(uint32_t *)(bss + g_crt.crt_ctx.argc_bss_offset) = 1;
         /* Write pointer size matching the PE type: 4 bytes for PE32, 8 for PE32+ */
-        if (g_crt_ctx.argv_bss_offset) {
+        if (g_crt.crt_ctx.argv_bss_offset) {
             if (g_is_32bit_get()) {
-                *(uint32_t *)(bss + g_crt_ctx.argv_bss_offset) = (uint32_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);
+                *(uint32_t *)(bss + g_crt.crt_ctx.argv_bss_offset) = (uint32_t)(uintptr_t)(g_crt.guest_argv ? g_crt.guest_argv : 0);
             } else {
-                *(uint64_t *)(bss + g_crt_ctx.argv_bss_offset) = (uint64_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);
+                *(uint64_t *)(bss + g_crt.crt_ctx.argv_bss_offset) = (uint64_t)(uintptr_t)(g_crt.guest_argv ? g_crt.guest_argv : 0);
             }
         }
-        if (g_crt_ctx.envp_bss_offset) {
+        if (g_crt.crt_ctx.envp_bss_offset) {
             if (g_is_32bit_get()) {
-                *(uint32_t *)(bss + g_crt_ctx.envp_bss_offset) = (uint32_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);
+                *(uint32_t *)(bss + g_crt.crt_ctx.envp_bss_offset) = (uint32_t)(uintptr_t)(g_crt.guest_envp ? g_crt.guest_envp : 0);
             } else {
-                *(uint64_t *)(bss + g_crt_ctx.envp_bss_offset) = (uint64_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);
+                *(uint64_t *)(bss + g_crt.crt_ctx.envp_bss_offset) = (uint64_t)(uintptr_t)(g_crt.guest_envp ? g_crt.guest_envp : 0);
             }
         }
     }

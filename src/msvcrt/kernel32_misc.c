@@ -2,17 +2,19 @@
 
 #include <string.h>
 #include "kernel32_priv.h"
+#include "msvcrt_priv.h"
 #include "include/wine_abi.h"
 #include "include/nt_constants.h"
 
 #define AT_FDCWD ((long)-100)
 
 /*
- * _acmdln is defined in crt_globals.c. We use a weak declaration so that
- * build targets that exclude crt_*.o (e.g. test_syscall_dispatch) don't
- * get an undefined reference. When weak, _acmdln is NULL if not linked.
+ * g_crt is declared in include/crt.h (included via msvcrt_priv.h) and defined
+ * in crt_globals.c. For build targets that exclude crt_*.o (e.g. test_syscall_dispatch),
+ * we declare it as weak so the build doesn't fail with undefined reference.
+ * At runtime, we check the address to see if g_crt was actually linked.
  */
-extern char *_acmdln __attribute__((weak));
+extern wine_crt_state_t g_crt __attribute__((weak));
 extern void *g_argv_page;
 
 /* Thread-local last-error code */
@@ -260,7 +262,7 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
  * Returns the command-line string for the current process.
  * In 32-bit mode, g_argv_page is allocated with MAP_32BIT (below 4GB)
  * and holds the PE path at offset 0, so the base pointer IS the string.
- * In 64-bit mode, _acmdln (from crt_globals) is fine since all addresses
+ * In 64-bit mode, g_crt.acmdln (from crt_globals) is fine since all addresses
  * are accessible to the guest.
  */
 WINE_STUB
@@ -270,7 +272,9 @@ const char *GetCommandLineA(void)
     if (g_argv_page) return FORCE_PTR_RETURN((const char *)g_argv_page);
     return FORCE_PTR_RETURN("");
 #else
-    return FORCE_PTR_RETURN(_acmdln ? _acmdln : "");
+    if ((uintptr_t)&g_crt != 0 && g_crt.acmdln)
+        return FORCE_PTR_RETURN(g_crt.acmdln);
+    return FORCE_PTR_RETURN("");
 #endif
 }
 

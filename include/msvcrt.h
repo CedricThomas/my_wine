@@ -8,19 +8,12 @@
 
 /* ── MSVCRT CRT Startup Stubs ──────────────────────────────── */
 
-/* Global variables accessed by CRT startup code */
-extern int __msvcrt_app_type;
-extern int _commode;
-extern int _fmode;
-extern char **_msvcrt_environ;
-extern char *_acmdln;
-
-/* Guest argv/envp set from main.c before entry jump */
-extern char **g_guest_argv;
-extern char **g_guest_envp;
-
-/* _cmdline_storage buffer and pointer - set from main.c before entry jump */
-extern char _cmdline_storage[PAGE_SIZE];
+/*
+ * All CRT global state is now in g_crt (wine_crt_state_t, defined in include/crt.h).
+ * Access via g_crt.app_type, g_crt.commode, g_crt.fmode, g_crt.environ,
+ * g_crt.acmdln, g_crt.guest_argv, g_crt.guest_envp, g_crt.cmdline_storage,
+ * g_crt.initenv, etc.
+ */
 
 /* CRT startup functions */
 __attribute__((ms_abi))
@@ -34,8 +27,8 @@ extern char *__p__acmdln;
 extern char *__p__commode;
 extern char *__p__fmode;
 #else
-/* 64-bit: __initenv is a data symbol, __p__commode/__p__fmode are function stubs (from crt_startup.c) */
-extern char **__initenv;
+/* 64-bit: __p__commode/__p__fmode are function stubs (from crt_startup.c).
+ * __initenv is now g_crt.initenv (in g_crt, from include/crt.h). */
 __attribute__((ms_abi))
 void *__p__commode(void);
 __attribute__((ms_abi))
