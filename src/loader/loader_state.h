@@ -84,7 +84,7 @@ static inline bool loader_is_32bit(void) {
     return g_loader.is_32bit != 0;
 }
 
-static inline void loader_set_32bit(int val) {
+static inline void loader_set_32bit(bool val) {
     g_loader.is_32bit = val;
 }
 
