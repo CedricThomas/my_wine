@@ -16,6 +16,7 @@
 
 /* ── Per-module headers ──────────────────────────────────────── */
 
+#include "loader_state.h"     /* wine_loader_state_t, g_loader, accessors */
 #include "image_mapper.h"       /* g_image_base, g_host_gs_base, get/set_pe_path, map_image[_at] */
 #include "import_table.h"       /* import_entry_t, import_flat, import_table[], strategies */
 #include "ordinal_table.h"      /* ordinal_lookup */
