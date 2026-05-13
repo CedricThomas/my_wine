@@ -137,6 +137,7 @@ static void *alloc_teb(size_t teb_size)
         return NULL;
     }
 
+#if __SIZEOF_POINTER__ == 8
     /* For PE32, TEB must be below 4GB so the guest can address it with 32-bit pointers */
     if (g_is_32bit && (uintptr_t)teb >= ADDR32_LIMIT) {
         DEBUG("TEB at %p above 4GB for PE32, remapping to 0x%08X", teb, TEB32_FIXED_ADDR);
@@ -151,6 +152,7 @@ static void *alloc_teb(size_t teb_size)
             return NULL;
         }
     }
+#endif
 
     /* Zero the TEB */
     memset(teb, 0, teb_size);
@@ -186,6 +188,7 @@ static void *alloc_peb(size_t peb_size)
         return NULL;
     }
 
+#if __SIZEOF_POINTER__ == 8
     /* For PE32, PEB must be below 4GB */
     if (g_is_32bit && (uintptr_t)peb >= ADDR32_LIMIT) {
         DEBUG("PEB at %p above 4GB for PE32, remapping to 0x%08X", peb, PEB32_FIXED_ADDR);
@@ -200,6 +203,7 @@ static void *alloc_peb(size_t peb_size)
             return NULL;
         }
     }
+#endif
 
     memset(peb, 0, peb_size);
     return peb;
@@ -232,10 +236,12 @@ static int wire_peb_fields(void *teb, void *peb)
 
     /* Initialize process heap */
     void *ph = init_process_heap();
+#if __SIZEOF_POINTER__ == 8
     if (g_is_32bit && (uintptr_t)ph >= ADDR32_LIMIT) {
         fprintf(stderr, "FATAL: process heap at %p is above 4GB for PE32 image\n", ph);
         return -1;
     }
+#endif
     write_guest_ptr(peb, g_is_32bit ? PEB32_PROCESS_HEAP : PEB64_PROCESS_HEAP, ph);
 
     /* Initialize module registry and PEB LDR */
@@ -243,10 +249,12 @@ static int wire_peb_fields(void *teb, void *peb)
     g_peb_ldr = init_peb_ldr();
     if (g_peb_ldr != NULL) {
         /* Set PEB LDR pointer */
+#if __SIZEOF_POINTER__ == 8
         if (g_is_32bit && (uintptr_t)g_peb_ldr >= ADDR32_LIMIT) {
             fprintf(stderr, "FATAL: PEB LDR at %p is above 4GB for PE32 image\n", g_peb_ldr);
             return -1;
         }
+#endif
         write_guest_ptr(peb, g_is_32bit ? PEB32_LDR : PEB64_LDR, g_peb_ldr);
 
         /* Register the main PE as the first module */
@@ -396,6 +404,7 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
         return NULL;
     }
 
+#if __SIZEOF_POINTER__ == 8
     /* For PE32, stack must be below 4GB */
     if (g_is_32bit && (uintptr_t)stack_base >= ADDR32_LIMIT) {
         void *new_base = remap_stack_below_4gb(stack_base, commit);
@@ -403,6 +412,7 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
         stack_base = new_base;
         DEBUG("Stack remapped to %p for PE32", stack_base);
     }
+#endif
 
     /* Top of stack (aligned to 16 bytes for Microsoft x64 ABI: rsp%16==8).
      * PE32 (stdcall) doesn't strictly require this, but it's harmless.
