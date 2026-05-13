@@ -20,6 +20,8 @@
 #include "include/nt_constants.h"
 #include "include/debug.h"
 #include "include/pe_priv.h"
+#include "include/pe_parser.h"
+#include "relocations.h"
 #include "loader_state.h"
 #include "include/common.h"
 
@@ -33,8 +35,6 @@
 #define wine_munmap(a, l) munmap(a, l)
 #define wine_mprotect(a, l, p) mprotect(a, l, p)
 #endif
-
-wine_loader_state_t g_loader = {0};
 
 /**
  * Internal core: map a PE file at the given desired base address.
@@ -128,9 +128,8 @@ void *map_image_at(const char *path,
 
     /* Detect 32-bit vs 64-bit image and set global flag.
      * g_loader.is_32bit is derived from nt.pe_type for use by other loader modules
-     * that don't have direct access to the NT headers struct.
-     * Transitional: also set g_is_32bit until task-5 migrates cross-module refs. */
-    g_loader.is_32bit = g_is_32bit = pe_is_pe32(&nt) ? 1 : 0;
+     * that don't have direct access to the NT headers struct. */
+    g_loader.is_32bit = pe_is_pe32(&nt) ? 1 : 0;
 
     /* 4. Map image */
     size_t image_size = pe_size_of_image(&nt);

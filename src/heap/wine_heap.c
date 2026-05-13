@@ -46,7 +46,7 @@ void *HeapCreate(uint32_t flOptions, uint64_t dwInitialSize, uint64_t dwMaximumS
 
     /* Allocate the heap structure via mmap (not musl — it doesn't exist yet) */
     int map_flags = MAP_PRIVATE | MAP_ANONYMOUS;
-    if (g_is_32bit) {
+    if (g_is_32bit_get()) {
         map_flags |= MAP_32BIT;  /* Ensure heap is below 4GB for PE32 */
     }
     void *mem = INLINE_SYSCALL_MMAP(NULL, sizeof(wine_heap_t),

@@ -123,8 +123,6 @@ int ldr_remove_module(loaded_module_t *mod)
 
 LDR_DATA_TABLE_ENTRY *ldr_find_by_addr(void *addr)
 {
-    LIST_ENTRY *cursor;
-
     if (!g_loader.peb_ldr || !addr)
         return NULL;
 

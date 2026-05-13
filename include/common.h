@@ -8,12 +8,18 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "debug.h"
+#include "../src/loader/loader_state.h"
 
 /* Global debug flag: set from envp in main() */
 extern int g_debug_enabled;
 
-/* PE32 (32-bit) flag: set by image_mapper, read by loader/heap/CRT modules */
-extern int g_is_32bit;
+/*
+ * g_is_32bit inline accessors — delegates to g_loader.is_32bit
+ * (defined in loader_state.h). Use g_is_32bit_get() for reads,
+ * g_is_32bit_set(val) for writes. Formerly a bare global int.
+ */
+static inline bool g_is_32bit_get(void) { return g_loader.is_32bit != 0; }
+static inline void g_is_32bit_set(int val) { g_loader.is_32bit = val; }
 
 /* Cached WINE_DLL_PATH from environ, set in main() before GS switch */
 #define WINE_DLL_PATH_MAX 512

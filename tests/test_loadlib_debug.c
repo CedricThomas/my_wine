@@ -14,7 +14,6 @@
 #include "include/common.h"
 
 void *setup_teb_peb(void);
-extern void *g_image_base;
 
 int find_dll_path(const char *dll_name, char *path, size_t path_size);
 loaded_module_t *load_dll(const char *path, int depth);

@@ -72,8 +72,6 @@
  */
 
 /* Declarations from image_mapper.c (linked into my_wine32) */
-extern void *g_image_base;
-extern int g_is_32bit;
 
 /* Module-level vars for NT headers (needed for setup_stack and other modules) */
 static IMAGE_NT_HEADERS g_nt_headers;
@@ -169,9 +167,6 @@ static const char err_import[]     = "my_wine32: import resolution failed\n";
 
 /* ── Externs for PEB wiring ──────────────────────────────────── */
 extern void *g_process_heap;
-extern PEB_LDR_DATA *g_peb_ldr;
-extern loaded_module_t module_list[];
-extern int module_count;
 
 /* ── SEH frame (stable location for TEB+0x00 exception chain) ──
  * EXCEPTION_REGISTRATION_RECORD: placed in static BSS so the TEB
@@ -240,7 +235,7 @@ static void *map_pe(const char *path)
     memcpy(&g_nt_headers, &nt, sizeof(g_nt_headers));
 
     /* Mark as 32-bit build so teb_peb.c/heap use 32-bit paths */
-    g_is_32bit = 1;
+    g_loader.is_32bit = 1;
 
     return base;
 }
@@ -474,17 +469,17 @@ static void wire_peb32_ldr(void *peb, void *image_base, IMAGE_NT_HEADERS *nt)
 {
     uint8_t *p = (uint8_t *)peb;
 
-    if (g_peb_ldr == NULL) {
+    if (loader_get_peb_ldr() == NULL) {
         init_module_list();
-        g_peb_ldr = init_peb_ldr();
+        loader_set_peb_ldr(init_peb_ldr());
     }
-    if (g_peb_ldr) {
-        *(uint32_t *)(p + 0x0C) = (uint32_t)(uintptr_t)g_peb_ldr;
+    if (loader_get_peb_ldr()) {
+        *(uint32_t *)(p + 0x0C) = (uint32_t)(uintptr_t)loader_get_peb_ldr();
 
         /* Register main PE image if not already linked */
         int mod_idx = -1;
-        for (int i = 0; i < module_count && i < MAX_MODULES; i++) {
-            if (module_list[i].base == image_base) {
+        for (int i = 0; i < g_loader.module_count && i < MAX_MODULES; i++) {
+            if (g_loader.modules[i].base == image_base) {
                 mod_idx = i;
                 break;
             }
@@ -494,8 +489,8 @@ static void wire_peb32_ldr(void *peb, void *image_base, IMAGE_NT_HEADERS *nt)
             if (mod) {
                 ldr_add_module(mod);
             }
-        } else if (!module_list[mod_idx].ldr_linked) {
-            ldr_add_module(&module_list[mod_idx]);
+        } else if (!g_loader.modules[mod_idx].ldr_linked) {
+            ldr_add_module(&g_loader.modules[mod_idx]);
         }
     }
 }
@@ -703,27 +698,27 @@ int main(int argc, char **argv)
     dll_copy_str(_acmdln, pe_path, 256);
 
     /* 2. Map the PE image */
-    g_image_base = map_pe(pe_path);
+    g_loader.image_base = map_pe(pe_path);
 
-    /* Resolve imports — must happen after map_pe() which sets g_is_32bit
+    /* Resolve imports — must happen after map_pe() which sets g_loader.is_32bit
      * and before any other PE operations that depend on patched IAT entries. */
     init_msvcrt_imports();       /* Fill dynamic msvcrt entries (no-op under MY_WINE32) */
     init_import_table();         /* Sort import_table for binary search */
-    if (resolve_imports(g_image_base, &g_nt_headers) != 0) {
+    if (resolve_imports(g_loader.image_base, &g_nt_headers) != 0) {
         INLINE_SYSCALL_WRITE_ERR(err_import, sizeof(err_import) - 1);
         INLINE_SYSCALL_EXIT_GROUP(1);
     }
 
     /* 3. Determine entry point */
     entry_rva = resolve_entry(pe_path);
-    entry_abs = (uint32_t)(uintptr_t)g_image_base + entry_rva;
+    entry_abs = (uint32_t)(uintptr_t)g_loader.image_base + entry_rva;
 
     /* 4-5. Allocate and initialize TEB and PEB */
-    void *peb = init_peb32(g_image_base);
+    void *peb = init_peb32(g_loader.image_base);
     void *teb = init_teb32(peb);
 
     /* Wire additional PEB fields: heap, params, LDR, OS version */
-    wire_peb32_fields(peb, g_image_base, &g_nt_headers, pe_path);
+    wire_peb32_fields(peb, g_loader.image_base, &g_nt_headers, pe_path);
 
     /* Setup guest stack */
     void *stack_top = setup_stack(&g_nt_headers);
@@ -739,7 +734,7 @@ int main(int argc, char **argv)
     ensure_argv_setup(pe_path);
 
     /* Pre-seed CRT globals in .bss */
-    seed_bss_vars(g_image_base, &g_nt_headers);
+    seed_bss_vars(g_loader.image_base, &g_nt_headers);
 
     /* 7. Set FS → TEB and jump to PE entry */
     setup_fs_and_jump(teb, pe_path, entry_abs, stack_top);

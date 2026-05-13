@@ -9,6 +9,7 @@
 #include "kernel32_priv.h"
 #include "include/pe_priv.h"
 #include "../loader/loader_priv.h"
+#include "../loader/loader_state.h"
 
 static char g_dll_path[512];
 
@@ -70,8 +71,8 @@ WINE_STUB
 void *GetModuleHandleA(const char *lpModuleName)
 {
     if (lpModuleName == NULL) {
-        if (module_count > 0)
-            return FORCE_PTR_RETURN(module_list[0].base);
+        if (g_loader.module_count > 0)
+            return FORCE_PTR_RETURN(g_loader.modules[0].base);
         return FORCE_PTR_RETURN(NULL);
     }
 
@@ -99,7 +100,7 @@ int FreeLibraryA(void *hModule)
 
     reset_export_cache(mod);
 
-    if (g_peb_ldr != NULL && mod->ldr_linked)
+    if (loader_get_peb_ldr() != NULL && mod->ldr_linked)
         ldr_remove_module(mod);
 
     if (mod->base && mod->nt) {

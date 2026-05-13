@@ -103,7 +103,7 @@ void init_peb32_fields(void *peb, void *image_base)
  */
 static inline void write_guest_ptr(void *base, size_t offset, void *value)
 {
-    if (g_is_32bit) {
+    if (g_is_32bit_get()) {
         *(uint32_t *)((char *)base + offset) = (uint32_t)(uintptr_t)value;
     } else {
         *(void **)((char *)base + offset) = value;
@@ -139,7 +139,7 @@ static void *alloc_teb(size_t teb_size)
 
 #if __SIZEOF_POINTER__ == 8
     /* For PE32, TEB must be below 4GB so the guest can address it with 32-bit pointers */
-    if (g_is_32bit && (uintptr_t)teb >= ADDR32_LIMIT) {
+    if (g_is_32bit_get() && (uintptr_t)teb >= ADDR32_LIMIT) {
         DEBUG("TEB at %p above 4GB for PE32, remapping to 0x%08X", teb, TEB32_FIXED_ADDR);
         if (wine_munmap(teb, teb_size) != 0) {
             wine_log_error("munmap TEB before remap");
@@ -163,7 +163,7 @@ static void *alloc_teb(size_t teb_size)
      *   Guest code reads TEB from gs:[0x48], then follows
      *   the self-referential pointer at teb[0x08] (64) / teb[0x04] (32) to verify.
      *   Without this, the bootstrap loop (rsi==rax check) never exits. */
-    if (g_is_32bit) {
+    if (g_is_32bit_get()) {
         init_teb32_fields(teb, NULL);
     } else {
         write_guest_ptr(teb, TEB64_TEB_SELF_REF, teb);
@@ -190,7 +190,7 @@ static void *alloc_peb(size_t peb_size)
 
 #if __SIZEOF_POINTER__ == 8
     /* For PE32, PEB must be below 4GB */
-    if (g_is_32bit && (uintptr_t)peb >= ADDR32_LIMIT) {
+    if (g_is_32bit_get() && (uintptr_t)peb >= ADDR32_LIMIT) {
         DEBUG("PEB at %p above 4GB for PE32, remapping to 0x%08X", peb, PEB32_FIXED_ADDR);
         if (wine_munmap(peb, peb_size) != 0) {
             wine_log_error("munmap PEB before remap");
@@ -220,64 +220,64 @@ static void *alloc_peb(size_t peb_size)
 static int wire_peb_fields(void *teb, void *peb)
 {
     /* Set PEB pointer in TEB */
-    if (g_is_32bit) {
+    if (g_is_32bit_get()) {
         init_teb32_fields(teb, peb);  /* sets PEB pointer (idempotent for other fields) */
     } else {
         write_guest_ptr(teb, TEB64_PEB_PTR, peb);
     }
 
     /* Set PEB fields */
-    if (g_is_32bit) {
-        init_peb32_fields(peb, g_image_base);
+    if (g_is_32bit_get()) {
+        init_peb32_fields(peb, g_loader.image_base);
     } else {
-        write_guest_ptr(peb, PEB64_IMAGE_BASE, g_image_base);
+        write_guest_ptr(peb, PEB64_IMAGE_BASE, g_loader.image_base);
         write_guest_u8(peb, PEB64_BEING_DEBUGGED, 0);
     }
 
     /* Initialize process heap */
     void *ph = init_process_heap();
 #if __SIZEOF_POINTER__ == 8
-    if (g_is_32bit && (uintptr_t)ph >= ADDR32_LIMIT) {
+    if (g_is_32bit_get() && (uintptr_t)ph >= ADDR32_LIMIT) {
         fprintf(stderr, "FATAL: process heap at %p is above 4GB for PE32 image\n", ph);
         return -1;
     }
 #endif
-    write_guest_ptr(peb, g_is_32bit ? PEB32_PROCESS_HEAP : PEB64_PROCESS_HEAP, ph);
+    write_guest_ptr(peb, g_is_32bit_get() ? PEB32_PROCESS_HEAP : PEB64_PROCESS_HEAP, ph);
 
     /* Initialize module registry and PEB LDR */
     init_module_list();
-    g_peb_ldr = init_peb_ldr();
-    if (g_peb_ldr != NULL) {
+    loader_set_peb_ldr(init_peb_ldr());
+    if (loader_get_peb_ldr() != NULL) {
         /* Set PEB LDR pointer */
 #if __SIZEOF_POINTER__ == 8
-        if (g_is_32bit && (uintptr_t)g_peb_ldr >= ADDR32_LIMIT) {
-            fprintf(stderr, "FATAL: PEB LDR at %p is above 4GB for PE32 image\n", g_peb_ldr);
+        if (g_is_32bit_get() && (uintptr_t)loader_get_peb_ldr() >= ADDR32_LIMIT) {
+            fprintf(stderr, "FATAL: PEB LDR at %p is above 4GB for PE32 image\n", loader_get_peb_ldr());
             return -1;
         }
 #endif
-        write_guest_ptr(peb, g_is_32bit ? PEB32_LDR : PEB64_LDR, g_peb_ldr);
+        write_guest_ptr(peb, g_is_32bit_get() ? PEB32_LDR : PEB64_LDR, loader_get_peb_ldr());
 
         /* Register the main PE as the first module */
-        if (g_image_base != NULL) {
-            /* Verify g_image_base is a real mapped PE image before dereferencing.
+        if (g_loader.image_base != NULL) {
+            /* Verify g_loader.image_base is a real mapped PE image before dereferencing.
              * madvise returns -ENONET for unmapped addresses, which guards against
-             * test scenarios where g_image_base is set to a fake value. */
-            if (madvise(g_image_base, 1, MADV_NORMAL) == 0) {
-                IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)g_image_base;
+             * test scenarios where g_loader.image_base is set to a fake value. */
+            if (madvise(g_loader.image_base, 1, MADV_NORMAL) == 0) {
+                IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)g_loader.image_base;
                 uint32_t pe_off = img_dos->e_lfanew;
                 IMAGE_NT_HEADERS img_nt;
                 {
                     uint32_t opt_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER);
-                    const uint16_t *magic = (const uint16_t *)((char *)g_image_base + opt_off);
+                    const uint16_t *magic = (const uint16_t *)((char *)g_loader.image_base + opt_off);
                     if (*magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
                         img_nt.pe_type = PE_TYPE_32;
-                        memcpy(&img_nt.u.nt32, (char *)g_image_base + pe_off, sizeof(IMAGE_NT_HEADERS32));
+                        memcpy(&img_nt.u.nt32, (char *)g_loader.image_base + pe_off, sizeof(IMAGE_NT_HEADERS32));
                     } else {
                         img_nt.pe_type = PE_TYPE_64;
-                        memcpy(&img_nt.u.nt64, (char *)g_image_base + pe_off, sizeof(IMAGE_NT_HEADERS64));
+                        memcpy(&img_nt.u.nt64, (char *)g_loader.image_base + pe_off, sizeof(IMAGE_NT_HEADERS64));
                     }
                 }
-                loaded_module_t *mod = add_module(g_image_base, "main.exe", &img_nt);
+                loaded_module_t *mod = add_module(g_loader.image_base, "main.exe", &img_nt);
                 if (mod != NULL) {
                     ldr_add_module(mod);
                 }
@@ -406,7 +406,7 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
 
 #if __SIZEOF_POINTER__ == 8
     /* For PE32, stack must be below 4GB */
-    if (g_is_32bit && (uintptr_t)stack_base >= ADDR32_LIMIT) {
+    if (g_is_32bit_get() && (uintptr_t)stack_base >= ADDR32_LIMIT) {
         void *new_base = remap_stack_below_4gb(stack_base, commit);
         if (!new_base) return NULL;
         stack_base = new_base;
@@ -430,7 +430,7 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
            (unsigned long)reserve, (unsigned long)commit);
 
     /* Store stack_base just below stack_top (guest pointer size) */
-    uintptr_t sp = (uintptr_t)stack_top - (g_is_32bit ? 4 : 8);
+    uintptr_t sp = (uintptr_t)stack_top - (g_is_32bit_get() ? 4 : 8);
     write_guest_ptr((void *)sp, 0, stack_base);
     g_stack_base = stack_base;
     g_stack_size = (size_t)commit;

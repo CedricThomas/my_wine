@@ -30,8 +30,6 @@
 
 /* ── Forward declarations from loader_priv.h ───────────────── */
 
-extern void *g_image_base;
-
 void *map_image(const char *path,
                 IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS *out_nt,

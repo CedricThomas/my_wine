@@ -102,7 +102,7 @@
 #include <stddef.h>
 
 /* Initialize the trampoline pool and generate the ret32 trampoline.
- * Call once before any lookups. No-op if !g_is_32bit or already initialized. */
+ * Call once before any lookups. No-op if !g_loader.is_32bit or already initialized. */
 void pe32_trampoline_init(void);
 
 /* far32_data: the 10-byte far-pointer struct patched at runtime.

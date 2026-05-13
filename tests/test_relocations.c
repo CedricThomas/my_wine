@@ -25,6 +25,7 @@
 
 #include "pe.h"
 #include "nt_constants.h"
+#include "src/loader/loader_state.h"
 
 /* Forward declare — relocations.c is compiled into this test binary */
 int apply_relocations(void *base, IMAGE_NT_HEADERS *nt);
@@ -46,8 +47,7 @@ int parse_sections(const void *base, size_t file_size,
                    const IMAGE_NT_HEADERS *nt_headers,
                    IMAGE_SECTION_HEADER **out_sections);
 
-/* Global set by image_mapper.c */
-extern void *g_image_base;
+/* Global set by image_mapper.c — now in g_loader */
 
 static int total_tests = 0;
 static int passed_tests = 0;
@@ -619,7 +619,7 @@ static void test_integration_map_relocated(const char *pe_path)
         check("mapped NT headers ImageBase matches original",
               mapped_nt.u.nt64.OptionalHeader.ImageBase == preferred_base);
 
-        check("g_image_base set by map_image", g_image_base == base);
+        check("g_loader.image_base set by map_image", g_loader.image_base == base);
 
         printf("    relocation delta: 0x%lx\n",
                (unsigned long)((uintptr_t)base - preferred_base));

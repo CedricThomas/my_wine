@@ -28,8 +28,6 @@
 
 /* ── Forward declarations from loader_priv.h ───────────────── */
 
-extern void *g_image_base;
-
 void init_import_table(void);
 void init_msvcrt_imports(void);
 
@@ -96,8 +94,8 @@ static void test_teb_peb_setup(void)
 
     printf("\n=== TEB/PEB Setup ===\n");
 
-    /* Set g_image_base to a plausible value (typical PE image base) */
-    g_image_base = (void *)0x140000000ULL;
+    /* Set g_loader.image_base to a plausible value (typical PE image base) */
+    g_loader.image_base = (void *)0x140000000ULL;
 
     /* Initialize import table (needed by import_table.o, import_resolve.o, import_init.o for __msvcrt_*) */
     init_msvcrt_imports();
@@ -145,7 +143,7 @@ static void test_teb_peb_setup(void)
     if (peb != NULL) {
         /* Verify PEB contents */
         void *peb_image_base = *(void **)((uint8_t *)peb + 0x008);
-        check("PEB.ImageBaseAddress == g_image_base", peb_image_base == g_image_base);
+        check("PEB.ImageBaseAddress == g_loader.image_base", peb_image_base == g_loader.image_base);
 
         uint8_t being_debugged = *(uint8_t *)((uint8_t *)peb + 0x002);
         check("PEB.BeingDebugged == 0", being_debugged == 0);

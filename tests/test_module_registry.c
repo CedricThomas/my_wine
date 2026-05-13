@@ -27,7 +27,6 @@
 
 /* Forward declarations for functions used in tests */
 void *setup_teb_peb(void);
-extern void *g_image_base;
 
 /* Forward declarations for loader functions used in API stub tests */
 int find_dll_path(const char *dll_name, char *path, size_t path_size);
@@ -84,7 +83,7 @@ static void test_add_find_remove(void)
     printf("\n=== Test 1: add/find/remove module ===\n");
 
     init_module_list();
-    check("module_count is 0 after init", module_count == 0);
+    check("g_loader.module_count is 0 after init", g_loader.module_count == 0);
 
     /* Allocate fake base + NT headers in writable memory */
     void *base = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE,
@@ -96,7 +95,7 @@ static void test_add_find_remove(void)
 
     loaded_module_t *mod = add_module(base, "test.dll", nt_ptr);
     check("add_module returns non-NULL", mod != NULL);
-    check("module_count is 1", module_count == 1);
+    check("g_loader.module_count is 1", g_loader.module_count == 1);
     check("mod->base matches", mod->base == base);
     check("mod->name is 'test.dll'", strcmp(mod->name, "test.dll") == 0);
 
@@ -114,7 +113,7 @@ static void test_add_find_remove(void)
     check("find_module_by_addr(out-of-range) returns NULL", found == NULL);
 
     remove_module(mod);
-    check("module_count is 0 after remove", module_count == 0);
+    check("g_loader.module_count is 0 after remove", g_loader.module_count == 0);
 
     found = find_module_by_name("test.dll");
     check("find_module_by_name('test.dll') returns NULL after remove", found == NULL);
@@ -150,7 +149,7 @@ static void test_multiple_modules(void)
         check(check_buf, mod != NULL);
     }
 
-    check("module_count is 3", module_count == 3);
+    check("g_loader.module_count is 3", g_loader.module_count == 3);
 
     /* Verify all 3 can be found by name */
     for (int i = 0; i < 3; i++) {
@@ -215,7 +214,7 @@ static void test_ldr_list_integrity(void)
         mods[i] = add_module(bases[i], names[i], nt_ptrs[i]);
         ldr_add_module(mods[i]);
     }
-    check("module_count is 3 after ldr_add_module", module_count == 3);
+    check("g_loader.module_count is 3 after ldr_add_module", g_loader.module_count == 3);
 
     /* ── Walk InLoadOrderModuleList forward ─────────────────── */
     {
@@ -308,7 +307,7 @@ static void test_ldr_list_integrity(void)
         munmap(bases[i], 0x1000);
     }
     free(ldr);
-    g_peb_ldr = NULL;
+    loader_set_peb_ldr(NULL);
 }
 
 /* ── Test 4: PEB[0x18] points to valid LDR after setup ─────────── */
@@ -317,22 +316,22 @@ static void test_peb_ldr_pointer(void)
 {
     printf("\n=== Test 4: PEB[0x18] points to valid LDR after setup ===\n");
 
-    /* Allocate a real mmap'd region as g_image_base so that
+    /* Allocate a real mmap'd region as g_loader.image_base so that
      * setup_teb_peb doesn't crash when checking madvise + headers.
      * Zero it so the fake headers won't cause segfaults. */
-    g_image_base = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE,
+    g_loader.image_base = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    check("mmap for g_image_base succeeded", g_image_base != MAP_FAILED);
-    if (g_image_base == MAP_FAILED) return;
-    memset(g_image_base, 0, 0x1000);
+    check("mmap for g_loader.image_base succeeded", g_loader.image_base != MAP_FAILED);
+    if (g_loader.image_base == MAP_FAILED) return;
+    memset(g_loader.image_base, 0, 0x1000);
 
     void *teb = setup_teb_peb();
 
     /* We don't set GS base — we read TEB/PEB directly via pointers */
     if (teb == NULL) {
         printf("  SKIP: setup_teb_peb() returned NULL\n");
-        munmap(g_image_base, 0x1000);
-        g_image_base = NULL;
+        munmap(g_loader.image_base, 0x1000);
+        g_loader.image_base = NULL;
         return;
     }
     check("setup_teb_peb returns non-NULL", teb != NULL);
@@ -363,8 +362,8 @@ static void test_peb_ldr_pointer(void)
             check("InInitializationOrderModuleList Blink is not NULL",
                   ldr->InInitializationOrderModuleList.Blink != NULL);
 
-            /* g_peb_ldr should match the PEB LDR pointer */
-            check("g_peb_ldr matches PEB[PEB_LDR]", g_peb_ldr == ldr);
+            /* loader_get_peb_ldr should match the PEB LDR pointer */
+            check("loader_get_peb_ldr matches PEB[PEB_LDR]", loader_get_peb_ldr() == (void *)ldr);
         }
     }
 
@@ -373,8 +372,8 @@ static void test_peb_ldr_pointer(void)
         munmap(peb, 4096);
     }
     munmap(teb, 4096);
-    munmap(g_image_base, 0x1000);
-    g_image_base = NULL;
+    munmap(g_loader.image_base, 0x1000);
+    g_loader.image_base = NULL;
 }
 
 /* ── Test 5: LDR removal ───────────────────────────────────────── */
@@ -460,7 +459,7 @@ static void test_ldr_removal(void)
     free(nt_ptr);
     munmap(base, 0x1000);
     free(ldr);
-    g_peb_ldr = NULL;
+    loader_set_peb_ldr(NULL);
 }
 
 
@@ -501,8 +500,8 @@ static void test_api_load_and_lookup(void)
     void *handle = _GetModuleHandleA("tdll.dll");
     check("_GetModuleHandleA(\"tdll.dll\") returns same base", handle == base);
 
-    /* _GetModuleHandleA(NULL) returns the main module (module_list[0]) */
-    /* Since module_list[0] is tdll.dll (first loaded), it should be the same */
+    /* _GetModuleHandleA(NULL) returns the main module (g_loader.modules[0]) */
+    /* Since g_loader.modules[0] is tdll.dll (first loaded), it should be the same */
     void *main_handle = _GetModuleHandleA(NULL);
     check("_GetModuleHandleA(NULL) returns the main module base", main_handle == base);
 

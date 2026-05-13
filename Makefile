@@ -239,7 +239,7 @@ TEST_module_registry_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o \
 
 # Export parsing test
 TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o \
-	$(BUILDDIR)/debug.o $(PE_OBJS)
+	$(BUILDDIR)/debug.o $(PE_OBJS) $(BUILDDIR)/common.o
 
 # PE32 (32-bit) parsing and relocation test
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o

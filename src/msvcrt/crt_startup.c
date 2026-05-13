@@ -135,14 +135,14 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
             *(uint32_t *)(bss + g_crt_ctx.argc_bss_offset) = 1;
         /* Write pointer size matching the PE type: 4 bytes for PE32, 8 for PE32+ */
         if (g_crt_ctx.argv_bss_offset) {
-            if (g_is_32bit) {
+            if (g_is_32bit_get()) {
                 *(uint32_t *)(bss + g_crt_ctx.argv_bss_offset) = (uint32_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);
             } else {
                 *(uint64_t *)(bss + g_crt_ctx.argv_bss_offset) = (uint64_t)(uintptr_t)(g_guest_argv ? g_guest_argv : 0);
             }
         }
         if (g_crt_ctx.envp_bss_offset) {
-            if (g_is_32bit) {
+            if (g_is_32bit_get()) {
                 *(uint32_t *)(bss + g_crt_ctx.envp_bss_offset) = (uint32_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);
             } else {
                 *(uint64_t *)(bss + g_crt_ctx.envp_bss_offset) = (uint64_t)(uintptr_t)(g_guest_envp ? g_guest_envp : 0);

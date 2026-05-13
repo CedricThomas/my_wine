@@ -8,10 +8,9 @@
 // Set from main() by scanning envp for MY_WINE_DEBUG
 int g_debug_enabled = 0;
 
-// ── PE32 (32-bit image) flag ───────────────────────────────────
-// Set by image_mapper.c when loading a PE32 image. Read by loader,
-// heap, and CRT modules for pointer-size decisions.
-int g_is_32bit = 0;
+// ── Consolidated loader state (defined here so it's available to all modules) ──
+// Previously split across image_mapper.c and common.c; now consolidated in loader_state.h
+wine_loader_state_t g_loader = {0};
 
 // ── Cached WINE_DLL_PATH ────────────────────────────────────────
 // Populated in main() before GS switch so find_dll_path is syscall-safe
