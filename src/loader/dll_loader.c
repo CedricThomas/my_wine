@@ -30,8 +30,8 @@
 /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
  * Uses atomic operations for allocation — still not fully thread-safe (mmap
  * and module registration are separate steps), but prevents overlapping bases.
+ * The base tracker lives in g_loader.dll_base_next (volatile, atomic CAS).
  */
-volatile uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
 
 /**
  * load_dll: map a DLL, apply relocations, register in module list + LDR,
@@ -42,29 +42,20 @@ volatile uintptr_t g_dll_base_next = DLL_ALLOC_BASE;  /* Start at 1.5GB */
 loaded_module_t *load_dll(const char *path, int depth)
 {
     /* Save main PE globals — map_image_at overwrites them with the DLL's values */
-    void *saved_image_base = g_image_base;
-    int saved_is_32bit = g_is_32bit;
+    void *saved_image_base = g_loader.image_base;
+    int saved_is_32bit = g_loader.is_32bit;
     char saved_pe_path[512];
-    const char *cur_pe_path = get_pe_path();
-    if (cur_pe_path) {
-        size_t pe_len = 0;
-        while (cur_pe_path[pe_len] && pe_len < sizeof(saved_pe_path) - 1)
-            pe_len++;
-        __builtin_memcpy(saved_pe_path, cur_pe_path, pe_len);
-        saved_pe_path[pe_len] = '\0';
-    } else {
-        saved_pe_path[0] = '\0';
-    }
+    snprintf(saved_pe_path, sizeof(saved_pe_path), "%s", g_loader.pe_path);
 
     /* Atomically reserve a page-aligned base for this DLL using CAS loop.
      * This prevents two threads from mapping at the same address.
      * We reserve at least PAGE_SIZE upfront; the rest is advanced after mapping. */
     uintptr_t alloc_base;
     do {
-        uintptr_t expected = __atomic_load_n(&g_dll_base_next, __ATOMIC_SEQ_CST);
+        uintptr_t expected = __atomic_load_n(&g_loader.dll_base_next, __ATOMIC_SEQ_CST);
         uintptr_t rounded = (expected + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
         uintptr_t desired = rounded + PAGE_SIZE;  /* reserve minimum one page */
-        if (__atomic_compare_exchange_n(&g_dll_base_next, &expected, desired,
+        if (__atomic_compare_exchange_n(&g_loader.dll_base_next, &expected, desired,
                                         false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
             alloc_base = rounded;
             break;
@@ -76,20 +67,20 @@ loaded_module_t *load_dll(const char *path, int depth)
     void *base = map_image_at(path, NULL, &nt_copy, NULL, alloc_base);
 
     /* Restore main PE globals (regardless of success/failure) */
-    g_image_base = saved_image_base;
-    g_is_32bit = saved_is_32bit;
-    set_pe_path(saved_pe_path);
+    g_loader.image_base = saved_image_base;
+    g_loader.is_32bit = saved_is_32bit;
+    snprintf(g_loader.pe_path, sizeof(g_loader.pe_path), "%s", saved_pe_path);
 
     if (base == NULL) {
         DEBUG("  ERROR: map_image_at failed for '%s'", path);
         return NULL;
     }
 
-    /* Advance g_dll_base_next past the actual DLL size.
+    /* Advance g_loader.dll_base_next past the actual DLL size.
      * We already reserved PAGE_SIZE atomically above, so only add the remainder. */
     uintptr_t dll_size = (pe_size_of_image(&nt_copy) + (PAGE_SIZE - 1)) & ~(uintptr_t)(PAGE_SIZE - 1);
     if (dll_size > PAGE_SIZE) {
-        __atomic_add_fetch(&g_dll_base_next, dll_size - PAGE_SIZE, __ATOMIC_SEQ_CST);
+        __atomic_add_fetch(&g_loader.dll_base_next, dll_size - PAGE_SIZE, __ATOMIC_SEQ_CST);
     }
 
     /* Extract NT headers from image memory — reconstruct union from raw bytes */
@@ -148,7 +139,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     }
 
     /* Add to PEB LDR */
-    if (g_peb_ldr != NULL) {
+    if (g_loader.peb_ldr != NULL) {
         ldr_add_module(mod);
     }
 
@@ -157,7 +148,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     if (resolve_module_imports(mod, depth + 1) != 0) {
         DEBUG("  ERROR: import resolution failed for '%s'", name);
         /* Cleanup all resources allocated above */
-        if (g_peb_ldr != NULL && mod->ldr_linked) {
+        if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
             ldr_remove_module(mod);
         }
         reset_export_cache(mod);

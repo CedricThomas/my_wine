@@ -16,10 +16,8 @@
 #include "image_mapper.h"
 #include "include/common.h"
 #include "loader_utils.h"
+#include "loader_state.h"
 #include "../syscall/syscalls_inline.h"
-
-/* ── Global state ──────────────────────────────────────────────── */
-PEB_LDR_DATA *g_peb_ldr = NULL;
 
 /* ── List helpers ───────────────────────────────────────────────── */
 
@@ -72,13 +70,13 @@ PEB_LDR_DATA *init_peb_ldr(void)
     list_init(&ldr->InMemoryOrderModuleList);
     list_init(&ldr->InInitializationOrderModuleList);
 
-    g_peb_ldr = ldr;
+    loader_set_peb_ldr(ldr);
     return ldr;
 }
 
 int ldr_add_module(loaded_module_t *mod)
 {
-    if (!mod || !mod->base || !mod->nt || !g_peb_ldr)
+    if (!mod || !mod->base || !mod->nt || !(PEB_LDR_DATA *)g_loader.peb_ldr)
         return -1;
 
     if (mod->ldr_linked)
@@ -92,10 +90,11 @@ int ldr_add_module(loaded_module_t *mod)
      * and self-referencing DoubleList nodes. */
     entry->LoadCount = mod->load_count;
 
+    PEB_LDR_DATA *ldr = (PEB_LDR_DATA *)g_loader.peb_ldr;
     /* Insert into the three PEB LDR lists */
-    list_insert_tail(&g_peb_ldr->InLoadOrderModuleList, &entry->DoubleList[0]);
-    list_insert_tail(&g_peb_ldr->InMemoryOrderModuleList, &entry->DoubleList[1]);
-    list_insert_tail(&g_peb_ldr->InInitializationOrderModuleList, &entry->DoubleList[2]);
+    list_insert_tail(&ldr->InLoadOrderModuleList, &entry->DoubleList[0]);
+    list_insert_tail(&ldr->InMemoryOrderModuleList, &entry->DoubleList[1]);
+    list_insert_tail(&ldr->InInitializationOrderModuleList, &entry->DoubleList[2]);
 
     mod->ldr_linked = 1;
 
@@ -126,12 +125,13 @@ LDR_DATA_TABLE_ENTRY *ldr_find_by_addr(void *addr)
 {
     LIST_ENTRY *cursor;
 
-    if (!g_peb_ldr || !addr)
+    if (!g_loader.peb_ldr || !addr)
         return NULL;
 
-    cursor = g_peb_ldr->InMemoryOrderModuleList.Flink;
+    PEB_LDR_DATA *ldr = (PEB_LDR_DATA *)g_loader.peb_ldr;
+    LIST_ENTRY *cursor = ldr->InMemoryOrderModuleList.Flink;
 
-    while (cursor != &g_peb_ldr->InMemoryOrderModuleList) {
+    while (cursor != &ldr->InMemoryOrderModuleList) {
         LDR_DATA_TABLE_ENTRY *entry = (LDR_DATA_TABLE_ENTRY *)(
             ((char *)cursor - offsetof(LDR_DATA_TABLE_ENTRY, DoubleList[1]))
         );
