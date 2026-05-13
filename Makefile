@@ -1,6 +1,6 @@
 # ── Toolchain ───────────────────────────────────────────────────
 CC       = gcc
-CFLAGS   = -Wall -Wextra -O2 -g -I. -Iinclude -MMD -MP -mno-sse
+CFLAGS   = -Wall -Wextra -Werror -O2 -g -I. -Iinclude -MMD -MP -mno-sse
 LDFLAGS  = -lrt -lpthread -ldl
 
 # Special flags for entry points, loader core, stubs, syscall infra
