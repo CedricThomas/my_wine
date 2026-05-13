@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 /* Return values for detect_pe_type */
 #define PE_TYPE_NONE  0
