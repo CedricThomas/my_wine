@@ -154,9 +154,9 @@ Practical advice for new contributors:
 - **`make`** — Build everything: loader binary, all sample Windows binaries, and all test binaries.
 - **`make samples`** — Build all sample Windows binaries (requires Docker for mingw-w64 cross-compilation).
 - **`make samples SAMPLE=<name>`** — Build a single sample binary.
-- **`make run-sample SAMPLE=<name>`** — Build + run a sample under `./my_wine`.
+- **`make run-samples SAMPLE=<name>`** — Build + run a sample under `./my_wine`.
 - **`make tests`** — Build the loader and all test binaries.
-- **`make run-test`** — Run all tests. Use `make run-test TEST=<name>` to filter (e.g. `TEST=parse`).
+- **`make run-tests`** — Run all tests. Use `make run-tests TEST=<name>` to filter (e.g. `TEST=parse`).
 - **`make fclean`** — Deep clean: remove build directory, generated headers, loader binary, and all sample `.exe` files.
 - **`make re`** — Rebuild from scratch (`fclean` then `all`).
 - **`gdb -ex 'break run_guest' -ex run --args ./my_wine samples/hello_world/hello_world.exe`** — Debug the guest handoff (stack switch + entry point call).

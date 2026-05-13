@@ -205,7 +205,7 @@ SHELL.EXE = samples/hello_world/hello_world.exe
 $(SHELL.EXE):
 	@bash scripts/samples.sh build hello_world
 
-# test builds the test binaries; run-test builds + runs them
+# test builds the test binaries; run-tests builds + runs them
 
 TEST ?=
 
@@ -214,11 +214,11 @@ tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_res
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
 
-run-test: tests
+run-tests: tests
 	@echo "==== Running tests ===="
 	@bash scripts/run_tests.sh $(TEST)
 
-debug-test: tests
+debug-tests: tests
 	@echo "==== Running tests with debug ===="
 	@bash scripts/run_tests.sh --debug
 
@@ -268,14 +268,14 @@ $(eval $(call TEST_RULE,pe32,$(TEST_pe32_OBJS)))
 #
 #   make samples              build all samples
 #   make samples SAMPLE=foo     build one sample
-#   make run-sample SAMPLE=foo  build + run under ./my_wine
+#   make run-samples SAMPLE=foo  build + run under ./my_wine
 
 SAMPLE ?=
 
 samples:
 	@bash scripts/samples.sh build $(SAMPLE)
 
-run-sample: all
+run-samples: all
 	@bash scripts/samples.sh run $(SAMPLE)
 
 debug-samples: all
@@ -317,4 +317,4 @@ gen-crt-offsets:
 gen-dispatcher: src/syscall/dispatcher_generated.c
 	@echo "Generated dispatcher switch bodies."
 
-.PHONY: all clean fclean re tests run-test debug-test samples run-sample debug-samples build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR) $(BUILDDIR32)

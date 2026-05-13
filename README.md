@@ -40,7 +40,7 @@ Samples are cross-compiled to PE `.exe` via a Docker container (mingw-w64):
 ```bash
 make samples                  # build all samples
 make samples SAMPLE=hello_world # build one sample
-make run-sample SAMPLE=hello_world  # build + run under ./my_wine
+make run-samples SAMPLE=hello_world  # build + run under ./my_wine
 ```
 
 You should see `Hello from Windows!` printed to the terminal.
@@ -70,7 +70,7 @@ For example:
 | `make test` | Build and run unit tests |
 | `make samples` | Cross-compile all samples via Docker |
 | `make samples SAMPLE=foo` | Cross-compile one sample |
-| `make run-sample SAMPLE=foo` | Build sample + run it under `./my_wine` |
+| `make run-samples SAMPLE=foo` | Build sample + run it under `./my_wine` |
 
 ### Dependencies
 
