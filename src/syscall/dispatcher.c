@@ -136,14 +136,16 @@ static void format_err_unhandled_syscall(char *buf, uint64_t nr)
  * Uses __wine_guest_regs.esp (32-bit) or .rsp (64-bit), populated by
  * the assembly dispatcher entry.
  *
- * 32-bit cdecl (all args on stack, thunk adds push ebp frame):
- *   [ESP+0]  = thunk return addr (index 0)
- *   [ESP+4]  = thunk's saved EBP (index 1)
- *   [ESP+8]  = guest caller's ret addr (index 2)
- *   [ESP+12] = arg1 (index 3)
- *   [ESP+16] = arg2 (index 4)
+ * 32-bit cdecl (all args on stack, dispatcher pushf + thunk push ebp):
+ *   [ESP+0]  = EFLAGS from pushf (index 0)
+ *   [ESP+4]  = thunk return addr (index 1)
+ *   [ESP+8]  = thunk's saved EBP (index 2)
+ *   [ESP+12] = guest caller's ret addr (index 3)
+ *   [ESP+16] = arg1 (index 4)
+ *   [ESP+20] = arg2 (index 5)
  *   ...
- *   STACK(n) reads index (n+2) to account for the thunk frame.
+ *   __ARG(n) reads index (n+3) to account for pushf + thunk frame.
+ *   STACK(n) reads index (n+7) for arg5+ (pushf + thunk + 4 args).
  *
  * 64-bit (args 1-4 in registers, 5+ on stack):
  *   [RSP+0]  = thunk return addr (index 0)
@@ -277,12 +279,12 @@ static int dispatch_ptr_inout(uint64_t guest_arg, uint64_t *ptr_val,
  *
  * On 32-bit (cdecl): all args on stack. The arg1-4 macros and STACK(n) need
  * different offsets:
- *   - arg1-4 macros use __ARG(n) = stack[n+2] → args 1-4 at [3],[4],[5],[6]
- *   - STACK(n) for generated code uses stack[n+6] → arg5+ at [7],[8],...
+ *   - arg1-4 macros use __ARG(n) = stack[n+3] → args 1-4 at [4],[5],[6],[7]
+ *   - STACK(n) for generated code uses stack[n+7] → arg5+ at [8],[9],...
  */
 #if defined(__i386__)
-#define __ARG(n) read_guest_stack((n) + 2)   /* thunk frame offset for arg1-4 */
-#define STACK(n) read_guest_stack((n) + 6)   /* thunk frame + 4 args offset */
+#define __ARG(n) read_guest_stack((n) + 3)   /* pushf + thunk frame offset for arg1-4 */
+#define STACK(n) read_guest_stack((n) + 7)   /* pushf + thunk frame + 4 args offset */
 #else
 #define __ARG(n) read_guest_stack(n)
 #define STACK(n) read_guest_stack(n)
@@ -349,7 +351,7 @@ static uint32_t dispatcher_core(uint32_t nr)
     uint64_t result = 0;
 
     /* On 32-bit: arg1-4 come from the stack (cdecl).
-     * __ARG(n) = stack[n+2] reads args 1-4 past the thunk frame. */
+     * __ARG(n) = stack[n+3] reads args 1-4 past pushf + thunk frame. */
     #define arg1 __ARG(1)
     #define arg2 __ARG(2)
     #define arg3 __ARG(3)
