@@ -23,6 +23,8 @@
 #include "include/pe_parser.h"
 #include "include/pe_priv.h"
 
+#include "crt_priv.h"
+
 /*
  * We need externs and function declarations from msvcrt_priv.h, but
  * including it directly causes type conflicts (crt_context_t and
@@ -70,44 +72,15 @@ void scan_text_for_refptrs(void *image_base,
                            IMAGE_SECTION_HEADER *sections,
                            uint64_t image_size, void *initenv_stub);
 
-/*
- * Full crt_module struct definition (opaque in crt.h, defined in crt.c).
- * We need the full struct to define our module instance.
- * This matches the struct in src/crt/crt.c.
- */
-struct crt_module {
-    const char *name;
-    crt_type_t type;
 
-    // Detection — return non-zero if this module matches the PE
-    int (*detect)(const char *file_path, IMAGE_NT_HEADERS *nt);
-
-    // Entry symbols (NULL-terminated array)
-    const char *const *entry_symbols;
-
-    // Refptr mappings (NULL-terminated with {NULL,NULL} sentinel)
-    const refptr_mapping_t *refptr_mappings;
-
-    // BSS init offsets (0 = skip)
-    uint32_t bss_init_offset;
-    uint32_t bss_initenv_offset;
-
-    // Vtable functions
-    void (*patch_refptrs)(const char *file_path, void *image_base,
-                          IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections);
-    void (*discover_offsets)(const char *file_path, IMAGE_NT_HEADERS *nt,
-                             IMAGE_SECTION_HEADER *sections, crt_context_t *ctx);
-    void (*seed_bss)(void *image_base, IMAGE_NT_HEADERS *nt,
-                     IMAGE_SECTION_HEADER *sections);
-};
 
 /* ── MinGW BSS layout offsets (relative to .bss base) ────────── */
 
-#define MINWG_BSS_INITENV   0x018   /* __initenv / _environ pointer */
-#define MINWG_BSS_ARGV      0x020   /* _argv pointer */
-#define MINWG_BSS_ARGC      0x028   /* _argc */
-#define MINWG_BSS_ACMDLN    0x030   /* _acmdln pointer (for GetCommandLineA) */
-#define MINWG_BSS_INITIALIZED 0x030 /* "initialized" flag to skip __do_global_ctors */
+#define MINWG_BSS_INITENV     0x018   /* __initenv / _environ pointer */
+#define MINWG_BSS_ARGV        0x020   /* _argv pointer */
+#define MINWG_BSS_ARGC        0x028   /* _argc */
+#define MINWG_BSS_ACMDLN      0x030   /* _acmdln pointer (for GetCommandLineA) */
+#define MINWG_BSS_INITIALIZED 0x030   /* "initialized" flag — overlaps _acmdln at 0x030 in MinGW layout */
 
 /* ── MinGW entry symbols ──────────────────────────────────────── */
 
