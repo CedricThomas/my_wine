@@ -52,6 +52,8 @@ const refptr_mapping_t refptr_mappings[] = {
     { NULL, NULL }
 };
 
+#define REF_MAP_COUNT (sizeof(refptr_mappings) / sizeof(refptr_mappings[0]) - 1)
+
 struct refptr_patch_arg {
     uint64_t *refptr;
     void *target;

@@ -19,6 +19,7 @@
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
+#include "include/crt.h"
 
 /* ── Global variables (defined in crt_globals.c) ───────────── */
 
@@ -159,16 +160,6 @@ extern void *__msvcrt_strerror;
 extern void *__msvcrt_wcslen;
 
 /* ── Refptr patching (defined in crt_refptrs.c) ─────────── */
-
-#ifndef MY_WINE_CRT_H
-typedef struct {
-    const char *name;
-    void       *target;
-} refptr_mapping_t;
-#endif /* MY_WINE_CRT_H */
-
-extern const refptr_mapping_t refptr_mappings[];
-#define REF_MAP_COUNT (sizeof(refptr_mappings) / sizeof(refptr_mappings[0]) - 1)
 
 void patch_crt_refptrs(const char *file_path, void *image_base,
                        IMAGE_NT_HEADERS *nt,
