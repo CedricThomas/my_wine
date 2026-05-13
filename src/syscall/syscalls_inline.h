@@ -194,20 +194,11 @@ extern void *synct_mmap2(void *addr, size_t len, int prot, int flags, int fd, of
 /*
  * clone: 32-bit uses __NR_clone (59), args: flags, newsp (stack),
  * parent_tidptr, child_tidptr, tls
- * Note: the Linux 32-bit clone syscall uses different argument layout
- * than 64-bit. The 32-bit version: clone(flags, child_stack, ptid, ctid, tls)
- * where tls is passed as ebp.
+ * Implemented in clone.S as wine_clone().
  */
+extern long wine_clone(int flags, void *child_stack, int *parent_tid, int *child_tid, void *fn, void *arg);
 #define INLINE_SYSCALL_CLONE(flags, child_stack, parent_tid, child_tid, fn, arg) \
-    ({ \
-        long _synct_eax; \
-        __asm__ volatile("int $0x80" \
-            : "=a"(_synct_eax) \
-            : "a"(__NR_clone), "b"(flags), "c"(child_stack), \
-              "d"(parent_tid), "S"(child_tid), "D"(arg) \
-            : "cc", "memory"); \
-        _synct_eax; \
-    })
+    wine_clone(flags, child_stack, parent_tid, child_tid, fn, arg)
 
 /*
  * set_thread_area (syscall 243) - creates an LDT entry pointing to a base
@@ -521,20 +512,10 @@ struct modify_ldt_ldt_s {
     })
 
 /* ── sys_clone ──────────────────────────────────────────────── */
-
+/* Implemented in clone64.S as wine_clone(). */
+extern long wine_clone(int flags, void *child_stack, int *parent_tid, int *child_tid, void *fn, void *arg);
 #define INLINE_SYSCALL_CLONE(flags, child_stack, parent_tid, child_tid, fn, arg) \
-    ({ \
-        long _synct_rax; \
-        register long _r10 asm("r10") = (long)(child_tid); \
-        register long _r8 asm("r8") = (long)(fn); \
-        register long _r9 asm("r9") = (long)(arg); \
-        __asm__ volatile("syscall" \
-            : "=a"(_synct_rax) \
-            : "a"(__NR_clone), "D"(flags), "S"(child_stack), \
-              "d"(parent_tid), "r"(_r10), "r"(_r8), "r"(_r9) \
-            : "rcx", "r11", "cc", "memory"); \
-        _synct_rax; \
-    })
+    wine_clone(flags, child_stack, parent_tid, child_tid, fn, arg)
 
 /* ── sys_mremap ─────────────────────────────────────────────── */
 
