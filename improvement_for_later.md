@@ -68,19 +68,10 @@ adapting syscall wrappers. Not worth the effort for this project scope.
 
 ---
 
-## Add `--gc-sections` Linker Flag
+## Generalize CRT
 
-**If staying static:** Adding `-Wl,--gc-sections` + `-ffunction-sections -fdata-sections`
-to the 32-bit compile flags would let the linker discard unused glibc sections,
-shrinking the static binary significantly (estimated 40-60% reduction).
-Requires marking all used symbols with `__attribute__((used))`.
-
----
-
-## Generalize PE32 beyond DOOM95
-
-The current 32-bit path is optimized for DOOM95 (Watcom CRT, `D_DoomMain` entry).
-For broader PE32 support, consider:
+The current path is optimized for mingw and Doom95
+For broader support, consider:
 
 - Auto-detect CRT type (Watcom vs MinGW vs MSVC) and select entry strategy
 - Implement a minimal `HeapAlloc`/`HeapCreate` so Win32 heap APIs work
