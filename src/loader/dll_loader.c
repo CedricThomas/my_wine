@@ -106,7 +106,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     }
 
     /* Check PE32/PE32+ mixing — DLL must match the main binary's PE type.
-     * Use saved_is_32bit since map_image_at() overwrote g_is_32bit with the DLL's type. */
+     * Use saved_is_32bit since map_image_at() overwrote g_loader.is_32bit with the DLL's type. */
     if (saved_is_32bit && img_nt->pe_type == PE_TYPE_64) {
         DEBUG("  ERROR: cannot load PE32+ DLL '%s' for PE32 binary", path);
         free(img_nt);

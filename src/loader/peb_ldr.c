@@ -53,7 +53,7 @@ static void list_remove(LIST_ENTRY *entry)
 PEB_LDR_DATA *init_peb_ldr(void)
 {
     PEB_LDR_DATA *ldr;
-    if (g_is_32bit) {
+    if (loader_is_32bit()) {
         /* For PE32, allocate below 4GB so the truncated pointer is valid */
         ldr = (PEB_LDR_DATA *)INLINE_SYSCALL_MMAP(NULL, sizeof(PEB_LDR_DATA),
                     PROT_READ | PROT_WRITE,
