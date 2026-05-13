@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <sys/mman.h>
 
+#include "include/crt.h"
 #include "include/common.h"
 #include "include/debug.h"
 #include "include/pe_priv.h"
@@ -127,6 +128,18 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
                        IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections)
 {
     if (!image_base || !nt || !sections) return;
+
+    /* Detect CRT type and get the active module. If the module provides
+     * a patch_refptrs vtable entry, delegate entirely — no fallback needed.
+     * Otherwise, fall through to the inline logic below. */
+    crt_type_t type = crt_detect_type(file_path, nt);
+    const crt_module_t *mod = crt_get_module(type);
+    if (mod && mod->patch_refptrs) {
+        mod->patch_refptrs(file_path, image_base, nt, sections);
+        return;
+    }
+
+    /* ── Fallback: inline patching when no module or vtable entry is available ── */
 
     /* Build local context — avoids reading g_crt_ctx during patching */
     crt_context_t ctx = {
