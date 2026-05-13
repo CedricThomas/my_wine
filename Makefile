@@ -43,6 +43,7 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 
 # Shared objects used by import-resolution and teb_peb tests
 TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) $(HEAP_OBJS) \
+	$(CRT_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o
 

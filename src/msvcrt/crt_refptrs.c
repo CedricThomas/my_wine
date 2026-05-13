@@ -18,6 +18,7 @@
 #include "msvcrt_priv.h"
 
 #define CRT_BSS_INITIALIZED 0x30
+#define CRT_BSS_INITENV     0x018   /* __initenv / _environ pointer in .bss */
 
 /*
  * refptr_mappings: patch targets for CRT refptr entries.
@@ -134,8 +135,8 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
      * Otherwise, fall through to the inline logic below. */
     crt_type_t type = crt_detect_type(file_path, nt);
     const crt_module_t *mod = crt_get_module(type);
-    if (mod && mod->patch_refptrs) {
-        mod->patch_refptrs(file_path, image_base, nt, sections);
+    if (mod) {
+        crt_patch_refptrs(mod, file_path, image_base, nt, sections);
         return;
     }
 

@@ -24,10 +24,16 @@
 
 #include "include/pe.h"
 #include "include/msvcrt.h"
+#include "include/crt.h"
 #include "include/common.h"
 #include "loader/loader_priv.h"
 #include "include/pe_priv.h"
 #include "include/debug.h"
+
+/* Forward declarations from msvcrt/crt_globals.c and crt_refptrs.c */
+extern crt_context_t g_crt_ctx;
+void patch_crt_refptrs(const char *file_path, void *image_base,
+                       IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections);
 
 extern char **environ;  // from libc, for guest envp
 
@@ -47,7 +53,11 @@ static const char *envp_lookup(char *const envp[], const char *key)
 }
 
 /* Pre-seed argc/argv/envp in .bss using COFF-derived offsets
- * from g_crt_ctx. Explicit mprotect ensures .bss is writable. */
+ * from g_crt_ctx. Explicit mprotect ensures .bss is writable.
+ *
+ * This is a fallback used when the active CRT module does not
+ * provide a seed_bss vtable entry. g_crt_ctx must be populated
+ * by patch_crt_refptrs() (or the module's discover_offsets) first. */
 static void seed_bss_vars(void *base,
                           const IMAGE_NT_HEADERS *nt,
                           IMAGE_SECTION_HEADER *sections)
@@ -153,6 +163,10 @@ static int init_loader(int argc, char **argv,
     void *base = map_image(argv[1], &dos, &nt, &nt_size);
     if (!base) return -1;
 
+    /* 1b. Detect CRT type and select the active CRT module */
+    crt_type_t crt_type = crt_detect_type(argv[1], &nt);
+    const crt_module_t *mod = crt_get_module(crt_type);
+
     /* 2. Get section headers (from the live image) */
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
 
@@ -213,11 +227,19 @@ static int init_loader(int argc, char **argv,
 
     /* 8b. Pre-seed argc/argv/envp in .bss
      *
-     * g_crt_ctx was populated by patch_crt_refptrs (step 4) which
-     * looks up _argc/__argc, _argv/__argv, _environ/__envp in the
-     * COFF symbol table and computes offsets relative to .bss base.
-     * Fallback to hardcoded values if COFF lookup was incomplete.
+     * If the active CRT module provides a seed_bss vtable entry, use it
+     * via the accessor function. Then always fall back to the local
+     * seed_bss_vars() for safety — both write the same values (argc=1,
+     * argv=NULL, envp=NULL) so double-seeding is harmless.
+     *
+     * g_crt_ctx is populated by patch_crt_refptrs (step 4) via the module's
+     * discover_offsets, which looks up _argc/__argc, _argv/__argv,
+     * _environ/__envp in the COFF symbol table and computes offsets
+     * relative to .bss base.
      */
+    if (mod) {
+        crt_seed_bss(mod, base, &nt, sections);
+    }
     seed_bss_vars(base, &nt, sections);
 
     /* 9. Build guest argv/envp from actual host arguments */
@@ -236,8 +258,8 @@ static int init_loader(int argc, char **argv,
     _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
 
     /* 10. Look up user entry symbol
-     *  - PE32: try "D_DoomMain" then "_D_DoomMain" (Watcom-compiled DOOM95)
-     *  - PE32+: try "main"
+     *  - Use crt_entry_symbols() from the active CRT module to iterate
+     *    entry symbol candidates
      *  - Fall back to PE entry point if no symbol found
      */
     uint64_t main_rva = 0;
@@ -246,18 +268,16 @@ static int init_loader(int argc, char **argv,
         char *string_table = NULL;
         int sym_count = parse_symbol_table_from_file(argv[1], &nt, &symbols, &string_table);
         if (sym_count > 0) {
-            if (pe_is_pe32(&nt)) {
-                /* Watcom-compiled PE32 (e.g. DOOM95): entry is D_DoomMain */
-                main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
-                                              sections, pe_section_count(&nt),
-                                              "D_DoomMain");
-                if (main_rva == 0) {
+            const char *const *entry_syms = crt_entry_symbols(mod);
+            if (entry_syms) {
+                for (int si = 0; entry_syms[si] != NULL; si++) {
                     main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
                                                   sections, pe_section_count(&nt),
-                                                  "_D_DoomMain");
+                                                  entry_syms[si]);
+                    if (main_rva != 0) break;
                 }
             } else {
-                /* PE32+: standard "main" entry */
+                /* No module or no entry symbols — try "main" as default */
                 main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
                                               sections, pe_section_count(&nt),
                                               "main");
@@ -269,24 +289,13 @@ static int init_loader(int argc, char **argv,
     uint64_t entry_abs;
     if (main_rva != 0) {
         entry_abs = (uint64_t)(uintptr_t)base + main_rva;
-        if (pe_is_pe32(&nt)) {
-            DEBUG("Bypassing CRT: jumping to D_DoomMain() at 0x%lx instead of entry 0x%lx",
-                    (unsigned long)entry_abs,
-                    (unsigned long)((uint64_t)(uintptr_t)base + pe_entry_rva(&nt)));
-        } else {
-            DEBUG("Bypassing CRT: jumping to main() at 0x%lx instead of entry 0x%lx",
-                    (unsigned long)entry_abs,
-                    (unsigned long)((uint64_t)(uintptr_t)base + pe_entry_rva(&nt)));
-        }
+        DEBUG("Bypassing CRT: jumping to entry at 0x%lx instead of entry 0x%lx",
+                (unsigned long)entry_abs,
+                (unsigned long)((uint64_t)(uintptr_t)base + pe_entry_rva(&nt)));
     } else {
         entry_abs = (uint64_t)(uintptr_t)base + pe_entry_rva(&nt);
-        if (pe_is_pe32(&nt)) {
-            fprintf(stderr, "WARNING: 'D_DoomMain'/'_D_DoomMain' symbol not found, "
-                    "using PE entry point 0x%lx\n", (unsigned long)entry_abs);
-        } else {
-            fprintf(stderr, "WARNING: 'main' symbol not found, "
-                    "using entry point 0x%lx\n", (unsigned long)entry_abs);
-        }
+        fprintf(stderr, "WARNING: entry symbol not found, "
+                "using entry point 0x%lx\n", (unsigned long)entry_abs);
     }
 
     /* Write outputs for caller */

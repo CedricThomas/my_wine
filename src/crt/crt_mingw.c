@@ -14,7 +14,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 #include "include/crt.h"
 #include "include/common.h"
@@ -126,16 +129,44 @@ static int mingw_detect(const char *file_path, IMAGE_NT_HEADERS *nt)
     if (!file_path || !nt)
         return 0;
 
-    const char *markers[] = { "__CTOR_LIST__", "__xi_a", "__xc_a" };
-    IMAGE_SECTION_HEADER *sections = get_image_sections(NULL, nt);
+    /*
+     * We need section headers to search for marker symbols via
+     * find_symbol_rva_from_file, but we don't have a mapped image base.
+     * Map the file read-only, get sections, search, then unmap.
+     */
+    int fd = open(file_path, O_RDONLY);
+    if (fd < 0)
+        return 0;
 
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        close(fd);
+        return 0;
+    }
+    size_t file_size = (size_t)st.st_size;
+
+    void *file = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (file == MAP_FAILED)
+        return 0;
+
+    IMAGE_SECTION_HEADER *sections = get_image_sections(file, nt);
+    if (!sections) {
+        munmap(file, file_size);
+        return 0;
+    }
+
+    const char *markers[] = { "__CTOR_LIST__", "__xi_a", "__xc_a" };
     for (int i = 0; i < 3; i++) {
         uint64_t rva = find_symbol_rva_from_file(file_path, nt,
                                                   sections, markers[i]);
-        if (rva != 0)
+        if (rva != 0) {
+            munmap(file, file_size);
             return 1;
+        }
     }
 
+    munmap(file, file_size);
     return 0;
 }
 

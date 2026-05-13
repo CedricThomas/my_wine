@@ -30,6 +30,7 @@
 #include <string.h>
 #include <fcntl.h>
 
+#include "include/crt.h"
 #include "../syscall/syscalls_inline.h"
 #include "include/syscall/dispatcher_entry.h"
 #include "include/pe.h"
@@ -46,6 +47,17 @@
 #include "module_list.h"
 #include "loader_utils.h"
 #include "../heap/wine_heap.h"
+
+/*
+ * Local BSS offset defines for MinGW CRT layout.
+ *
+ * This is a standalone 32-bit binary that cannot load CRT modules,
+ * so we use hardcoded offsets matching the MinGW CRT .bss layout.
+ */
+#define CRT_BSS_INITENV   0x018   /* __initenv / _environ pointer */
+#define CRT_BSS_ARGV      0x020   /* _argv pointer */
+#define CRT_BSS_ARGC      0x028   /* _argc */
+#define CRT_BSS_ACMDLN    0x030   /* _acmdln pointer (for GetCommandLineA) */
 
 /*
  * KNOWN LIMITATION: sync_test_32 crash in PE32 mode
@@ -656,9 +668,9 @@ static void wire_peb32_fields(void *peb, void *image_base,
  * seed_bss_vars — pre-seed CRT globals in the PE .bss section.
  *
  * Many PE32 CRTs (MinGW, Watcom) expect _argc, _argv, _environ
- * to be pre-initialized in .bss before entry. We use hardcoded
- * offsets from common.h since g_crt_ctx COFF parsing is not
- * available in the 32-bit path.
+ * to be pre-initialized in .bss before entry. We use local
+ * CRT_BSS_* defines for the 32-bit standalone build since the
+ * CRT module system is not available in the 32-bit child.
  *
  * Uses INLINE_SYSCALL_MPROTECT for mprotect (already in syscalls_inline.h).
  */
@@ -703,8 +715,7 @@ static void seed_bss_vars(void *base, IMAGE_NT_HEADERS *nt)
     }
 
     /* _acmdln → pointer to the 32-bit path copy (from ensure_argv_setup)
-     * so the PE's own CRT _acmdln symbol resolves to a 32-bit string buffer.
-     * CRT_BSS_ACMDLN follows the MinGW CRT layout after _argc (CRT_BSS_ARGC). */
+     * so the PE's own CRT _acmdln symbol resolves to a 32-bit string buffer. */
     if (CRT_BSS_ACMDLN + 4 <= bss_size && g_argv_page != NULL) {
         uint32_t path_ptr = (uint32_t)(uintptr_t)((uint8_t *)g_argv_page + 0);
         *(uint32_t *)(bss_base + CRT_BSS_ACMDLN) = path_ptr;
