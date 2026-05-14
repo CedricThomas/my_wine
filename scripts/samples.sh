@@ -287,23 +287,40 @@ run_sample() {
 
     # Capture stdout to a temp file for optional output comparison
     local output_file
+    local ret_file
     output_file=$(mktemp) || { echo "  ERR: $name (mktemp failed)"; return 1; }
-    trap "rm -f '$output_file' '${output_file}.err'" RETURN
+    ret_file=$(mktemp) || { rm -f "$output_file"; echo "  ERR: $name (mktemp failed)"; return 1; }
+    trap "rm -f '$output_file' '$ret_file' '${output_file}.err'" RETURN
 
     # Export MY_WINE_DEBUG when in debug mode
     if [ "${DEBUG}" != "0" ]; then
         export MY_WINE_DEBUG=1
     fi
 
-    # Run with timeout; capture stdout into temp file for output comparison
-    # Always capture only stdout for comparison; stderr goes to .err in debug mode
-    # The subshell with outer 2>/dev/null suppresses bash's own SIGSEGV error
-    # report (e.g. "Erreur de segmentation") when the sample crashes.
-    local ret=0
+    # Run with timeout; capture stdout into temp file for output comparison.
+    # The subshell always exits 0 (writing the real exit code to a temp file)
+    # so the parent bash never sees a signal-based exit status and never prints
+    # its own diagnostic (e.g. "Erreur de segmentation" / "Segmentation fault").
+    # The outer 2>/dev/null catches any residual output.
     if [ "${DEBUG}" != "0" ]; then
-        ( timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>"${output_file}.err" ) 2>/dev/null || ret=$?
+        (
+            set +e
+            timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>"${output_file}.err"
+            echo $? >"$ret_file"
+            exit 0
+        ) 2>/dev/null
     else
-        ( timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null ) 2>/dev/null || ret=$?
+        (
+            set +e
+            timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null
+            echo $? >"$ret_file"
+            exit 0
+        ) 2>/dev/null
+    fi
+    local ret=0
+    if [ -f "$ret_file" ]; then
+        ret=$(cat "$ret_file")
+        [ -z "$ret" ] && ret=0
     fi
 
     # --- Output display in debug mode — show both stdout and stderr ---
