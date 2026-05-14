@@ -26,11 +26,14 @@ SKIP=0
 
 # Run a single test binary and record PASS/FAIL.
 # Usage: run_test test_name [arg1 arg2 ...]
+# Pipes through tr -d '\0' to silently strip null bytes from output
+# (some tests like test_syscall_dispatch emit binary data that would
+#  cause bash to print "command substitution: null byte ignored").
 run_test() {
 	local name="$1"
 	shift
 	local output
-	output=$(timeout 5 ./"$BUILDDIR"/"$name" "$@" 2>&1) || true
+	output=$(timeout 5 ./"$BUILDDIR"/"$name" "$@" 2>&1 | tr -d '\0') || true
 
 	if echo "$output" | grep -q "Failed: 0"; then
 		PASS=$((PASS + 1))
@@ -52,7 +55,7 @@ run_test() {
 run_test_teb_peb() {
 	local name="test_teb_peb"
 	local output
-	output=$(timeout 120 ./"$BUILDDIR"/"$name" 2>&1) || true
+	output=$(timeout 120 ./"$BUILDDIR"/"$name" 2>&1 | tr -d '\0') || true
 
 	if [ -z "$output" ]; then
 		# Empty output — likely crashed on FSGSBASE instruction
