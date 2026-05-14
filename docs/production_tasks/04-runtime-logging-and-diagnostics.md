@@ -42,5 +42,5 @@ before touching diagnostics. In particular:
 ## Done Criteria
 
 - Normal sample runs do not emit internal traces.
-- `MY_WINE_DEBUG=1` still exposes useful diagnostics.
+- Change `MY_WINE_DEBUG=` to `MY_WINE_DEBUG_LEVEL=` and update all the tools using it.
 - Guest stdout is not mixed with loader diagnostics.

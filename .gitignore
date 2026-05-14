@@ -1,5 +1,6 @@
 # Build directory
 build/
+build32/
 
 # Object files (defense in depth, already covered by build/)
 *.o
@@ -29,6 +30,7 @@ tests/*
 # Auto-generated files
 include/crt_offsets_generated.h
 src/syscall/dispatcher_generated.c
+.gen_crt_offsets.*/
 
 # Python
 __pycache__/

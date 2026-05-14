@@ -9,6 +9,7 @@ switch bodies.
 Usage:
   python3 scripts/gen_dispatcher.py               # verify mode
   python3 scripts/gen_dispatcher.py --generate     # write dispatcher_generated.c
+  python3 scripts/gen_dispatcher.py --check        # verify generated file freshness
   python3 scripts/gen_dispatcher.py --help
 """
 
@@ -309,6 +310,33 @@ def generate_output():
 
 # ── CLI ─────────────────────────────────────────────────────────
 
+def write_generated(path):
+    output = generate_output()
+    with open(path, "w") as f:
+        f.write(output)
+    print("Generated: %s" % path)
+    print("Syscall count: %d" % len(parse_def()))
+
+
+def check_generated(path):
+    expected = generate_output()
+    if not os.path.exists(path):
+        print("FAIL: missing generated file: %s" % path)
+        print("Run: python3 scripts/gen_dispatcher.py --generate")
+        return 1
+
+    with open(path) as f:
+        actual = f.read()
+
+    if actual != expected:
+        print("FAIL: stale generated file: %s" % path)
+        print("Run: python3 scripts/gen_dispatcher.py --generate")
+        return 1
+
+    print("OK: generated file is fresh: %s" % path)
+    return 0
+
+
 def main():
     if len(sys.argv) > 1:
         mode = sys.argv[1]
@@ -320,11 +348,18 @@ def main():
         return
 
     if mode == "--generate":
-        output = generate_output()
-        with open(OUT_FILE, "w") as f:
-            f.write(output)
-        print("Generated: %s" % OUT_FILE)
-        print("Syscall count: %d" % len(parse_def()))
+        write_generated(OUT_FILE)
+        return
+
+    if mode == "--check":
+        sys.exit(check_generated(OUT_FILE))
+        return
+
+    if mode == "--output":
+        if len(sys.argv) < 3:
+            print("FAIL: --output requires a path")
+            sys.exit(1)
+        write_generated(sys.argv[2])
         return
 
     if mode == "--verify":

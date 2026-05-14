@@ -37,7 +37,7 @@ Start from the generated/ignored artifact inventory in
 2. Ensure generators are deterministic.
 3. Add `make gen` or similarly named aggregate target.
 4. Add `make check-generated` that fails when generated output differs.
-5. Document the policy in the Makefile or a short doc.
+5. Document the policy in the Makefile.
 6. Update `audit/source-inventory.md` if the checked-in vs ignored policy
    changes.
 

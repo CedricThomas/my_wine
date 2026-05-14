@@ -22,6 +22,13 @@ endif
 BUILDDIR = build
 BUILDDIR32 = build32
 
+# ── Generated File Policy ───────────────────────────────────────
+# Required generated files are ignored by git but regenerated automatically
+# from tracked inputs. Optional generated files are ignored and only used when
+# present; hardcoded fallbacks keep the build working without them.
+GENERATED_REQUIRED = src/syscall/dispatcher_generated.c
+GENERATED_OPTIONAL = include/crt_offsets_generated.h
+
 # ── Source Groups: Wrapper And PE32+ ────────────────────────────
 # Auto-discover .c per source group; objects flatten into build/.
 ROOT_SRC     = $(filter-out src/wrapper_main.c, $(sort $(shell find src/   -maxdepth 1 -name '*.c')))
@@ -147,17 +154,22 @@ all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test
 
 # ── Generated Files ─────────────────────────────────────────────
 # Dispatcher switch bodies from include/nt_syscalls.def.
-src/syscall/dispatcher_generated.c: include/nt_syscalls.def scripts/gen_dispatcher.py
+$(GENERATED_REQUIRED): include/nt_syscalls.def scripts/gen_dispatcher.py
 	@python3 scripts/gen_dispatcher.py --generate
 
-$(BUILDDIR)/dispatcher.o: src/syscall/dispatcher_generated.c
-$(BUILDDIR32)/dispatcher.o: src/syscall/dispatcher_generated.c
+$(BUILDDIR)/dispatcher.o: $(GENERATED_REQUIRED)
+$(BUILDDIR32)/dispatcher.o: $(GENERATED_REQUIRED)
+
+gen: gen-dispatcher
+
+check-generated:
+	@python3 scripts/gen_dispatcher.py --check
 
 gen-crt-offsets:
 	@echo "Generating CRT offsets from current mingw-w64 toolchain..."
 	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed"; echo "  Try: make build-docker-image"; exit 0; }
 
-gen-dispatcher: src/syscall/dispatcher_generated.c
+gen-dispatcher: $(GENERATED_REQUIRED)
 	@echo "Generated dispatcher switch bodies."
 
 # ── Directories And Pattern Rules ───────────────────────────────
@@ -279,8 +291,7 @@ build-docker-image:
 clean:
 	@echo "  CLEAN build artifacts"
 	rm -rf $(BUILDDIR) $(BUILDDIR32)
-	rm -f include/crt_offsets_generated.h
-	rm -f src/syscall/dispatcher_generated.c
+	rm -f $(GENERATED_REQUIRED) $(GENERATED_OPTIONAL)
 
 fclean: clean
 	@echo "  FCLEAN all end targets"
@@ -296,4 +307,4 @@ re: fclean
 # ── Auto-generated Header Dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
 
-.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen-crt-offsets gen-dispatcher $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-crt-offsets gen-dispatcher check-generated $(BUILDDIR) $(BUILDDIR32)
