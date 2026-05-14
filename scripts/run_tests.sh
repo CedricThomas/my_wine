@@ -48,23 +48,28 @@ run_test() {
 }
 
 # Run test_teb_peb which may crash due to FSGSBASE unavailability.
+# Distinguish: no output (crash) → SKIP, Failed: 0 → PASS, Failed: N→ FAIL.
 run_test_teb_peb() {
 	local name="test_teb_peb"
 	local output
 	output=$(timeout 120 ./"$BUILDDIR"/"$name" 2>&1) || true
 
-	if echo "$output" | grep -q "Failed: 0"; then
+	if [ -z "$output" ]; then
+		# Empty output — likely crashed on FSGSBASE instruction
+		SKIP=$((SKIP + 1))
+		echo "SKIP  $name (FSGSBASE unavailable)"
+	elif echo "$output" | grep -q "Failed: 0"; then
 		PASS=$((PASS + 1))
 		if [ "$DEBUG" = "1" ]; then
 			echo "$output"
 		fi
 		echo "PASS  $name"
 	else
-		SKIP=$((SKIP + 1))
+		FAIL=$((FAIL + 1))
 		if [ "$DEBUG" = "1" ]; then
 			echo "$output"
 		fi
-		echo "SKIP  $name (FSGSBASE unavailable)"
+		echo "FAIL  $name"
 	fi
 }
 

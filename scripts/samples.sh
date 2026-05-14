@@ -297,11 +297,13 @@ run_sample() {
 
     # Run with timeout; capture stdout into temp file for output comparison
     # Always capture only stdout for comparison; stderr goes to .err in debug mode
+    # The subshell with outer 2>/dev/null suppresses bash's own SIGSEGV error
+    # report (e.g. "Erreur de segmentation") when the sample crashes.
     local ret=0
     if [ "${DEBUG}" != "0" ]; then
-        timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>"${output_file}.err" || ret=$?
+        ( timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>"${output_file}.err" ) 2>/dev/null || ret=$?
     else
-        timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null || ret=$?
+        ( timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null ) 2>/dev/null || ret=$?
     fi
 
     # --- Output display in debug mode — show both stdout and stderr ---
