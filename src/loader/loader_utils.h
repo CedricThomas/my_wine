@@ -49,6 +49,11 @@ static inline void dll_memset(void *ptr, int c, size_t n)
     __builtin_memset(ptr, c, n);
 }
 
+static inline void *dll_memcpy(void *dst, const void *src, size_t n)
+{
+    return __builtin_memcpy(dst, src, n);
+}
+
 /* ── import_resolve.c-only helpers ───────────────────────────── */
 
 static inline size_t dll_strlen(const char *s)
@@ -64,6 +69,11 @@ static inline int dll_strncmp(const char *a, const char *b, size_t n)
 static inline const char *dll_strchr(const char *s, int c)
 {
     return __builtin_strchr(s, c);
+}
+
+static inline const char *dll_strrchr(const char *s, int c)
+{
+    return __builtin_strrchr(s, c);
 }
 
 static inline int dll_build_path(char *dst, size_t dst_size,

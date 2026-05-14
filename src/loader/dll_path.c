@@ -22,17 +22,11 @@ static void init_exe_dir(void)
     if (g_exe_dir[0] != '\0') return;
     const char *pe_path = get_pe_path();
     if (pe_path != NULL && pe_path[0] != '\0') {
-        /* Hand-rolled strrchr */
-        const char *last_slash = NULL;
-        const char *p = pe_path;
-        while (*p) {
-            if (*p == '/') last_slash = p;
-            p++;
-        }
+        const char *last_slash = dll_strrchr(pe_path, '/');
         if (last_slash != NULL && last_slash != pe_path) {
             size_t dir_len = last_slash - pe_path;
             if (dir_len >= sizeof(g_exe_dir)) dir_len = sizeof(g_exe_dir) - 1;
-            __builtin_memcpy(g_exe_dir, pe_path, dir_len);
+            dll_memcpy(g_exe_dir, pe_path, dir_len);
             g_exe_dir[dir_len] = '\0';
             return;
         }
