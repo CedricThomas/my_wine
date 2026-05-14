@@ -1,0 +1,9 @@
+=== DLL Loader Test ===
+OK: LoadLibraryA -> 0x[0-9a-fA-F]+
+OK: GetModuleHandleA -> 0x[0-9a-fA-F]+
+OK: dll_add\(3, 4\) = 7
+OK: dll_greeting\(\) = "Hello from exportlib\.dll!"
+Test from dll_puts!OK: dll_puts succeeded
+OK: FreeLibrary -> 1
+
+=== ALL TESTS PASSED ===

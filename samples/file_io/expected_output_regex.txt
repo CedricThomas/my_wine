@@ -1,0 +1,8 @@
+CreateFileA OK.*
+WriteFile OK.*
+CloseHandle \(after write\) OK
+ReadFile OK.*
+Data verification OK
+CloseHandle \(after read\) OK
+DeleteFileA OK
+All tests passed
