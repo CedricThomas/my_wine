@@ -288,7 +288,7 @@ run_sample() {
     # Capture stdout to a temp file for optional output comparison
     local output_file
     output_file=$(mktemp) || { echo "  ERR: $name (mktemp failed)"; return 1; }
-    trap "rm -f '$output_file'" RETURN
+    trap "rm -f '$output_file' '${output_file}.err'" RETURN
 
     # Export MY_WINE_DEBUG when in debug mode
     if [ "${DEBUG}" != "0" ]; then
@@ -296,17 +296,20 @@ run_sample() {
     fi
 
     # Run with timeout; capture stdout into temp file for output comparison
-    # Suppress my_wine debug logs on stderr unless DEBUG is set
+    # Always capture only stdout for comparison; stderr goes to .err in debug mode
     local ret=0
     if [ "${DEBUG}" != "0" ]; then
-        timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>&1 || ret=$?
+        timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>"${output_file}.err" || ret=$?
     else
         timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null || ret=$?
     fi
 
-    # --- Output display in debug mode ---
+    # --- Output display in debug mode — show both stdout and stderr ---
     if [ "${DEBUG}" != "0" ] && [ -s "$output_file" ]; then
         cat "$output_file"
+    fi
+    if [ "${DEBUG}" != "0" ] && [ -s "${output_file}.err" ]; then
+        cat "${output_file}.err" >&2
     fi
 
     # --- Check exit code ---
