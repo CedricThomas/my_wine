@@ -1,6 +1,6 @@
 # Subplan 2: SDL2 Backend
 
-Implement `render_backend_sdl2.c` — the SDL2 implementation of `render_backend.h`.
+Implement `src/backend/sdl2/*.c` — the SDL2 implementation of `render_backend.h`.
 
 ## Dependencies
 - **Subplan 1 complete** — `render_backend.h` must exist
@@ -103,7 +103,7 @@ Implement `render_backend_sdl2.c` — the SDL2 implementation of `render_backend
 ## Files
 | File | Action |
 |------|--------|
-| `src/backend/render_backend_sdl2.c` | **New** (~2,000 lines) |
+| `src/backend/sdl2/*.c` | **New** (~2,000 lines) |
 | `Makefile` | Edit: add SDL2 linker flags + source path |
 
 **~2,000 lines, ~8-10 days**
