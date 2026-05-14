@@ -717,19 +717,15 @@ int main(int argc, char **argv)
         void *base = g_loader.image_base;
         IMAGE_DATA_DIRECTORY imp_dir;
         void *ll_addr = (void *)(uintptr_t)0;
+        void *ll_iat_ptr = NULL; /* pointer to the IAT cell for LoadLibraryA */
         if (pe_get_import_dir(&g_nt_headers, &imp_dir) && imp_dir.VirtualAddress != 0) {
             uint64_t import_rva = imp_dir.VirtualAddress;
             IMAGE_IMPORT_DESCRIPTOR *desc =
                 (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
             while (desc->Name != 0) {
                 const char *dll_name = (const char *)((char *)base + desc->Name);
-                if (dll_name[0] == 'k' && dll_name[1] == 'e' &&
-                    dll_name[2] == 'r' && dll_name[3] == 'n' &&
-                    dll_name[4] == 'e' && dll_name[5] == 'l' &&
-                    dll_name[6] == '3' && dll_name[7] == '2' &&
-                    dll_name[8] == '.' && dll_name[9] == 'd' &&
-                    dll_name[10] == 'l' && dll_name[11] == 'l' &&
-                    dll_name[12] == '\0') {
+                /* Case-insensitive DLL name check (PE may use "KERNEL32.dll") */
+                if (dll_strcasecmp(dll_name, "kernel32.dll") == 0) {
                     uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
                     uint8_t *iat_base = (uint8_t *)((char *)base + desc->FirstThunk);
 
@@ -783,6 +779,7 @@ int main(int argc, char **argv)
                             fname[9] == 'r' && fname[10] == 'y' &&
                             fname[11] == 'A' && fname[12] == '\0') {
                             ll_addr = (void *)(uintptr_t)*(uint32_t *)(iat_base + j * 4);
+                            ll_iat_ptr = (void *)(iat_base + j * 4);
                             /* Log the IAT value for LoadLibraryA */
                             {
                                 char buf[80];
@@ -821,6 +818,66 @@ int main(int argc, char **argv)
             }
             buf[i++] = '\n';
             INLINE_SYSCALL_WRITE(2, buf, i);
+        }
+
+        /* Final readback: verify the IAT cell survived pass 2 */
+        if (ll_iat_ptr) {
+            uint32_t final_val = *(uint32_t *)ll_iat_ptr;
+            char buf[64];
+            int i = 0;
+            const char *p = "IAT: LoadLibraryA (final)=0x";
+            while (*p) buf[i++] = *p++;
+            for (int h = 7; h >= 0; h--) {
+                buf[i++] = "0123456789abcdef"[(final_val >> (h * 4)) & 0xf];
+            }
+            buf[i++] = '\n';
+            INLINE_SYSCALL_WRITE(2, buf, i);
+        }
+
+        /* Scan .text for JMP thunks whose IAT target is 0x0 (unresolved) */
+        {
+            IMAGE_SECTION_HEADER *sections = get_image_sections(base, &g_nt_headers);
+            int num_sections = pe_section_count(&g_nt_headers);
+            uint64_t targets[MAX_THUNK_TARGETS];
+            int num_targets = scan_rip_relative_jumps(base, &g_nt_headers, sections,
+                                                       num_sections, targets, MAX_THUNK_TARGETS);
+            int zero_count = 0;
+            for (int t = 0; t < num_targets; t++) {
+                uint64_t target_rva = targets[t];
+                uint32_t *target_ptr = (uint32_t *)((char *)base + target_rva);
+                if ((uint32_t)*target_ptr == 0x0) {
+                    zero_count++;
+                    char buf[80];
+                    int n = 0;
+                    const char *p = "  ZERO thunk target at IAT RVA 0x";
+                    for (; *p && n < 70; ) buf[n++] = *p++;
+                    for (int h = 7; h >= 0; h--) {
+                        buf[n++] = "0123456789abcdef"[(target_rva >> (h*4)) & 0xf];
+                    }
+                    buf[n++] = '\n';
+                    INLINE_SYSCALL_WRITE(2, buf, n);
+                }
+            }
+            {
+                char buf[80];
+                int n = 0;
+                const char *p = "IAT thunk scan: ";
+                for (; *p && n < 70; ) buf[n++] = *p++;
+                { int d = n; int v = num_targets;
+                  if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                  if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                  n = d;
+                }
+                for (p = " targets, "; *p && n < 70; ) buf[n++] = *p++;
+                { int d = n; int v = zero_count;
+                  if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                  if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                  n = d;
+                }
+                for (p = " zero"; *p && n < 70; ) buf[n++] = *p++;
+                buf[n++] = '\n';
+                INLINE_SYSCALL_WRITE(2, buf, n);
+            }
         }
     }
 
