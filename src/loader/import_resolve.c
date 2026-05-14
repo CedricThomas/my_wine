@@ -37,9 +37,19 @@ void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS *nt,
 
 static void *resolve_import(const char *dll_name, const char *func_name)
 {
-    /* Tier 1: lookup in our stub import table (hand-rolled binary search) */
-    size_t lo = 0, hi = import_table_count;
+    /* Tier 1: lookup in our stub import table */
     import_entry_t *entry = NULL;
+#if defined(MY_WINE32)
+    /* 32-bit: linear scan (avoid sort/bsearch dependency issues) */
+    for (size_t i = 0; i < import_table_count; i++) {
+        if (import_cmp_by_name(func_name, &import_table[i]) == 0) {
+            entry = &import_table[i];
+            break;
+        }
+    }
+#else
+    /* 64-bit: hand-rolled binary search */
+    size_t lo = 0, hi = import_table_count;
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
         int cmp = import_cmp_by_name(func_name, &import_table[mid]);
@@ -52,6 +62,7 @@ static void *resolve_import(const char *dll_name, const char *func_name)
             break;
         }
     }
+#endif
     if (entry != NULL && entry->address != NULL) {
         if (entry->dll_name && dll_strcasecmp(entry->dll_name, dll_name) != 0) {
             DEBUG("  WARNING: %s found in %s but requested from %s",

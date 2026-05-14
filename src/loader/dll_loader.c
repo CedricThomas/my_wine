@@ -41,6 +41,9 @@
  * Suitable for calling from WINE_STUB context on guest stack. */
 loaded_module_t *load_dll(const char *path, int depth)
 {
+    const char msg[] = "load_dll: ENTER\n";
+    INLINE_SYSCALL_WRITE(2, msg, sizeof(msg) - 1);
+
     /* Save main PE globals — map_image_at overwrites them with the DLL's values */
     void *saved_image_base = g_loader.image_base;
     int saved_is_32bit = g_loader.is_32bit;
@@ -87,12 +90,16 @@ loaded_module_t *load_dll(const char *path, int depth)
     IMAGE_DOS_HEADER *img_dos = (IMAGE_DOS_HEADER *)base;
     uint32_t pe_off = img_dos->e_lfanew;
 
-    /* Allocate NT headers on heap so they survive past this function */
-    IMAGE_NT_HEADERS *img_nt = malloc(sizeof(IMAGE_NT_HEADERS));
-    if (!img_nt) {
+    /* Allocate NT headers on heap so they survive past this function.
+     * Use INLINE_SYSCALL_MMAP directly — in the 32-bit build, glibc malloc/free
+     * crash because they use FS-relative TLS access and FS→TEB is set. */
+    void *nt_alloc = INLINE_SYSCALL_MMAP(NULL, PAGE_SIZE,
+        PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (nt_alloc == MAP_FAILED) {
         INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
         return NULL;
     }
+    IMAGE_NT_HEADERS *img_nt = (IMAGE_NT_HEADERS *)nt_alloc;
     {
         uint32_t opt_off = pe_off + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER);
         const uint16_t *magic = (const uint16_t *)((char *)base + opt_off);
@@ -109,13 +116,13 @@ loaded_module_t *load_dll(const char *path, int depth)
      * Use saved_is_32bit since map_image_at() overwrote g_loader.is_32bit with the DLL's type. */
     if (saved_is_32bit && img_nt->pe_type == PE_TYPE_64) {
         DEBUG("  ERROR: cannot load PE32+ DLL '%s' for PE32 binary", path);
-        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
         INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
         return NULL;
     }
     if (!saved_is_32bit && img_nt->pe_type == PE_TYPE_32) {
         DEBUG("  ERROR: cannot load PE32 DLL '%s' for PE32+ binary", path);
-        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
         INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
         return NULL;
     }
@@ -133,7 +140,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     if (mod == NULL) {
         DEBUG("  ERROR: module list full, cannot load '%s'", name);
         uintptr_t sz = pe_size_of_image(img_nt);
-        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
         INLINE_SYSCALL_MUNMAP(base, sz);
         return NULL;
     }
@@ -154,7 +161,7 @@ loaded_module_t *load_dll(const char *path, int depth)
         reset_export_cache(mod);
         remove_module(mod);
         uintptr_t sz = pe_size_of_image(img_nt);
-        free(img_nt);
+        INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
         INLINE_SYSCALL_MUNMAP(base, sz);
         return NULL;
     }

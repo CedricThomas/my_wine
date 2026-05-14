@@ -18,6 +18,9 @@ static char g_dll_path[512];
 WINE_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
+    const char msg1[] = "LoadLibraryA: ENTER\n";
+    INLINE_SYSCALL_WRITE(2, msg1, sizeof(msg1) - 1);
+
     if (lpLibFileName == NULL) {
         return FORCE_PTR_RETURN(NULL);
     }

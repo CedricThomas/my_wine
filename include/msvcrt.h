@@ -1,6 +1,7 @@
 #ifndef MY_WINE_MSVCRT_H
 #define MY_WINE_MSVCRT_H
 
+#include "wine_abi.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "common.h"
@@ -16,9 +17,9 @@
  */
 
 /* CRT startup functions */
-__attribute__((ms_abi))
+GUEST_ABI
 void __set_app_type(int type);
-__attribute__((ms_abi))
+GUEST_ABI
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *pStartInfo);
 #ifdef MY_WINE32
 /* 32-bit: these are data symbols (from crt_32_stub.c) */
@@ -29,42 +30,42 @@ extern char *__p__fmode;
 #else
 /* 64-bit: __p__commode/__p__fmode are function stubs (from crt_startup.c).
  * __initenv is now g_crt.initenv (in g_crt, from include/crt.h). */
-__attribute__((ms_abi))
+GUEST_ABI
 void *__p__commode(void);
-__attribute__((ms_abi))
+GUEST_ABI
 void *__p__fmode(void);
 #endif
-__attribute__((ms_abi))
+GUEST_ABI
 void _initterm(void);
-__attribute__((ms_abi))
+GUEST_ABI
 void *_initterm_e(const void **pi, const void **pe);
-__attribute__((ms_abi))
+GUEST_ABI
 void *_onexit(void (*func)(void));
 
 /* IO buffers */
-__attribute__((ms_abi))
+GUEST_ABI
 void *__iob_func(void);
-__attribute__((ms_abi))
+GUEST_ABI
 void *__acrt_iob_func(void);
 
 /* Locale */
-__attribute__((ms_abi))
+GUEST_ABI
 void __lconv_init(void);
 
 /* Math error */
-__attribute__((ms_abi))
+GUEST_ABI
 void __setusermatherr(void (*handler)(void));
 
 /* Stdlib functions */
-__attribute__((ms_abi))
+GUEST_ABI
 void _amsg_exit(int msg);
-__attribute__((ms_abi))
+GUEST_ABI
 void _cexit(void);
 /* _exit and exit: main.c calls these directly with SysV ABI, so no ms_abi */
 void _exit(int code);
 void exit(int code);
 /* abort: declared in stdlib.h, PE gets it via import table pointer */
-__attribute__((ms_abi))
+GUEST_ABI
 void *_setargv(void);
 
 /* Memory functions */

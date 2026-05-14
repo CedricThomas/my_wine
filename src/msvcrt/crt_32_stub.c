@@ -15,6 +15,7 @@
 
 #ifdef MY_WINE32
 #include "../syscall/syscalls_inline.h"
+#include "../include/wine_abi.h"
 #else
 #include <stdlib.h>
 #include <stdio.h>
@@ -60,6 +61,7 @@ char ***__initenv_func(void) { return &__initenv; }
  * static _acmdln buffer so it outlives the call stack. */
 static char *g_argv_fallback[2];
 
+WINE_STUB
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_wildcards, void *pStartInfo)
 {
     (void)expand_wildcards;
@@ -77,12 +79,14 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_wildcards, 
 /* __initenv — MinGW CRT expects a function returning env pointer */
 
 /* _initterm — CRT initialization. Empty in our stub. */
+WINE_STUB
 void _initterm(void)
 {
     /* No-op — we don't need CRT initialization in my_wine */
 }
 
 /* _initterm_e — CRT init with init/exit function pointers */
+WINE_STUB
 void *_initterm_e(const void **pi, const void **pe)
 {
     if (pi) *pi = NULL;
@@ -91,6 +95,7 @@ void *_initterm_e(const void **pi, const void **pe)
 }
 
 /* _onexit — no-op */
+WINE_STUB
 void *_onexit(void (*func)(void))
 {
     (void)func;
@@ -98,12 +103,14 @@ void *_onexit(void (*func)(void))
 }
 
 /* __setusermatherr — no-op */
+WINE_STUB
 void __setusermatherr(void (*handler)(void))
 {
     (void)handler;
 }
 
 /* __set_app_type — set console/gui (no-op) */
+WINE_STUB
 void __set_app_type(int type)
 {
     __msvcrt_app_type = type;
@@ -111,12 +118,14 @@ void __set_app_type(int type)
 
 /* _amsg_exit — error exit */
 #ifdef MY_WINE32
+WINE_STUB
 void _amsg_exit(int msg)
 {
     (void)msg;
     INLINE_SYSCALL_EXIT(1);
 }
 #else
+WINE_STUB
 void _amsg_exit(int msg)
 {
     (void)msg;
@@ -126,11 +135,13 @@ void _amsg_exit(int msg)
 
 /* _cexit — clean exit */
 #ifdef MY_WINE32
+WINE_STUB
 void _cexit(void)
 {
     INLINE_SYSCALL_EXIT(0);
 }
 #else
+WINE_STUB
 void _cexit(void)
 {
     exit(0);
@@ -139,28 +150,36 @@ void _cexit(void)
 
 /* _errno — return errno pointer (use a local variable) */
 static int __my_wine_errno;
+WINE_STUB
 int *_errno(void)
 {
     return &__my_wine_errno;
 }
 
 /* _lock / _unlock — no-ops (single-threaded) */
+WINE_STUB
 void _lock(int type) { (void)type; }
+WINE_STUB
 void _unlock(int type) { (void)type; }
 
 /* __iob_func — not needed in 32-bit (no stdio) */
+WINE_STUB
 void *__iob_func(void) { return NULL; }
 
 /* __acrt_iob_func — not needed in 32-bit */
+WINE_STUB
 void *__acrt_iob_func(void) { return NULL; }
 
 /* __lconv_init — locale (no-op) */
+WINE_STUB
 void __lconv_init(void) { }
 
 /* ___lc_codepage_func — codepage (UTF-8) */
+WINE_STUB
 int ___lc_codepage_func(void) { return 65001; }
 
 /* ___mb_cur_max_func — max bytes per char */
+WINE_STUB
 int ___mb_cur_max_func(void) { return 1; }
 
 /* ── Stdlib stubs (needed by MinGW CRT) ─────────────────────── */
@@ -174,21 +193,25 @@ extern void *GetProcessHeap(void);
 
 static void *g_process_heap = NULL;
 
+WINE_STUB
 void *_m_malloc(size_t size)
 {
     if (!g_process_heap) g_process_heap = HeapCreate(0, 65536, 0);
     return HeapAlloc(g_process_heap, 0, size);
 }
+WINE_STUB
 void _m_free(void *ptr)
 {
     if (ptr && g_process_heap) HeapFree(g_process_heap, 0, ptr);
 }
+WINE_STUB
 void *_m_calloc(size_t nmemb, size_t size)
 {
     void *p = _m_malloc(nmemb * size);
     if (p) __builtin_memset(p, 0, nmemb * size);
     return p;
 }
+WINE_STUB
 void *_m_realloc(void *ptr, size_t size)
 {
     if (!ptr) return _m_malloc(size);
@@ -196,13 +219,17 @@ void *_m_realloc(void *ptr, size_t size)
 }
 
 /* memcpy / memset */
+WINE_STUB
 void *_m_memcpy(void *dst, const void *src, size_t n) { return __builtin_memcpy(dst, src, n); }
+WINE_STUB
 void *_m_memset(void *dst, int c, size_t n) { return __builtin_memset(dst, c, n); }
 
 /* strlen / strnlen / strcmp / strncmp */
+WINE_STUB
 size_t _m_strlen(const char *s) { return __builtin_strlen(s); }
 
 /* _m_strnlen — bounded string length (used by pe32_entry.c my_getenv) */
+WINE_STUB
 size_t _m_strnlen(const char *s, size_t n)
 {
     size_t i;
@@ -211,10 +238,12 @@ size_t _m_strnlen(const char *s, size_t n)
     return i;
 }
 
+WINE_STUB
 int _m_strcmp(const char *a, const char *b) {
     while (*a && *b) { if (*a != *b) return (unsigned char)*a - (unsigned char)*b; a++; b++; }
     return (unsigned char)*a - (unsigned char)*b;
 }
+WINE_STUB
 int _m_strncmp(const char *a, const char *b, size_t n) {
     while (n > 0 && *a && *b) { if (*a != *b) return (unsigned char)*a - (unsigned char)*b; a++; b++; n--; }
     if (n == 0) return 0;  /* all n characters matched */
@@ -250,38 +279,52 @@ int _m_strncasecmp(const char *a, const char *b, size_t n) {
     return _m_tolower_c((unsigned char)*a) - _m_tolower_c((unsigned char)*b);
 }
 
+WINE_STUB
 int _m_memcmp(const void *a, const void *b, size_t n) { return __builtin_memcmp(a, b, n); }
 
 /* abort / exit */
 #ifdef MY_WINE32
+WINE_STUB
 void _m_abort(void) { INLINE_SYSCALL_EXIT(1); }
+WINE_STUB
 void _m_exit(int code) { INLINE_SYSCALL_EXIT(code); }
 #else
+WINE_STUB
 void _m_abort(void) { abort(); }
+WINE_STUB
 void _m_exit(int code) { exit(code); }
 #endif
 
 /* signal — returns old handler (simplified) */
 typedef void (*sig_handler_t)(int);
+WINE_STUB
 sig_handler_t _m_signal(int sig, sig_handler_t handler) { (void)sig; (void)handler; return NULL; }
 
 /* wcslen */
+WINE_STUB
 size_t _m_wcslen(const void *s) { (void)s; return 0; }
 
 /* localeconv / strerror */
 struct lconv;
+WINE_STUB
 struct lconv *_m_localeconv(void) { return NULL; }
+WINE_STUB
 char *_m_strerror(int n) { (void)n; return "error"; }
 
 /* fprintf / fwrite / vfprintf / fputc */
 #ifdef MY_WINE32
 /* 32-bit: minimal stubs (no stdio in the build) */
+WINE_STUB
 int _m_fprintf(void *stream, const char *fmt, ...) { (void)stream; (void)fmt; return 0; }
+WINE_STUB
 int _m_fwrite(const void *ptr, size_t size, size_t nmemb, void *stream) { (void)ptr; (void)size; (void)nmemb; (void)stream; return 0; }
+WINE_STUB
 int _m_vfprintf(void *stream, const char *fmt, void *ap) { (void)stream; (void)fmt; (void)ap; return 0; }
+WINE_STUB
 int _m_fputc(int c, void *stream) { (void)c; (void)stream; return c; }
 #else
 /* 64-bit: wire through to real libc stdio (cast FILE* to/from void*) */
+WINE_STUB
 int _m_fprintf(void *stream, const char *fmt, ...) {
     va_list ap;
     int ret;
@@ -290,12 +333,15 @@ int _m_fprintf(void *stream, const char *fmt, ...) {
     va_end(ap);
     return ret;
 }
+WINE_STUB
 int _m_fwrite(const void *ptr, size_t size, size_t nmemb, void *stream) {
     return fwrite(ptr, size, nmemb, (FILE *)stream);
 }
+WINE_STUB
 int _m_vfprintf(void *stream, const char *fmt, void *ap) {
     return vfprintf((FILE *)stream, fmt, *(va_list *)ap);
 }
+WINE_STUB
 int _m_fputc(int c, void *stream) {
     return fputc(c, (FILE *)stream);
 }

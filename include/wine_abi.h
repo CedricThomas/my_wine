@@ -12,6 +12,16 @@
 #include <stdint.h>
 
 /*
+ * GUEST_ABI — attribute for guest-facing function declarations in headers.
+ * Must match WINE_STUB so declarations and definitions are compatible.
+ */
+#if defined(__i386__)
+#define GUEST_ABI
+#else
+#define GUEST_ABI __attribute__((ms_abi))
+#endif
+
+/*
  * WINE_STUB — marks a non-static function as using the guest calling
  * convention. Use for all exported stub functions called from guest PE code
  * (kernel32, msvcrt, ntdll exports).
