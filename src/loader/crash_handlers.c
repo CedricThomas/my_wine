@@ -193,25 +193,50 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         } else {
             const char warn[] = "CRASH: ucontext invalid, skipping register dump\n";
             INLINE_SYSCALL_WRITE_ERR(warn, sizeof(warn) - 1);
-            /* Fallback: dump current stack to approximate crash location */
+            /* Fallback: read ESP + EBP, derive signal frame return address */
 #if defined(__i386__)
             {
-                uintptr_t esp;
+                uintptr_t esp, ebp;
                 __asm__ volatile("movl %%esp, %0" : "=r"(esp));
-                char buf[128]; int n = 0;
-                const char *p = "CRASH: fallback ESP=0x";
-                while (*p && n < 50) buf[n++] = *p++;
+                __asm__ volatile("movl %%ebp, %0" : "=r"(ebp));
+                char buf[200]; int n = 0;
+                const char *p;
+
+                /* ESP gives current stack position */
+                p = "CRASH: fallback ESP=0x";
+                while (*p && n < 200) buf[n++] = *p++;
                 for (int h = 7; h >= 0; h--)
                     buf[n++] = "0123456789abcdef"[(esp>>(h*4))&0xf];
-                /* Dump a few words on the stack */
-                for (p = ", stack=["; *p && n < 110; ) buf[n++] = *p++;
+
+                /* EBP points to saved frame pointer; return address (signal trampoline)
+                 * at [EBP+4]. This is the kernel's sigreturn address, useful for
+                 * confirming the signal handler frame is intact. */
+                p = ", EBP=0x";
+                while (*p && n < 200) buf[n++] = *p++;
+                for (int h = 7; h >= 0; h--)
+                    buf[n++] = "0123456789abcdef"[(ebp>>(h*4))&0xf];
+
+                /* Read return address from signal handler frame: [EBP+4] */
+                uintptr_t sig_ret = 0;
+                if (ebp > 0x1000 && ebp < 0xFFFFC000UL)
+                    sig_ret = *(uintptr_t *)(ebp + 4);
+
+                p = ", signal_ret=0x";
+                while (*p && n < 200) buf[n++] = *p++;
+                for (int h = 7; h >= 0; h--)
+                    buf[n++] = "0123456789abcdef"[(sig_ret>>(h*4))&0xf];
+
+                /* Dump a few words at current ESP for additional context */
+                p = ", stack=[";
+                while (*p && n < 200) buf[n++] = *p++;
                 uintptr_t *sp = (uintptr_t *)esp;
-                for (int i = 0; i < 4 && n < 110; i++) {
+                for (int i = 0; i < 4 && n < 200; i++) {
                     if (i > 0) buf[n++] = ' ';
                     for (int h = 7; h >= 0; h--)
                         buf[n++] = "0123456789abcdef"[(sp[i]>>(h*4))&0xf];
                 }
-                buf[n++] = ']'; buf[n++] = '\n';
+                buf[n++] = ']';
+                buf[n++] = '\n';
                 INLINE_SYSCALL_WRITE(2, buf, n);
             }
 #endif
