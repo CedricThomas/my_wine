@@ -66,7 +66,7 @@ static void vm_alloc_remove(int idx)
 
 /* ── lstrlenA ───────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int lstrlenA(const char *lpString)
 {
     const char *s = lpString;
@@ -76,7 +76,7 @@ int lstrlenA(const char *lpString)
 
 /* ── lstrcpyA ───────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 char *lstrcpyA(char *dest, const char *src)
 {
     char *d = dest;
@@ -90,7 +90,7 @@ char *lstrcpyA(char *dest, const char *src)
 
 /* ── lstrcatA ───────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 char *lstrcatA(char *dest, const char *src)
 {
     char *d = dest;
@@ -105,7 +105,7 @@ char *lstrcatA(char *dest, const char *src)
 
 /* ── GetLastError ───────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 uint32_t GetLastError(void)
 {
     return g_last_error;
@@ -113,7 +113,7 @@ uint32_t GetLastError(void)
 
 /* ── TlsGetValue ───────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *TlsGetValue(uint32_t dwTlsIndex)
 {
     (void)dwTlsIndex;
@@ -128,7 +128,7 @@ void *TlsGetValue(uint32_t dwTlsIndex)
  * to avoid a uint64_t parameter passing through the handler ABI in 32-bit
  * mode, where the handler's inline asm can clobber callee-saved registers.
  */
-WINE_STUB
+KERNEL32_STUB
 void GetSystemTimeAsFileTime(FILETIME *lpSystemTime)
 {
     if (lpSystemTime == NULL) {
@@ -155,7 +155,7 @@ void GetSystemTimeAsFileTime(FILETIME *lpSystemTime)
  * to avoid a uint64_t parameter passing through the handler ABI in 32-bit
  * mode, where the handler's inline asm can clobber callee-saved registers.
  */
-WINE_STUB
+KERNEL32_STUB
 int QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount)
 {
     if (lpPerformanceCount == NULL) {
@@ -179,7 +179,7 @@ int QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount)
  * Inlines the constant directly (instead of calling handler_NtQueryPerformanceFrequency)
  * to avoid a uint64_t parameter passing through the handler ABI in 32-bit mode.
  */
-WINE_STUB
+KERNEL32_STUB
 int QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency)
 {
     if (lpFrequency == NULL) {
@@ -193,7 +193,7 @@ int QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency)
 
 /* ── VirtualProtect ─────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect)
 {
     int prot = map_protect(flNewProtect);
@@ -233,7 +233,7 @@ typedef struct {
     uint32_t __unused2;
 } MEMORY_BASIC_INFORMATION;
 
-WINE_STUB
+KERNEL32_STUB
 uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
 {
     if (!lpAddress || !lpBuffer) {
@@ -265,7 +265,7 @@ uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength)
  * In 64-bit mode, g_crt.acmdln (from crt_globals) is fine since all addresses
  * are accessible to the guest.
  */
-WINE_STUB
+KERNEL32_STUB
 const char *GetCommandLineA(void)
 {
 #ifdef __i386__
@@ -284,14 +284,14 @@ const char *GetCommandLineA(void)
  * Returns NULL — most PE startup code only reads this to verify
  * the environment is accessible, and the CRT uses __initenv instead.
  */
-WINE_STUB
+KERNEL32_STUB
 char *GetEnvironmentStringsA(void)
 {
     return FORCE_PTR_RETURN(NULL);
 }
 
 /* ── IsDBCSLeadByteEx ──────────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 int IsDBCSLeadByteEx(uint16_t code_page, uint8_t byte)
 {
     (void)code_page;
@@ -300,7 +300,7 @@ int IsDBCSLeadByteEx(uint16_t code_page, uint8_t byte)
 }
 
 /* ── MultiByteToWideChar ───────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 int MultiByteToWideChar(uint32_t code_page, uint32_t dw_flags,
                         const char *lpMultiByteStr, int cbMultiByteChar,
                         void *lpWideCharStr, int cchWideChar)
@@ -315,7 +315,7 @@ int MultiByteToWideChar(uint32_t code_page, uint32_t dw_flags,
 }
 
 /* ── WideCharToMultiByte ───────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 int WideCharToMultiByte(uint32_t code_page, uint32_t dw_flags,
                         const void *lpWideCharStr, int cchWideChar,
                         char *lpMultiByteStr, int cbMultiByteChar,
@@ -338,7 +338,7 @@ int WideCharToMultiByte(uint32_t code_page, uint32_t dw_flags,
  * MSVC for exception dispatch. For our minimal runtime we just
  * return ExceptionContinueSearch (1) to skip the handler.
  */
-WINE_STUB
+KERNEL32_STUB
 uint64_t __C_specific_handler(uint64_t exception_record, uint64_t establisher_frame,
                                uint64_t context_record, uint64_t dispatcher_context,
                                uint64_t image_base, uint64_t module_data,
@@ -366,7 +366,7 @@ uint64_t __C_specific_handler(uint64_t exception_record, uint64_t establisher_fr
 }
 
 /* ── CloseHandle ──────────────────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 int CloseHandle(void *hObject)
 {
     uint64_t handle = (uint64_t)(uintptr_t)hObject;
@@ -397,7 +397,7 @@ int CloseHandle(void *hObject)
 }
 
 /* ── CreateFileA ─────────────────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 void *CreateFileA(const char *lpFileName, uint32_t dwDesiredAccess,
                   uint32_t dwShareMode, void *lpSecurityAttributes,
                   uint32_t dwCreationDisposition, uint32_t dwFlagsAndAttributes,
@@ -503,7 +503,7 @@ void *CreateFileA(const char *lpFileName, uint32_t dwDesiredAccess,
 }
 
 /* ── DeleteFileA ─────────────────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 int DeleteFileA(const char *lpFileName)
 {
     if (lpFileName == NULL)
@@ -550,7 +550,7 @@ int DeleteFileA(const char *lpFileName)
 }
 
 /* ── VirtualAlloc ────────────────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 void *VirtualAlloc(void *lpAddress,
 #if defined(__i386__)
                    uint32_t dwSize,
@@ -583,7 +583,7 @@ void *VirtualAlloc(void *lpAddress,
 }
 
 /* ── VirtualFree ─────────────────────────────────────────────── */
-WINE_STUB
+KERNEL32_STUB
 int VirtualFree(void *lpAddress,
 #if defined(__i386__)
                 uint32_t dwSize,
@@ -637,5 +637,5 @@ int VirtualFree(void *lpAddress,
  * Used to verify that pointer-returning stubs correctly force values
  * into RAX for guest code consumption.
  */
-WINE_STUB void *test_return_ptr(void) { return FORCE_PTR_RETURN((void *)0x12345678UL); }
-WINE_STUB void *test_return_ptr_arg(void *arg) { return FORCE_PTR_RETURN(arg ? arg : (void *)0xdeadbeefUL); }
+KERNEL32_STUB void *test_return_ptr(void) { return FORCE_PTR_RETURN((void *)0x12345678UL); }
+KERNEL32_STUB void *test_return_ptr_arg(void *arg) { return FORCE_PTR_RETURN(arg ? arg : (void *)0xdeadbeefUL); }

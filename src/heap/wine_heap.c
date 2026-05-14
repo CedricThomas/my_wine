@@ -39,8 +39,8 @@ typedef struct wine_heap {
  * HeapCreate(flOptions, dwInitialSize, dwMaximumSize)
  * Returns a heap handle or NULL on failure.
  */
-WINE_STUB
-void *HeapCreate(uint32_t flOptions, uint64_t dwInitialSize, uint64_t dwMaximumSize)
+KERNEL32_STUB
+void *HeapCreate(uint32_t flOptions, uintptr_t dwInitialSize, uintptr_t dwMaximumSize)
 {
     wine_heap_t *heap;
 
@@ -73,8 +73,8 @@ void *HeapCreate(uint32_t flOptions, uint64_t dwInitialSize, uint64_t dwMaximumS
  * HeapAlloc(hHeap, dwFlags, dwBytes)
  * Returns pointer to allocated memory or NULL.
  */
-WINE_STUB
-void *HeapAlloc(void *hHeap, uint32_t dwFlags, uint64_t dwBytes)
+KERNEL32_STUB
+void *HeapAlloc(void *hHeap, uint32_t dwFlags, uintptr_t dwBytes)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
@@ -102,7 +102,7 @@ void *HeapAlloc(void *hHeap, uint32_t dwFlags, uint64_t dwBytes)
  * HeapFree(hHeap, dwFlags, lpMem)
  * Returns non-zero on success, zero on failure.
  */
-WINE_STUB
+KERNEL32_STUB
 int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
@@ -131,8 +131,8 @@ int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem)
  * HeapReAlloc(hHeap, dwFlags, lpMem, dwBytes)
  * Returns new pointer (may be same or different address).
  */
-WINE_STUB
-void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
+KERNEL32_STUB
+void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uintptr_t dwBytes)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
@@ -175,7 +175,7 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes)
  * HeapDestroy(hHeap)
  * Returns non-zero on success, zero on failure.
  */
-WINE_STUB
+KERNEL32_STUB
 int HeapDestroy(void *hHeap)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
@@ -203,7 +203,7 @@ int HeapDestroy(void *hHeap)
  * GetProcessHeap()
  * Returns the process default heap.
  */
-WINE_STUB
+KERNEL32_STUB
 void *GetProcessHeap(void)
 {
     return g_process_heap;
@@ -213,17 +213,17 @@ void *GetProcessHeap(void)
  * HeapSize(hHeap, dwFlags, lpMem)
  * Returns the size of the allocation or -1 on error.
  */
-WINE_STUB
-uint64_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem)
+KERNEL32_STUB
+uintptr_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
     if (!heap || !heap->is_valid || lpMem == NULL) {
-        return (uint64_t)-1;
+        return (uintptr_t)-1;
     }
 
     (void)dwFlags;
-    return (uint64_t)musl_malloc_usable_size((void *)lpMem);
+    return (uintptr_t)musl_malloc_usable_size((void *)lpMem);
 }
 
 /*

@@ -185,11 +185,11 @@ int ___mb_cur_max_func(void) { return 1; }
 /* ── Stdlib stubs (needed by MinGW CRT) ─────────────────────── */
 
 /* Heap functions from wine_heap.c */
-extern void *HeapCreate(unsigned int fl, size_t dwInitialSize, size_t dwMaximumSize);
-extern void *HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes);
-extern int HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem);
-extern void *HeapReAlloc(void *hHeap, unsigned int dwFlags, void *lpMem, size_t dwBytes);
-extern void *GetProcessHeap(void);
+extern KERNEL32_ABI void *HeapCreate(unsigned int fl, uintptr_t dwInitialSize, uintptr_t dwMaximumSize);
+extern KERNEL32_ABI void *HeapAlloc(void *hHeap, unsigned int dwFlags, uintptr_t dwBytes);
+extern KERNEL32_ABI int HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem);
+extern KERNEL32_ABI void *HeapReAlloc(void *hHeap, unsigned int dwFlags, void *lpMem, uintptr_t dwBytes);
+extern KERNEL32_ABI void *GetProcessHeap(void);
 
 static void *g_process_heap = NULL;
 

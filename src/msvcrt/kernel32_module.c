@@ -48,7 +48,7 @@ static inline void dbg_write_bool(const char *prefix, int val)
 
 /* ── LoadLibraryA ─────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
     const char msg1[] = "LoadLibraryA: ENTER\n";
@@ -93,7 +93,7 @@ void *_LoadLibraryA(const char *lpLibFileName)
 
 /* ── GetProcAddress ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *GetProcAddress(void *hModule, const char *lpProcName)
 {
     if (hModule == NULL || lpProcName == NULL)
@@ -113,7 +113,7 @@ void *_GetProcAddress(void *hModule, const char *lpProcName)
 
 /* ── GetModuleHandleA ──────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *GetModuleHandleA(const char *lpModuleName)
 {
     if (lpModuleName == NULL) {
@@ -133,7 +133,7 @@ void *_GetModuleHandleA(const char *lpModuleName)
 
 /* ── FreeLibraryA ──────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int FreeLibraryA(void *hModule)
 {
     loaded_module_t *mod = find_module_by_addr(hModule);
@@ -166,7 +166,7 @@ int _FreeLibraryA(void *hModule)
 
 /* ── FreeLibraryAndExitThread ──────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 __attribute__((noreturn)) void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)
 {
     FreeLibraryA(hModule);

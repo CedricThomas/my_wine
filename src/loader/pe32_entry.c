@@ -27,6 +27,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
 
@@ -247,16 +248,71 @@ static void *map_pe(const char *path)
 /*
  * resolve_entry — returns the PE entry point RVA.
  *
- * For PE32: uses the PE AddressOfEntryPoint directly.
- * The COFF symbol lookup approach was unreliable (struct layout
- * mismatches between file and in-memory IMAGE_NT_HEADERS caused
- * incorrect RVA values).  If a custom entry like D_DoomMain is
- * ever needed, it can be re-added with proper testing.
+ * For PE32: tries to find the _main symbol in the COFF symbol table
+ * so we can bypass the MinGW CRT startup (___tmainCRTStartup) and
+ * jump directly to the user's main(). This avoids the CRT relocator,
+ * exception filter setup, FPU reset, and other CRT init code that
+ * causes crashes in the 32-bit loader (EIP=0x0 after _out returns).
+ *
+ * When jumping to _main, we also set the _initialized CRT flag so that
+ * _main's call to ___main returns immediately without running
+ * __do_global_ctors (which can crash with inconsistent CRT state).
+ *
+ * If _main is not found, falls back to the PE AddressOfEntryPoint.
  */
 static uint32_t resolve_entry(const char *path)
 {
-    (void)path;
-    return pe_entry_rva(&g_nt_headers);
+    uint32_t entry_rva = pe_entry_rva(&g_nt_headers);
+    uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
+    uint32_t num_sym = pe_number_of_symbols(&g_nt_headers);
+
+    if (ptr_sym == 0 || num_sym == 0)
+        return entry_rva;
+
+    IMAGE_SYMBOL *symbols = NULL;
+    char *string_table = NULL;
+    int sym_count = parse_symbol_table_from_file(path, &g_nt_headers,
+                                                  &symbols, &string_table);
+    if (sym_count <= 0)
+        return entry_rva;
+
+    IMAGE_SECTION_HEADER *sections =
+        get_image_sections(g_loader.image_base, &g_nt_headers);
+    int num_sections = pe_section_count(&g_nt_headers);
+
+    /* Try _main first (MinGW convention for user's main) */
+    uint32_t main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                           sections, num_sections, "_main");
+    if (main_rva == 0) {
+        /* Try main without underscore */
+        main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                      sections, num_sections, "main");
+    }
+
+    if (main_rva != 0) {
+        entry_rva = main_rva;
+
+        /* Set the _initialized CRT flag so ___main skips __do_global_ctors. */
+        uint32_t init_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                               sections, num_sections, "_initialized");
+        if (init_rva == 0) {
+            IMAGE_SECTION_HEADER *bss = find_section_by_name(&g_nt_headers,
+                                                             sections, ".bss");
+            if (bss)
+                init_rva = bss->VirtualAddress + 0x40;
+        }
+        if (init_rva != 0) {
+            uint8_t *addr = (uint8_t *)g_loader.image_base + init_rva;
+            uintptr_t page = (uintptr_t)addr & ~(uintptr_t)PAGE_MASK;
+            long rc = INLINE_SYSCALL_MPROTECT((void *)page, PAGE_SIZE,
+                                               PROT_READ | PROT_WRITE);
+            if (rc == 0)
+                *(uint32_t *)addr = 1;
+        }
+    }
+
+    free(symbols);
+    return entry_rva;
 }
 
 /*

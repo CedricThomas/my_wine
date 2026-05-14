@@ -5,7 +5,7 @@
 
 /* ── ExitProcess ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void ExitProcess(uint32_t uExitCode)
 {
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
@@ -26,7 +26,7 @@ void ExitProcess(uint32_t uExitCode)
 
 /* ── GetStartupInfoA ────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void GetStartupInfoA(STARTUPINFOA *lpStartupInfo)
 {
     if (lpStartupInfo) {
@@ -37,7 +37,7 @@ void GetStartupInfoA(STARTUPINFOA *lpStartupInfo)
 
 /* ── SetUnhandledExceptionFilter ───────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *SetUnhandledExceptionFilter(void *callback)
 {
     (void)callback;
@@ -46,7 +46,7 @@ void *SetUnhandledExceptionFilter(void *callback)
 
 /* ── Sleep ──────────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void Sleep(uint32_t dwMilliseconds)
 {
     /* Inline formatting — avoids glibc sprintf which accesses vDSO via GS. */

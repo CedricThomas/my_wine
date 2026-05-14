@@ -22,6 +22,17 @@
 #endif
 
 /*
+ * KERNEL32_ABI — 32-bit Windows API imports use stdcall, where the callee
+ * pops stack arguments. MSVCRT imports remain cdecl on i386, so keep this
+ * separate from GUEST_ABI/WINE_STUB.
+ */
+#if defined(__i386__)
+#define KERNEL32_ABI __attribute__((stdcall))
+#else
+#define KERNEL32_ABI __attribute__((ms_abi))
+#endif
+
+/*
  * WINE_STUB — marks a non-static function as using the guest calling
  * convention. Use for all exported stub functions called from guest PE code
  * (kernel32, msvcrt, ntdll exports).
@@ -38,6 +49,12 @@
 #define WINE_STUB
 #else
 #define WINE_STUB __attribute__((ms_abi))
+#endif
+
+#if defined(__i386__)
+#define KERNEL32_STUB __attribute__((stdcall))
+#else
+#define KERNEL32_STUB __attribute__((ms_abi))
 #endif
 
 /*

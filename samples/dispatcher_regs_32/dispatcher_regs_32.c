@@ -83,8 +83,11 @@ int main(void)
         "movl %%esi, %0\n"
         "movl %%edi, %1\n"
         "movl %%ebx, %2\n"
-        : "=&c"(esi_before),
-          "=&d"(edi_before), "=&D"(ebx_before)
+        : "=m"(esi_before),
+          "=m"(edi_before),
+          "=m"(ebx_before)
+        :
+        : "memory"
     );
 
     /* The syscall: QPC → kernel32 stub → thunk → dispatcher. */
@@ -95,8 +98,11 @@ int main(void)
         "movl %%esi, %0\n"
         "movl %%edi, %1\n"
         "movl %%ebx, %2\n"
-        : "=&c"(esi_after),
-          "=&d"(edi_after), "=&D"(ebx_after)
+        : "=m"(esi_after),
+          "=m"(edi_after),
+          "=m"(ebx_after)
+        :
+        : "memory"
     );
 
     check_reg("EBP", 0xBADC0DE, frame_marker, hStdout);

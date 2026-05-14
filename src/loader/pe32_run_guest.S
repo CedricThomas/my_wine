@@ -48,17 +48,13 @@ pe32_run_guest:
 
     /*
      * Set EBP to a valid "frame" value before jumping to the PE entry.
-     * The CRT startup (_mainCRTStartup) does `push ebp; mov esp, ebp`
-     * and its cleanup epilogue does `lea -N(%ebp), %esp; pop ebp; ret`.
-     * If EBP is garbage when we jump, the CRT cleanup will crash.
-     *
-     * We set EBP to the address just above the fake return address
-     * (which is at ESP+4 after our subl $4). This way the CRT sees:
-     *   [ESP+0] = fake return address (entry_abs)
-     *   [ESP+4] = EBP (our synthetic caller frame)
-     * and the CRT's push/mov and eventual pop work correctly.
+     * When jumping to _main (bypassing CRT), we need EBP to point to
+     * a valid stack location so the entry function's prologue works.
+     * We set EBP = ESP, pointing to the fake return address.
+     * When the entry function does `push ebp; mov ebp, esp`,
+     * the saved EBP is a valid stack address.
      */
-    movl 4(%esp), %ebp      /* EBP = entry_abs (same as fake ret addr) */
+    movl %esp, %ebp         /* EBP = ESP (pointing to fake ret addr) */
 
     /* Jump to PE entry point (in ESI). Should not return. */
     jmp *%esi

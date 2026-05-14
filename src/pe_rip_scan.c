@@ -69,10 +69,13 @@ static int _scan_rip_jumps(void *image_base,
 
         if (is32) {
             /* PE32: disp is an absolute 32-bit address.
-             * Convert to RVA by subtracting image base. */
+             * Convert to RVA by subtracting the actual mapped base. The
+             * operand is relocated when the image is not at its preferred
+             * ImageBase, so using OptionalHeader.ImageBase is only correct
+             * before relocations or for preferred-base mappings. */
             uint32_t abs_addr = (uint32_t)(uint32_t)disp;
-            uint64_t base_rva = pe_image_base(nt);
-            target_rva = (uint64_t)(abs_addr - (uint32_t)base_rva);
+            uint32_t mapped_base = (uint32_t)(uintptr_t)image_base;
+            target_rva = (uint64_t)(abs_addr - mapped_base);
         } else {
             /* PE32+: RIP-relative. target = instr_addr + 6 + disp (RVA) */
             uint64_t instr_addr = text_start + off;

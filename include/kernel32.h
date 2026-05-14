@@ -24,61 +24,61 @@ void *_GetProcAddress(void *hModule, const char *lpProcName);
 void *_GetModuleHandleA(const char *lpModuleName);
 int _FreeLibraryA(void *hModule);
 
-/* Guest-facing declarations (ms_abi — called from PE code) */
-GUEST_ABI
+/* Guest-facing declarations (stdcall on i386, ms_abi on x86_64). */
+KERNEL32_ABI
 void *GetStdHandle(int nStdHandle);
 
-GUEST_ABI
+KERNEL32_ABI
 int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
               uint32_t *lpNumberOfBytesWritten, void *lpOverlapped);
 
-GUEST_ABI
+KERNEL32_ABI
 int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
              uint32_t *lpNumberOfBytesRead, void *lpOverlapped);
 
-GUEST_ABI
+KERNEL32_ABI
 void ExitProcess(uint32_t uExitCode);
 
-GUEST_ABI
+KERNEL32_ABI
 void *LoadLibraryA(const char *lpLibFileName);
 
 /* SysV-compatible wrapper for LoadLibraryA (callable from native code / tests) */
 void *_LoadLibraryA(const char *lpLibFileName);
 
-GUEST_ABI
+KERNEL32_ABI
 void *GetModuleHandleA(const char *lpModuleName);
 
 /* SysV-compatible wrapper for GetModuleHandleA (callable from native code / tests) */
 void *_GetModuleHandleA(const char *lpModuleName);
 
-GUEST_ABI
+KERNEL32_ABI
 void *GetProcAddress(void *hModule, const char *lpProcName);
 
 /* SysV-compatible wrapper for GetProcAddress (callable from native code / tests) */
 void *_GetProcAddress(void *hModule, const char *lpProcName);
 
-GUEST_ABI
+KERNEL32_ABI
 const char *GetCommandLineA(void);
 
-GUEST_ABI
+KERNEL32_ABI
 char *GetEnvironmentStringsA(void);
 
 /* Character conversion / DBCS */
-GUEST_ABI
+KERNEL32_ABI
 int IsDBCSLeadByteEx(uint16_t code_page, uint8_t byte);
 
-GUEST_ABI
+KERNEL32_ABI
 int MultiByteToWideChar(uint32_t code_page, uint32_t dw_flags,
                         const char *lpMultiByteStr, int cbMultiByteChar,
                         void *lpWideCharStr, int cchWideChar);
 
-GUEST_ABI
+KERNEL32_ABI
 int WideCharToMultiByte(uint32_t code_page, uint32_t dw_flags,
                         const void *lpWideCharStr, int cchWideChar,
                         char *lpMultiByteStr, int cbMultiByteChar,
                         void *lpDefaultChar, void *lpUsedDefaultChar);
 
-GUEST_ABI
+KERNEL32_ABI
 int FreeLibraryA(void *hModule);
 
 /* SysV-compatible wrapper for FreeLibraryA (callable from native code / tests) */
@@ -87,16 +87,16 @@ int _FreeLibraryA(void *hModule);
 /* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
 #define FreeLibrary FreeLibraryA
 
-GUEST_ABI
+KERNEL32_ABI
 __attribute__((noreturn))
 void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode);
 
-GUEST_ABI
+KERNEL32_ABI
 int lstrlenA(const char *lpString);
 
-GUEST_ABI
+KERNEL32_ABI
 char *lstrcpyA(char *dest, const char *src);
-GUEST_ABI
+KERNEL32_ABI
 char *lstrcatA(char *dest, const char *src);
 
 /* ── FILETIME / LARGE_INTEGER types ───────────────────────── */
@@ -112,33 +112,33 @@ typedef struct {
 
 /* ── Time functions ─────────────────────────────────────────── */
 
-GUEST_ABI
+KERNEL32_ABI
 void GetSystemTimeAsFileTime(FILETIME *lpSystemTime);
 
-GUEST_ABI
+KERNEL32_ABI
 int QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount);
 
-GUEST_ABI
+KERNEL32_ABI
 int QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency);
 
 /* ── Synchronization ────────────────────────────────────────── */
 
-GUEST_ABI
+KERNEL32_ABI
 void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, const char *lpName);
 
-GUEST_ABI
+KERNEL32_ABI
 int SetEvent(void *hEvent);
 
-GUEST_ABI
+KERNEL32_ABI
 int ResetEvent(void *hEvent);
 
-GUEST_ABI
+KERNEL32_ABI
 uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds);
 
-GUEST_ABI
+KERNEL32_ABI
 void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName);
 
-GUEST_ABI
+KERNEL32_ABI
 int ReleaseMutex(void *hMutex);
 
 /* ── Additional kernel32 stubs ──────────────────────────────── */
@@ -153,40 +153,40 @@ typedef struct {
     uint64_t SpinCount;             // 0x20, 8 bytes
 } CRITICAL_SECTION;                 // total 40 bytes
 
-GUEST_ABI
+KERNEL32_ABI
 void InitializeCriticalSection(CRITICAL_SECTION *cs);
-GUEST_ABI
+KERNEL32_ABI
 void EnterCriticalSection(CRITICAL_SECTION *cs);
-GUEST_ABI
+KERNEL32_ABI
 void LeaveCriticalSection(CRITICAL_SECTION *cs);
-GUEST_ABI
+KERNEL32_ABI
 void DeleteCriticalSection(CRITICAL_SECTION *cs);
 
 /* ── Heap management ─────────────────────────────────────────── */
 
-GUEST_ABI
-void *HeapCreate(uint32_t flOptions, uint64_t dwInitialSize, uint64_t dwMaximumSize);
+KERNEL32_ABI
+void *HeapCreate(uint32_t flOptions, uintptr_t dwInitialSize, uintptr_t dwMaximumSize);
 
-GUEST_ABI
-void *HeapAlloc(void *hHeap, uint32_t dwFlags, uint64_t dwBytes);
+KERNEL32_ABI
+void *HeapAlloc(void *hHeap, uint32_t dwFlags, uintptr_t dwBytes);
 
-GUEST_ABI
+KERNEL32_ABI
 int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem);
 
-GUEST_ABI
-void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uint64_t dwBytes);
+KERNEL32_ABI
+void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uintptr_t dwBytes);
 
-GUEST_ABI
+KERNEL32_ABI
 void *GetProcessHeap(void);
 
-GUEST_ABI
+KERNEL32_ABI
 int HeapDestroy(void *hHeap);
 
-GUEST_ABI
-uint64_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem);
+KERNEL32_ABI
+uintptr_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem);
 
 /* Error handling */
-GUEST_ABI
+KERNEL32_ABI
 uint32_t GetLastError(void);
 
 /* Startup info */
@@ -210,27 +210,27 @@ typedef struct {
     void *hStdError;
 } STARTUPINFOA;
 
-GUEST_ABI
+KERNEL32_ABI
 void GetStartupInfoA(STARTUPINFOA *lpStartupInfo);
 
 /* Exception handling */
-GUEST_ABI
+KERNEL32_ABI
 void *SetUnhandledExceptionFilter(void *callback);
 
 /* Sleep */
-GUEST_ABI
+KERNEL32_ABI
 void Sleep(uint32_t dwMilliseconds);
 
 /* Thread Local Storage */
-GUEST_ABI
+KERNEL32_ABI
 void *TlsGetValue(uint32_t dwTlsIndex);
 
 /* Memory management */
-GUEST_ABI
+KERNEL32_ABI
 int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect);
-GUEST_ABI
+KERNEL32_ABI
 uint64_t VirtualQuery(void *lpAddress, void *lpBuffer, uint32_t dwLength);
-GUEST_ABI
+KERNEL32_ABI
 void *VirtualAlloc(void *lpAddress,
 #if defined(__i386__)
                    uint32_t dwSize,
@@ -238,7 +238,7 @@ void *VirtualAlloc(void *lpAddress,
                    uint64_t dwSize,
 #endif
                    uint32_t flAllocationType, uint32_t flProtect);
-GUEST_ABI
+KERNEL32_ABI
 int VirtualFree(void *lpAddress,
 #if defined(__i386__)
                 uint32_t dwSize,
@@ -248,21 +248,21 @@ int VirtualFree(void *lpAddress,
                 uint32_t dwFreeType);
 
 /* File I/O */
-GUEST_ABI
+KERNEL32_ABI
 int CloseHandle(void *hObject);
 
 #define INVALID_HANDLE_VALUE ((void *)(uintptr_t)(intptr_t)-1)
 
-GUEST_ABI
+KERNEL32_ABI
 void *CreateFileA(const char *lpFileName, uint32_t dwDesiredAccess,
                   uint32_t dwShareMode, void *lpSecurityAttributes,
                   uint32_t dwCreationDisposition, uint32_t dwFlagsAndAttributes,
                   void *hTemplateFile);
-GUEST_ABI
+KERNEL32_ABI
 int DeleteFileA(const char *lpFileName);
 
 /* SEH handler */
-GUEST_ABI
+KERNEL32_ABI
 uint64_t __C_specific_handler(uint64_t exception_record, uint64_t establisher_frame,
                                uint64_t context_record, uint64_t dispatcher_context,
                                uint64_t image_base, uint64_t module_data,

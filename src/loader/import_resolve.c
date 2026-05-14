@@ -336,6 +336,10 @@ static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS *nt,
  */
 static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS *nt)
 {
+    if (pe_is_pe32(nt)) {
+        return 0;
+    }
+
     IMAGE_DATA_DIRECTORY imp_dir;
     if (!pe_get_import_dir(nt, &imp_dir)) {
         return 0;

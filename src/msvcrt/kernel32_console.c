@@ -6,7 +6,7 @@
 #include "../syscall/syscalls_inline.h"
 
 /* Helper: write a static message to stderr via direct syscall */
-WINE_STUB
+KERNEL32_STUB
 void write_to_stderr(const char *msg)
 {
     INLINE_SYSCALL_WRITE_ERR(msg, (size_t)__builtin_strlen(msg));
@@ -15,7 +15,7 @@ void write_to_stderr(const char *msg)
 
 /* ── GetStdHandle ───────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *GetStdHandle(int nStdHandle)
 {
     switch (nStdHandle) {
@@ -29,13 +29,13 @@ void *GetStdHandle(int nStdHandle)
 /* ── WriteFile ──────────────────────────────────────────────── */
 /*
  * Do NOT call handler_NtWriteFile from here.  handler_NtWriteFile is
- * compiled with the default (System V) ABI while WINE_STUB uses the
+ * compiled with the default (System V) ABI while KERNEL32_STUB uses the
  * Microsoft x64 ABI.  Calling a System V callee from an MS-ABI caller
  * (or vice-versa) corrupts register-based arguments.
  *
  * Instead, resolve the handle ourselves and issue the syscall directly.
  */
-WINE_STUB
+KERNEL32_STUB
 int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
               uint32_t *lpNumberOfBytesWritten, void *lpOverlapped)
 {
@@ -79,7 +79,7 @@ int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
  * Same ABI caveat as WriteFile — do the work directly instead of
  * calling handler_NtReadFile.
  */
-WINE_STUB
+KERNEL32_STUB
 int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
              uint32_t *lpNumberOfBytesRead, void *lpOverlapped)
 {

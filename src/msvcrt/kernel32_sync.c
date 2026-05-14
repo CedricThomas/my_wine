@@ -18,7 +18,7 @@
  * Create an event object. Maps to NtCreateEvent.
  * lpAttributes, lpName ignored → NULL. ManualReset=event_type, initialState.
  */
-WINE_STUB
+KERNEL32_STUB
 void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, const char *lpName)
 {
     (void)lpAttributes;
@@ -30,7 +30,7 @@ void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, cons
 
 /* ── SetEvent ────────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int SetEvent(void *hEvent)
 {
     uintptr_t handle = (uintptr_t)hEvent;
@@ -49,7 +49,7 @@ int SetEvent(void *hEvent)
 
 /* ── ResetEvent ──────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int ResetEvent(void *hEvent)
 {
     uintptr_t handle = (uintptr_t)hEvent;
@@ -71,7 +71,7 @@ int ResetEvent(void *hEvent)
  * dwMilliseconds: INFINITE=0xFFFFFFFF, else milliseconds.
  * Maps to NtWaitForSingleObject with relative timeout.
  */
-WINE_STUB
+KERNEL32_STUB
 uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 {
     uintptr_t handle = (uintptr_t)hHandle;
@@ -105,7 +105,7 @@ uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 
 /* ── CreateMutexA ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName)
 {
     (void)lpAttributes;
@@ -118,7 +118,7 @@ void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName)
 
 /* ── ReleaseMutex ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int ReleaseMutex(void *hMutex)
 {
     uintptr_t handle = (uintptr_t)hMutex;
@@ -132,7 +132,7 @@ int ReleaseMutex(void *hMutex)
 
 /* ── Critical Section stubs ─────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void InitializeCriticalSection(CRITICAL_SECTION *cs)
 {
     if (cs) {
@@ -145,7 +145,7 @@ void InitializeCriticalSection(CRITICAL_SECTION *cs)
     }
 }
 
-WINE_STUB
+KERNEL32_STUB
 void EnterCriticalSection(CRITICAL_SECTION *cs)
 {
     if (!cs) return;
@@ -187,7 +187,7 @@ void EnterCriticalSection(CRITICAL_SECTION *cs)
     }
 }
 
-WINE_STUB
+KERNEL32_STUB
 void LeaveCriticalSection(CRITICAL_SECTION *cs)
 {
     if (!cs) return;
@@ -201,7 +201,7 @@ void LeaveCriticalSection(CRITICAL_SECTION *cs)
     }
 }
 
-WINE_STUB
+KERNEL32_STUB
 void DeleteCriticalSection(CRITICAL_SECTION *cs)
 {
     if (!cs) return;
