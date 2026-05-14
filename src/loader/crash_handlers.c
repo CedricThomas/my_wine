@@ -30,6 +30,7 @@
 #include <sys/user.h>
 
 static int g_alt_stack_available = 1;  /* Flipped to 0 if signal stack mmap fails */
+static volatile int g_in_crash_handler = 0;  /* Recursion guard */
 
 /*
  * SEH handler — called when an exception occurs in guest code.
@@ -67,7 +68,12 @@ void seh_crash_handler(void *exception_record, void *establisher_frame,
  */
 static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 {
-    (void)info;
+    /* Recursion guard: if we're already in the handler, just exit immediately */
+    if (g_in_crash_handler) {
+        INLINE_SYSCALL_EXIT(EXIT_SIGSEGV);
+    }
+    g_in_crash_handler = 1;
+
     const char sig_sev[] = "CRASH: SIGSEGV";
     const char sig_ill[] = "CRASH: SIGILL";
     const char sig_abt[] = "CRASH: SIGABRT";
@@ -86,6 +92,29 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
     else if (sig == SIGTRAP) { sig_name = sig_trap; sig_len = 13; }
 
     INLINE_SYSCALL_WRITE_ERR(sig_name, (size_t)sig_len);
+
+    /* Dump diagnostic info: si_addr, ucontext ptr */
+    {
+        uintptr_t uc_ptr = (uintptr_t)ucontext;
+        uintptr_t fault_addr = 0;
+        /* Try to read si_addr safely */
+        if (info != NULL && (uintptr_t)info >= 0x1000 && (uintptr_t)info < 0xFFFFC000UL) {
+            fault_addr = (uintptr_t)info->si_addr;
+        }
+        char buf[128];
+        int n = 0;
+        const char *p;
+        for (p = "CRASH: si_addr=0x"; *p && n < 120; ) buf[n++] = *p++;
+        for (int h = 7; h >= 0; h--) {
+            buf[n++] = "0123456789abcdef"[(fault_addr >> (h*4)) & 0xf];
+        }
+        for (p = ", ucontext=0x"; *p && n < 120; ) buf[n++] = *p++;
+        for (int h = 7; h >= 0; h--) {
+            buf[n++] = "0123456789abcdef"[(uc_ptr >> (h*4)) & 0xf];
+        }
+        buf[n++] = '\n';
+        INLINE_SYSCALL_WRITE(2, buf, n);
+    }
 
     if (!g_alt_stack_available) {
         const char stack_warn[] = "WARNING: running on guest stack — crash may be unrecoverable\n";
@@ -164,6 +193,28 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         } else {
             const char warn[] = "CRASH: ucontext invalid, skipping register dump\n";
             INLINE_SYSCALL_WRITE_ERR(warn, sizeof(warn) - 1);
+            /* Fallback: dump current stack to approximate crash location */
+#if defined(__i386__)
+            {
+                uintptr_t esp;
+                __asm__ volatile("movl %%esp, %0" : "=r"(esp));
+                char buf[128]; int n = 0;
+                const char *p = "CRASH: fallback ESP=0x";
+                while (*p && n < 50) buf[n++] = *p++;
+                for (int h = 7; h >= 0; h--)
+                    buf[n++] = "0123456789abcdef"[(esp>>(h*4))&0xf];
+                /* Dump a few words on the stack */
+                for (p = ", stack=["; *p && n < 110; ) buf[n++] = *p++;
+                uintptr_t *sp = (uintptr_t *)esp;
+                for (int i = 0; i < 4 && n < 110; i++) {
+                    if (i > 0) buf[n++] = ' ';
+                    for (int h = 7; h >= 0; h--)
+                        buf[n++] = "0123456789abcdef"[(sp[i]>>(h*4))&0xf];
+                }
+                buf[n++] = ']'; buf[n++] = '\n';
+                INLINE_SYSCALL_WRITE(2, buf, n);
+            }
+#endif
         }
     }
 
@@ -233,7 +284,7 @@ void setup_signal_handlers(void)
     memset(&sa, 0, sizeof(sa));
 #endif
     sa.sa_sigaction = crash_handler;
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
 #ifdef MY_WINE32
     for (int _si = 0; _si < (int)(sizeof(sa.sa_mask.__val)/sizeof(sa.sa_mask.__val[0])); _si++)
         sa.sa_mask.__val[_si] = 0;
