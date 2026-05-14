@@ -2,8 +2,11 @@
  * import_resolve.c — IAT resolution (pass 1 + pass 2 + thunk strategies)
  *
  * Resolves imports by patching IAT entries in the PE image.
- * Glibc-free: all string/memory ops are hand-rolled.
+ * Glibc-free: all string/memory ops are hand-rolled. No PLT calls.
  * Binary search in import table is hand-rolled (no bsearch dependency).
+ *
+ * IMPORTANT: This file runs AFTER the GS→TEB switch in 32-bit mode.
+ * No glibc calls permitted (no DEBUG/fprintf, no string.h, etc.)
  */
 
 #include "include/pe.h"
@@ -12,7 +15,6 @@
 #include "include/common.h"
 #include "include/nt_constants.h"
 #include "loader_priv.h"
-#include "include/debug.h"
 #include "export_table.h"
 #include "module_list.h"
 #include "peb_ldr.h"
@@ -64,10 +66,6 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     }
 #endif
     if (entry != NULL && entry->address != NULL) {
-        if (entry->dll_name && dll_strcasecmp(entry->dll_name, dll_name) != 0) {
-            DEBUG("  WARNING: %s found in %s but requested from %s",
-                  func_name, entry->dll_name, dll_name);
-        }
         return entry->address;
     }
 
@@ -76,14 +74,11 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     if (mod != NULL && mod->export_cache.number_of_names > 0) {
         void *addr = lookup_export(mod, func_name);
         if (addr != NULL) {
-            DEBUG("    Resolved %s!%s from module %s via export table -> %p",
-                  dll_name, func_name, mod->name, addr);
             return addr;
         }
     }
 
     /* Tier 3: not found */
-    DEBUG("  ERROR: unresolved import: %s!%s", dll_name, func_name);
     return NULL;
 }
 
@@ -94,11 +89,9 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
 {
     IMAGE_DATA_DIRECTORY imp_dir;
     if (!pe_get_import_dir(nt, &imp_dir)) {
-        DEBUG("No imports to resolve");
         return 0;
     }
     if (imp_dir.Size == 0) {
-        DEBUG("No imports to resolve");
         return 0;
     }
 
@@ -109,12 +102,8 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
     uint64_t high_bit_mask = is32 ? 0x80000000 : 0x8000000000000000ULL;
     size_t thunk_size = is32 ? sizeof(uint32_t) : sizeof(uint64_t);
 
-    DEBUG("Resolving imports:");
-
     while (desc->Name != 0) {
         const char *dll_name = (const char *)((char *)base + desc->Name);
-
-        DEBUG("  DLL: %s", dll_name);
 
         uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
         uint8_t *iat_base  = (uint8_t *)((char *)base + desc->FirstThunk);
@@ -130,7 +119,6 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
             if (thunk_val == 0) break;
 
             void *addr = NULL;
-            const char *func_name_for_debug = NULL;
 
             if (thunk_val & high_bit_mask) {
                 /* Ordinal import (high bit set) */
@@ -138,29 +126,19 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                 const char *func_name = ordinal_lookup(dll_name, ordinal);
                 if (func_name != NULL) {
                     addr = resolve_import(dll_name, func_name);
-                    DEBUG("    Resolved ordinal %s!%d -> %s -> %p",
-                          dll_name, ordinal, func_name, addr);
-                } else {
-                    DEBUG("  WARNING: ordinal import %s!%d not in lookup table",
-                          dll_name, ordinal);
                 }
-                func_name_for_debug = "<ordinal>";
             } else {
                 /* Name import */
                 IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk_val);
-                func_name_for_debug = (const char *)imp_name->Name;
-                addr = resolve_import(dll_name, func_name_for_debug);
+                addr = resolve_import(dll_name, (const char *)imp_name->Name);
             }
 
             if (addr != NULL) {
-                DEBUG("    Resolved %s -> %p", func_name_for_debug, addr);
                 if (is32) {
                     *(uint32_t *)(iat_base + i * thunk_size) = (uint32_t)(uintptr_t)addr;
                 } else {
                     *(uint64_t *)(iat_base + i * thunk_size) = (uint64_t)(uintptr_t)addr;
                 }
-            } else {
-                DEBUG("    FAILED to resolve import at index %d", i);
             }
         }
 
@@ -211,9 +189,6 @@ static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS *nt,
                                       flat, num_flat);
         if (did_match) {
             matched++;
-        } else {
-            DEBUG("    Thunk patch UNMATCHED at 0x%lx (current=0x%lx)",
-                  (unsigned long)target, (unsigned long)current_val);
         }
     }
 
@@ -239,19 +214,10 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS *nt)
     if (num_targets == 0)
         return 0;
 
-    DEBUG("  Found %d thunk targets in .text (range 0x%lx-0x%lx)",
-          num_targets,
-          (unsigned long)thunk_targets[0],
-          (unsigned long)thunk_targets[num_targets - 1] + 7);
-
     struct import_flat flat[MAX_FLAT_IMPORTS];
     int num_flat = build_flat_import_array(base, nt, flat);
 
-    DEBUG("  Flat import array: %d entries", num_flat);
-
-    int matched = patch_thunk_targets(base, nt, thunk_targets, num_targets, flat, num_flat);
-
-    DEBUG("  Thunk IAT patched: %d/%d targets resolved", matched, num_targets);
+    patch_thunk_targets(base, nt, thunk_targets, num_targets, flat, num_flat);
 
     return 0;
 }
@@ -272,8 +238,6 @@ int resolve_imports(void *base, IMAGE_NT_HEADERS *nt)
 int resolve_module_imports(loaded_module_t *mod, int depth)
 {
     if (depth >= MAX_IMPORT_DEPTH) {
-        DEBUG("  ERROR: import resolution depth exceeded (%d) for %s",
-              MAX_IMPORT_DEPTH, mod->name);
         return -1;
     }
 
@@ -303,8 +267,6 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
             if (dll_strcasecmp("kernel32.dll", dll_name) == 0 ||
                 dll_strcasecmp("ntdll.dll", dll_name) == 0 ||
                 dll_strcasecmp("msvcrt.dll", dll_name) == 0) {
-                DEBUG("  Skipping stub library '%s' for %s (resolved via import table)",
-                      dll_name, mod->name);
                 d++;
                 continue;
             }
@@ -312,16 +274,12 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
             /* Need to load this DLL */
             char path[512];
             if (!find_dll_path(dll_name, path, sizeof(path))) {
-                DEBUG("  ERROR: cannot find DLL '%s' imported by %s",
-                      dll_name, mod->name);
                 return -1;
             }
 
             /* Load the DLL (map + relocate + register) */
             dep = load_dll(path, depth + 1);
             if (dep == NULL) {
-                DEBUG("  ERROR: failed to load '%s' for %s",
-                      dll_name, mod->name);
                 return -1;
             }
         }
@@ -330,17 +288,13 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
 
     /* Second pass: resolve all imports using the three-tier resolver */
     if (resolve_imports(base, nt) != 0) {
-        DEBUG("  ERROR: import resolution failed for %s", mod->name);
         return -1;
     }
 
     /* Parse exports so this module's functions can be found by others */
     if (parse_export_table(mod) != 0) {
         /* parse_export_table returns -1 if no export dir — that's OK */
-        DEBUG("  parse_export_table returned -1 for %s (no exports?)", mod->name);
     }
 
     return 0;
 }
-
-

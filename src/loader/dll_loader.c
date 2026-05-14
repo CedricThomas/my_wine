@@ -3,21 +3,19 @@
  *
  * Maps a DLL at a reserved base below 4GB, applies relocations,
  * registers in module list + LDR, and resolves its imports.
- * Glibc-free: all string/memory ops are hand-rolled or __builtin.
- * Suitable for calling from WINE_STUB context on guest stack.
+ *
+ * Glibc-free: all string/memory ops use dll_* macros from loader_utils.h.
+ * No PLT calls — safe to call from WINE_STUB context after GS→TEB switch.
  *
  * Extracted from import_resolve.c.
  */
 
-#include <string.h>
-#include <stdlib.h>
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/pe_priv.h"
 #include "include/common.h"
 #include "include/nt_constants.h"
 #include "loader_priv.h"
-#include "include/debug.h"
 #include "export_table.h"
 #include "module_list.h"
 #include "peb_ldr.h"
@@ -75,7 +73,6 @@ loaded_module_t *load_dll(const char *path, int depth)
     dll_copy_str(g_loader.pe_path, saved_pe_path, sizeof(g_loader.pe_path));
 
     if (base == NULL) {
-        DEBUG("  ERROR: map_image_at failed for '%s'", path);
         return NULL;
     }
 
@@ -105,23 +102,21 @@ loaded_module_t *load_dll(const char *path, int depth)
         const uint16_t *magic = (const uint16_t *)((char *)base + opt_off);
         if (*magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
             img_nt->pe_type = PE_TYPE_32;
-            memcpy(&img_nt->u.nt32, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS32));
+            dll_memcpy(&img_nt->u.nt32, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS32));
         } else {
             img_nt->pe_type = PE_TYPE_64;
-            memcpy(&img_nt->u.nt64, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS64));
+            dll_memcpy(&img_nt->u.nt64, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS64));
         }
     }
 
     /* Check PE32/PE32+ mixing — DLL must match the main binary's PE type.
      * Use saved_is_32bit since map_image_at() overwrote g_loader.is_32bit with the DLL's type. */
     if (saved_is_32bit && img_nt->pe_type == PE_TYPE_64) {
-        DEBUG("  ERROR: cannot load PE32+ DLL '%s' for PE32 binary", path);
         INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
         INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
         return NULL;
     }
     if (!saved_is_32bit && img_nt->pe_type == PE_TYPE_32) {
-        DEBUG("  ERROR: cannot load PE32 DLL '%s' for PE32+ binary", path);
         INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
         INLINE_SYSCALL_MUNMAP(base, pe_size_of_image(&nt_copy));
         return NULL;
@@ -138,7 +133,6 @@ loaded_module_t *load_dll(const char *path, int depth)
     /* Register in module list */
     loaded_module_t *mod = add_module(base, name, img_nt);
     if (mod == NULL) {
-        DEBUG("  ERROR: module list full, cannot load '%s'", name);
         uintptr_t sz = pe_size_of_image(img_nt);
         INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
         INLINE_SYSCALL_MUNMAP(base, sz);
@@ -153,7 +147,6 @@ loaded_module_t *load_dll(const char *path, int depth)
     /* Resolve this DLL's own imports (recursive).
      * resolve_module_imports also calls parse_export_table internally. */
     if (resolve_module_imports(mod, depth + 1) != 0) {
-        DEBUG("  ERROR: import resolution failed for '%s'", name);
         /* Cleanup all resources allocated above */
         if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
             ldr_remove_module(mod);
@@ -174,6 +167,5 @@ loaded_module_t *load_dll(const char *path, int depth)
         parse_export_table(mod);
     }
 
-    DEBUG("Loaded DLL: %s at %p", name, base);
     return mod;
 }

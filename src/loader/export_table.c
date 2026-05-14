@@ -6,17 +6,16 @@
  * embedded EXPORT_CACHE within loaded_module_t.
  *
  * No malloc — the cache is embedded. No glibc — all memory ops
- * use __builtin_memcpy or hand-rolled loops.
+ * use dll_memcpy/dll_memset macros (no PLT calls).
+ * Glibc-free: safe to call from WINE_STUB context after GS→TEB switch.
  */
 
-#include <stdio.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "export_table.h"
 #include "include/pe_priv.h"
 #include "include/nt_constants.h"
-#include "include/debug.h"
+#include "loader_utils.h"
 
 int parse_export_table(loaded_module_t *mod)
 {
@@ -34,8 +33,8 @@ int parse_export_table(loaded_module_t *mod)
 
     EXPORT_CACHE *cache = &mod->export_cache;
 
-    /* Zero the entire cache */
-    __builtin_memset(cache, 0, sizeof(EXPORT_CACHE));
+    /* Zero the entire cache — glibc-free */
+    dll_memset(cache, 0, sizeof(EXPORT_CACHE));
 
     cache->base = mod->base;
     cache->export_dir_rva = dir.VirtualAddress;
@@ -50,13 +49,11 @@ int parse_export_table(loaded_module_t *mod)
     /* Copy AddressOfNames array (RVAs) */
     if (exp->NumberOfNames > 0 && exp->AddressOfNames != 0) {
         if (exp->NumberOfNames > MAX_EXPORT_NAMES) {
-            DEBUG("  WARNING: export name count %u exceeds MAX_EXPORT_NAMES %d",
-                  exp->NumberOfNames, MAX_EXPORT_NAMES);
             exp->NumberOfNames = MAX_EXPORT_NAMES;
         }
         size_t nsize = exp->NumberOfNames * sizeof(uint32_t);
         uint32_t *src = (uint32_t *)((uint8_t *)mod->base + exp->AddressOfNames);
-        __builtin_memcpy(cache->name_table, src, nsize);
+        dll_memcpy(cache->name_table, src, nsize);
     }
 
     /* Copy AddressOfNameOrdinals array (uint16_t ordinals) */
@@ -64,19 +61,17 @@ int parse_export_table(loaded_module_t *mod)
         uint32_t names = exp->NumberOfNames;  /* already capped above */
         size_t osize = names * sizeof(uint16_t);
         uint16_t *src = (uint16_t *)((uint8_t *)mod->base + exp->AddressOfNameOrdinals);
-        __builtin_memcpy(cache->ordinal_table, src, osize);
+        dll_memcpy(cache->ordinal_table, src, osize);
     }
 
     /* Copy AddressOfFunctions array (RVAs) */
     if (exp->NumberOfFunctions > 0 && exp->AddressOfFunctions != 0) {
         if (exp->NumberOfFunctions > MAX_EXPORT_FUNCTIONS) {
-            DEBUG("  WARNING: export func count %u exceeds MAX_EXPORT_FUNCTIONS %d",
-                  exp->NumberOfFunctions, MAX_EXPORT_FUNCTIONS);
             exp->NumberOfFunctions = MAX_EXPORT_FUNCTIONS;
         }
         size_t fsize = exp->NumberOfFunctions * sizeof(uint32_t);
         uint32_t *src = (uint32_t *)((uint8_t *)mod->base + exp->AddressOfFunctions);
-        __builtin_memcpy(cache->func_table, src, fsize);
+        dll_memcpy(cache->func_table, src, fsize);
     }
 
     return 0;
@@ -84,16 +79,16 @@ int parse_export_table(loaded_module_t *mod)
 
 /*
  * check_forwarder — If func_rva falls inside the export directory,
- * it is a forwarder string ("dll!func"). Log a warning and return true.
+ * it is a forwarder string ("dll!func"). Return true.
  * Forwarder resolution is deferred for now.
+ * Glibc-free: no debug output to avoid fprintf@plt.
  */
 static int check_forwarder(EXPORT_CACHE *cache, loaded_module_t *mod, uint32_t func_rva)
 {
+    (void)mod;
     uint32_t export_end = cache->export_dir_rva + cache->export_dir_size;
 
     if (func_rva >= cache->export_dir_rva && func_rva < export_end) {
-        DEBUG("  WARNING: forwarder detected in %s at RVA 0x%x",
-              mod->name, func_rva);
         return 1;
     }
     return 0;
@@ -114,7 +109,7 @@ void *lookup_export(loaded_module_t *mod, const char *func_name)
         uint32_t mid = lo + (hi - lo) / 2;
         uint32_t name_rva = cache->name_table[mid];
         const char *name = (const char *)((uint8_t *)mod->base + name_rva);
-        int cmp = strcmp(func_name, name);
+        int cmp = dll_strcmp(func_name, name);
 
         if (cmp < 0) {
             hi = mid;
@@ -158,9 +153,10 @@ void *lookup_export_by_ordinal(loaded_module_t *mod, uint16_t ordinal)
 }
 
 /* Reset the embedded export cache (clear all fields).
- * No free needed — the cache is embedded in the module. */
+ * No free needed — the cache is embedded in the module.
+ * Glibc-free: uses dll_memset instead of __builtin_memset. */
 void reset_export_cache(loaded_module_t *mod)
 {
     if (!mod) return;
-    __builtin_memset(&mod->export_cache, 0, sizeof(EXPORT_CACHE));
+    dll_memset(&mod->export_cache, 0, sizeof(EXPORT_CACHE));
 }

@@ -84,6 +84,23 @@
         _dll_result;                                                   \
     })
 
+#define dll_strcmp(_a, _b)                                             \
+    ({                                                                 \
+        int _dll_rc = 0;                                               \
+        const char *_dll_a = (_a), *_dll_b = (_b);                     \
+        while (*_dll_a && *_dll_b) {                                   \
+            if (*_dll_a != *_dll_b) {                                  \
+                _dll_rc = (unsigned char)*_dll_a - (unsigned char)*_dll_b; \
+                break;                                                 \
+            }                                                          \
+            _dll_a++; _dll_b++;                                        \
+        }                                                              \
+        if (!_dll_rc) {                                                \
+            _dll_rc = (unsigned char)*_dll_a - (unsigned char)*_dll_b; \
+        }                                                              \
+        _dll_rc;                                                       \
+    })
+
 /* strncpy-like: copies up to max_len-1 bytes, always null-terminates */
 #define dll_copy_str(_dst, _src, _max_len)                             \
     do {                                                               \
