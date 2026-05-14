@@ -92,34 +92,79 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
         INLINE_SYSCALL_WRITE(2, stack_warn, sizeof(stack_warn) - 1);
     }
 
-    ucontext_t *uc = (ucontext_t *)ucontext;
-    if (uc) {
-        greg_t *regs = uc->uc_mcontext.gregs;
-        char hex_buf[200];
-        int off = 0;
-        const char *labels[] = {
-#if defined(__i386__)
-            " EIP=", " ESP=", " EAX="
-#else
-            " RIP=", " RSP=", " RAX="
-#endif
-        };
-        int reg_indices[] = {
-#if defined(__i386__)
-            REG_EIP, REG_ESP, REG_EAX
-#else
-            REG_RIP, REG_RSP, REG_RAX
-#endif
-        };
-        for (int j = 0; j < 3; j++) {
-            for (int k = 0; labels[j][k]; k++) hex_buf[off++] = labels[j][k];
-            uint64_t val = (uint64_t)regs[reg_indices[j]];
-            format_hex(hex_buf + off, sizeof(hex_buf) - off, val);
-            off += 16;
+    /*
+     * SAFETY: The ucontext pointer is provided by the kernel on the signal stack.
+     * However, in our environment (FS→TEB switch, custom stack setup), the
+     * ucontext may be at an invalid location or the signal handler may be
+     * running on a corrupted guest stack instead of the alt stack.
+     *
+     * We validate the pointer before accessing it. If it's clearly invalid,
+     * we skip the register dump entirely to avoid a SECOND crash that would
+     * obscure the original crash diagnostics.
+     *
+     * On Linux x86, the ucontext is always placed on the signal stack (either
+     * the alt stack or the current stack). It should be in user-space.
+     * We check: non-NULL, aligned, in a reasonable user-space range.
+     */
+    {
+        uintptr_t uc_ptr = (uintptr_t)ucontext;
+        int uc_valid = 1;
+
+        if (uc_ptr == 0) {
+            uc_valid = 0;
+        } else if (uc_ptr & 3) {
+            uc_valid = 0;  /* misaligned */
         }
-        hex_buf[off++] = '\n';
-        hex_buf[off] = '\0';
-        INLINE_SYSCALL_WRITE_ERR(hex_buf, (size_t)off);
+#if defined(__i386__)
+        else if (uc_ptr > 0xFFFFC000UL) {
+            uc_valid = 0;  /* kernel space or too high */
+        } else if (uc_ptr < 0x1000) {
+            uc_valid = 0;  /* null page / too low */
+        }
+#else
+        else if (uc_ptr > 0xfffffffffffe0000UL) {
+            uc_valid = 0;
+        }
+#endif
+
+        if (uc_valid) {
+            /* Try to read EIP/RIP from ucontext with a protection:
+             * we attempt the read in a bounded way. If this crashes,
+             * the kernel will deliver SIGSEGV again, but since our
+             * handler is already running, it will terminate the process
+             * (default SIG_DFL behavior for nested signal on same handler).
+             * This is acceptable — we get the signal name printed at least. */
+            ucontext_t *uc = (ucontext_t *)ucontext;
+            greg_t *regs = uc->uc_mcontext.gregs;
+            char hex_buf[200];
+            int off = 0;
+            const char *labels[] = {
+#if defined(__i386__)
+                " EIP=", " ESP=", " EAX="
+#else
+                " RIP=", " RSP=", " RAX="
+#endif
+            };
+            int reg_indices[] = {
+#if defined(__i386__)
+                REG_EIP, REG_ESP, REG_EAX
+#else
+                REG_RIP, REG_RSP, REG_RAX
+#endif
+            };
+            for (int j = 0; j < 3; j++) {
+                for (int k = 0; labels[j][k]; k++) hex_buf[off++] = labels[j][k];
+                uint64_t val = (uint64_t)regs[reg_indices[j]];
+                format_hex(hex_buf + off, sizeof(hex_buf) - off, val);
+                off += 16;
+            }
+            hex_buf[off++] = '\n';
+            hex_buf[off] = '\0';
+            INLINE_SYSCALL_WRITE_ERR(hex_buf, (size_t)off);
+        } else {
+            const char warn[] = "CRASH: ucontext invalid, skipping register dump\n";
+            INLINE_SYSCALL_WRITE_ERR(warn, sizeof(warn) - 1);
+        }
     }
 
     /*
