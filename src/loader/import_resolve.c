@@ -215,10 +215,65 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
             }
 
             if (addr != NULL) {
+                /* Save index before any block-local shadows */
+                const int idx = i;
+
+                /* Debug: log pre-write state */
+                {
+                    char buf[256];
+                    int n = 0;
+                    const char *p;
+                    for (p = "IAT write: idx="; *p && n < 240; ) buf[n++] = *p++;
+                    { int d = n; int v = idx;
+                      if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                      if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                      if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                      if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                      n = d;
+                    }
+                    for (p = ", dll="; *p && n < 240; ) buf[n++] = *p++;
+                    for (p = dll_name; *p && n < 245; ) buf[n++] = *p++;
+                    for (p = ", ILT=0x"; *p && n < 245; ) buf[n++] = *p++;
+                    dbg_fmt_hex(buf + n, (uintptr_t)(orig_base + idx * thunk_size)); n += 8;
+                    for (p = ", IAT=0x"; *p && n < 245; ) buf[n++] = *p++;
+                    dbg_fmt_hex(buf + n, (uintptr_t)(iat_base + idx * thunk_size)); n += 8;
+                    buf[n++] = '\n';
+                    INLINE_SYSCALL_WRITE(2, buf, n);
+                }
+
                 if (is32) {
-                    *(uint32_t *)(iat_base + i * thunk_size) = (uint32_t)(uintptr_t)addr;
+                    *(uint32_t *)(iat_base + idx * thunk_size) = (uint32_t)(uintptr_t)addr;
                 } else {
-                    *(uint64_t *)(iat_base + i * thunk_size) = (uint64_t)(uintptr_t)addr;
+                    *(uint64_t *)(iat_base + idx * thunk_size) = (uint64_t)(uintptr_t)addr;
+                }
+
+                /* Debug: readback immediately after write */
+                {
+                    char buf[256];
+                    int n = 0;
+                    const char *p;
+                    uint64_t readback;
+                    if (is32) {
+                        readback = (uint32_t)*((uint32_t *)(iat_base + idx * thunk_size));
+                    } else {
+                        readback = *((uint64_t *)(iat_base + idx * thunk_size));
+                    }
+                    for (p = "  IAT written=0x"; *p && n < 245; ) buf[n++] = *p++;
+                    dbg_fmt_hex(buf + n, (uintptr_t)addr); n += 8;
+                    for (p = ", readback=0x"; *p && n < 245; ) buf[n++] = *p++;
+                    dbg_fmt_hex(buf + n, (uintptr_t)readback); n += 8;
+                    if (is32) {
+                        for (p = ", offset="; *p && n < 245; ) buf[n++] = *p++;
+                        { int d = n; int v = (int)(iat_base + idx * thunk_size - (uint8_t *)base);
+                          if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                          if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                          if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                          if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                          n = d;
+                        }
+                    }
+                    buf[n++] = '\n';
+                    INLINE_SYSCALL_WRITE(2, buf, n);
                 }
             }
         }

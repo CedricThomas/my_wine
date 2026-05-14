@@ -732,9 +732,47 @@ int main(int argc, char **argv)
                     dll_name[12] == '\0') {
                     uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
                     uint8_t *iat_base = (uint8_t *)((char *)base + desc->FirstThunk);
+
+                    /* Log IAT check addresses */
+                    {
+                        char buf[128];
+                        int n = 0;
+                        const char *p;
+                        for (p = "IAT check: orig_base=0x"; *p && n < 120; ) buf[n++] = *p++;
+                        for (int h = 7; h >= 0; h--) {
+                            buf[n++] = "0123456789abcdef"[((uintptr_t)orig_base >> (h*4)) & 0xf];
+                        }
+                        for (p = ", iat_base=0x"; *p && n < 120; ) buf[n++] = *p++;
+                        for (int h = 7; h >= 0; h--) {
+                            buf[n++] = "0123456789abcdef"[((uintptr_t)iat_base >> (h*4)) & 0xf];
+                        }
+                        buf[n++] = '\n';
+                        INLINE_SYSCALL_WRITE(2, buf, n);
+                    }
+
                     for (int j = 0; ; j++) {
                         uint32_t thunk_val = (uint32_t)*((uint32_t *)(orig_base + j * 4));
                         if (thunk_val == 0) break;
+
+                        /* Log each ILT entry */
+                        {
+                            char buf[80];
+                            int n = 0;
+                            const char *p;
+                            for (p = "  ILT entry j="; *p && n < 70; ) buf[n++] = *p++;
+                            { int d = n; int v = j;
+                              if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                              if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                              n = d;
+                            }
+                            for (p = ": thunk=0x"; *p && n < 70; ) buf[n++] = *p++;
+                            for (int h = 7; h >= 0; h--) {
+                                buf[n++] = "0123456789abcdef"[(thunk_val >> (h*4)) & 0xf];
+                            }
+                            buf[n++] = '\n';
+                            INLINE_SYSCALL_WRITE(2, buf, n);
+                        }
+
                         if (thunk_val & 0x80000000) continue;
                         IMAGE_IMPORT_BY_NAME *imp_name =
                             (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk_val);
@@ -745,6 +783,25 @@ int main(int argc, char **argv)
                             fname[9] == 'r' && fname[10] == 'y' &&
                             fname[11] == 'A' && fname[12] == '\0') {
                             ll_addr = (void *)(uintptr_t)*(uint32_t *)(iat_base + j * 4);
+                            /* Log the IAT value for LoadLibraryA */
+                            {
+                                char buf[80];
+                                int n = 0;
+                                const char *p;
+                                uint32_t iat_val = *(uint32_t *)(iat_base + j * 4);
+                                for (p = "  IAT["; *p && n < 70; ) buf[n++] = *p++;
+                                { int d = n; int v = j;
+                                  if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                                  if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+                                  n = d;
+                                }
+                                for (p = "]=0x"; *p && n < 70; ) buf[n++] = *p++;
+                                for (int h = 7; h >= 0; h--) {
+                                    buf[n++] = "0123456789abcdef"[(iat_val >> (h*4)) & 0xf];
+                                }
+                                buf[n++] = '\n';
+                                INLINE_SYSCALL_WRITE(2, buf, n);
+                            }
                             break;
                         }
                     }
