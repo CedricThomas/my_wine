@@ -20,7 +20,7 @@ static void out(const char *s)
 /* Helper: print a pointer as "0xHHHHHHHH" */
 static void out_ptr(HMODULE p)
 {
-    unsigned long long addr = (unsigned long long)p;
+    DWORD addr = (DWORD)(ULONG_PTR)p;
     char buf[12];
     int i;
 

@@ -32,8 +32,9 @@ static inline void dbg_fmt_hex(char *dst, uintptr_t val)
     }
 }
 
-static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+static inline void dbg_write_ptr(int level, const char *prefix, uintptr_t val)
 {
+    if (g_debug_level < level) return;
     char buf[64];
     int i = 0;
     const char *p;
@@ -45,8 +46,9 @@ static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
     INLINE_SYSCALL_WRITE(2, buf, i);
 }
 
-static inline void dbg_write_str(const char *prefix, const char *str)
+static inline void dbg_write_str(int level, const char *prefix, const char *str)
 {
+    if (g_debug_level < level) return;
     char buf[256];
     int i = 0;
     const char *p;
@@ -99,6 +101,7 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     }
 #endif
     if (entry != NULL && entry->address != NULL) {
+        if (g_debug_level >= 2)
         { char buf[256]; int i = 0;
           const char *p;
           for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
@@ -123,6 +126,7 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     if (mod != NULL && mod->export_cache.number_of_names > 0) {
         void *addr = lookup_export(mod, func_name);
         if (addr != NULL) {
+            if (g_debug_level >= 2)
             { char buf[256]; int i = 0;
               const char *p;
               for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
@@ -144,6 +148,7 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     }
 
     /* Tier 3: not found */
+    if (g_debug_level >= 2)
     { char buf[256]; int i = 0;
       const char *p;
       for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
@@ -184,7 +189,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
 
     while (desc->Name != 0) {
         const char *dll_name = (const char *)((char *)base + desc->Name);
-        dbg_write_str("resolve_imports: DLL=", dll_name);
+        dbg_write_str(2, "resolve_imports: DLL=", dll_name);
 
         uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
         uint8_t *iat_base  = (uint8_t *)((char *)base + desc->FirstThunk);
@@ -219,6 +224,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                 const int idx = i;
 
                 /* Debug: log pre-write state */
+                if (g_debug_level >= 3)
                 {
                     char buf[256];
                     int n = 0;
@@ -248,6 +254,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                 }
 
                 /* Debug: readback immediately after write */
+                if (g_debug_level >= 3)
                 {
                     char buf[256];
                     int n = 0;
@@ -367,7 +374,7 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS *nt)
  */
 int resolve_imports(void *base, IMAGE_NT_HEADERS *nt)
 {
-    dbg_write_ptr("resolve_imports: base=", (uintptr_t)base);
+    dbg_write_ptr(2, "resolve_imports: base=", (uintptr_t)base);
     if (resolve_import_pass1(base, nt) != 0)
         return -1;
     return resolve_import_pass2(base, nt);

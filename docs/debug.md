@@ -1,5 +1,22 @@
 # Debug Notes — my_wine
 
+## Runtime Diagnostic Levels
+
+Runtime diagnostics are controlled with `MY_WINE_DEBUG_LEVEL`.
+
+- `0` or unset: quiet normal execution; guest stdout/stderr is not mixed with loader traces.
+- `1`: setup milestones and diagnostic warnings.
+- `2`: loader, import, DLL, thunk, and syscall trace summaries.
+- `3`: very verbose per-symbol, per-path, and per-IAT diagnostics.
+
+Examples:
+
+```sh
+MY_WINE_DEBUG_LEVEL=1 ./my_wine samples/hello_world/hello_world.exe
+MY_WINE_DEBUG_LEVEL=2 ./my_wine samples/hello_world/hello_world.exe
+MY_WINE_DEBUG_LEVEL=3 ./my_wine samples/dll_loader_32/dll_loader_32.exe
+```
+
 ## Crash Status
 
 ```

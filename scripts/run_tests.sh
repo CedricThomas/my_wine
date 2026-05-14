@@ -1,8 +1,9 @@
 #!/bin/bash
 set -e
 
-# Usage: run_tests.sh [--debug]
-#   --debug  Export MY_WINE_DEBUG=1 for all test invocations (verbose debug output)
+# Usage: run_tests.sh [--debug|--debug-level N]
+#   --debug          Export MY_WINE_DEBUG_LEVEL=1 for all test invocations
+#   --debug-level N  Export MY_WINE_DEBUG_LEVEL=N for all test invocations
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -10,10 +11,18 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 DEBUG=0
-if [ "$1" = "--debug" ]; then
+DEBUG_LEVEL=1
+if [ "${1:-}" = "--debug" ]; then
 	DEBUG=1
-	export MY_WINE_DEBUG=1
-	echo ">>> DEBUG MODE ACTIVE (MY_WINE_DEBUG=1)"
+	DEBUG_LEVEL=1
+elif [ "${1:-}" = "--debug-level" ] && [ -n "${2:-}" ]; then
+	DEBUG=1
+	DEBUG_LEVEL="$2"
+fi
+
+if [ "$DEBUG" = "1" ]; then
+	export MY_WINE_DEBUG_LEVEL="$DEBUG_LEVEL"
+	echo ">>> DEBUG MODE ACTIVE (MY_WINE_DEBUG_LEVEL=$DEBUG_LEVEL)"
 	echo ""
 fi
 

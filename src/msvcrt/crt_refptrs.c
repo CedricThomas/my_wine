@@ -69,7 +69,7 @@ static void refptr_patch_cb(void *arg)
     struct refptr_patch_arg *a = (struct refptr_patch_arg *)arg;
     uint64_t old_val = (uint64_t)(uintptr_t)*a->refptr;
     *a->refptr = (uint64_t)(uintptr_t)a->target;
-    DEBUG("patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p",
+    DEBUG_LEVEL(2, "patch_crt_refptrs: %s at rva 0x%lx: 0x%lx -> %p",
             a->name, (unsigned long)a->rva, old_val, a->target);
 }
 
@@ -158,7 +158,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
     if (bss_sec) {
         ctx.bss_vaddr = bss_sec->VirtualAddress;
         initenv_stub = (void **)((char *)image_base + ctx.bss_vaddr + CRT_BSS_INITENV);
-        DEBUG("patch_crt_refptrs: .bss at VA=0x%lx, initenv_stub=%p",
+        DEBUG_LEVEL(2, "patch_crt_refptrs: .bss at VA=0x%lx, initenv_stub=%p",
                 (unsigned long)ctx.bss_vaddr, (void *)initenv_stub);
     }
 
@@ -176,7 +176,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
         uint32_t *initialized_ptr = (uint32_t *)((char *)image_base +
                                                   ctx.bss_vaddr + CRT_BSS_INITIALIZED);
         *initialized_ptr = 1;
-        DEBUG("patch_crt_refptrs: set initialized=1 at %p", (void *)initialized_ptr);
+        DEBUG_LEVEL(2, "patch_crt_refptrs: set initialized=1 at %p", (void *)initialized_ptr);
     }
 
     uint64_t image_size = pe_size_of_image(nt);
@@ -195,7 +195,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 
         if (target_rva != 0) {
             if (!patched_any)
-                DEBUG("patch_crt_refptrs: using COFF symbol table");
+                DEBUG_LEVEL(2, "patch_crt_refptrs: using COFF symbol table");
             apply_refptr_patch(image_base, target_rva, map->target,
                                map->name, image_size,
                                ctx.image_base, ctx.bss_vaddr,
@@ -267,7 +267,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
 
     /* ── Always supplement with .text scanning ── */
     if (!patched_initenv) {
-        DEBUG("patch_crt_refptrs: __imp___initenv not in COFF, scanning .text");
+        DEBUG_LEVEL(2, "patch_crt_refptrs: __imp___initenv not in COFF, scanning .text");
         scan_text_for_refptrs(image_base, nt, sections, image_size, initenv_stub);
     }
 }

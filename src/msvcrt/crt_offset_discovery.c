@@ -260,7 +260,7 @@ static int match_symbol_name(const char *sym_name, size_t sym_name_len,
     /* Strategy 4: substring fallback */
     if (sym_name_len > 8 && strstr(sym_name, name) != NULL) {
         if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
-            DEBUG("DBG_COFF_SUB: '%.*s' matched '%s' as substring",
+            DEBUG_LEVEL(3, "DBG_COFF_SUB: '%.*s' matched '%s' as substring",
                     (int)sym_name_len, sym_name, name);
         }
         return 1;
@@ -291,7 +291,7 @@ static int find_matching_symbol(
      * Some mingw-w64 builds have garbage absolute symbols (sec=0) with
      * wrong values that appear before the real section-bound entry.
      */
-    DEBUG("DBG_COFF: '%s' scanning %u symbols", name, sym_count);
+    DEBUG_LEVEL(3, "DBG_COFF: '%s' scanning %u symbols", name, sym_count);
     for (uint32_t i = 0; i < sym_count; i++) {
         const IMAGE_SYMBOL *sym = &symbols[i];
         const char *sym_name = get_symbol_name(sym, string_table);
@@ -299,13 +299,13 @@ static int find_matching_symbol(
         size_t sym_name_len = strlen(sym_name);
 
         if (i < 3) {
-            DEBUG("DBG_COFF: sym[%u] = '%.*s' sect=%d",
+            DEBUG_LEVEL(3, "DBG_COFF: sym[%u] = '%.*s' sect=%d",
                     i, (int)sym_name_len, sym_name, sym->SectionNumber);
         }
 
         /* Debug: show all symbols containing CTOR or DTOR */
         if (strstr(sym_name, "CTOR") || strstr(sym_name, "DTOR")) {
-            DEBUG("DBG_COFF_SYM: idx=%u name='%.*s' sect=%d val=%u type=%d",
+            DEBUG_LEVEL(3, "DBG_COFF_SYM: idx=%u name='%.*s' sect=%d val=%u type=%d",
                     i, (int)sym_name_len, sym_name, (int)sym->SectionNumber, sym->Value, sym->Type);
         }
 
@@ -314,7 +314,7 @@ static int find_matching_symbol(
         if (!matched) continue;
 
         if (strncmp(name, "__CTOR_LIST__", 13) == 0 || strncmp(name, "__DTOR_LIST__", 13) == 0) {
-            DEBUG("DBG_COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d",
+            DEBUG_LEVEL(3, "DBG_COFF_MATCH: sym[%u] '%.*s' sect=%d val=%u num_secs=%u has=%d",
                     i, (int)sym_name_len, sym_name, sym->SectionNumber, sym->Value,
                     pe_section_count(nt), has_section_match);
         }
@@ -365,7 +365,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
     (void)find_matching_symbol(symbols, string_table, sym_count, name,
                                nt, sections, &best_rva);
 
-    DEBUG("DBG_COFF: '%s' -> rva=0x%lx", name, (unsigned long)best_rva);
+    DEBUG_LEVEL(3, "DBG_COFF: '%s' -> rva=0x%lx", name, (unsigned long)best_rva);
     munmap(file_map, file_size);
     return best_rva;
 }
@@ -411,7 +411,7 @@ void discover_crt_offsets(const char *file_path,
     if (ctx->argc_bss_offset == 0 || ctx->argv_bss_offset == 0 || ctx->envp_bss_offset == 0) {
         const crt_module_t *mod = crt_get_module(CRT_TYPE_MINGW);
         if (mod && crt_bss_init_offset(mod)) {
-            DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
+            DEBUG_LEVEL(1, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
                   "using CRT module fallback (0x%x/0x%x/0x%x)",
                   crt_bss_initenv_offset(mod), crt_bss_argv_offset(mod),
                   crt_bss_init_offset(mod));
@@ -424,7 +424,7 @@ void discover_crt_offsets(const char *file_path,
             #define FALLBACK_ARGV 0x020
             #define FALLBACK_INITENV 0x018
             #define FALLBACK_ACMDLN 0x030
-            DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
+            DEBUG_LEVEL(1, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
                   "using hardcoded CRT offsets (0x%x/0x%x/0x%x)",
                   FALLBACK_INITENV, FALLBACK_ARGV, FALLBACK_ARGC);
             if (ctx->argc_bss_offset == 0) ctx->argc_bss_offset = FALLBACK_ARGC;
@@ -433,6 +433,6 @@ void discover_crt_offsets(const char *file_path,
         }
     }
 
-    DEBUG("crt_offset_discovery: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
+    DEBUG_LEVEL(2, "crt_offset_discovery: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
             ctx->argc_bss_offset, ctx->argv_bss_offset, ctx->envp_bss_offset);
 }

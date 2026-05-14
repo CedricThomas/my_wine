@@ -10,8 +10,9 @@
 #include "debug.h"
 #include "../src/loader/loader_state.h"
 
-/* Global debug flag: set from envp in main() */
-extern int g_debug_enabled;
+/* Global debug level: set from MY_WINE_DEBUG_LEVEL before guest handoff. */
+extern int g_debug_level;
+int parse_debug_level(const char *value);
 
 /*
  * g_is_32bit inline accessors — delegates to g_loader.is_32bit

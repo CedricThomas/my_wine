@@ -187,7 +187,7 @@ static void watcom_discover_offsets(const char *file_path,
     /* Fallback: if COFF lookup failed, use hardcoded Watcom BSS offsets */
     if (ctx->argc_bss_offset == 0 || ctx->argv_bss_offset == 0 ||
         ctx->envp_bss_offset == 0) {
-        DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
+        DEBUG_LEVEL(1, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
               "using hardcoded Watcom BSS offsets (0x%x/0x%x/0x%x)",
               WATCOM_BSS_INITENV, WATCOM_BSS_ARGV, WATCOM_BSS_ARGC);
         if (ctx->argc_bss_offset == 0)
@@ -198,7 +198,7 @@ static void watcom_discover_offsets(const char *file_path,
             ctx->envp_bss_offset = WATCOM_BSS_INITENV;
     }
 
-    DEBUG("watcom_discover_offsets: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
+    DEBUG_LEVEL(2, "watcom_discover_offsets: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
           ctx->argc_bss_offset, ctx->argv_bss_offset, ctx->envp_bss_offset);
 }
 
@@ -226,7 +226,7 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
     IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec) {
         ctx.bss_vaddr = bss_sec->VirtualAddress;
-        DEBUG("watcom_patch_refptrs: .bss at VA=0x%lx",
+        DEBUG_LEVEL(2, "watcom_patch_refptrs: .bss at VA=0x%lx",
               (unsigned long)ctx.bss_vaddr);
     }
 
@@ -242,11 +242,11 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
                                                   ctx.bss_vaddr +
                                                   WATCOM_BSS_INITIALIZED);
         *initialized_ptr = 1;
-        DEBUG("watcom_patch_refptrs: set initialized=1 at %p",
+        DEBUG_LEVEL(2, "watcom_patch_refptrs: set initialized=1 at %p",
               (void *)initialized_ptr);
     }
 
-    DEBUG("watcom_patch_refptrs: no refptr mappings to patch (empty table)");
+    DEBUG_LEVEL(2, "watcom_patch_refptrs: no refptr mappings to patch (empty table)");
 }
 
 /* ── BSS seeding ───────────────────────────────────────────────── */
@@ -287,7 +287,7 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     if (g_crt.crt_ctx.argc_bss_offset != 0) {
         *(uint32_t *)(bss_base + g_crt.crt_ctx.argc_bss_offset) = 1;
-        DEBUG(".bss: wrote argc=1 at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote argc=1 at offset 0x%x",
               g_crt.crt_ctx.argc_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argc_bss_offset is 0, "
@@ -300,7 +300,7 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote argv=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote argv=NULL at offset 0x%x",
               g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
@@ -313,7 +313,7 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote envp=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote envp=NULL at offset 0x%x",
               g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "

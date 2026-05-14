@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 
 #include "kernel32_priv.h"
+#include "include/common.h"
 #include "include/pe_priv.h"
 #include "../loader/loader_priv.h"
 #include "../loader/loader_state.h"
@@ -22,8 +23,9 @@ static inline void dbg_fmt_hex(char *dst, uintptr_t val)
     }
 }
 
-static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+static inline void dbg_write_ptr(int level, const char *prefix, uintptr_t val)
 {
+    if (g_debug_level < level) return;
     char buf[64];
     int i = 0;
     const char *p;
@@ -35,8 +37,9 @@ static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
     INLINE_SYSCALL_WRITE(2, buf, i);
 }
 
-static inline void dbg_write_bool(const char *prefix, int val)
+static inline void dbg_write_bool(int level, const char *prefix, int val)
 {
+    if (g_debug_level < level) return;
     char buf[64];
     int i = 0;
     const char *p;
@@ -51,38 +54,40 @@ static inline void dbg_write_bool(const char *prefix, int val)
 KERNEL32_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
-    const char msg1[] = "LoadLibraryA: ENTER\n";
-    INLINE_SYSCALL_WRITE(2, msg1, sizeof(msg1) - 1);
+    if (g_debug_level >= 2) {
+        const char msg1[] = "LoadLibraryA: ENTER\n";
+        INLINE_SYSCALL_WRITE(2, msg1, sizeof(msg1) - 1);
+    }
 
-    dbg_write_ptr("LoadLibraryA: arg=", (uintptr_t)lpLibFileName);
+    dbg_write_ptr(3, "LoadLibraryA: arg=", (uintptr_t)lpLibFileName);
 
     if (lpLibFileName == NULL) {
-        dbg_write_ptr("LoadLibraryA: ret=", 0);
+        dbg_write_ptr(2, "LoadLibraryA: ret=", 0);
         return FORCE_PTR_RETURN(NULL);
     }
 
     loaded_module_t *mod = find_module_by_name_safe(lpLibFileName);
-    dbg_write_ptr("LoadLibraryA: find_module=", mod ? (uintptr_t)mod->base : 0);
+    dbg_write_ptr(2, "LoadLibraryA: find_module=", mod ? (uintptr_t)mod->base : 0);
     if (mod != NULL) {
         mod->load_count++;
-        dbg_write_ptr("LoadLibraryA: ret=", (uintptr_t)mod->base);
+        dbg_write_ptr(2, "LoadLibraryA: ret=", (uintptr_t)mod->base);
         return FORCE_PTR_RETURN(mod->base);
     }
 
     int found = find_dll_path(lpLibFileName, g_dll_path, sizeof(g_dll_path));
-    dbg_write_bool("LoadLibraryA: find_path=", found);
+    dbg_write_bool(2, "LoadLibraryA: find_path=", found);
     if (!found) {
-        dbg_write_ptr("LoadLibraryA: ret=", 0);
+        dbg_write_ptr(2, "LoadLibraryA: ret=", 0);
         return FORCE_PTR_RETURN(NULL);
     }
 
     mod = load_dll(g_dll_path, 0);
     if (mod == NULL) {
-        dbg_write_ptr("LoadLibraryA: ret=", 0);
+        dbg_write_ptr(2, "LoadLibraryA: ret=", 0);
         return FORCE_PTR_RETURN(NULL);
     }
 
-    dbg_write_ptr("LoadLibraryA: ret=", (uintptr_t)mod->base);
+    dbg_write_ptr(2, "LoadLibraryA: ret=", (uintptr_t)mod->base);
     return FORCE_PTR_RETURN(mod->base);
 }
 

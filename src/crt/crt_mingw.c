@@ -187,7 +187,7 @@ static void mingw_discover_offsets(const char *file_path,
     /* Fallback: if COFF lookup failed, use hardcoded MinGW BSS offsets */
     if (ctx->argc_bss_offset == 0 || ctx->argv_bss_offset == 0 ||
         ctx->envp_bss_offset == 0) {
-        DEBUG("WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
+        DEBUG_LEVEL(1, "WARNING: COFF symbol lookup for argc/argv/envp incomplete, "
               "using hardcoded MinGW BSS offsets (0x%x/0x%x/0x%x)",
               MINGW_BSS_INITENV, MINGW_BSS_ARGV, MINGW_BSS_ARGC);
         if (ctx->argc_bss_offset == 0)
@@ -198,7 +198,7 @@ static void mingw_discover_offsets(const char *file_path,
             ctx->envp_bss_offset = MINGW_BSS_INITENV;
     }
 
-    DEBUG("mingw_discover_offsets: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
+    DEBUG_LEVEL(2, "mingw_discover_offsets: CRT offsets argc=0x%x argv=0x%x envp=0x%x",
           ctx->argc_bss_offset, ctx->argv_bss_offset, ctx->envp_bss_offset);
 }
 
@@ -237,7 +237,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
         ctx.bss_vaddr = bss_sec->VirtualAddress;
         initenv_stub = (void **)((char *)image_base + ctx.bss_vaddr +
                                  MINGW_BSS_INITENV);
-        DEBUG("mingw_patch_refptrs: .bss at VA=0x%lx, initenv_stub=%p",
+        DEBUG_LEVEL(2, "mingw_patch_refptrs: .bss at VA=0x%lx, initenv_stub=%p",
               (unsigned long)ctx.bss_vaddr, (void *)initenv_stub);
     }
 
@@ -256,7 +256,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
                                                   ctx.bss_vaddr +
                                                   MINGW_BSS_INITIALIZED);
         *initialized_ptr = 1;
-        DEBUG("mingw_patch_refptrs: set initialized=1 at %p",
+        DEBUG_LEVEL(2, "mingw_patch_refptrs: set initialized=1 at %p",
               (void *)initialized_ptr);
     }
 
@@ -276,7 +276,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
 
         if (target_rva != 0) {
             if (!patched_any)
-                DEBUG("mingw_patch_refptrs: using COFF symbol table");
+                DEBUG_LEVEL(2, "mingw_patch_refptrs: using COFF symbol table");
             apply_refptr_patch(image_base, target_rva, map->target,
                                map->name, image_size,
                                ctx.image_base, ctx.bss_vaddr,
@@ -354,7 +354,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
 
     /* ── Always supplement with .text scanning ── */
     if (!patched_initenv) {
-        DEBUG("mingw_patch_refptrs: __imp___initenv not in COFF, scanning .text");
+        DEBUG_LEVEL(2, "mingw_patch_refptrs: __imp___initenv not in COFF, scanning .text");
         scan_text_for_refptrs(image_base, nt, sections, image_size,
                               initenv_stub);
     }
@@ -402,7 +402,7 @@ static void mingw_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     if (g_crt.crt_ctx.argc_bss_offset != 0) {
         *(uint32_t *)(bss_base + g_crt.crt_ctx.argc_bss_offset) = 1;
-        DEBUG(".bss: wrote argc=1 at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote argc=1 at offset 0x%x",
               g_crt.crt_ctx.argc_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argc_bss_offset is 0, "
@@ -415,7 +415,7 @@ static void mingw_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote argv=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote argv=NULL at offset 0x%x",
               g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
@@ -428,7 +428,7 @@ static void mingw_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote envp=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote envp=NULL at offset 0x%x",
               g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "

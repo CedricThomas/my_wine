@@ -87,7 +87,7 @@ static void seed_bss_vars(void *base,
 
     if (g_crt.crt_ctx.argc_bss_offset != 0) {
         *(uint32_t *)(bss_base + g_crt.crt_ctx.argc_bss_offset) = 1;
-        DEBUG(".bss: wrote argc=1 at offset 0x%x", g_crt.crt_ctx.argc_bss_offset);
+        DEBUG_LEVEL(2, ".bss: wrote argc=1 at offset 0x%x", g_crt.crt_ctx.argc_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argc_bss_offset is 0, "
                 "skipping argc pre-seed\n");
@@ -99,7 +99,7 @@ static void seed_bss_vars(void *base,
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote argv=NULL at offset 0x%x", g_crt.crt_ctx.argv_bss_offset);
+        DEBUG_LEVEL(2, ".bss: wrote argv=NULL at offset 0x%x", g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
                 "skipping argv pre-seed\n");
@@ -111,7 +111,7 @@ static void seed_bss_vars(void *base,
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         }
-        DEBUG(".bss: wrote envp=NULL at offset 0x%x", g_crt.crt_ctx.envp_bss_offset);
+        DEBUG_LEVEL(2, ".bss: wrote envp=NULL at offset 0x%x", g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "
                 "skipping envp pre-seed\n");
@@ -138,9 +138,10 @@ static int init_loader(int argc, char **argv,
         return -1;
     }
 
-    /* 0. Parse MY_WINE_DEBUG from environ; set global debug flag before GS switch */
-    if (envp_lookup(environ, "MY_WINE_DEBUG") != NULL) {
-        g_debug_enabled = 1;
+    /* 0. Parse MY_WINE_DEBUG_LEVEL before GS switch. Any non-zero value enables traces. */
+    {
+        const char *debug_level = envp_lookup(environ, "MY_WINE_DEBUG_LEVEL");
+        g_debug_level = parse_debug_level(debug_level);
     }
 
     /* 0b. Cache WINE_DLL_PATH before GS switch so find_dll_path is syscall-safe */
@@ -210,11 +211,11 @@ static int init_loader(int argc, char **argv,
                 size_t padding_off = data_sec->SizeOfRawData;
                 size_t padding_size = data_sec->Misc.VirtualSize - data_sec->SizeOfRawData;
                 memset((uint8_t *)base + data_vaddr + padding_off, 0, padding_size);
-                DEBUG(".data section: vaddr=0x%lx, raw=0x%lx, virt=0x%lx, zeroed %lu padding bytes",
+                DEBUG_LEVEL(2, ".data section: vaddr=0x%lx, raw=0x%lx, virt=0x%lx, zeroed %lu padding bytes",
                        (unsigned long)data_vaddr, (unsigned long)data_sec->SizeOfRawData,
                        (unsigned long)data_sec->Misc.VirtualSize, (unsigned long)padding_size);
             } else {
-                DEBUG(".data section: vaddr=0x%lx, size=0x%lx, no padding to zero",
+                DEBUG_LEVEL(2, ".data section: vaddr=0x%lx, size=0x%lx, no padding to zero",
                        (unsigned long)data_vaddr, (unsigned long)data_sec->Misc.VirtualSize);
             }
 

@@ -747,6 +747,11 @@ int main(int argc, char **argv)
         INLINE_SYSCALL_EXIT_GROUP(1);
     }
 
+    {
+        const char *debug_level = my_getenv("MY_WINE_DEBUG_LEVEL");
+        g_debug_level = parse_debug_level(debug_level);
+    }
+
     /* Seed _acmdln so GetCommandLineA() returns the PE path.
      * Uses dll_copy_str to avoid the musl ifunc PLT resolution bug in
      * 32-bit static builds (same pattern used in ensure_argv_setup).
@@ -766,7 +771,7 @@ int main(int argc, char **argv)
     }
 
     /* Debug: verify IAT entry for LoadLibraryA is non-zero */
-    {
+    if (g_debug_level >= 3) {
         const char msg_iat[] = "pe32_entry: imports resolved, testing IAT entry\n";
         INLINE_SYSCALL_WRITE(2, msg_iat, sizeof(msg_iat) - 1);
 

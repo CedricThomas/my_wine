@@ -22,8 +22,9 @@ static inline void dbg_fmt_hex(char *dst, uintptr_t val)
     }
 }
 
-static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+static inline void dbg_write_ptr(int level, const char *prefix, uintptr_t val)
 {
+    if (g_debug_level < level) return;
     char buf[64];
     int i = 0;
     const char *p;
@@ -35,8 +36,9 @@ static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
     INLINE_SYSCALL_WRITE(2, buf, i);
 }
 
-static inline void dbg_write_str(const char *prefix, const char *str)
+static inline void dbg_write_str(int level, const char *prefix, const char *str)
 {
+    if (g_debug_level < level) return;
     char buf[256];
     int i = 0;
     const char *p;
@@ -81,13 +83,13 @@ static void init_exe_dir(void)
  */
 int find_dll_path(const char *dll_name, char *path, size_t path_size)
 {
-    dbg_write_str("find_dll_path: name=", dll_name);
+    dbg_write_str(2, "find_dll_path: name=", dll_name);
 
     /* --- Try current directory --- */
     if (dll_build_path(path, path_size, ".", dll_name) == 0) {
-        dbg_write_str("find_dll_path: try_cwd=", path);
+        dbg_write_str(3, "find_dll_path: try_cwd=", path);
         if (dll_path_exists(path)) {
-            dbg_write_str("find_dll_path: cwd=", "ok");
+            dbg_write_str(2, "find_dll_path: cwd=", "ok");
             return 1;
         }
     }
@@ -96,9 +98,9 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
     init_exe_dir();
     if (g_exe_dir[0] != '.' || g_exe_dir[1] != '\0') {
         if (dll_build_path(path, path_size, g_exe_dir, dll_name) == 0) {
-            dbg_write_str("find_dll_path: try_app=", path);
+            dbg_write_str(3, "find_dll_path: try_app=", path);
             if (dll_path_exists(path)) {
-                dbg_write_str("find_dll_path: app=", "ok");
+                dbg_write_str(2, "find_dll_path: app=", "ok");
                 return 1;
             }
         }
@@ -133,9 +135,9 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
             int i;
             for (i = 0; i < seg_count; i++) {
                 if (dll_build_path(path, path_size, segments[i], dll_name) == 0) {
-                    dbg_write_str("find_dll_path: try_path=", path);
+                    dbg_write_str(3, "find_dll_path: try_path=", path);
                     if (dll_path_exists(path)) {
-                        dbg_write_str("find_dll_path: wine_path=", "ok");
+                        dbg_write_str(2, "find_dll_path: wine_path=", "ok");
                         return 1;
                     }
                 }
@@ -143,6 +145,6 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
         }
     }
 
-    dbg_write_str("find_dll_path: ret=", "not_found");
+    dbg_write_str(2, "find_dll_path: ret=", "not_found");
     return 0;
 }

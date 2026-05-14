@@ -421,9 +421,11 @@ static uint64_t dispatcher_core(uint64_t nr, uint64_t a1, uint64_t a2,
 #if defined(__i386__)
 uint32_t c_dispatch_syscall(uint32_t nr)
 {
-    char trace_buf[48];
-    format_trace_syscall(trace_buf, (uint64_t)nr);
-    INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXXXXXXXXXX\n"));
+    if (g_debug_level >= 2) {
+        char trace_buf[48];
+        format_trace_syscall(trace_buf, (uint64_t)nr);
+        INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXXXXXXXXXX\n") - 1);
+    }
 
     uint32_t result = dispatcher_core(nr);
 
@@ -433,9 +435,11 @@ uint32_t c_dispatch_syscall(uint32_t nr)
 #else
 uint64_t c_dispatch_syscall(uint64_t nr)
 {
-    char trace_buf[48];
-    format_trace_syscall(trace_buf, nr);
-    INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXXXXXXXXXX\n"));
+    if (g_debug_level >= 2) {
+        char trace_buf[48];
+        format_trace_syscall(trace_buf, nr);
+        INLINE_SYSCALL_WRITE_ERR(trace_buf, sizeof("TRACE: syscall 0xXXXXXXXXXXXXXXXX\n") - 1);
+    }
 
     uint64_t result = dispatcher_core(nr, __wine_guest_regs.rcx, __wine_guest_regs.rdx,
                                        __wine_guest_regs.r8, __wine_guest_regs.r9);

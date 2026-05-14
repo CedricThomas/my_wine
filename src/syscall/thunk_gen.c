@@ -125,7 +125,7 @@ static void write_thunk_at_32(uint8_t *loc, uint16_t syscall_number, void *dispa
     loc[9] = (uint8_t)((nr >> 16) & 0xFF);
     loc[10] = (uint8_t)((nr >> 24) & 0xFF);
 
-    DEBUG("wine: thunk[%d] dispatcher=0x%x", syscall_number, (unsigned)disp_addr);
+    DEBUG_LEVEL(2, "wine: thunk[%d] dispatcher=0x%x", syscall_number, (unsigned)disp_addr);
 
     /* call eax — 2 bytes: FF D0 (indirect call through EAX) */
     loc[11] = 0xFF;
@@ -181,7 +181,7 @@ static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatch
     loc[17] = (uint8_t)((addr >> 48) & 0xFF);
     loc[18] = (uint8_t)((addr >> 56) & 0xFF);
 
-    DEBUG("wine: thunk[%d] dispatcher=0x%lx", syscall_number, (unsigned long)dispatcher_addr);
+    DEBUG_LEVEL(2, "wine: thunk[%d] dispatcher=0x%lx", syscall_number, (unsigned long)dispatcher_addr);
 
     /* call rax — 2 bytes: FF D0 (indirect call through RAX) */
     loc[19] = 0xFF;
@@ -229,7 +229,7 @@ void **generate_all_thunks(void)
     void *dispatcher = wine_dispatcher_addr();
 
 #ifdef MY_WINE32
-    {
+    if (g_debug_level >= 2) {
         char msg[64];
         int off = 0;
         const char prefix[] = "wine: dispatcher at 0x";
@@ -246,7 +246,7 @@ void **generate_all_thunks(void)
         return NULL;
     }
 #else
-    fprintf(stderr, "wine: dispatcher at %p\n", dispatcher);
+    DEBUG_LEVEL(2, "wine: dispatcher at %p", dispatcher);
     if (dispatcher == NULL) {
         fprintf(stderr, "wine: fatal: __wine_dispatcher symbol not found\n");
         return NULL;

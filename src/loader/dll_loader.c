@@ -34,8 +34,9 @@ static inline void dbg_fmt_hex(char *dst, uintptr_t val)
     }
 }
 
-static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+static inline void dbg_write_ptr(int level, const char *prefix, uintptr_t val)
 {
+    if (g_debug_level < level) return;
     char buf[64];
     int i = 0;
     const char *p;
@@ -47,8 +48,9 @@ static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
     INLINE_SYSCALL_WRITE(2, buf, i);
 }
 
-static inline void dbg_write_str(const char *prefix, const char *str)
+static inline void dbg_write_str(int level, const char *prefix, const char *str)
 {
+    if (g_debug_level < level) return;
     char buf[256];
     int i = 0;
     const char *p;
@@ -72,8 +74,10 @@ static inline void dbg_write_str(const char *prefix, const char *str)
  * Suitable for calling from WINE_STUB context on guest stack. */
 loaded_module_t *load_dll(const char *path, int depth)
 {
-    const char msg[] = "load_dll: ENTER\n";
-    INLINE_SYSCALL_WRITE(2, msg, sizeof(msg) - 1);
+    if (g_debug_level >= 2) {
+        const char msg[] = "load_dll: ENTER\n";
+        INLINE_SYSCALL_WRITE(2, msg, sizeof(msg) - 1);
+    }
 
     /* Save main PE globals — map_image_at overwrites them with the DLL's values */
     void *saved_image_base = g_loader.image_base;
@@ -105,7 +109,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     g_loader.is_32bit = saved_is_32bit;
     dll_copy_str(g_loader.pe_path, saved_pe_path, sizeof(g_loader.pe_path));
 
-    dbg_write_ptr("load_dll: map=", base ? (uintptr_t)base : 0);
+    dbg_write_ptr(2, "load_dll: map=", base ? (uintptr_t)base : 0);
     if (base == NULL) {
         return NULL;
     }
@@ -166,7 +170,7 @@ loaded_module_t *load_dll(const char *path, int depth)
 
     /* Register in module list */
     loaded_module_t *mod = add_module(base, name, img_nt);
-    dbg_write_ptr("load_dll: add_module=", mod ? (uintptr_t)mod : 0);
+    dbg_write_ptr(2, "load_dll: add_module=", mod ? (uintptr_t)mod : 0);
     if (mod == NULL) {
         uintptr_t sz = pe_size_of_image(img_nt);
         INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
@@ -177,13 +181,13 @@ loaded_module_t *load_dll(const char *path, int depth)
     /* Add to PEB LDR */
     if (g_loader.peb_ldr != NULL) {
         ldr_add_module(mod);
-        dbg_write_str("load_dll: ldr_add=", "ok");
+        dbg_write_str(2, "load_dll: ldr_add=", "ok");
     }
 
     /* Resolve this DLL's own imports (recursive).
      * resolve_module_imports also calls parse_export_table internally. */
     int resolve_rc = resolve_module_imports(mod, depth + 1);
-    dbg_write_str("load_dll: resolve_imports=", resolve_rc == 0 ? "ok" : "fail");
+    dbg_write_str(2, "load_dll: resolve_imports=", resolve_rc == 0 ? "ok" : "fail");
     if (resolve_rc != 0) {
         /* Cleanup all resources allocated above */
         if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
@@ -203,7 +207,7 @@ loaded_module_t *load_dll(const char *path, int depth)
         pe_get_data_dir(img_nt, DIRECTORY_ENTRY_EXPORT, &exp_dir) &&  /* check export dir */
         exp_dir.VirtualAddress != 0) {
         parse_export_table(mod);
-        dbg_write_str("load_dll: parse_export=", "ok");
+        dbg_write_str(2, "load_dll: parse_export=", "ok");
     }
 
     return mod;

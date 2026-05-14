@@ -39,7 +39,7 @@ Date: 2026-05-14
 | `src/run_guest.S` | PE32+ stack switch and entry trampoline. | PE32+-only; no glibc. |
 | `src/trampoline.S` | Assembly trampoline symbol `trampoline_jump`; not referenced by Makefile or code search. | Dead-code candidate until proven used externally. |
 | `src/common.c`, `include/common.h` | Shared debug flag and `with_mprotect_rw`; architecture support guard. | Shared; `common.c` currently uses libc/string/mprotect and is in `SPECIAL_CFLAGS`. |
-| `src/debug.c`, `include/debug.h` | Shared debug infrastructure/macros. | Shared; `DEBUG` uses `fprintf`, so do not add DEBUG calls in glibc-free guest paths. |
+| `src/debug.c`, `include/debug.h` | Shared debug infrastructure/macros. | Shared; `DEBUG` uses `fprintf`, so do not add DEBUG calls in glibc-free guest paths. Runtime traces are controlled by level-based `MY_WINE_DEBUG_LEVEL` values. |
 | `src/pe_headers.c`, `include/pe.h`, `include/pe_parser.h`, `include/pe_priv.h` | DOS/NT header parsing, RVA conversion, section helpers, PE structs. | Shared PE32/PE32+; glibc allowed in parser tests/setup unless called post-switch. |
 | `src/pe_imports.c` | Import descriptor parsing and thunk-size-aware walking. | Shared PE32/PE32+. |
 | `src/pe_rip_scan.c` | Scans PE32+ RIP-relative and PE32 absolute import jump patterns. | Shared with arch-specific scan modes. |
@@ -315,7 +315,7 @@ High-confidence no-glibc zones:
 
 Known warning signs:
 
-- `include/debug.h` uses `fprintf` in `DEBUG`; do not use it in files documented as glibc-free.
+- `include/debug.h` uses `fprintf` in `DEBUG`; do not use it in files documented as glibc-free. Use syscall-safe writes gated on `g_debug_level` thresholds for guest-sensitive diagnostics.
 - `src/msvcrt/crt_startup.c` wrappers `_m_malloc`, `_m_free`, `_m_calloc`, `_m_realloc`, `_m_abort`, and `_m_exit` forward to libc names. Keep tests around PE32+ CRT startup before changing this.
 - `src/loader/import_table.c` uses libc sort/strcmp on non-PE32 paths and local no-libc versions under `MY_WINE32`. Preserve this split until architecture boundaries are explicit.
 - `src/loader/teb_peb.c` comments note setting FS too early corrupts glibc TLS access.

@@ -20,11 +20,22 @@
 
 set -euo pipefail
 
-# Parse --debug flag from arguments (can appear anywhere)
+# Parse debug flags from arguments (can appear anywhere)
 DEBUG=0
+DEBUG_LEVEL=1
+prev=""
 for arg in "$@"; do
+    if [ "$prev" = "--debug-level" ]; then
+        DEBUG=1
+        DEBUG_LEVEL="$arg"
+        prev=""
+        continue
+    fi
     if [ "$arg" = "--debug" ]; then
         DEBUG=1
+        DEBUG_LEVEL=1
+    elif [ "$arg" = "--debug-level" ]; then
+        prev="$arg"
     fi
 done
 
@@ -292,9 +303,9 @@ run_sample() {
     ret_file=$(mktemp) || { rm -f "$output_file"; echo "  ERR: $name (mktemp failed)"; return 1; }
     trap "rm -f '$output_file' '$ret_file' '${output_file}.err'" RETURN
 
-    # Export MY_WINE_DEBUG when in debug mode
+    # Export MY_WINE_DEBUG_LEVEL when in debug mode
     if [ "${DEBUG}" != "0" ]; then
-        export MY_WINE_DEBUG=1
+        export MY_WINE_DEBUG_LEVEL="$DEBUG_LEVEL"
     fi
 
     # Run with timeout; capture stdout into temp file for output comparison.
@@ -386,7 +397,11 @@ run_sample() {
 filter_args() {
     local args=()
     for arg in "$@"; do
-        if [ "$arg" != "--debug" ]; then
+        if [ "$arg" = "--debug-level" ]; then
+            skip_next=1
+        elif [ "${skip_next:-0}" = "1" ]; then
+            skip_next=0
+        elif [ "$arg" != "--debug" ]; then
             args+=("$arg")
         fi
     done
@@ -426,7 +441,7 @@ case "$MODE" in
         pass=0 fail=0 skip=0
         if [ "${DEBUG}" != "0" ]; then
             echo "============================"
-            echo "  DEBUG MODE (MY_WINE_DEBUG=1)"
+            echo "  DEBUG MODE (MY_WINE_DEBUG_LEVEL=$DEBUG_LEVEL)"
             echo "============================"
         fi
         for name in $samples; do
@@ -454,7 +469,7 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Usage: $0 {build|run} [sample_name]"
+        echo "Usage: $0 {build|run} [sample_name] [--debug|--debug-level N]"
         echo ""
         echo "  build         Build all samples (or named sample)"
         echo "  run           Build + run under ./my_wine"

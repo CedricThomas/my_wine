@@ -4,9 +4,9 @@
 #include <string.h>
 #include <sys/mman.h>
 
-// ── Debug global flag ──────────────────────────────────────────
-// Set from main() by scanning envp for MY_WINE_DEBUG
-int g_debug_enabled = 0;
+// ── Debug global level ─────────────────────────────────────────
+// Set from MY_WINE_DEBUG_LEVEL before guest handoff.
+int g_debug_level = 0;
 
 // ── Consolidated loader state (defined here so it's available to all modules) ──
 // Previously split across image_mapper.c and common.c; now consolidated in loader_state.h
@@ -26,9 +26,30 @@ void set_wine_dll_path(const char *path)
     g_wine_dll_path[sizeof(g_wine_dll_path) - 1] = '\0';
 }
 
-// Override debug_check_fn (weak in debug.c) to check g_debug_enabled
-static int debug_enabled(void) { return g_debug_enabled; }
+// Override debug_check_fn (weak in debug.c) to check g_debug_level
+static int debug_enabled(void) { return g_debug_level != 0; }
+static int debug_level(void) { return g_debug_level; }
 int (*debug_check_fn)(void) = &debug_enabled;
+int (*debug_level_fn)(void) = &debug_level;
+
+int parse_debug_level(const char *value)
+{
+    int level = 0;
+
+    if (value == NULL) {
+        return 0;
+    }
+
+    while (*value >= '0' && *value <= '9') {
+        level = (level * 10) + (*value - '0');
+        if (level > 9) {
+            return 9;
+        }
+        value++;
+    }
+
+    return level;
+}
 
 // ── format_hex ──────────────────────────────────────────────────
 

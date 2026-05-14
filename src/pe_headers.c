@@ -176,7 +176,7 @@ IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
             return (IMAGE_SECTION_HEADER *)&sections[i];
         }
     }
-    DEBUG("find_section_by_name: not found '%s' (searched %d sections)", name, num);
+    DEBUG_LEVEL(3, "find_section_by_name: not found '%s' (searched %d sections)", name, num);
     return NULL;
 }
 
@@ -187,18 +187,18 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,
 {
     (void)dos;
 
-    DEBUG("=== PE Header Dump ===");
+    DEBUG_LEVEL(2, "=== PE Header Dump ===");
     uint16_t machine = pe_machine(nt);
-    DEBUG("Machine:           0x%04x (%s)",
+    DEBUG_LEVEL(2, "Machine:           0x%04x (%s)",
             machine,
             machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" :
             machine == IMAGE_FILE_MACHINE_I386 ? "I386" : "unknown");
-    DEBUG("PE type:           %s",
+    DEBUG_LEVEL(2, "PE type:           %s",
             pe_is_pe32(nt) ? "PE32" : "PE32+");
-    DEBUG("Entry point:       0x%08x", pe_entry_rva(nt));
-    DEBUG("Image base:        0x%016" PRIx64, pe_image_base(nt));
-    DEBUG("Section count:     %u", pe_section_count(nt));
-    DEBUG("");
+    DEBUG_LEVEL(2, "Entry point:       0x%08x", pe_entry_rva(nt));
+    DEBUG_LEVEL(2, "Image base:        0x%016" PRIx64, pe_image_base(nt));
+    DEBUG_LEVEL(2, "Section count:     %u", pe_section_count(nt));
+    DEBUG_LEVEL(2, "");
 
     for (uint16_t i = 0; i < pe_section_count(nt); i++) {
         const IMAGE_SECTION_HEADER *s = &sections[i];
@@ -206,13 +206,13 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,
         memcpy(name, s->Name, 8);
         name[8] = '\0';
 
-        DEBUG("Section %u:", i);
-        DEBUG("  Name:             %s", name);
-        DEBUG("  VirtualAddress:   0x%08x", s->VirtualAddress);
-        DEBUG("  VirtualSize:      0x%08x", s->Misc.VirtualSize);
-        DEBUG("  SizeOfRawData:    0x%08x", s->SizeOfRawData);
-        DEBUG("  PointerToRawData: 0x%08x", s->PointerToRawData);
-        DEBUG("  Characteristics:  0x%08x", s->Characteristics);
+        DEBUG_LEVEL(2, "Section %u:", i);
+        DEBUG_LEVEL(2, "  Name:             %s", name);
+        DEBUG_LEVEL(2, "  VirtualAddress:   0x%08x", s->VirtualAddress);
+        DEBUG_LEVEL(2, "  VirtualSize:      0x%08x", s->Misc.VirtualSize);
+        DEBUG_LEVEL(2, "  SizeOfRawData:    0x%08x", s->SizeOfRawData);
+        DEBUG_LEVEL(2, "  PointerToRawData: 0x%08x", s->PointerToRawData);
+        DEBUG_LEVEL(2, "  Characteristics:  0x%08x", s->Characteristics);
 
         /* Decode common characteristic flags */
         char flags[128] = "";
@@ -222,9 +222,9 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,
             strcat(flags, " W");
         if (s->Characteristics & IMAGE_SCN_MEM_EXECUTE)
             strcat(flags, " X");
-        DEBUG("%s", flags);
-        DEBUG("");
+        DEBUG_LEVEL(2, "%s", flags);
+        DEBUG_LEVEL(2, "");
     }
 
-    DEBUG("=====================");
+    DEBUG_LEVEL(2, "=====================");
 }
