@@ -103,7 +103,8 @@ my_wine64: $(OBJS)
 
 MY_WINE32_CC = $(CC) -m32
 MY_WINE32_CFLAGS = $(CFLAGS) -DMY_WINE32 -mno-red-zone -fno-stack-protector \
-	-fno-exceptions -mno-sse -fno-pie -no-pie -Werror
+	-fno-exceptions -mno-sse -fno-pie -no-pie -fno-builtin \
+	-Werror
 BUILDDIR32 = build32
 
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager
