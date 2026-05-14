@@ -285,29 +285,77 @@ run_sample() {
         timeout_sec=$(parse_sample_info "$info" "timeout")
     fi
 
-    echo "  RUN $name (under my_wine, expect exit=$expected_exit, timeout=${timeout_sec}s)"
+    # Capture stdout to a temp file for optional output comparison
+    local output_file
+    output_file=$(mktemp) || { echo "  ERR: $name (mktemp failed)"; return 1; }
+    trap "rm -f '$output_file'" RETURN
 
     # Export MY_WINE_DEBUG when in debug mode
     if [ "${DEBUG}" != "0" ]; then
         export MY_WINE_DEBUG=1
     fi
 
-    # Run with timeout; capture exit code without triggering set -e
-    # Suppress my_wine debug logs (DBG_*) on stderr unless DEBUG is set
+    # Run with timeout; capture stdout into temp file for output comparison
+    # Suppress my_wine debug logs on stderr unless DEBUG is set
     local ret=0
     if [ "${DEBUG}" != "0" ]; then
-        timeout "$timeout_sec" "$MY_WINE" "$exe" || ret=$?
+        timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>&1 || ret=$?
     else
-        timeout "$timeout_sec" "$MY_WINE" "$exe" 2>/dev/null || ret=$?
+        timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null || ret=$?
     fi
 
-    if [ "$ret" -eq "$expected_exit" ]; then
-        echo "  PASS  $name (exit=$ret, expected=$expected_exit)"
-        return 0
-    else
+    # --- Output display in debug mode ---
+    if [ "${DEBUG}" != "0" ] && [ -s "$output_file" ]; then
+        cat "$output_file"
+    fi
+
+    # --- Check exit code ---
+    if [ "$ret" -ne "$expected_exit" ]; then
         echo "  FAIL  $name (exit=$ret, expected=$expected_exit)"
         return 1
     fi
+
+    # --- Check expected_output.txt (byte-for-byte) ---
+    if [ -f "$src_dir/expected_output.txt" ]; then
+        if ! diff -q "$src_dir/expected_output.txt" "$output_file" >/dev/null 2>&1; then
+            echo "  FAIL  $name (output mismatch)"
+            return 1
+        fi
+    fi
+
+    # --- Check expected_output_regex.txt (line-by-line regex, auto-anchored) ---
+    if [ -f "$src_dir/expected_output_regex.txt" ]; then
+        # Read regex patterns into an array
+        local -a regex_lines=()
+        while IFS= read -r line || [ -n "$line" ]; do
+            regex_lines+=("$line")
+        done < "$src_dir/expected_output_regex.txt"
+
+        local actual_count
+        actual_count=$(wc -l < "$output_file")
+        local expected_count=${#regex_lines[@]}
+
+        # Line count must match
+        if [ "$actual_count" -ne "$expected_count" ]; then
+            echo "  FAIL  $name (output regex mismatch)"
+            return 1
+        fi
+
+        # Compare each actual line against corresponding regex (auto-anchored)
+        local idx=0
+        while IFS= read -r line || [ -n "$line" ]; do
+            local pattern="^${regex_lines[$idx]}$"
+            if ! printf '%s\n' "$line" | grep -qE "$pattern"; then
+                echo "  FAIL  $name (output regex mismatch)"
+                return 1
+            fi
+            idx=$((idx + 1))
+        done < "$output_file"
+    fi
+
+    # --- PASS ---
+    echo "  PASS  $name"
+    return 0
 }
 
 # ── Main ──────────────────────────────────────────────────────────
