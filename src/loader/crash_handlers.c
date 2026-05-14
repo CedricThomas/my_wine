@@ -266,8 +266,12 @@ void setup_signal_handlers(void)
      * potentially-corrupted current stack.
      */
 #ifdef MY_WINE32
-    void *sigstack_mem = INLINE_SYSCALL_MMAP(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
-                              MAP_PRIVATE|MAP_ANONYMOUS|MAP_32BIT, -1, 0);
+    /* 32-bit: use MAP_FIXED at 0x00800000 (above UNIX stack at 0x00620000).
+     * This address is high enough for sigaltstack to accept (tested),
+     * and well below 3GB, keeping it away from host libc (0xf7xxxxxx). */
+    void *sigstack_mem = INLINE_SYSCALL_MMAP((void *)0x00800000, SIG_STACK_SIZE,
+                              PROT_READ|PROT_WRITE,
+                              MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
 #else
     void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
@@ -296,7 +300,19 @@ void setup_signal_handlers(void)
         ss.ss_size = SIG_STACK_SIZE;
         ss.ss_flags = 0;
 #ifdef MY_WINE32
-        INLINE_SYSCALL_SIGALTSTACK(&ss, NULL);
+        long ss_rc = INLINE_SYSCALL_SIGALTSTACK(&ss, NULL);
+        if (ss_rc != 0) {
+            g_alt_stack_available = 0;
+            char buf[128]; int n = 0;
+            const char *p = "WARNING: sigaltstack failed (rc=";
+            while (*p && n < 120) buf[n++] = *p++;
+            { int d = n; int v = (int)ss_rc;
+              if (v >= 0) { buf[d++] = '0' + v % 10; v /= 10; }
+              n = d;
+            }
+            for (p = ")\n"; *p && n < 120; ) buf[n++] = *p++;
+            INLINE_SYSCALL_WRITE(2, buf, n);
+        }
 #else
         sigaltstack(&ss, NULL);
 #endif

@@ -397,8 +397,22 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
     commit  = (commit  + PAGE_MASK) & ~(uint64_t)PAGE_MASK;
 
     /* Allocate stack (grows downward on x86_64) */
+#if defined(MY_WINE32)
+    /* 32-bit: use MAP_FIXED at a fixed address below the my_wine32
+     * binary (0x080xxxxx). The guest stack at 0x00500000 is:
+     * - above the PE image (0x004xxxxx)
+     * - below the UNIX stack (0x00600000)
+     * - below the signal stack (0x00800000)
+     * MAP_STACK is omitted — it forces high-range (0xf7xxxxxx) allocation
+     * which overlaps with host libc and causes SIGSEGV on dispatch. */
+    void *stack_base = wine_mmap((void *)0x00500000, (size_t)commit,
+                             PROT_READ|PROT_WRITE,
+                             MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,
+                             -1, 0);
+#else
     void *stack_base = wine_mmap(NULL, (size_t)commit, PROT_READ|PROT_WRITE,
                              MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK|MAP_32BIT, -1, 0);
+#endif
     if (stack_base == MAP_FAILED) {
         wine_log_error("mmap stack");
         return NULL;

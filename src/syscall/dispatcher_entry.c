@@ -30,9 +30,18 @@ void *unix_stack_ptr_val = NULL;
 
 int setup_unix_stack(void)
 {
+#if defined(MY_WINE32)
+    /* 32-bit: use MAP_FIXED at 0x00600000, above the guest stack
+     * (0x00500000 + 512KB = 0x00580000) and below the signal stack
+     * (0x00800000). 128KB at 0x00600000 extends to 0x00620000. */
+    void *base = wine_mmap((void *)0x00600000, UNIX_STACK_SIZE,
+                      PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+#else
     void *base = wine_mmap(NULL, UNIX_STACK_SIZE,
                       PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+#endif
 
     if (base == MAP_FAILED) {
         DEBUG("wine: failed to allocate UNIX stack");
