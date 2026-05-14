@@ -96,6 +96,11 @@ handler: handler_NtCreateSection
 args: ptr(wb) arg1 as h_handle | ptr(wb) arg4 as h_maxSz
 call: handler_NtCreateSection(&h_handle, arg2, arg3, &h_maxSz, STACK(1), STACK(2), STACK(3))
 
+0x4C  NtCreateSemaphore
+handler: handler_NtCreateSemaphore
+args: ptr(wb) arg1 as h_handle
+call: handler_NtCreateSemaphore(&h_handle, arg2, arg3, arg4, STACK(1))
+
 0x4E  NtCreateThreadEx
 handler: handler_NtCreateThreadEx
 args: ptr(wb) arg1 as h_handle

@@ -16,12 +16,15 @@ build/
 # Windows libraries
 *.dll
 
-# Main binary
+# Main binaries
 my_wine
+my_wine64
+my_wine32
 
 # Test binaries (ignore all in tests/, keep .c sources)
 tests/*
 !tests/*.c
+!tests/*.h
 
 # Auto-generated files
 include/crt_offsets_generated.h

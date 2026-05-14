@@ -1,0 +1,6 @@
+Dispatcher register preservation test (PE32)
+PASS: EBP preserved across syscall
+PASS: ESI preserved across syscall
+PASS: EDI preserved across syscall
+PASS: EBX preserved across syscall
+RESULT: ALL PASSED

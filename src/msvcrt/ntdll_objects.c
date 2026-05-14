@@ -13,7 +13,6 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <signal.h>
-#include <pthread.h>
 #include "../syscall/syscalls_inline.h"
 #include "handler_abi.h"
 #include "ntdll_priv.h"
@@ -21,14 +20,6 @@
 #ifndef PAGE_SIZE
 #define PAGE_SIZE 4096
 #endif
-
-/* ── Event / Thread storage ────────────────────────────────────── */
-
-wine_event_t events[MAX_EVENTS];
-int event_count = 0;
-
-wine_thread_t threads[MAX_THREADS];
-int thread_count = 0;
 
 HANDLER
 uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
@@ -38,31 +29,22 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
     (void)desired_access;
     (void)object_attributes;
 
-    if (event_count >= MAX_EVENTS)
+    if (ko_event_count() >= MAX_EVENTS)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
-    /* Find a free slot in the handle table for this event */
-    uint64_t handle = 0;
-    {
-        unsigned idx;
-        for (idx = 3; idx < HANDLE_TABLE_SIZE; idx++) {
-            if (!handle_table[idx].used) {
-                handle_table[idx].fd   = -1; /* not an fd, marks event slot */
-                handle_table[idx].used = 1;
-                handle = (uint64_t)idx;
-                break;
-            }
-        }
+    int slot = ko_event_count();
+    ko_set_event_count(slot + 1);
+    wine_event_t *ev = ko_event(slot);
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_EVENT, (void *)ev);
+
+    if (handle == 0) {
+        ko_set_event_count(slot);
+        return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
-    if (handle == 0)
-        return STATUS_MEMORY_NOT_AVAILABLE;
-
-    int slot = event_count++;
-    events[slot].handle   = (int)handle;
-    events[slot].signaled = (initial_state != 0) ? 1 : 0;
-    events[slot].event_type = (int)event_type;
-    pthread_cond_init(&events[slot].cond, NULL);
+    ev->handle   = (int)handle;
+    ev->signaled = (initial_state != 0) ? 1 : 0;
+    ev->event_type = (int)event_type;
 
     if (event_handle != 0)
         *event_handle = handle;
@@ -72,8 +54,8 @@ uint64_t handler_NtCreateEvent(uint64_t *event_handle, uint64_t desired_access,
 
 static void thread_wrapper(void *arg)
 {
-    uint64_t routine = (uint64_t)(uintptr_t)((void **)arg)[0];
-    uint64_t param   = (uint64_t)(uintptr_t)((void **)arg)[1];
+    uintptr_t routine = (uintptr_t)((void **)arg)[0];
+    uintptr_t param   = (uintptr_t)((void **)arg)[1];
     /* munmap the args page — safe since we extracted values above */
     (void)INLINE_SYSCALL_MUNMAP(arg, PAGE_SIZE);
     void (*fn)(void *) = (void (*)(void *))routine;
@@ -97,7 +79,7 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
     (void)attribute;
     (void)attr_list;
 
-    if (thread_count >= MAX_THREADS)
+    if (ko_thread_count() >= MAX_THREADS)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
     /* Prepare arguments for the wrapper — use mmap instead of malloc */
@@ -130,28 +112,20 @@ uint64_t handler_NtCreateThreadEx(uint64_t *thread_handle, uint64_t desired_acce
         return STATUS_UNSUCCESSFUL;
     }
 
-    /* Find a free slot in the handle table */
-    uint64_t handle = 0;
-    {
-        unsigned idx;
-        for (idx = 3; idx < HANDLE_TABLE_SIZE; idx++) {
-            if (!handle_table[idx].used) {
-                handle_table[idx].fd   = -1; /* not an fd, marks thread slot */
-                handle_table[idx].used = 1;
-                handle = (uint64_t)idx;
-                break;
-            }
-        }
-    }
+    int slot = ko_thread_count();
+    ko_set_thread_count(slot + 1);
+    wine_thread_t *thr = ko_thread(slot);
+    uint32_t handle = wine_handle_alloc(HANDLE_TYPE_THREAD, (void *)thr);
 
     if (handle == 0) {
+        ko_set_thread_count(slot);
         INLINE_SYSCALL_KILL(tid, SIGKILL);
         return STATUS_MEMORY_NOT_AVAILABLE;
     }
 
-    int slot = thread_count++;
-    threads[slot].tid       = (pthread_t)(uintptr_t)tid;
-    threads[slot].suspended = (create_flags & 4) ? 1 : 0; /* CREATE_SUSPENDED */
+    thr->tid       = (int)tid;
+    thr->handle    = (int)handle;
+    thr->suspended = (create_flags & 4) ? 1 : 0; /* CREATE_SUSPENDED */
 
     if (thread_handle != 0)
         *thread_handle = handle;

@@ -12,9 +12,6 @@
 
 #include "module_list.h"
 
-/* DLL base allocator start address (1.5GB) to avoid GCC ms_abi truncation bug */
-#define DLL_ALLOC_BASE 0x60000000
-
 /**
  * load_dll: map a DLL, apply relocations, register in module list + LDR,
  * resolve its imports. Returns the loaded_module_t or NULL on failure.

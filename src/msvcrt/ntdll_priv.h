@@ -10,35 +10,16 @@
 
 #include "include/ntdll.h"
 #include "include/pe.h"
+#include "include/handle_manager.h"
 #include <stddef.h>
-#include <pthread.h>
 
-/* ── Handle Table ──────────────────────────────────────────────── */
+/* ── Handle Table Helper Functions ─────────────────────────────── */
 
-#define HANDLE_TABLE_SIZE    256
-#define STDIN_HANDLE         0x7FFFFFFF
-#define STDOUT_HANDLE        0x7FFFFFFE
-#define STDERR_HANDLE        0x7FFFFFFD
-
-typedef struct {
-    int        fd;
-    uint8_t    used;
-} handle_entry_t;
-
-/*
- * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
- * No mutex, spinlock, or atomic protection is applied.
- * If multi-threaded guest code is supported in the future, each table
- * must be protected (e.g., pthread_mutex_t) and all accessors updated.
- */
-extern handle_entry_t handle_table[HANDLE_TABLE_SIZE];
-
-void init_handle_table(void);
 int handle_to_fd(uint64_t handle);
 uint64_t fd_to_handle(int fd);
 void free_handle(uint64_t handle);
 
-/* ── Section Tracking ──────────────────────────────────────────── */
+/* ── Type Definitions ──────────────────────────────────────────── */
 
 #define MAX_SECTIONS 64
 
@@ -49,32 +30,10 @@ typedef struct {
     uint64_t  max_size;
 } wine_section_t;
 
-/*
- * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
- * No mutex, spinlock, or atomic protection is applied.
- * If multi-threaded guest code is supported in the future, each table
- * must be protected (e.g., pthread_mutex_t) and all accessors updated.
- */
-extern wine_section_t sections[MAX_SECTIONS];
-extern int section_count;
-
-/* ── View Tracking ─────────────────────────────────────────────── */
-
 typedef struct {
     void  *base;
     size_t size;
 } wine_view_t;
-
-/*
- * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
- * No mutex, spinlock, or atomic protection is applied.
- * If multi-threaded guest code is supported in the future, each table
- * must be protected (e.g., pthread_mutex_t) and all accessors updated.
- */
-extern wine_view_t views[MAX_SECTIONS];
-extern int view_count;
-
-/* ── Event Tracking ────────────────────────────────────────────── */
 
 #define MAX_EVENTS 64
 
@@ -82,96 +41,95 @@ typedef struct {
     int handle;
     int signaled;
     int event_type; // 0 = Notification, 1 = Synchronization
-    pthread_cond_t cond;
 } wine_event_t;
-
-/*
- * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
- * No mutex, spinlock, or atomic protection is applied.
- * If multi-threaded guest code is supported in the future, each table
- * must be protected (e.g., pthread_mutex_t) and all accessors updated.
- */
-extern wine_event_t events[MAX_EVENTS];
-extern int event_count;
-
-/* ── Mutex Tracking ────────────────────────────────────────────── */
 
 #define MAX_MUTEXES 64
 
 typedef struct {
-    int            handle;
-    pthread_mutex_t mutex;
-    int            locked;  /* track if currently locked */
+    int handle;
+    int locked;  /* track if currently locked */
 } wine_mutex_t;
 
-/*
- * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
- * No mutex, spinlock, or atomic protection is applied.
- * If multi-threaded guest code is supported in the future, each table
- * must be protected (e.g., pthread_mutex_t) and all accessors updated.
- */
-extern wine_mutex_t mutexes[MAX_MUTEXES];
-extern int mutex_count;
+#define MAX_SEMAPHORES 64
 
-/* ── Synchronization Globals ────────────────────────────────────── */
-
-extern pthread_mutex_t events_global_mutex;
-
-/* ── Thread Tracking ───────────────────────────────────────────── */
+typedef struct {
+    int handle;
+    int count;
+    int max_count;
+} wine_semaphore_t;
 
 #define MAX_THREADS 32
 
 typedef struct {
-    int tid;     /* clone() returns PID of child */
+    int tid;
+    int handle;
     int suspended;
 } wine_thread_t;
 
-/*
- * SINGLE-THREAD ONLY: these globals are not safe for concurrent access.
- * No mutex, spinlock, or atomic protection is applied.
- * If multi-threaded guest code is supported in the future, each table
- * must be protected (e.g., pthread_mutex_t) and all accessors updated.
- */
-extern wine_thread_t threads[MAX_THREADS];
-extern int thread_count;
+/* ── Kernel Object Store ───────────────────────────────────────── */
 
-/* ── Accessors ──────────────────────────────────────────────────── */
-/*
- * These accessor functions provide read-only references to the internal
- * global tables declared above.  They are SINGLE-THREAD ONLY: no locking
- * is performed because the loader runs single-threaded before guest
- * entry.  If multi-threaded guest code is supported in the future,
- * each accessor must acquire the appropriate lock (e.g., the corresponding
- * pthread_mutex_t) before returning a reference.
- */
+typedef struct {
+    // Section / view tables
+    wine_section_t sections[MAX_SECTIONS];
+    int            section_count;
+    wine_view_t    views[MAX_SECTIONS];
+    int            view_count;
 
-/* Handle table */
-handle_entry_t  *get_handle_table(void);
+    // Event table
+    wine_event_t   events[MAX_EVENTS];
+    int            event_count;
 
-/* Section tracking */
-wine_section_t  *get_sections(void);
-int              get_section_count(void);
+    // Mutex table
+    wine_mutex_t   mutexes[MAX_MUTEXES];
+    int            mutex_count;
 
-/* View tracking */
-wine_view_t     *get_views(void);
-int              get_view_count(void);
+    // Semaphore table
+    wine_semaphore_t semaphores[MAX_SEMAPHORES];
+    int            semaphore_count;
 
-/* Event tracking */
-wine_event_t    *get_events(void);
-int              get_event_count(void);
+    // Thread table
+    wine_thread_t  threads[MAX_THREADS];
+    int            thread_count;
 
-/* Mutex tracking */
-wine_mutex_t    *get_mutexes(void);
-int              get_mutex_count(void);
+    // Spinlock protecting all tables
+    wine_spinlock_t lock;
+} wine_kernel_objects_t;
 
-/* Synchronization */
-pthread_mutex_t *get_events_global_mutex(void);
+extern wine_kernel_objects_t g_ko;
 
-/* Thread tracking */
-wine_thread_t   *get_threads(void);
-int              get_thread_count(void);
+/* ── Inline Accessors ──────────────────────────────────────────── */
 
-/* ── Helpers ───────────────────────────────────────────────────── */
+// Sections
+static inline wine_section_t *ko_section(int i)       { return &g_ko.sections[i]; }
+static inline int             ko_section_count(void)  { return g_ko.section_count; }
+static inline void            ko_set_section_count(int n) { g_ko.section_count = n; }
+
+// Views
+static inline wine_view_t *ko_view(int i)             { return &g_ko.views[i]; }
+static inline int          ko_view_count(void)         { return g_ko.view_count; }
+static inline void         ko_set_view_count(int n)    { g_ko.view_count = n; }
+
+// Events
+static inline wine_event_t *ko_event(int i)            { return &g_ko.events[i]; }
+static inline int           ko_event_count(void)       { return g_ko.event_count; }
+static inline void          ko_set_event_count(int n)  { g_ko.event_count = n; }
+
+// Mutexes
+static inline wine_mutex_t *ko_mutex(int i)            { return &g_ko.mutexes[i]; }
+static inline int           ko_mutex_count(void)       { return g_ko.mutex_count; }
+static inline void          ko_set_mutex_count(int n)  { g_ko.mutex_count = n; }
+
+// Semaphores
+static inline wine_semaphore_t *ko_semaphore(int i)    { return &g_ko.semaphores[i]; }
+static inline int               ko_semaphore_count(void) { return g_ko.semaphore_count; }
+static inline void              ko_set_semaphore_count(int n) { g_ko.semaphore_count = n; }
+
+// Threads
+static inline wine_thread_t *ko_thread(int i)          { return &g_ko.threads[i]; }
+static inline int            ko_thread_count(void)     { return g_ko.thread_count; }
+static inline void           ko_set_thread_count(int n) { g_ko.thread_count = n; }
+
+/* ── Helpers ──────────────────────────────────────────────────── */
 
 int map_protect(uint64_t protect);
 int find_view(void *base);

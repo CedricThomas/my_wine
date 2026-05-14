@@ -55,7 +55,7 @@ High-level directory layout (not the full tree from README):
 |---|---|---|
 | `src/main.c` | Entry point: 10-step pipeline orchestrator | Read first |
 | `src/loader/` | Image mapping, import resolution, TEB/PEB, guest setup, entry | `main.c` → `loader/` |
-| `src/stubs/` | Windows API stub implementations (ntdll, kernel32, msvcrt) | `ntdll_*.c`, `kernel32_*.c`, `crt_*.c` |
+| `src/msvcrt/` | Windows API stub implementations (ntdll, kernel32, msvcrt) | `ntdll_*.c`, `kernel32_*.c`, `crt_*.c` |
 | `src/syscall/` | Thunk generation, dispatcher entry, UNIX stack management, NT syscall dispatcher | `thunk_gen.c`, `dispatcher_entry_asm.S`, `dispatcher_entry.c`, `dispatcher.c` |
 | `src/pe_*.c` | PE format parsing (headers, imports, symbols, RIP scan | `pe_headers.c` |
 | `src/run_guest.S` | Naked assembly trampoline — switches to guest stack and jumps to PE entry | — |
@@ -96,7 +96,7 @@ The pipeline in `src/main.c` (`main()`) runs its loading pipeline:
 
 2. **`init_msvcrt_imports()` / `init_import_table()`** in `src/loader/import_init.c` and `src/loader/import_table.c` — Initializes dynamic msvcrt import entries from COFF symbol table and sorts the import table for `bsearch`.
 
-3. **`patch_crt_refptrs()`** in `src/stubs/crt_refptrs.c` — Fixes CRT `.refptr` pointers so the PE can find our Linux-side stub variables (CTOR/DTOR lists, image base, etc.).
+3. **`patch_crt_refptrs()`** in `src/msvcrt/crt_refptrs.c` — Fixes CRT `.refptr` pointers so the PE can find our Linux-side stub variables (CTOR/DTOR lists, image base, etc.).
 
 4. **`resolve_imports()`** in `src/loader/import_resolve.c` — Walks the import descriptor chain and patches IAT entries to point at our stub functions from `import_table`.
 
@@ -128,7 +128,7 @@ Naked assembly trampoline — no prologue/epilogue. Switches to the guest stack,
 2. **`dispatcher_entry_asm.S`** — `__wine_dispatcher` saves all guest state (RCX, RDX, R8, R9, RSP, return address) into `__wine_guest_regs` (declared in `dispatcher_entry.c`), switches to the UNIX stack, calls `c_dispatch_syscall()`, writes result back, restores guest state, returns.
 3. **`dispatcher.c`** — `c_dispatch_syscall(nr)` reads arguments from `__wine_guest_regs` (RCX/RDX/R8/R9 + guest stack for args 5+) and dispatches to the appropriate handler function via switch/case.
 
-Each handler function is declared in the stub files (`src/stubs/ntdll_*.c`, `src/stubs/kernel32_*.c`, `src/stubs/crt_*.c`) and implements the Windows API semantics using Linux primitives. For example, `handler_NtWriteFile` translates the Windows handle (STD_OUTPUT_HANDLE) to a Linux file descriptor and calls `write(2)`.
+Each handler function is declared in the stub files (`src/msvcrt/ntdll_*.c`, `src/msvcrt/kernel32_*.c`, `src/msvcrt/crt_*.c`) and implements the Windows API semantics using Linux primitives. For example, `handler_NtWriteFile` translates the Windows handle (STD_OUTPUT_HANDLE) to a Linux file descriptor and calls `write(2)`.
 
 If no handler is registered, the dispatcher writes an error and raises `SIGSEGV`.
 
@@ -154,9 +154,9 @@ Practical advice for new contributors:
 - **`make`** — Build everything: loader binary, all sample Windows binaries, and all test binaries.
 - **`make samples`** — Build all sample Windows binaries (requires Docker for mingw-w64 cross-compilation).
 - **`make samples SAMPLE=<name>`** — Build a single sample binary.
-- **`make run-sample SAMPLE=<name>`** — Build + run a sample under `./my_wine`.
+- **`make run-samples SAMPLE=<name>`** — Build + run a sample under `./my_wine`.
 - **`make tests`** — Build the loader and all test binaries.
-- **`make run-test`** — Run all tests. Use `make run-test TEST=<name>` to filter (e.g. `TEST=parse`).
+- **`make run-tests`** — Run all tests. Use `make run-tests TEST=<name>` to filter (e.g. `TEST=parse`).
 - **`make fclean`** — Deep clean: remove build directory, generated headers, loader binary, and all sample `.exe` files.
 - **`make re`** — Rebuild from scratch (`fclean` then `all`).
 - **`gdb -ex 'break run_guest' -ex run --args ./my_wine samples/hello_world/hello_world.exe`** — Debug the guest handoff (stack switch + entry point call).

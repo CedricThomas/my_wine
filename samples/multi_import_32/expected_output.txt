@@ -1,0 +1,2 @@
+multi_import: msvcrt memcpy = Hello from multi-import!
+multi_import: OK (kernel32 + msvcrt)

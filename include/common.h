@@ -1,16 +1,25 @@
 #ifndef MY_WINE_COMMON_H
 #define MY_WINE_COMMON_H
 
-#if !defined(__x86_64__)
-#error "my_wine only supports x86_64 architecture"
+#if !defined(__x86_64__) && !defined(__i386__)
+#error "my_wine only supports x86_64 and x86 architectures"
 #endif
 
 #include <stdint.h>
 #include <stddef.h>
 #include "debug.h"
+#include "../src/loader/loader_state.h"
 
 /* Global debug flag: set from envp in main() */
 extern int g_debug_enabled;
+
+/*
+ * g_is_32bit inline accessors — delegates to g_loader.is_32bit
+ * (defined in loader_state.h). Use g_is_32bit_get() for reads,
+ * g_is_32bit_set(val) for writes. Formerly a bare global int.
+ */
+static inline bool g_is_32bit_get(void) { return g_loader.is_32bit != 0; }
+static inline void g_is_32bit_set(int val) { g_loader.is_32bit = val; }
 
 /* Cached WINE_DLL_PATH from environ, set in main() before GS switch */
 #define WINE_DLL_PATH_MAX 512
@@ -24,7 +33,8 @@ void set_wine_dll_path(const char *path);
 
 // x86_64 opcode constants
 #define X86_JMP_RIP         0xFF
-#define X86_MOD_RIP         0x25
+#define X86_MOD_RIP         0x25   // jmp *disp32(%rip) (PE32+)
+#define X86_MOD_ABS         0x15   // jmp *disp32 (PE32 absolute indirect)
 #define X86_REX_W           0x48
 #define X86_MOV_R64_RIP     0x8B
 #define X86_MOV_RIP         0x05
@@ -39,16 +49,15 @@ void set_wine_dll_path(const char *path);
 #define X86_SYSCALL_BYTE1    0x0F
 #define X86_SYSCALL_BYTE2    0x05
 
-// CRT BSS offsets
-#define CRT_BSS_INITENV     0x018
-#define CRT_BSS_ARGC        0x028
-#define CRT_BSS_ARGV        0x020
-
 // Windows pseudo-handle values
-#define HANDLE_CURRENT_PROCESS  0xFFFFFFFF
-#define STD_INPUT_HANDLE_VALUE  0x7FFFFFFF
-#define STD_OUTPUT_HANDLE_VALUE 0x7FFFFFFE
-#define STD_ERROR_HANDLE_VALUE  0x7FFFFFFD
+// Note: These must use unsigned literals so they zero-extend to uint64_t
+// on 32-bit (where the dispatcher zero-extends the 32-bit stack value).
+// 0xFFFFFFFF as int = -1, sign-extends to 0xFFFFFFFFFFFFFFFF as uint64_t.
+// 0xFFFFFFFFU is unsigned int = 0x00000000FFFFFFFF when promoted to uint64_t.
+#define HANDLE_CURRENT_PROCESS  ((uint64_t)0xFFFFFFFF)
+#define STD_INPUT_HANDLE_VALUE  ((uint64_t)0x7FFFFFFF)
+#define STD_OUTPUT_HANDLE_VALUE ((uint64_t)0x7FFFFFFE)
+#define STD_ERROR_HANDLE_VALUE  ((uint64_t)0x7FFFFFFD)
 
 // Array size limits
 #define MAX_THUNK_TARGETS   256

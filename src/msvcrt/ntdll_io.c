@@ -81,7 +81,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     /* Extract path from OBJECT_ATTRIBUTES if provided */
     if (object_attributes != 0) {
         /* Read ObjectName pointer from OBJECT_ATTRIBUTES */
-        uint64_t object_name_ptr = ((OBJECT_ATTRIBUTES *)object_attributes)->ObjectName;
+        uintptr_t object_name_ptr = (uintptr_t)((OBJECT_ATTRIBUTES *)(uintptr_t)object_attributes)->ObjectName;
 
         if (object_name_ptr != 0) {
             /* Read UNICODE_STRING */
@@ -112,7 +112,7 @@ uint64_t handler_NtOpenFile(uint64_t *file_handle, uint64_t desired_access,
     const char *open_path = path ? path : "/dev/null";
 
     /* Open the file via openat syscall (avoids libc after GS base change) */
-    long res = INLINE_SYSCALL_OPENAT(AT_FDCWD, open_path, oflags);
+    long res = INLINE_SYSCALL_OPENAT(AT_FDCWD, open_path, oflags, 0);
     int fd = (int)res;
     if (fd < 0) {
         return STATUS_UNSUCCESSFUL;

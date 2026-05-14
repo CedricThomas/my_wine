@@ -1,0 +1,7 @@
+GetProcessHeap OK.*
+HeapAlloc\(256\) OK.*
+HeapReAlloc\(512\) OK.*
+HeapFree OK
+Alloc/Free cycle OK
+HeapFree\(NULL\) OK
+All tests passed

@@ -77,7 +77,7 @@ __getmainargs → _initterm`) would dereference these `.refptr` entries
 and either crash or get garbage values.
 
 **The fix:** Patch each `.refptr` entry to point to my_wine's own stub
-variables (defined in `src/stubs/crt_globals.c`) instead of the PE's
+variables (defined in `src/msvcrt/crt_globals.c`) instead of the PE's
 original targets. These stubs are real global variables that contain
 safe initial values (typically `0`).
 
@@ -85,7 +85,7 @@ safe initial values (typically `0`).
 
 ## 3. The Stub Globals
 
-`src/stubs/crt_globals.c` defines the stub variables that `.refptr`
+`src/msvcrt/crt_globals.c` defines the stub variables that `.refptr`
 entries are patched to point to. These provide safe two-level
 indirection: the CRT loads the stub's address from `.refptr`, then
 dereferences it to get a safe value.
@@ -152,7 +152,7 @@ crt_context_t g_crt_ctx = { 0 };
 
 ## 4. How `patch_crt_refptrs` Works
 
-`patch_crt_refptrs()` is defined in `src/stubs/crt_refptrs.c`. It
+`patch_crt_refptrs()` is defined in `src/msvcrt/crt_refptrs.c`. It
 runs during loader initialization (called from `main.c` after the PE
 is mapped, before the guest entry point is jumped to).
 
@@ -194,7 +194,7 @@ most general.
 #### Layer 1: COFF Symbol Table Lookup (Primary)
 
 For each symbol name in `refptr_mappings[]`, the function calls
-`find_symbol_rva_from_file()` (from `src/stubs/crt_offset_discovery.c`):
+`find_symbol_rva_from_file()` (from `src/msvcrt/crt_offset_discovery.c`):
 
 ```c
 uint64_t target_rva = find_symbol_rva_from_file(file_path, nt, sections, name);
@@ -245,7 +245,7 @@ matching constructor/destructor-related entries (those are `.CRT`, not
 
 If `__imp___initenv` was **not patched** by layers 1 or 2, the
 function calls `scan_text_for_refptrs()` (from
-`src/stubs/crt_offset_discovery.c`):
+`src/msvcrt/crt_offset_discovery.c`):
 
 ```c
 if (!patched_initenv) {
@@ -437,19 +437,19 @@ main.c::main()
 
 | Component | File | Role |
 |---|---|---|
-| `refptr_mappings[]` | `src/stubs/crt_refptrs.c` | 18 symbol-to-stub mappings |
-| `patch_crt_refptrs()` | `src/stubs/crt_refptrs.c` | Orchestrates 3-layer discovery + patching |
-| `apply_refptr_patch()` | `src/stubs/crt_refptrs.c` | Applies individual patch via `with_mprotect_rw()` |
-| `find_symbol_rva_from_file()` | `src/stubs/crt_offset_discovery.c` | COFF symbol table lookup (Layer 1) |
-| Data section scanning | `src/stubs/crt_refptrs.c` | Value-based `.bss` pointer scan (Layer 2) |
-| `scan_text_for_refptrs()` | `src/stubs/crt_offset_discovery.c` | `.text` instruction pattern scan (Layer 3) |
-| `discover_crt_offsets()` | `src/stubs/crt_offset_discovery.c` | Finds argc/argv/envp `.bss` offsets |
-| Stub globals | `src/stubs/crt_globals.c` | `ctor_list_stub`, `_fmode`, `g_crt_ctx`, etc. |
+| `refptr_mappings[]` | `src/msvcrt/crt_refptrs.c` | 18 symbol-to-stub mappings |
+| `patch_crt_refptrs()` | `src/msvcrt/crt_refptrs.c` | Orchestrates 3-layer discovery + patching |
+| `apply_refptr_patch()` | `src/msvcrt/crt_refptrs.c` | Applies individual patch via `with_mprotect_rw()` |
+| `find_symbol_rva_from_file()` | `src/msvcrt/crt_offset_discovery.c` | COFF symbol table lookup (Layer 1) |
+| Data section scanning | `src/msvcrt/crt_refptrs.c` | Value-based `.bss` pointer scan (Layer 2) |
+| `scan_text_for_refptrs()` | `src/msvcrt/crt_offset_discovery.c` | `.text` instruction pattern scan (Layer 3) |
+| `discover_crt_offsets()` | `src/msvcrt/crt_offset_discovery.c` | Finds argc/argv/envp `.bss` offsets |
+| Stub globals | `src/msvcrt/crt_globals.c` | `ctor_list_stub`, `_fmode`, `g_crt_ctx`, etc. |
 | `patch_acrt_iob()` | `src/loader/guest_setup.c` | Patches `__acrt_iob_func` jmp thunk |
 | `find_text_thunk()` | `src/loader/import_resolve.c` | Finds `.text` jmp-thunk by IAT target |
 | `with_mprotect_rw()` | `src/common.c` | Atomic RWX write with mprotect callback |
 | `crt_context_t` | `include/msvcrt.h` | `image_base`, `bss_vaddr`, CRT offsets |
-| Declarations | `src/stubs/msvcrt_priv.h` | Externs, `refptr_mapping_t`, function prototypes |
+| Declarations | `src/msvcrt/msvcrt_priv.h` | Externs, `refptr_mapping_t`, function prototypes |
 
 ---
 

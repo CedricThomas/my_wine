@@ -1,9 +1,11 @@
 /*
- * main.c — PE loader orchestrator
+ * main.c — PE32+ loader orchestrator (my_wine64)
  *
  * Opens a PE32+ binary, maps sections with correct protections,
  * resolves imports, sets up TEB/PEB, allocates a guest stack,
  * and jumps to the entry point.
+ *
+ * PE32 images are rejected — use my_wine wrapper or my_wine32 directly.
  *
  * All heavy lifting is delegated to src/loader/ sub-modules.
  */
@@ -20,10 +22,15 @@
 
 #include "include/pe.h"
 #include "include/msvcrt.h"
+#include "include/crt.h"
 #include "include/common.h"
 #include "loader/loader_priv.h"
 #include "include/pe_priv.h"
 #include "include/debug.h"
+
+/* g_crt is declared in include/crt.h (via msvcrt.h) and defined in crt_globals.c */
+void patch_crt_refptrs(const char *file_path, void *image_base,
+                       IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections);
 
 extern char **environ;  // from libc, for guest envp
 
@@ -43,18 +50,22 @@ static const char *envp_lookup(char *const envp[], const char *key)
 }
 
 /* Pre-seed argc/argv/envp in .bss using COFF-derived offsets
- * from g_crt_ctx. Explicit mprotect ensures .bss is writable. */
+ * from g_crt_ctx. Explicit mprotect ensures .bss is writable.
+ *
+ * This is a fallback used when the active CRT module does not
+ * provide a seed_bss vtable entry. g_crt_ctx must be populated
+ * by patch_crt_refptrs() (or the module's discover_offsets) first. */
 static void seed_bss_vars(void *base,
-                          const IMAGE_NT_HEADERS64 *nt,
+                          const IMAGE_NT_HEADERS *nt,
                           IMAGE_SECTION_HEADER *sections)
 {
-    if (g_crt_ctx.bss_vaddr == 0) {
+    if (g_crt.crt_ctx.bss_vaddr == 0) {
         fprintf(stderr, "WARNING: .bss section not found, "
                 "skipping argc/argv/envp pre-seed\n");
         return;
     }
 
-    uint8_t *bss_base = (uint8_t *)base + g_crt_ctx.bss_vaddr;
+    uint8_t *bss_base = (uint8_t *)base + g_crt.crt_ctx.bss_vaddr;
 
     IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec == NULL) {
@@ -74,25 +85,33 @@ static void seed_bss_vars(void *base,
         return;
     }
 
-    if (g_crt_ctx.argc_bss_offset != 0) {
-        *(uint32_t *)(bss_base + g_crt_ctx.argc_bss_offset) = 1;
-        DEBUG(".bss: wrote argc=1 at offset 0x%x", g_crt_ctx.argc_bss_offset);
+    if (g_crt.crt_ctx.argc_bss_offset != 0) {
+        *(uint32_t *)(bss_base + g_crt.crt_ctx.argc_bss_offset) = 1;
+        DEBUG(".bss: wrote argc=1 at offset 0x%x", g_crt.crt_ctx.argc_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argc_bss_offset is 0, "
                 "skipping argc pre-seed\n");
     }
 
-    if (g_crt_ctx.argv_bss_offset != 0) {
-        *(uint64_t *)(bss_base + g_crt_ctx.argv_bss_offset) = 0;
-        DEBUG(".bss: wrote argv=NULL at offset 0x%x", g_crt_ctx.argv_bss_offset);
+    if (g_crt.crt_ctx.argv_bss_offset != 0) {
+        if (pe_is_pe32(nt)) {
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
+        } else {
+            *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
+        }
+        DEBUG(".bss: wrote argv=NULL at offset 0x%x", g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
                 "skipping argv pre-seed\n");
     }
 
-    if (g_crt_ctx.envp_bss_offset != 0) {
-        *(uint64_t *)(bss_base + g_crt_ctx.envp_bss_offset) = 0;
-        DEBUG(".bss: wrote envp=NULL at offset 0x%x", g_crt_ctx.envp_bss_offset);
+    if (g_crt.crt_ctx.envp_bss_offset != 0) {
+        if (pe_is_pe32(nt)) {
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
+        } else {
+            *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
+        }
+        DEBUG(".bss: wrote envp=NULL at offset 0x%x", g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "
                 "skipping envp pre-seed\n");
@@ -101,11 +120,18 @@ static void seed_bss_vars(void *base,
 
 /* ── init_loader ─────────────────────────────────────────────── */
 
+/**
+ * Map the PE, detect PE32 vs PE32+, and either:
+ *   - For PE32:  unmap, print error, return -1 (use my_wine32 instead).
+ *   - For PE32+: full loader setup (imports, TEB, PEB, etc.),
+ *                return PE_TYPE_64 with outputs filled.
+ */
 static int init_loader(int argc, char **argv,
                        uint64_t *out_entry,
                        void **out_base,
                        void **out_stack,
-                       void **out_teb)
+                       void **out_teb,
+                       int *out_pe_type)
 {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <pe_binary>\n", argv[0]);
@@ -128,13 +154,30 @@ static int init_loader(int argc, char **argv,
 
     /* 1. Map the PE image (open file, parse headers, copy sections, set protections) */
     IMAGE_DOS_HEADER dos;
-    IMAGE_NT_HEADERS64 nt;
+    IMAGE_NT_HEADERS nt;
     size_t nt_size;
     void *base = map_image(argv[1], &dos, &nt, &nt_size);
     if (!base) return -1;
 
+    /* 1b. Detect CRT type and select the active CRT module */
+    crt_type_t crt_type = crt_detect_type(argv[1], &nt);
+    const crt_module_t *mod = crt_get_module(crt_type);
+    crt_set_active(mod);
+
     /* 2. Get section headers (from the live image) */
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
+
+    /* ── PE32: not supported by this binary ─────────────────── */
+    if (pe_is_pe32(&nt)) {
+        /* Unmap the temporary image before erroring */
+        if (munmap(base, (size_t)nt_size) != 0) {
+            perror("WARNING: munmap on PE32 reject");
+        }
+        fprintf(stderr, "Error: PE32 binary detected. Use my_wine wrapper or my_wine32 directly.\n");
+        return -1;
+    }
+
+    /* ── PE32+ path: full loader setup ─────────────────────── */
 
     /* 3. Initialize dynamic msvcrt import entries, then sort for bsearch */
     init_msvcrt_imports();
@@ -151,7 +194,7 @@ static int init_loader(int argc, char **argv,
     if (!teb) return -1;
 
     /* 7. Set up stack */
-    void *stack_top = setup_stack(&nt.OptionalHeader);
+    void *stack_top = setup_stack(&nt);
     if (!stack_top) return -1;
 
     /* 8a. Zero .data section */
@@ -180,12 +223,20 @@ static int init_loader(int argc, char **argv,
 
     /* 8b. Pre-seed argc/argv/envp in .bss
      *
-     * g_crt_ctx was populated by patch_crt_refptrs (step 4) which
-     * looks up _argc/__argc, _argv/__argv, _environ/__envp in the
-     * COFF symbol table and computes offsets relative to .bss base.
-     * Fallback to hardcoded values if COFF lookup was incomplete.
+     * If the active CRT module provides a seed_bss vtable entry, use it.
+     * Otherwise fall back to the local seed_bss_vars().
+     *
+     * g_crt.crt_ctx is populated by patch_crt_refptrs (step 4) via the module's
+     * discover_offsets, which looks up _argc/__argc, _argv/__argv,
+     * _environ/__envp in the COFF symbol table and computes offsets
+     * relative to .bss base.
      */
-    seed_bss_vars(base, &nt, sections);
+    const crt_module_t *active = crt_get_active();
+    if (crt_has_seed_bss(active)) {
+        crt_seed_bss(active, base, &nt, sections);
+    } else {
+        seed_bss_vars(base, &nt, sections);
+    }
 
     /* 9. Build guest argv/envp from actual host arguments */
     static char *guest_argv[2];
@@ -194,23 +245,39 @@ static int init_loader(int argc, char **argv,
     char **guest_envp = environ;  /* real host environment */
 
     /* Set msvcrt globals so __getmainargs can return the real values */
-    g_guest_argv = guest_argv;
-    g_guest_envp = guest_envp;
+    g_crt.guest_argv = guest_argv;
+    g_crt.guest_envp = guest_envp;
 
-    /* Fill _cmdline_storage so _acmdln points to the actual PE path */
-    strncpy(_cmdline_storage, argv[1], sizeof(_cmdline_storage) - 1);
-    _cmdline_storage[sizeof(_cmdline_storage) - 1] = '\0';
+    /* Fill g_crt.cmdline_storage so g_crt.acmdln points to the actual PE path
+     * g_crt.acmdln is initialized to point to g_crt.cmdline_storage by crt_init_self_refs */
+    strncpy(g_crt.cmdline_storage, argv[1], sizeof(g_crt.cmdline_storage) - 1);
+    g_crt.cmdline_storage[sizeof(g_crt.cmdline_storage) - 1] = '\0';
 
-    /* 10. Look up user main() symbol; fall back to entry point if not found */
+    /* 10. Look up user entry symbol
+     *  - Use crt_entry_symbols() from the active CRT module to iterate
+     *    entry symbol candidates
+     *  - Fall back to PE entry point if no symbol found
+     */
     uint64_t main_rva = 0;
     {
         IMAGE_SYMBOL *symbols = NULL;
         char *string_table = NULL;
         int sym_count = parse_symbol_table_from_file(argv[1], &nt, &symbols, &string_table);
         if (sym_count > 0) {
-            main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
-                                          sections, nt.FileHeader.NumberOfSections,
-                                          "main");
+            const char *const *entry_syms = crt_entry_symbols(mod);
+            if (entry_syms) {
+                for (int si = 0; entry_syms[si] != NULL; si++) {
+                    main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                                  sections, pe_section_count(&nt),
+                                                  entry_syms[si]);
+                    if (main_rva != 0) break;
+                }
+            } else {
+                /* No module or no entry symbols — try "main" as default */
+                main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                              sections, pe_section_count(&nt),
+                                              "main");
+            }
             free(symbols);  // free the malloc'd buffer
         }
     }
@@ -218,13 +285,13 @@ static int init_loader(int argc, char **argv,
     uint64_t entry_abs;
     if (main_rva != 0) {
         entry_abs = (uint64_t)(uintptr_t)base + main_rva;
-        DEBUG("Bypassing CRT: jumping to main() at 0x%lx instead of entry 0x%lx",
+        DEBUG("Bypassing CRT: jumping to entry at 0x%lx instead of entry 0x%lx",
                 (unsigned long)entry_abs,
-                (unsigned long)((uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint));
+                (unsigned long)((uint64_t)(uintptr_t)base + pe_entry_rva(&nt)));
     } else {
-        entry_abs = (uint64_t)(uintptr_t)base + nt.OptionalHeader.AddressOfEntryPoint;
-        fprintf(stderr, "WARNING: 'main' symbol not found, using entry point 0x%lx\n",
-                (unsigned long)entry_abs);
+        entry_abs = (uint64_t)(uintptr_t)base + pe_entry_rva(&nt);
+        fprintf(stderr, "WARNING: entry symbol not found, "
+                "using entry point 0x%lx\n", (unsigned long)entry_abs);
     }
 
     /* Write outputs for caller */
@@ -232,6 +299,7 @@ static int init_loader(int argc, char **argv,
     *out_base = base;
     *out_stack = stack_top;
     *out_teb = teb;
+    *out_pe_type = PE_TYPE_64;
 
     return 0;
 }
@@ -242,11 +310,13 @@ int main(int argc, char *argv[])
 {
     uint64_t entry;
     void *base, *stack_top, *teb;
+    int pe_type;
 
-    if (init_loader(argc, argv, &entry, &base, &stack_top, &teb) != 0) {
+    if (init_loader(argc, argv, &entry, &base, &stack_top, &teb, &pe_type) != 0) {
         return 1;
     }
 
-    run_guest_entry(entry, base, stack_top, teb, g_guest_argv, g_guest_envp);
+    /* ── PE32+: single-process flow ───────────────────────── */
+    run_guest_entry(entry, base, stack_top, teb, g_crt.guest_argv, g_crt.guest_envp);
     return 0;
 }

@@ -84,9 +84,9 @@ static void acrt_iob_patch_cb(void *arg)
 }
 
 /* Compute .text section end for bounds checking */
-static uint64_t find_text_end(IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections)
+static uint64_t find_text_end(IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections)
 {
-    for (uint16_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+    for (uint16_t i = 0; i < pe_section_count(nt); i++) {
         if (memcmp(sections[i].Name, ".text", 5) == 0) {
             uint64_t end = sections[i].VirtualAddress + sections[i].Misc.VirtualSize;
             if (end < sections[i].VirtualAddress ||
@@ -123,7 +123,7 @@ static int apply_iob_patch(void *thunk, uint8_t *code, uint64_t thunk_off,
     return 0;
 }
 
-static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS64 *nt,
+static void patch_acrt_iob(void *base, IMAGE_NT_HEADERS *nt,
                            IMAGE_SECTION_HEADER *sections)
 {
     uint64_t text_end = find_text_end(nt, sections);
@@ -175,7 +175,7 @@ static void *setup_seh_and_thunks(void)
 /* ── Step 3a: PE header re-parse ── */
 
 static void parse_pe_headers(uint64_t entry_abs, void *image_base,
-                             IMAGE_NT_HEADERS64 **out_nt,
+                             IMAGE_NT_HEADERS **out_nt,
                              IMAGE_SECTION_HEADER **out_sections)
 {
     (void)entry_abs;  /* image_base passed directly instead of computing from entry_abs */
@@ -187,7 +187,21 @@ static void parse_pe_headers(uint64_t entry_abs, void *image_base,
         return;
     }
     uint32_t pe_off = img_dos->e_lfanew;
-    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((char *)image_base + pe_off);
+    const uint8_t *raw = (const uint8_t *)image_base + pe_off;
+    IMAGE_NT_HEADERS *nt = malloc(sizeof(IMAGE_NT_HEADERS));
+    if (!nt) { fprintf(stderr, "ERROR: parse_pe_headers: malloc failed\n"); return; }
+    memset(nt, 0, sizeof(*nt));
+    memcpy(&nt->u, raw, sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER));
+    const uint16_t *magic = (const uint16_t *)(raw + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER));
+    if (*magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        nt->pe_type = PE_TYPE_32;
+        memcpy(&nt->u.nt32.OptionalHeader, raw + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER),
+               sizeof(IMAGE_OPTIONAL_HEADER32));
+    } else {
+        nt->pe_type = PE_TYPE_64;
+        memcpy(&nt->u.nt64.OptionalHeader, raw + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER),
+               sizeof(IMAGE_OPTIONAL_HEADER64));
+    }
     IMAGE_SECTION_HEADER *sections = get_image_sections(image_base, nt);
 
     *out_nt = nt;
@@ -201,7 +215,7 @@ static void finalize_guest_state(void *teb, void *seh_frame)
     /* Save host GS base so it can be restored by call_on_unix_stack */
     uintptr_t host_gs;
     __asm__ volatile("rdgsbase %0" : "=r"(host_gs));
-    g_host_gs_base = host_gs;
+    g_loader.host_gs_base = host_gs;
 
     /* Re-set GS base */
     if (set_gs_base(teb) != 0) {
@@ -216,13 +230,13 @@ static void finalize_guest_state(void *teb, void *seh_frame)
 
 /* ── Step 4: Final patches ───────────────────────────────────── */
 
-static void apply_final_patches(void *base, IMAGE_NT_HEADERS64 *nt,
+static void apply_final_patches(void *base, IMAGE_NT_HEADERS *nt,
                                 IMAGE_SECTION_HEADER *sections)
 {
     patch_acrt_iob(base, nt, sections);
 
     /* Ensure .bss is writable (mprotect may not propagate) */
-    for (uint32_t i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+    for (uint32_t i = 0; i < pe_section_count(nt); i++) {
         if (sections[i].Characteristics & IMAGE_SCN_MEM_WRITE) {
             size_t sz = sections[i].Misc.VirtualSize;
             if (sz == 0) sz = sections[i].SizeOfRawData;
@@ -297,7 +311,7 @@ __attribute__((noreturn)) void setup_guest_and_run(
     DEBUG("my_wine: jumping to entry 0x%lx via inline asm",
           (unsigned long)entry_abs);
 
-    IMAGE_NT_HEADERS64 *nt = NULL;
+    IMAGE_NT_HEADERS *nt = NULL;
     IMAGE_SECTION_HEADER *sections = NULL;
 
     parse_pe_headers(entry_abs, image_base, &nt, &sections);

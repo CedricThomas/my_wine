@@ -17,6 +17,14 @@ extern void *g_stack_base;
 extern size_t g_stack_size;
 
 void *setup_teb_peb(void);
-void *setup_stack(IMAGE_OPTIONAL_HEADER64 *opt);
+void *setup_stack(IMAGE_NT_HEADERS *nt);
+
+/* Fixed addresses for PE32 TEB/PEB (high in 32-bit space) */
+#define TEB32_FIXED_ADDR  0x7FFDE000U
+#define PEB32_FIXED_ADDR  0x7FFDF000U
+
+/* Shared PE32 init helpers (used by pe32_entry.c and setup_teb_peb) */
+void init_teb32_fields(void *teb, void *peb);
+void init_peb32_fields(void *peb, void *image_base);
 
 #endif /* MY_WINE_TEB_PEB_H */

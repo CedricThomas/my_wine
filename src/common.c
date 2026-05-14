@@ -8,6 +8,10 @@
 // Set from main() by scanning envp for MY_WINE_DEBUG
 int g_debug_enabled = 0;
 
+// ── Consolidated loader state (defined here so it's available to all modules) ──
+// Previously split across image_mapper.c and common.c; now consolidated in loader_state.h
+wine_loader_state_t g_loader = { .dll_base_next = DLL_ALLOC_BASE };
+
 // ── Cached WINE_DLL_PATH ────────────────────────────────────────
 // Populated in main() before GS switch so find_dll_path is syscall-safe
 char g_wine_dll_path[WINE_DLL_PATH_MAX] = {0};

@@ -9,8 +9,42 @@
 #include "loader_utils.h"
 #include "image_mapper.h"
 #include "dll_path.h"
+#include "../syscall/syscalls_inline.h"
 
 static char g_exe_dir[512] = {0};
+
+/* ── Debug helpers (syscall-safe, no glibc) ── */
+static inline void dbg_fmt_hex(char *dst, uintptr_t val)
+{
+    for (int i = 7; i >= 0; i--) {
+        dst[i] = "0123456789abcdef"[val & 0xf];
+        val >>= 4;
+    }
+}
+
+static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+{
+    char buf[64];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p; ) buf[i++] = *p++;
+    buf[i++] = '0'; buf[i++] = 'x';
+    dbg_fmt_hex(buf + i, val);
+    i += 8;
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
+
+static inline void dbg_write_str(const char *prefix, const char *str)
+{
+    char buf[256];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p && i < 240; ) buf[i++] = *p++;
+    for (p = str; *p && i < 250; ) buf[i++] = *p++;
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
 
 /**
  * Initialize g_exe_dir with the directory of the main PE file.
@@ -22,17 +56,11 @@ static void init_exe_dir(void)
     if (g_exe_dir[0] != '\0') return;
     const char *pe_path = get_pe_path();
     if (pe_path != NULL && pe_path[0] != '\0') {
-        /* Hand-rolled strrchr */
-        const char *last_slash = NULL;
-        const char *p = pe_path;
-        while (*p) {
-            if (*p == '/') last_slash = p;
-            p++;
-        }
+        const char *last_slash = dll_strrchr(pe_path, '/');
         if (last_slash != NULL && last_slash != pe_path) {
             size_t dir_len = last_slash - pe_path;
             if (dir_len >= sizeof(g_exe_dir)) dir_len = sizeof(g_exe_dir) - 1;
-            __builtin_memcpy(g_exe_dir, pe_path, dir_len);
+            dll_memcpy(g_exe_dir, pe_path, dir_len);
             g_exe_dir[dir_len] = '\0';
             return;
         }
@@ -53,18 +81,26 @@ static void init_exe_dir(void)
  */
 int find_dll_path(const char *dll_name, char *path, size_t path_size)
 {
+    dbg_write_str("find_dll_path: name=", dll_name);
+
     /* --- Try current directory --- */
     if (dll_build_path(path, path_size, ".", dll_name) == 0) {
-        if (dll_path_exists(path))
+        dbg_write_str("find_dll_path: try_cwd=", path);
+        if (dll_path_exists(path)) {
+            dbg_write_str("find_dll_path: cwd=", "ok");
             return 1;
+        }
     }
 
     /* --- Try app directory --- */
     init_exe_dir();
     if (g_exe_dir[0] != '.' || g_exe_dir[1] != '\0') {
         if (dll_build_path(path, path_size, g_exe_dir, dll_name) == 0) {
-            if (dll_path_exists(path))
+            dbg_write_str("find_dll_path: try_app=", path);
+            if (dll_path_exists(path)) {
+                dbg_write_str("find_dll_path: app=", "ok");
                 return 1;
+            }
         }
     }
 
@@ -97,12 +133,16 @@ int find_dll_path(const char *dll_name, char *path, size_t path_size)
             int i;
             for (i = 0; i < seg_count; i++) {
                 if (dll_build_path(path, path_size, segments[i], dll_name) == 0) {
-                    if (dll_path_exists(path))
+                    dbg_write_str("find_dll_path: try_path=", path);
+                    if (dll_path_exists(path)) {
+                        dbg_write_str("find_dll_path: wine_path=", "ok");
                         return 1;
+                    }
                 }
             }
         }
     }
 
+    dbg_write_str("find_dll_path: ret=", "not_found");
     return 0;
 }

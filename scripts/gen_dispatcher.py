@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
 """
-gen_dispatcher.py — Regenerate dispatcher switch body from nt_syscalls.def
+gen_dispatcher.py — Regenerate dispatcher switch bodies from nt_syscalls.def
 
 Reads include/nt_syscalls.def (new declarative format) and generates
-src/syscall/dispatcher_generated.c with the DISPATCHER_C_BODY switch body.
+src/syscall/dispatcher_generated.c with both c_dispatcher and legacy
+switch bodies.
 
 Usage:
   python3 scripts/gen_dispatcher.py               # verify mode
   python3 scripts/gen_dispatcher.py --generate     # write dispatcher_generated.c
   python3 scripts/gen_dispatcher.py --help
-
-Version note:
-  The syscall numbers in nt_syscalls.def are version-specific (Windows 10+
-  x86_64).  When regenerating for a different Windows version, ensure the
-  syscall numbers in nt_syscalls.def are updated to match the target version
-  first.  This generator does NOT validate syscall numbers — it assumes
-  nt_syscalls.def contains correct values for the target Windows version.
 """
 
 import sys
@@ -141,7 +135,7 @@ def p_name_for(local_name):
 
 # ── C code generation ───────────────────────────────────────────
 
-def gen_decls(args):
+def gen_decls(args, variant):
     """Generate local variable declarations."""
     lines = []
     declared = set()
@@ -151,7 +145,10 @@ def gen_decls(args):
         if a["type"] == "stack":
             n = a["name"]  # already h_xxx
             declared.add(n)
-            lines.append("        uint64_t %s = read_guest_stack(%s);" % (n, a["index"]))
+            if variant == "c":
+                lines.append("        uint64_t %s = read_guest_stack(%s);" % (n, a["index"]))
+            else:
+                lines.append("        uint64_t %s = read_guest_stack_ctx(ctx, %s);" % (n, a["index"]))
 
     # ptr(wb) locals: skip uint64_t if already declared by stack
     for a in args:
@@ -167,7 +164,7 @@ def gen_decls(args):
     return "\n".join(lines)
 
 
-def gen_validation(args):
+def gen_validation(args, variant):
     """Generate ptr(wb) dispatch and ptr(ro) validation code."""
     lines = []
     # ptr(wb) and ptr(wb32)
@@ -175,11 +172,12 @@ def gen_validation(args):
         if a["type"] in ("wb", "wb32"):
             n = a["name"]
             pn = p_name_for(n)
+            fn = "dispatch_ptr_inout" if variant == "c" else "dispatch_ptr_inout_ctx"
             lines.append(
-                '        if (dispatch_ptr_inout(%s, &%s, &%s, "%s", &result) != 0) break;' %
-                (a["src"], n, a["p_name"], a.get("label", a["name"])))
+                '        if (%s(%s, &%s, &%s, "%s", &result) != 0) break;' %
+                (fn, a["src"], n, a["p_name"], a.get("label", a["name"])))
     # ptr(ro) — reuse `status` var across multiple read_guest_ptr calls
-    ret = "return (uint64_t)status;"
+    ret = "return (uint64_t)status;" if variant == "c" else "return status;"
     first_ro = True
     for a in args:
         if a["type"] == "ro":
@@ -193,15 +191,20 @@ def gen_validation(args):
     return "\n".join(lines)
 
 
-def expand_call(call_template, args):
+def expand_call(call_template, args, variant):
     """Expand STACK(N) and raw in the call template."""
     result = call_template
     # STACK(N)
-    result = re.sub(r'STACK\((\d+)\)', lambda m: "read_guest_stack(%s)" % m.group(1), result)
+    if variant == "c":
+        result = re.sub(r'STACK\((\d+)\)', lambda m: "read_guest_stack(%s)" % m.group(1), result)
+    else:
+        result = re.sub(r'STACK\((\d+)\)', lambda m: "read_guest_stack_ctx(ctx, %s)" % m.group(1), result)
     # raw → first ptr(ro) from register
     raw_src = find_raw_source(args)
     if raw_src and "raw" in result:
         result = result.replace("raw", raw_src)
+    # Suppress pointer-to-int-cast warnings on 32-bit: cast through uintptr_t first
+    result = result.replace("(PVOID)", "(PVOID)(uintptr_t)")
     return result
 
 
@@ -220,22 +223,22 @@ def gen_writeback(args):
     return "\n".join(lines)
 
 
-def gen_case(entry):
+def gen_case(entry, variant):
     """Generate one switch case block."""
     args = entry["args"]
     parts = ["    case %s: /* %s */" % (entry["num"], entry["name"]), "    {"]
 
-    decls = gen_decls(args)
+    decls = gen_decls(args, variant)
     if decls:
         parts.append(decls)
         parts.append("")
 
-    val = gen_validation(args)
+    val = gen_validation(args, variant)
     if val:
         parts.append(val)
         parts.append("")
 
-    call = expand_call(entry["call"], args)
+    call = expand_call(entry["call"], args, variant)
     parts.append("        result = %s;" % call)
 
     wb = gen_writeback(args)
@@ -247,25 +250,26 @@ def gen_case(entry):
     return "\n".join(parts)
 
 
-def gen_default():
+def gen_default(variant):
     """Generate the default case."""
+    var = "nr" if variant == "c" else "syscall_number"
     return """    default:
     {
         char buf[39];
-        format_err_unhandled_syscall(buf, nr);
+        format_err_unhandled_syscall(buf, %s);
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
     }
     result = STATUS_NOT_IMPLEMENTED;
-    break;"""
+    break;""" % var
 
 
-def gen_switch_body(syscalls):
-    """Generate all case blocks."""
+def gen_switch_body(syscalls, variant):
+    """Generate all case blocks for one variant."""
     cases = []
     for entry in syscalls:
-        cases.append(gen_case(entry))
+        cases.append(gen_case(entry, variant))
     cases.append("")
-    cases.append(gen_default())
+    cases.append(gen_default(variant))
     return "\n".join(cases) + "\n"
 
 
@@ -273,26 +277,31 @@ def generate_output():
     """Generate the full dispatcher_generated.c file."""
     syscalls = parse_def()
 
-    body = gen_switch_body(syscalls)
+    c_body = gen_switch_body(syscalls, "c")
+    legacy_body = gen_switch_body(syscalls, "legacy")
 
     return (
         "/*\n"
         " * dispatcher_generated.c — Auto-generated from include/nt_syscalls.def\n"
         " * DO NOT EDIT BY HAND — run scripts/gen_dispatcher.py --generate\n"
-        " * Contains the switch body for the dispatcher entry point.\n"
+        " * Contains the switch bodies for both dispatcher entry points.\n"
         " * Included from dispatcher.c via #define + #include.\n"
         " */\n"
         "\n"
         "#ifndef DISPATCHER_GENERATED_C\n"
         "#define DISPATCHER_GENERATED_C\n"
         "\n"
-        "#ifndef DISPATCHER_C_BODY\n"
-        '#error "Define DISPATCHER_C_BODY before including this file"\n'
-        "#endif\n"
-        "\n"
+        "#if defined(DISPATCHER_C_BODY)\n"
         "switch (nr) {\n"
-        + body +
+        + c_body +
         "}\n"
+        "#elif defined(DISPATCHER_LEGACY_BODY)\n"
+        "switch (nt_nr) {\n"
+        + legacy_body +
+        "}\n"
+        "#else\n"
+        '#error "Define DISPATCHER_C_BODY or DISPATCHER_LEGACY_BODY before including this file"\n'
+        "#endif\n"
         "\n"
         "#endif /* DISPATCHER_GENERATED_C */\n"
     )
@@ -339,8 +348,10 @@ def main():
         print("OK: All %d syscalls have handler: and call: lines" % len(syscalls))
 
         try:
-            body = gen_switch_body(syscalls)
-            print("OK: DISPATCHER_C_BODY body generated (%d chars)" % len(body))
+            c_body = gen_switch_body(syscalls, "c")
+            legacy_body = gen_switch_body(syscalls, "legacy")
+            print("OK: c_dispatcher body generated (%d chars)" % len(c_body))
+            print("OK: legacy_dispatcher body generated (%d chars)" % len(legacy_body))
         except Exception as e:
             print("FAIL: %s" % e)
             import traceback

@@ -1,0 +1,7 @@
+CreateEventA OK.*
+WaitForSingleObject\(unsignaled, 0\).*
+WaitForSingleObject\(signaled, 0\).*
+ResetEvent OK
+CreateMutexA OK.*
+ReleaseMutex OK
+All tests passed

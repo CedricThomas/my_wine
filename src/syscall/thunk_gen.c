@@ -40,7 +40,11 @@
  *   - This generated code will only execute on x86_64 CPUs.
  */
 
-#define THUNK_SIZE 23        /* 2+7+10+2+1+1 bytes: push+mov+rax+call+pop+ret */
+#if defined(__i386__)
+#define THUNK_SIZE  THUNK_SIZE_32   /* 15 bytes for 32-bit thunks */
+#else
+#define THUNK_SIZE  23              /* 2+7+10+2+1+1 bytes: push+mov+rax+call+pop+ret */
+#endif
 #define NUM_NT_SYSCALLS 25
 
 static void *thunk_blob = NULL;    /* single mmap'd executable region */
@@ -64,6 +68,78 @@ static const uint16_t nt_syscall_list[] = {
     NT_SYSCALL_CREATE_MUTEX, NT_SYSCALL_SET_EVENT, NT_SYSCALL_RESET_EVENT
 };
 
+static void validate_dispatcher_addr(void *addr)
+{
+    if (addr == NULL) {
+#ifdef MY_WINE32
+        INLINE_SYSCALL_WRITE_ERR("wine: fatal: dispatcher address is NULL, cannot generate thunks\n", sizeof("wine: fatal: dispatcher address is NULL, cannot generate thunks\n") - 1);
+        INLINE_SYSCALL_EXIT(1);
+#else
+        fprintf(stderr, "wine: fatal: dispatcher address is NULL, cannot generate thunks\n");
+        abort();
+#endif
+    }
+}
+
+#if defined(__i386__)
+/*
+ * write_thunk_at_32 — encode a 15-byte 32-bit thunk at the given location.
+ * Layout:
+ *   Offset 0:     push ebp          (save guest EBP — callee-saved, preserved by dispatcher)
+ *   Offset 1-5:   mov eax, imm32    (load dispatcher address, clobbers EAX)
+ *   Offset 6-10:  mov edx, imm32    (load syscall number)
+ *   Offset 11-12: call eax          (indirect call to dispatcher)
+ *   Offset 13:    pop ebp           (restore guest EBP)
+ *   Offset 14:    ret               (return to guest caller)
+ * Total: 15 bytes: 55 B8 XX XX XX XX BA XX XX XX XX FF D0 5D C3
+ *
+ * In 32-bit mode all addresses fit in 32 bits, so imm32 encoding is sufficient.
+ * EAX carries dispatcher address, EDX carries syscall number to the dispatcher.
+ * push ebp/pop ebp wraps the call (like push rdi/pop rdi in 64-bit mode).
+ * EBP is callee-saved (already preserved by dispatcher), so EAX is free to
+ * carry the syscall return value back to the guest without being clobbered.
+ */
+#define THUNK_SIZE_32 15
+
+static void write_thunk_at_32(uint8_t *loc, uint16_t syscall_number, void *dispatcher_addr)
+{
+    validate_dispatcher_addr(dispatcher_addr);
+
+    uint32_t disp_addr = (uint32_t)(uintptr_t)dispatcher_addr;
+
+    /* push ebp — 1 byte: 55 */
+    loc[0] = 0x55;
+
+    /* mov eax, imm32(dispatcher) — 5 bytes: B8 XX XX XX XX */
+    loc[1] = 0xB8;
+    loc[2] = (uint8_t)(disp_addr & 0xFF);
+    loc[3] = (uint8_t)((disp_addr >> 8) & 0xFF);
+    loc[4] = (uint8_t)((disp_addr >> 16) & 0xFF);
+    loc[5] = (uint8_t)((disp_addr >> 24) & 0xFF);
+
+    /* mov edx, imm32(syscall_number) — 5 bytes: BA XX XX XX XX */
+    loc[6] = 0xBA;
+    uint32_t nr = (uint32_t)syscall_number;
+    loc[7] = (uint8_t)(nr & 0xFF);
+    loc[8] = (uint8_t)((nr >> 8) & 0xFF);
+    loc[9] = (uint8_t)((nr >> 16) & 0xFF);
+    loc[10] = (uint8_t)((nr >> 24) & 0xFF);
+
+    DEBUG("wine: thunk[%d] dispatcher=0x%x", syscall_number, (unsigned)disp_addr);
+
+    /* call eax — 2 bytes: FF D0 (indirect call through EAX) */
+    loc[11] = 0xFF;
+    loc[12] = 0xD0;
+
+    /* pop ebp — 1 byte: 5D (restore guest EBP) */
+    loc[13] = 0x5D;
+
+    /* ret — 1 byte: C3 (return to guest caller) */
+    loc[14] = 0xC3;
+}
+
+#else /* !__i386__ — x86_64 */
+
 /*
  * write_thunk_at — encode a 23-byte thunk at the given location.
  * Layout:
@@ -76,10 +152,7 @@ static const uint16_t nt_syscall_list[] = {
  */
 static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatcher_addr)
 {
-    if (dispatcher_addr == NULL) {
-        fprintf(stderr, "wine: fatal: dispatcher address is NULL, cannot generate thunks\n");
-        abort();
-    }
+    validate_dispatcher_addr(dispatcher_addr);
 
     /* push rdi — 2 bytes: 41 57 (REX.B + push rdi) */
     loc[0] = 0x41;
@@ -121,34 +194,73 @@ static void write_thunk_at(uint8_t *loc, uint16_t syscall_number, void *dispatch
     loc[22] = 0xC3;
 }
 
+#endif /* __i386__ */
+
 /*
  * generate_all_thunks — allocate one executable blob, write all thunks, return array.
  */
 void **generate_all_thunks(void)
 {
+#if defined(__i386__)
+    size_t needed = (size_t)NUM_NT_SYSCALLS * THUNK_SIZE_32;
+#else
     size_t needed = (size_t)NUM_NT_SYSCALLS * THUNK_SIZE;
+#endif
     size_t alloc = (needed + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
     if (alloc < PAGE_SIZE) alloc = PAGE_SIZE;
 
+#ifdef MY_WINE32
+    thunk_blob = INLINE_SYSCALL_MMAP(NULL, alloc, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (thunk_blob == MAP_FAILED) {
+        INLINE_SYSCALL_WRITE_ERR("mmap thunk_blob\n", sizeof("mmap thunk_blob\n") - 1);
+        return NULL;
+    }
+#else
     thunk_blob = mmap(NULL, alloc, PROT_READ | PROT_WRITE | PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (thunk_blob == MAP_FAILED) {
         perror("mmap thunk_blob");
         return NULL;
     }
+#endif
     thunk_blob_size = alloc;
 
     void *dispatcher = wine_dispatcher_addr();
+
+#ifdef MY_WINE32
+    {
+        char msg[64];
+        int off = 0;
+        const char prefix[] = "wine: dispatcher at 0x";
+        int i;
+        for (i = 0; prefix[i]; i++) msg[off++] = prefix[i];
+        uint64_t val = (uint64_t)(uintptr_t)dispatcher;
+        format_hex(msg + off, sizeof(msg) - off, val);
+        off += 16;
+        msg[off++] = '\n';
+        INLINE_SYSCALL_WRITE_ERR(msg, (size_t)off);
+    }
+    if (dispatcher == NULL) {
+        INLINE_SYSCALL_WRITE_ERR("wine: fatal: __wine_dispatcher symbol not found\n", sizeof("wine: fatal: __wine_dispatcher symbol not found\n") - 1);
+        return NULL;
+    }
+#else
     fprintf(stderr, "wine: dispatcher at %p\n", dispatcher);
     if (dispatcher == NULL) {
         fprintf(stderr, "wine: fatal: __wine_dispatcher symbol not found\n");
         return NULL;
     }
+#endif
 
     for (int i = 0; i < NUM_NT_SYSCALLS; i++) {
         uint16_t nr = nt_syscall_list[i];
         uint8_t *loc = (uint8_t *)thunk_blob + ((size_t)i * THUNK_SIZE);
+#if defined(__i386__)
+        write_thunk_at_32(loc, nr, dispatcher);
+#else
         write_thunk_at(loc, nr, dispatcher);
+#endif
         thunk_array[nr] = (thunk_fn)loc;
     }
 

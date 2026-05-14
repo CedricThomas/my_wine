@@ -27,7 +27,4 @@ int ldr_add_module(loaded_module_t *mod);
 int ldr_remove_module(loaded_module_t *mod);
 LDR_DATA_TABLE_ENTRY *ldr_find_by_addr(void *addr);
 
-/* Global pointer to allocated PEB_LDR_DATA */
-extern PEB_LDR_DATA *g_peb_ldr;
-
 #endif /* MY_WINE_PEB_LDR_H */

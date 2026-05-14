@@ -110,7 +110,7 @@ uses the correct larger size.
 Matches msvcrt.dll's FILE size exactly.
 
 ```c
-// src/stubs/msvcrt_priv.h
+// src/msvcrt/msvcrt_priv.h
 typedef union {
     wine_FILE f[3];      // 3 × 48 bytes = 144 bytes
     char      bytes[144];
@@ -267,7 +267,7 @@ Real threads with shared TEB:
 - **Shares the parent's TEB** — no per-thread TEB. All threads see the
   same GS base and TEB contents.
 - Thread tracking: `wine_thread_t { tid, suspended }` with `MAX_THREADS = 32`
-  and `threads[]` array in `src/stubs/ntdll_objects.c`.
+  and `threads[]` array in `src/msvcrt/ntdll_objects.c`.
 - No per-thread SEH, no per-thread TLS
 - GS base is set once (for the main thread only)
 

@@ -10,21 +10,14 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include "peb_ldr.h"
-
-/* ── Global state ──────────────────────────────────────────────── */
-PEB_LDR_DATA *g_peb_ldr = NULL;
-
-/* ── Hand-rolled helpers (no glibc for guest-stack safety) ─────── */
-
-static void pdr_memset(void *ptr, int c, size_t n)
-{
-    uint8_t *p = (uint8_t *)ptr;
-    size_t i;
-    for (i = 0; i < n; i++)
-        p[i] = (uint8_t)c;
-}
+#include "image_mapper.h"
+#include "include/common.h"
+#include "loader_utils.h"
+#include "loader_state.h"
+#include "../syscall/syscalls_inline.h"
 
 /* ── List helpers ───────────────────────────────────────────────── */
 
@@ -59,8 +52,17 @@ static void list_remove(LIST_ENTRY *entry)
 
 PEB_LDR_DATA *init_peb_ldr(void)
 {
-    PEB_LDR_DATA *ldr = (PEB_LDR_DATA *)malloc(sizeof(PEB_LDR_DATA));
-    if (!ldr) return NULL;
+    PEB_LDR_DATA *ldr;
+    if (loader_is_32bit()) {
+        /* For PE32, allocate below 4GB so the truncated pointer is valid */
+        ldr = (PEB_LDR_DATA *)INLINE_SYSCALL_MMAP(NULL, sizeof(PEB_LDR_DATA),
+                    PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+        if (ldr == (void *)-1 || ldr == NULL) return NULL;
+    } else {
+        ldr = (PEB_LDR_DATA *)malloc(sizeof(PEB_LDR_DATA));
+        if (!ldr) return NULL;
+    }
 
     memset(ldr, 0, sizeof(PEB_LDR_DATA));
 
@@ -68,13 +70,13 @@ PEB_LDR_DATA *init_peb_ldr(void)
     list_init(&ldr->InMemoryOrderModuleList);
     list_init(&ldr->InInitializationOrderModuleList);
 
-    g_peb_ldr = ldr;
+    loader_set_peb_ldr(ldr);
     return ldr;
 }
 
 int ldr_add_module(loaded_module_t *mod)
 {
-    if (!mod || !mod->base || !mod->nt || !g_peb_ldr)
+    if (!mod || !mod->base || !mod->nt || !(PEB_LDR_DATA *)g_loader.peb_ldr)
         return -1;
 
     if (mod->ldr_linked)
@@ -88,10 +90,11 @@ int ldr_add_module(loaded_module_t *mod)
      * and self-referencing DoubleList nodes. */
     entry->LoadCount = mod->load_count;
 
+    PEB_LDR_DATA *ldr = (PEB_LDR_DATA *)g_loader.peb_ldr;
     /* Insert into the three PEB LDR lists */
-    list_insert_tail(&g_peb_ldr->InLoadOrderModuleList, &entry->DoubleList[0]);
-    list_insert_tail(&g_peb_ldr->InMemoryOrderModuleList, &entry->DoubleList[1]);
-    list_insert_tail(&g_peb_ldr->InInitializationOrderModuleList, &entry->DoubleList[2]);
+    list_insert_tail(&ldr->InLoadOrderModuleList, &entry->DoubleList[0]);
+    list_insert_tail(&ldr->InMemoryOrderModuleList, &entry->DoubleList[1]);
+    list_insert_tail(&ldr->InInitializationOrderModuleList, &entry->DoubleList[2]);
 
     mod->ldr_linked = 1;
 
@@ -111,7 +114,7 @@ int ldr_remove_module(loaded_module_t *mod)
     list_remove(&entry->DoubleList[2]);
 
     /* Reset the entry */
-    pdr_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
+    dll_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
 
     mod->ldr_linked = 0;
 
@@ -120,14 +123,13 @@ int ldr_remove_module(loaded_module_t *mod)
 
 LDR_DATA_TABLE_ENTRY *ldr_find_by_addr(void *addr)
 {
-    LIST_ENTRY *cursor;
-
-    if (!g_peb_ldr || !addr)
+    if (!g_loader.peb_ldr || !addr)
         return NULL;
 
-    cursor = g_peb_ldr->InMemoryOrderModuleList.Flink;
+    PEB_LDR_DATA *ldr = (PEB_LDR_DATA *)g_loader.peb_ldr;
+    LIST_ENTRY *cursor = ldr->InMemoryOrderModuleList.Flink;
 
-    while (cursor != &g_peb_ldr->InMemoryOrderModuleList) {
+    while (cursor != &ldr->InMemoryOrderModuleList) {
         LDR_DATA_TABLE_ENTRY *entry = (LDR_DATA_TABLE_ENTRY *)(
             ((char *)cursor - offsetof(LDR_DATA_TABLE_ENTRY, DoubleList[1]))
         );

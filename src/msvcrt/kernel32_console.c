@@ -1,9 +1,12 @@
 #define _GNU_SOURCE
 
 #include "kernel32_priv.h"
+#include "ntdll_priv.h"
+#include "include/nt_constants.h"
+#include "../syscall/syscalls_inline.h"
 
 /* Helper: write a static message to stderr via direct syscall */
-WINE_STUB
+KERNEL32_STUB
 void write_to_stderr(const char *msg)
 {
     INLINE_SYSCALL_WRITE_ERR(msg, (size_t)__builtin_strlen(msg));
@@ -12,7 +15,7 @@ void write_to_stderr(const char *msg)
 
 /* ── GetStdHandle ───────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *GetStdHandle(int nStdHandle)
 {
     switch (nStdHandle) {
@@ -24,11 +27,20 @@ void *GetStdHandle(int nStdHandle)
 }
 
 /* ── WriteFile ──────────────────────────────────────────────── */
-
-WINE_STUB
+/*
+ * Do NOT call handler_NtWriteFile from here.  handler_NtWriteFile is
+ * compiled with the default (System V) ABI while KERNEL32_STUB uses the
+ * Microsoft x64 ABI.  Calling a System V callee from an MS-ABI caller
+ * (or vice-versa) corrupts register-based arguments.
+ *
+ * Instead, resolve the handle ourselves and issue the syscall directly.
+ */
+KERNEL32_STUB
 int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
               uint32_t *lpNumberOfBytesWritten, void *lpOverlapped)
 {
+    (void)lpOverlapped;  /* overlapped I/O not yet supported */
+
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(NT_SYSCALL_WRITE_FILE);
     if (thunk == NULL) {
@@ -36,65 +48,72 @@ int WriteFile(void *hFile, const void *lpBuffer, uint32_t nNumberOfBytesToWrite,
         return 0;
     }
 
-    /*
-     * Map kernel32 WriteFile args to NtWriteFile args:
-     *   hFile  → file_handle
-     *   0      → event  (no event for non-overlapped I/O)
-     *   0      → apc    (no APC routine)
-     *   0      → context (no APC user context)
-     *   lpBuffer  → buffer
-     *   nNumberOfBytesToWrite → length
-     *   0      → byte_offset (no OVERLAPPED)
-     *   lpNumberOfBytesWritten → bytes_written
-     */
-    uint64_t result = handler_NtWriteFile(
-        (uint64_t)(uintptr_t)hFile,
-        0,  /* event */
-        0,  /* apc */
-        0,  /* context */
-        (uint64_t)(uintptr_t)lpBuffer,
-        (uint64_t)nNumberOfBytesToWrite,
-        0,  /* byte_offset */
-        (uint64_t)(uintptr_t)lpNumberOfBytesWritten
-    );
-    (void)lpOverlapped;  /* overlapped I/O not yet supported */
-    return result == STATUS_SUCCESS;
+    uint64_t handle = (uint64_t)(uintptr_t)hFile;
+    int fd;
+
+    /* Resolve handle to a Linux FD */
+    if (handle == STDIN_HANDLE)  fd = STDIN_FILENO;
+    else if (handle == STDOUT_HANDLE) fd = STDOUT_FILENO;
+    else if (handle == STDERR_HANDLE) fd = STDERR_FILENO;
+    else {
+        fd = handle_to_fd(handle);
+    }
+
+    if (fd < 0) {
+        if (lpNumberOfBytesWritten) *lpNumberOfBytesWritten = 0;
+        return 0;
+    }
+
+    long res = INLINE_SYSCALL_WRITE(fd, lpBuffer, nNumberOfBytesToWrite);
+    if (res < 0) {
+        if (lpNumberOfBytesWritten) *lpNumberOfBytesWritten = 0;
+        return 0;
+    }
+
+    if (lpNumberOfBytesWritten) *lpNumberOfBytesWritten = (uint32_t)res;
+    return 1;
 }
 
 /* ── ReadFile ───────────────────────────────────────────────── */
-
-WINE_STUB
+/*
+ * Same ABI caveat as WriteFile — do the work directly instead of
+ * calling handler_NtReadFile.
+ */
+KERNEL32_STUB
 int ReadFile(void *hFile, void *lpBuffer, uint32_t nNumberOfBytesToRead,
              uint32_t *lpNumberOfBytesRead, void *lpOverlapped)
 {
-    /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
+    (void)lpOverlapped;  /* overlapped I/O not yet supported */
+
+    /* Validate the syscall thunk exists */
     void *thunk = lookup_thunk(NT_SYSCALL_READ_FILE);
     if (thunk == NULL) {
         write_to_stderr("my_wine: ReadFile: thunk not found\n");
         return 0;
     }
 
-    /*
-     * Map kernel32 ReadFile args to NtReadFile args:
-     *   hFile  → file_handle
-     *   0      → event
-     *   0      → apc
-     *   0      → context
-     *   lpBuffer  → buffer
-     *   nNumberOfBytesToRead → length
-     *   0      → byte_offset (no OVERLAPPED)
-     *   lpNumberOfBytesRead → bytes_read
-     */
-    uint64_t result = handler_NtReadFile(
-        (uint64_t)(uintptr_t)hFile,
-        0,  /* event */
-        0,  /* apc */
-        0,  /* context */
-        (uint64_t)(uintptr_t)lpBuffer,
-        (uint64_t)nNumberOfBytesToRead,
-        0,  /* byte_offset */
-        (uint64_t)(uintptr_t)lpNumberOfBytesRead
-    );
-    (void)lpOverlapped;  /* overlapped I/O not yet supported */
-    return result == STATUS_SUCCESS;
+    uint64_t handle = (uint64_t)(uintptr_t)hFile;
+    int fd;
+
+    /* Resolve handle to a Linux FD */
+    if (handle == STDIN_HANDLE)  fd = STDIN_FILENO;
+    else if (handle == STDOUT_HANDLE) fd = STDOUT_FILENO;
+    else if (handle == STDERR_HANDLE) fd = STDERR_FILENO;
+    else {
+        fd = handle_to_fd(handle);
+    }
+
+    if (fd < 0) {
+        if (lpNumberOfBytesRead) *lpNumberOfBytesRead = 0;
+        return 0;
+    }
+
+    long res = INLINE_SYSCALL_READ(fd, lpBuffer, nNumberOfBytesToRead);
+    if (res < 0) {
+        if (lpNumberOfBytesRead) *lpNumberOfBytesRead = 0;
+        return 0;
+    }
+
+    if (lpNumberOfBytesRead) *lpNumberOfBytesRead = (uint32_t)res;
+    return 1;
 }

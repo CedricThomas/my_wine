@@ -115,6 +115,10 @@ NTSTATUS handler_NtReleaseMutex(HANDLE handle, BOOL alertable);
 // NtCreateMutex (0x44)
 NTSTATUS handler_NtCreateMutex(PVOID *mutex_handle, ULONG desired_access, PVOID object_attributes);
 
+// NtCreateSemaphore (0x4C)
+NTSTATUS handler_NtCreateSemaphore(PVOID *semaphore_handle, ULONG desired_access, PVOID object_attributes,
+                                   ULONG initial_count, ULONG maximum_count);
+
 // NtQueryPerformanceCounter (0x55)
 NTSTATUS handler_NtQueryPerformanceCounter(PVOID counter_ptr);
 

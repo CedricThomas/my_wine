@@ -1,5 +1,5 @@
 /*
- * pe_parser.h — PE32+ binary parser API
+ * pe_parser.h — PE32/PE32+ binary parser API
  *
  * Functions for parsing and inspecting PE file structures.
  */
@@ -22,12 +22,12 @@ int parse_dos_header(const void *base, size_t file_size,
 
 /*
  * Parse the NT headers (PE signature + file header + optional header).
- * Returns 0 on success, -1 on error, -2 if the binary is PE32 (32-bit)
- * which is not supported (only PE32+ / x86_64 is supported).
+ * Auto-detects PE32 vs PE32+ via OptionalHeader.Magic.
+ * Returns 0 on success, -1 on error.
  */
 int parse_nt_headers(const void *base, size_t file_size,
                      const IMAGE_DOS_HEADER *dos_header,
-                     IMAGE_NT_HEADERS64 *out_nt_headers);
+                     IMAGE_NT_HEADERS *out_nt_headers);
 
 /*
  * Parse the section table.
@@ -35,14 +35,14 @@ int parse_nt_headers(const void *base, size_t file_size,
  * out_sections points into the file mapping (no allocation).
  */
 int parse_sections(const void *base, size_t file_size,
-                   const IMAGE_NT_HEADERS64 *nt_headers,
+                   const IMAGE_NT_HEADERS *nt_headers,
                    IMAGE_SECTION_HEADER **out_sections);
 
 /*
  * Find a section by name (case-insensitive, up to 8 chars).
  * Returns NULL if not found.
  */
-IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS64 *nt_headers,
+IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
                                             const IMAGE_SECTION_HEADER *sections,
                                             const char *name);
 
@@ -52,12 +52,12 @@ IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS64 *nt_headers,
  * out_first_descriptor points into the file mapping.
  */
 int parse_imports(const void *base, size_t file_size,
-                  const IMAGE_NT_HEADERS64 *nt_headers,
+                  const IMAGE_NT_HEADERS *nt_headers,
                   IMAGE_IMPORT_DESCRIPTOR **out_first_descriptor);
 
 /* ── Debug ───────────────────────────────────────────────────── */
 
-void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
+void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,
                   const IMAGE_SECTION_HEADER *sections);
 
 /* ── COFF Symbol Table ───────────────────────────────────────── */
@@ -70,7 +70,7 @@ void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
  * The symbols and string_table are malloc'd; only symbols needs freeing.
  */
 int parse_symbol_table_from_file(const char *path,
-                                  const IMAGE_NT_HEADERS64 *nt_headers,
+                                  const IMAGE_NT_HEADERS *nt_headers,
                                   IMAGE_SYMBOL **out_symbols,
                                   char **out_string_table);
 
@@ -108,7 +108,7 @@ uint32_t lookup_symbol_rva(const IMAGE_SYMBOL *symbols, int count,
  * Returns 0 if .text not found or section too small.
  */
 int scan_rip_relative_jumps(void *image_base,
-                            const IMAGE_NT_HEADERS64 *nt,
+                            const IMAGE_NT_HEADERS *nt,
                             const IMAGE_SECTION_HEADER *sections,
                             int num_sections,
                             uint64_t *targets,
@@ -121,7 +121,7 @@ int scan_rip_relative_jumps(void *image_base,
  * Returns the absolute address of the thunk instruction, or NULL.
  */
 void *find_rip_relative_jump_to(void *image_base,
-                                const IMAGE_NT_HEADERS64 *nt,
+                                const IMAGE_NT_HEADERS *nt,
                                 const IMAGE_SECTION_HEADER *sections,
                                 int num_sections,
                                 void *target_addr);

@@ -19,68 +19,13 @@
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
+#include "include/crt.h"
 
-/* ── Global variables (defined in crt_globals.c) ───────────── */
-
-extern int __msvcrt_app_type;
-extern int _commode;
-extern int _fmode;
-extern char **_msvcrt_environ;
-
-extern char **g_guest_argv;
-extern char **g_guest_envp;
-
-extern char _cmdline_storage[PAGE_SIZE];
-extern char *_acmdln;
-
-extern uint64_t native_startup_lock;
-extern int native_startup_state;
-extern int dowildcard_val;
-extern int newmode_val;
-extern crt_context_t g_crt_ctx;
-
-extern uint64_t dyn_tls_callback_stub;
-extern uint64_t mingw_excpt_handler_stub;
-extern uint64_t xc_a_stub;
-extern uint64_t xc_z_stub;
-
-extern uint32_t ctor_list_stub[];
-extern uint32_t dtor_list_stub[];
-
-extern uint64_t xi_a_stub;
-extern uint64_t xi_z_stub;
-
-extern void **__imp___initenv_stub;
-
-/* ── FILE structures (defined in crt_file.c) ───────────── */
-
-#define WINE_FILE_SIZE 48
-
-#pragma pack(push, 1)
-typedef struct {
-    int            _fd;
-    unsigned char *_ptr;
-    int            _cnt;
-    unsigned char *_base;
-    uintptr_t      _flag;
-    unsigned char  _pad[16];
-} wine_FILE;
-#pragma pack(pop)
-
-_Static_assert(sizeof(wine_FILE) == WINE_FILE_SIZE, "wine_FILE size mismatch");
-
-#define WINE_IOEOF  0x8000
-#define WINE_IOWRT  0x0002
-#define WINE_IONBF  0x4000
-#define WINE_IOREAD 0x0001
-#define WINE_IOFBF  0x0200
-
-typedef union {
-    wine_FILE f[3];
-    char      bytes[48 * 3];
-} iob_union;
-
-extern iob_union __wine_iob;
+/* ── wine_crt_state_t, g_crt, wine_FILE, iob_union ─────────────
+ * All defined in include/crt.h (included above via msvcrt.h → crt.h).
+ * g_crt is defined in crt_globals.c.
+ * SINGLE-THREAD ONLY: g_crt is not safe for concurrent access.
+ */
 
 /* ── Internal wine_* functions (defined in crt_stdio.c / crt_stdlib.c) ── */
 /*
@@ -155,32 +100,26 @@ extern void *__msvcrt_wcslen;
 
 /* ── Refptr patching (defined in crt_refptrs.c) ─────────── */
 
-typedef struct {
-    const char *name;
-    void       *target;
-} refptr_mapping_t;
-
-extern const refptr_mapping_t refptr_mappings[];
-#define REF_MAP_COUNT (sizeof(refptr_mappings) / sizeof(refptr_mappings[0]) - 1)
-
 void patch_crt_refptrs(const char *file_path, void *image_base,
-                       IMAGE_NT_HEADERS64 *nt,
+                       IMAGE_NT_HEADERS *nt,
                        IMAGE_SECTION_HEADER *sections);
 void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
                         const char *name, uint64_t image_size,
-                        uint64_t ctx_image_base, uint64_t ctx_bss_vaddr);
+                        uint64_t ctx_image_base, uint64_t ctx_bss_vaddr,
+                        IMAGE_NT_HEADERS *nt,
+                        IMAGE_SECTION_HEADER *sections);
 
 /* ── CRT offset discovery (defined in crt_offset_discovery.c) ── */
 void discover_crt_offsets(const char *file_path,
-                          IMAGE_NT_HEADERS64 *nt,
+                          IMAGE_NT_HEADERS *nt,
                           IMAGE_SECTION_HEADER *sections,
                           crt_context_t *ctx);
 uint64_t find_symbol_rva_from_file(const char *file_path,
-                                   IMAGE_NT_HEADERS64 *nt,
+                                   IMAGE_NT_HEADERS *nt,
                                    IMAGE_SECTION_HEADER *sections,
                                    const char *name);
 void scan_text_for_refptrs(void *image_base,
-                           IMAGE_NT_HEADERS64 *nt,
+                           IMAGE_NT_HEADERS *nt,
                            IMAGE_SECTION_HEADER *sections,
                            uint64_t image_size, void *initenv_stub);
 

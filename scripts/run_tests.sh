@@ -1,54 +1,118 @@
 #!/bin/bash
 set -e
 
+# Usage: run_tests.sh [--debug]
+#   --debug  Export MY_WINE_DEBUG=1 for all test invocations (verbose debug output)
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
+DEBUG=0
+if [ "$1" = "--debug" ]; then
+	DEBUG=1
+	export MY_WINE_DEBUG=1
+	echo ">>> DEBUG MODE ACTIVE (MY_WINE_DEBUG=1)"
+	echo ""
+fi
+
 SHELL_EXE="samples/hello_world/hello_world.exe"
 BUILDDIR="build"
 
+PASS=0
+FAIL=0
+SKIP=0
+
+# Run a single test binary and record PASS/FAIL.
+# Usage: run_test test_name [arg1 arg2 ...]
+# Pipes through tr -d '\0' to silently strip null bytes from output
+# (some tests like test_syscall_dispatch emit binary data that would
+#  cause bash to print "command substitution: null byte ignored").
+run_test() {
+	local name="$1"
+	shift
+	local output
+	output=$(timeout 5 ./"$BUILDDIR"/"$name" "$@" 2>&1 | tr -d '\0') || true
+
+	if echo "$output" | grep -q "Failed: 0"; then
+		PASS=$((PASS + 1))
+		if [ "$DEBUG" = "1" ]; then
+			echo "$output"
+		fi
+		echo "PASS  $name"
+	else
+		FAIL=$((FAIL + 1))
+		if [ "$DEBUG" = "1" ]; then
+			echo "$output"
+		fi
+		echo "FAIL  $name"
+	fi
+}
+
+# Run test_teb_peb which may crash due to FSGSBASE unavailability.
+# Distinguish: no output (crash) → SKIP, Failed: 0 → PASS, Failed: N→ FAIL.
+run_test_teb_peb() {
+	local name="test_teb_peb"
+	local output
+	output=$(timeout 120 ./"$BUILDDIR"/"$name" 2>&1 | tr -d '\0') || true
+
+	if [ -z "$output" ]; then
+		# Empty output — likely crashed on FSGSBASE instruction
+		SKIP=$((SKIP + 1))
+		echo "SKIP  $name (FSGSBASE unavailable)"
+	elif echo "$output" | grep -q "Failed: 0"; then
+		PASS=$((PASS + 1))
+		if [ "$DEBUG" = "1" ]; then
+			echo "$output"
+		fi
+		echo "PASS  $name"
+	else
+		FAIL=$((FAIL + 1))
+		if [ "$DEBUG" = "1" ]; then
+			echo "$output"
+		fi
+		echo "FAIL  $name"
+	fi
+}
+
 # test_parse
-echo "=== Running test_parse ==="
 if [ -f "$SHELL_EXE" ]; then
-	timeout 5 ./"$BUILDDIR"/test_parse "$SHELL_EXE"
+	run_test test_parse "$SHELL_EXE"
 else
-	echo "No hello_world.exe found — running error/negative tests only"
-	timeout 5 ./"$BUILDDIR"/test_parse
+	run_test test_parse
 fi
 
 # test_import_resolution
-echo "=== Running test_import_resolution ==="
-timeout 5 ./"$BUILDDIR"/test_import_resolution
+run_test test_import_resolution
 
-# test_teb_peb
-echo "=== Running test_teb_peb ==="
-if timeout 120 ./"$BUILDDIR"/test_teb_peb 2>&1; then
-	:
-else
-	echo "  SKIP: test_teb_peb terminated abnormally (FSGSBASE unavailable)"
-fi
+# test_teb_peb — special: may crash on FSGSBASE
+run_test_teb_peb
 
 # test_syscall_dispatch
-echo "=== Running test_syscall_dispatch ==="
-timeout 5 ./"$BUILDDIR"/test_syscall_dispatch
+run_test test_syscall_dispatch
 
 # test_relocations
-echo "=== Running test_relocations ==="
 if [ -f "$SHELL_EXE" ]; then
-	timeout 5 ./"$BUILDDIR"/test_relocations "$SHELL_EXE"
+	run_test test_relocations "$SHELL_EXE"
 else
-	echo "No hello_world.exe found — running unit tests only"
-	timeout 5 ./"$BUILDDIR"/test_relocations
+	run_test test_relocations
 fi
 
 # test_module_registry
-echo "=== Running test_module_registry ==="
-timeout 5 ./"$BUILDDIR"/test_module_registry
+run_test test_module_registry
 
 # test_export_parsing
-echo "=== Running test_export_parsing ==="
-timeout 5 ./"$BUILDDIR"/test_export_parsing
+run_test test_export_parsing
 
-echo "=== Tests completed ==="
+# test_pe32
+run_test test_pe32
+
+# --- Summary ---
+TOTAL=$((PASS + FAIL + SKIP))
+echo ""
+echo "$PASS passed, $FAIL failed, $SKIP skipped out of $TOTAL tests"
+
+if [ "$FAIL" -gt 0 ]; then
+	exit 1
+fi

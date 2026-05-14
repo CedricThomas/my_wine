@@ -6,10 +6,9 @@
  */
 
 #include "module_list.h"
+#include "include/pe_priv.h"
 #include "loader_utils.h"
-
-loaded_module_t module_list[MAX_MODULES];
-int module_count = 0;
+#include "loader_state.h"
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -38,16 +37,16 @@ static void module_list_entry_init(LIST_ENTRY *entry)
 }
 
 /* Populate the LDR_DATA_TABLE_ENTRY from module metadata */
-static void module_init_ldr_entry(loaded_module_t *m, IMAGE_NT_HEADERS64 *nt)
+static void module_init_ldr_entry(loaded_module_t *m, IMAGE_NT_HEADERS *nt)
 {
     LDR_DATA_TABLE_ENTRY *entry = &m->ldr_entry;
 
     dll_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
 
     entry->DllBase = m->base;
-    entry->EntryPoint = (char *)m->base + nt->OptionalHeader.AddressOfEntryPoint;
-    entry->SizeOfImage = nt->OptionalHeader.SizeOfImage;
-    entry->TimeDateStamp = nt->FileHeader.TimeDateStamp;
+    entry->EntryPoint = (char *)m->base + pe_entry_rva(nt);
+    entry->SizeOfImage = pe_size_of_image(nt);
+    entry->TimeDateStamp = pe_time_date_stamp(nt);
     entry->LoadCount = 1;
 
     module_make_unicode_string(&entry->FullDllName, m->name);
@@ -64,16 +63,16 @@ static void module_init_ldr_entry(loaded_module_t *m, IMAGE_NT_HEADERS64 *nt)
 
 void init_module_list(void)
 {
-    dll_memset(module_list, 0, sizeof(module_list));
-    module_count = 0;
+    dll_memset(g_loader.modules, 0, sizeof(g_loader.modules));
+    g_loader.module_count = 0;
 }
 
-loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS64 *nt)
+loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS *nt)
 {
     int i;
     for (i = 0; i < MAX_MODULES; i++) {
-        if (module_list[i].base == NULL) {
-            loaded_module_t *m = &module_list[i];
+        if (g_loader.modules[i].base == NULL) {
+            loaded_module_t *m = &g_loader.modules[i];
             dll_memset(m, 0, sizeof(loaded_module_t));
             m->base = base;
             dll_copy_str(m->name, name, sizeof(m->name));
@@ -81,7 +80,7 @@ loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS64 *nt
             m->load_count = 1;
             m->ldr_linked = 0;
             module_init_ldr_entry(m, nt);
-            module_count++;
+            g_loader.module_count++;
             return m;
         }
     }
@@ -91,10 +90,10 @@ loaded_module_t *add_module(void *base, const char *name, IMAGE_NT_HEADERS64 *nt
 loaded_module_t *find_module_by_name(const char *name)
 {
     int i;
-    for (i = 0; i < MAX_MODULES; i++) {
-        if (module_list[i].base != NULL &&
-            dll_strcasecmp(module_list[i].name, name) == 0) {
-            return &module_list[i];
+    for (i = 0; i < g_loader.module_count; i++) {
+        if (g_loader.modules[i].base != NULL &&
+            dll_strcasecmp(g_loader.modules[i].name, name) == 0) {
+            return &g_loader.modules[i];
         }
     }
     return NULL;
@@ -105,8 +104,8 @@ loaded_module_t *find_module_by_name(const char *name)
 loaded_module_t *find_module_by_name_safe(const char *name)
 {
     int i;
-    for (i = 0; i < MAX_MODULES; i++) {
-        const char *a = module_list[i].name;
+    for (i = 0; i < g_loader.module_count; i++) {
+        const char *a = g_loader.modules[i].name;
         const char *b = name;
         if (a == NULL || b == NULL) continue;
         while (*a && *b) {
@@ -116,7 +115,7 @@ loaded_module_t *find_module_by_name_safe(const char *name)
             if (ca != cb) break;
             a++; b++;
         }
-        if (*a == '\0' && *b == '\0') return &module_list[i];
+        if (*a == '\0' && *b == '\0') return &g_loader.modules[i];
     }
     return NULL;
 }
@@ -125,12 +124,12 @@ loaded_module_t *find_module_by_addr(void *addr)
 {
     uintptr_t a = (uintptr_t)addr;
     int i;
-    for (i = 0; i < MAX_MODULES; i++) {
-        if (module_list[i].base != NULL && module_list[i].nt != NULL) {
-            uintptr_t base = (uintptr_t)module_list[i].base;
-            uintptr_t end = base + module_list[i].nt->OptionalHeader.SizeOfImage;
+    for (i = 0; i < g_loader.module_count; i++) {
+        if (g_loader.modules[i].base != NULL && g_loader.modules[i].nt != NULL) {
+            uintptr_t base = (uintptr_t)g_loader.modules[i].base;
+            uintptr_t end = base + pe_size_of_image(g_loader.modules[i].nt);
             if (a >= base && a < end) {
-                return &module_list[i];
+                return &g_loader.modules[i];
             }
         }
     }
@@ -140,10 +139,10 @@ loaded_module_t *find_module_by_addr(void *addr)
 void remove_module(loaded_module_t *mod)
 {
     int i;
-    for (i = 0; i < MAX_MODULES; i++) {
-        if (&module_list[i] == mod) {
-            dll_memset(&module_list[i], 0, sizeof(loaded_module_t));
-            module_count--;
+    for (i = 0; i < g_loader.module_count; i++) {
+        if (&g_loader.modules[i] == mod) {
+            dll_memset(&g_loader.modules[i], 0, sizeof(loaded_module_t));
+            g_loader.module_count--;
             return;
         }
     }

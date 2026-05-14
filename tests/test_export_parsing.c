@@ -26,6 +26,7 @@
 #include "nt_constants.h"
 #include "src/loader/module_list.h"
 #include "src/loader/export_table.h"
+#include "include/pe_priv.h"
 
 /* ── Test harness ────────────────────────────────────────────── */
 
@@ -47,7 +48,7 @@ static void check(const char *label, int condition)
 
 /* Create a minimal loaded_module_t on the stack for testing.
  * The embedded export_cache is zero'd. */
-static loaded_module_t *make_test_mod(void *base, IMAGE_NT_HEADERS64 *nt)
+static loaded_module_t *make_test_mod(void *base, IMAGE_NT_HEADERS *nt)
 {
     static loaded_module_t mod;  /* static to avoid stack overflow with embedded arrays */
     memset(&mod, 0, sizeof(mod));
@@ -61,7 +62,7 @@ static void *build_pe_with_exports(size_t buf_size,
                                     const char **export_names,
                                     int num_exports,
                                     int has_forwarder,
-                                    IMAGE_NT_HEADERS64 **out_nt)
+                                    IMAGE_NT_HEADERS **out_nt)
 {
     void *base = mmap(NULL, buf_size, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -76,17 +77,21 @@ static void *build_pe_with_exports(size_t buf_size,
     dos->e_lfanew = 0x80;
 
     /* ── NT headers at 0x0080 ──────────────────────────── */
-    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(p + 0x0080);
-    nt->Signature = IMAGE_NT_SIGNATURE;
-    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
-    nt->FileHeader.NumberOfSections = 2;
-    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
-    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
-    nt->OptionalHeader.SectionAlignment = 0x1000;
-    nt->OptionalHeader.FileAlignment = 0x200;
-    nt->OptionalHeader.SizeOfImage = 0x3000;
-    nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress = 0x2000;
-    nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].Size = 0x200;
+    /* Write as IMAGE_NT_HEADERS (tagged union) in buffer */
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(p + 0x0080);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS));
+    nt->u.nt64.Signature = IMAGE_NT_SIGNATURE;
+    nt->u.nt64.FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+    nt->u.nt64.FileHeader.NumberOfSections = 2;
+    nt->u.nt64.FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt->u.nt64.OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    nt->u.nt64.OptionalHeader.SectionAlignment = 0x1000;
+    nt->u.nt64.OptionalHeader.FileAlignment = 0x200;
+    nt->u.nt64.OptionalHeader.SizeOfImage = 0x3000;
+    nt->u.nt64.OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+    nt->u.nt64.OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress = 0x2000;
+    nt->u.nt64.OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].Size = 0x200;
+    nt->pe_type = PE_TYPE_64;
 
     if (out_nt) *out_nt = nt;
 
@@ -173,7 +178,7 @@ static void test_parse_export_table(void)
     const char *names[] = { "Alpha", "Beta", "Delta", "Gamma" };
     size_t buf_size = 0x3000;
 
-    IMAGE_NT_HEADERS64 *nt = NULL;
+    IMAGE_NT_HEADERS *nt = NULL;
     void *base = build_pe_with_exports(buf_size, names, 4, 0, &nt);
     if (!base) { printf("  SKIP: build failed\n"); return; }
 
@@ -208,13 +213,16 @@ static void test_parse_no_export(void)
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 64;
 
-    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)((uint8_t *)base + 64);
-    nt->Signature = IMAGE_NT_SIGNATURE;
-    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
-    nt->FileHeader.NumberOfSections = 0;
-    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
-    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
-    nt->OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress = 0;
+    /* Write as IMAGE_NT_HEADERS in buffer */
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((uint8_t *)base + 64);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS));
+    nt->u.nt64.Signature = IMAGE_NT_SIGNATURE;
+    nt->u.nt64.FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+    nt->u.nt64.FileHeader.NumberOfSections = 0;
+    nt->u.nt64.FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt->u.nt64.OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    nt->u.nt64.OptionalHeader.DataDirectory[DIRECTORY_ENTRY_EXPORT].VirtualAddress = 0;
+    nt->pe_type = PE_TYPE_64;
 
     loaded_module_t *mod = make_test_mod(base, nt);
     int rc = parse_export_table(mod);
@@ -232,7 +240,7 @@ static void test_lookup_export(void)
     const char *names[] = { "Alpha", "Beta", "Delta", "Gamma" };
     size_t buf_size = 0x3000;
 
-    IMAGE_NT_HEADERS64 *nt = NULL;
+    IMAGE_NT_HEADERS *nt = NULL;
     void *base = build_pe_with_exports(buf_size, names, 4, 0, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 
@@ -268,7 +276,7 @@ static void test_lookup_export_by_ordinal(void)
     const char *names[] = { "Alpha", "Beta", "Gamma" };
     size_t buf_size = 0x3000;
 
-    IMAGE_NT_HEADERS64 *nt = NULL;
+    IMAGE_NT_HEADERS *nt = NULL;
     void *base = build_pe_with_exports(buf_size, names, 3, 0, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 
@@ -297,7 +305,7 @@ static void test_forwarder_detection(void)
     const char *names[] = { "Alpha", "Beta", "Forwarded" };
     size_t buf_size = 0x3000;
 
-    IMAGE_NT_HEADERS64 *nt = NULL;
+    IMAGE_NT_HEADERS *nt = NULL;
     void *base = build_pe_with_exports(buf_size, names, 3, 1, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 
@@ -325,7 +333,7 @@ static void test_reset_export_cache(void)
     const char *names[] = { "A", "B" };
     size_t buf_size = 0x3000;
 
-    IMAGE_NT_HEADERS64 *nt = NULL;
+    IMAGE_NT_HEADERS *nt = NULL;
     void *base = build_pe_with_exports(buf_size, names, 2, 0, &nt);
     if (!base) { printf("  SKIP\n"); return; }
 

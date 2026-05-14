@@ -4,7 +4,43 @@ Deep-dive into how my_wine loads and runs a PE binary on Linux.
 
 ---
 
+## 0. Three-Binary Layout
+
+The project ships three binaries:
+
+| Binary | Source | Role |
+|---|---|---|
+| `my_wine` | `src/wrapper_main.c` | Thin wrapper — reads PE headers, detects PE32 vs PE32+, `execvp` the correct backend |
+| `my_wine64` | `src/main.c` | PE32+ loader — single-process, loads and runs 64-bit PE in-place |
+| `my_wine32` | `src/loader/pe32_entry.c` | PE32 loader — 32-bit dynamic ELF (`-no-pie`), runs 32-bit PE natively |
+
+Users and tests invoke `my_wine`. It dispatches transparently to the right backend.
+Each backend can also be run directly for debugging.
+
+### 0.1 `my_wine` Wrapper
+
+`src/wrapper_main.c` implements a standalone PE-type detector and dispatcher:
+
+1. **Resolve candidate paths** — determine the directory of the `my_wine` binary (via `argv[0]` or `/proc/self/exe`), then construct paths to `my_wine64` and `my_wine32`.
+2. **Read PE headers** — `open()` the target PE, `read()` the DOS + NT headers (just enough bytes to read `OptionalHeader.Magic`), detect PE32 (`IMAGE_FILE_MACHINE_I386`) vs PE32+ (`IMAGE_FILE_MACHINE_AMD64`).
+3. **`execvp` the backend** — call `execvp()` with the resolved backend path, passing the PE path and any user arguments. No `fork()`, no `waitpid()` — `execvp` replaces the wrapper entirely.
+
+```
+my_wine hello.exe
+ │
+ ├─ open("hello.exe") → read headers → detect PE type
+ │
+ ├─ if PE32+:  execvp("my_wine64", ["my_wine64", "hello.exe", ...])
+ │
+ └─ if PE32:   execvp("my_wine32", ["my_wine32", "hello.exe", ...])
+```
+
+---
+
 ## 1. High-Level Data Flow
+
+> The following describes the PE32+ path (`my_wine64`).
+> For PE32, see [Section 3](#3-pe32-dual-process-model).
 
 ```
   PE file (hello.exe)
@@ -169,10 +205,10 @@ the x86_64 ABI (`rsp % 16 == 8` before `call`).
 
 ---
 
-## 2. Single-Process Model
+## 2. PE32+ Single-Process Model (`my_wine64`)
 
-`main()` runs entirely in a **single process**. There is no `fork()` —
-the guest PE loads and executes in the same process that orchestrated
+`my_wine64` (`src/main.c`) runs entirely in a **single process**. There is no `fork()` —
+the guest PE32+ loads and executes in the same process that orchestrated
 the loading.
 
 ```
@@ -239,9 +275,72 @@ exits from the same process.
 
 ---
 
-## 3. Direct Syscall Dispatch
+## 3. PE32 Dual-Process Model
 
-### 3.1 The 23-Byte Thunk
+> For full details, see [PE32.md](PE32.md).
+
+### Why a Separate 32-Bit Binary?
+
+Linux blocks `ljmp`/`lcall` to a 32-bit code segment at CPL=3 in a 64-bit process. A 32-bit PE **cannot** execute inside a 64-bit ELF — it must run in a native 32-bit process. The in-process mode-switch approach was tried and found fundamentally unfixed.
+
+### Architecture
+
+`my_wine` (the wrapper) detects PE32 → `execvp()`s `my_wine32` (a 32-bit dynamically-linked ELF built with `-no-pie`). The wrapper is replaced entirely by `my_wine32` via `execvp` — no `fork()`, no `waitpid()`. The PE path is passed as `argv[1]`. No IPC, no shared memory.
+
+### `my_wine32` Entry Point
+
+glibc CRT (`crt1.o`) → `__libc_start_main` → `main()` (`pe32_entry.c`), which independently:
+- Maps PE from disk, allocates TEB32/PEB32 at fixed 32-bit addresses
+- Generates 15-byte thunks, resolves imports, seeds BSS vars
+- Sets up **FS → TEB via `set_thread_area`** (syscall 243, LDT-based)
+- Jumps to PE entry via `pe32_run_guest.S`
+
+### Key Differences From Single-Process (PE32+)
+
+| | PE32+ (`my_wine64`) | PE32 (`my_wine32`) |
+|---|---|---|
+| Thunk size | 23 bytes | 15 bytes: `push ebp; mov eax,dispatcher; mov edx,nr; call eax; pop ebp; ret` |
+| Syscall | `syscall` (RAX) | `int $0x80` (EAX) |
+| mmap | `mmap` (syscall 9) | `mmap2` (syscall 192) |
+| TEB base | GS via `arch_prctl` / `wrgsbase` | FS via `set_thread_area` (LDT, syscall 243) |
+| Calling ABI | Microsoft x64 (RCX/RDX/R8/R9) | cdecl (stack-based) |
+| libc calls | glibc available | glibc available before FS→TEB switch, `INLINE_SYSCALL_*` after |
+
+### Process Flow
+
+```
+my_wine (wrapper, src/wrapper_main.c)
+  ┌─────────────────────────────────────┐
+  │ open(PE) → read headers             │
+  │ detect PE32                         │
+  │ execvp("my_wine32", [PE_path, ...]) │
+  └──────────────┬──────────────────────┘
+                 │  (wrapper replaced by my_wine32)
+                 ▼
+my_wine32 (32-bit dynamic ELF, src/loader/pe32_entry.c)
+  ┌───────────────────────────────────────────────────────┐
+  │ glibc CRT (crt1.o)                                    │
+  │ __libc_start_main → main() (pe32_entry.c)             │
+  │     ├─ map_image()                                    │
+  │     ├─ setup_teb_peb()                                │
+  │     ├─ set_thread_area(FS → TEB)                      │
+  │     ├─ resolve_imports()                              │
+  │     ├─ generate_all_thunks() (15-byte)                │
+  │     ├─ seed_bss_vars()                                │
+  │     └─ pe32_run_guest()                               │
+  │               │                                        │
+  │           guest code runs (32-bit)                     │
+  │           syscalls via int $0x80                       │
+  │               │                                        │
+  │           guest exits → exit(code)                     │
+  └───────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. Direct Syscall Dispatch
+
+### 4.1 The 23-Byte Thunk
 
 Each NT syscall has a dynamically generated **23-byte thunk**
 (`src/syscall/thunk_gen.c`):
@@ -274,7 +373,7 @@ The IAT entries in the PE point to these thunks so that when guest
 code calls `NtWriteFile`, it jumps to the thunk, which loads the NT
 syscall number, calls the dispatcher, and returns.
 
-### 3.2 `__wine_dispatcher` Assembly Trampoline
+### 4.2 `__wine_dispatcher` Assembly Trampoline
 
 `__wine_dispatcher` (in `src/syscall/dispatcher_entry_asm.S`) bridges
 guest code on the guest stack to our C handler on the UNIX stack:
@@ -330,7 +429,7 @@ __wine_dispatcher:
 The dispatcher is position-independent (all accesses use `%rip`-relative
 offsets) and does not use the red zone.
 
-### 3.3 `c_dispatch_syscall` C Handler
+### 4.3 `c_dispatch_syscall` C Handler
 
 `c_dispatch_syscall()` in `src/syscall/dispatcher.c`:
 
@@ -369,7 +468,7 @@ offsets) and does not use the red zone.
   → guest code continues with result in RAX
 ```
 
-### 3.4 `__wine_guest_regs` — Global Saved State
+### 4.4 `__wine_guest_regs` — Global Saved State
 
 `__wine_guest_regs` is a **global struct** (defined in
 `src/syscall/dispatcher_entry.c`, declared in
@@ -395,9 +494,9 @@ struct guest_regs __wine_guest_regs = {0};
 directly — the syscall number comes from `RDI` (the C function's
 `rdi` parameter per System V ABI, which is already set by the thunk).
 
-### 3.5 Handler Implementation
+### 4.5 Handler Implementation
 
-NT handlers (`src/stubs/ntdll_*.c`) implement Windows syscalls using
+NT handlers (`src/msvcrt/ntdll_*.c`) implement Windows syscalls using
 Linux primitives:
 
 | NT Handler | Linux Implementation |
@@ -433,7 +532,7 @@ maps to Linux fd 1, `STD_ERROR_HANDLE` (0x7FFFFFFD) to fd 2.
 
 ---
 
-## 4. Stack Switching
+## 5. Stack Switching
 
 The guest PE runs on its own stack (allocated from the PE's
 `SizeOfStackReserve`/`SizeOfStackCommit`). The C dispatcher handlers
@@ -486,7 +585,7 @@ Using a separate UNIX stack:
 
 ---
 
-## 5. Crash Handlers
+## 6. Crash Handlers
 
 `src/loader/crash_handlers.c` installs both Windows-style SEH handlers
 and POSIX signal handlers.
@@ -520,7 +619,7 @@ TLS access via GS-relative offsets will crash.
 
 ---
 
-## 6. Jumping to Guest Code
+## 7. Jumping to Guest Code
 
 ### `run_guest_entry()` in `src/loader/entry.c`
 
@@ -587,7 +686,7 @@ Key behaviors:
 
 ---
 
-## 7. Guest Setup Flow (Detailed)
+## 8. Guest Setup Flow (Detailed)
 
 The complete flow inside `setup_guest_and_run()`:
 
@@ -639,7 +738,7 @@ setup_guest_and_run(entry_abs, stack_top, teb, guest_argv, guest_envp)
 
 ---
 
-## 8. Cleanup
+## 9. Cleanup
 
 `cleanup_guest()` in `src/loader/guest_setup.c` is called from
 `NtTerminateProcess` to reclaim all guest resources:
@@ -654,11 +753,12 @@ Note: the UNIX stack is cleaned up by `cleanup_unix_stack()` in
 
 ---
 
-## 9. Key File References
+## 10. Key File References
 
 | File | Purpose |
 |---|---|
-| `src/main.c` | Orchestrator — 10-step pipeline |
+| `src/wrapper_main.c` | `my_wine` wrapper — reads PE headers, detects PE32 vs PE32+, `execvp` correct backend |
+| `src/main.c` | `my_wine64` — PE32+ orchestrator, 10-step pipeline (rejects PE32) |
 | `src/loader/image_mapper.c` | `map_image()` — open, mmap, parse, copy sections, mprotect |
 | `src/loader/teb_peb.c` | `setup_teb_peb()` + `setup_stack()` — allocate TEB, PEB, guest stack |
 | `src/loader/guest_setup.c` | `setup_guest_and_run()` — signal handlers, SEH, thunks, __acrt_iob, GS base, jump to guest |
@@ -680,7 +780,7 @@ Note: the UNIX stack is cleaned up by `cleanup_unix_stack()` in
 
 ---
 
-## 10. `force_align_arg_pointer` and `WINE_STUB`
+## 11. `force_align_arg_pointer` and `WINE_STUB`
 
 ### What `force_align_arg_pointer` Does
 

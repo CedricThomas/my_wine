@@ -79,7 +79,7 @@ void _unlock(int locknum)
 static int wine_fputc(int ch, void *stream)
 {
     if (stream == NULL) return -1;
-    uintptr_t base = (uintptr_t)__wine_iob.bytes;
+    uintptr_t base = (uintptr_t)g_crt.iob.bytes;
     uintptr_t addr = (uintptr_t)stream;
     if (addr < base || addr >= base + WINE_FILE_SIZE * 3) return -1;
     wine_FILE *f = (wine_FILE *)stream;

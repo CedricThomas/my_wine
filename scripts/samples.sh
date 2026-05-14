@@ -20,6 +20,14 @@
 
 set -euo pipefail
 
+# Parse --debug flag from arguments (can appear anywhere)
+DEBUG=0
+for arg in "$@"; do
+    if [ "$arg" = "--debug" ]; then
+        DEBUG=1
+    fi
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SAMPLES_DIR="$PROJECT_DIR/samples"
@@ -58,6 +66,23 @@ ensure_image() {
             echo "  FAIL: Docker build failed"
             return 1
         }
+    fi
+}
+
+# Select MinGW compiler based on arch field in sample.info (default: 64).
+# Args: $1 = sample source directory
+# Returns: compiler name via stdout
+select_compiler() {
+    local src_dir="$1"
+    local info="$src_dir/sample.info"
+    local arch="64"
+    if [ -f "$info" ]; then
+        arch=$(parse_sample_info "$info" "arch")
+    fi
+    if [ "$arch" = "32" ]; then
+        echo "i686-w64-mingw32-gcc"
+    else
+        echo "x86_64-w64-mingw32-gcc"
     fi
 }
 
@@ -115,12 +140,16 @@ build_dlls() {
         container_src=$(to_container_path "$c_src")
         container_def=$(to_container_path "$def")
 
+        # Select compiler based on arch field in sample.info (default: 64)
+        local CC
+        CC=$(select_compiler "$src_dir")
+
         echo "  CC  ${name}/dlls/${dll_base}.dll (mingw-dll)"
         docker run --rm \
             -v "$PROJECT_DIR:/project:ro" \
             -v "$src_dir:/out" \
             "$IMAGE_NAME" \
-            x86_64-w64-mingw32-gcc \
+            "$CC" \
             -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -shared \
             -Wl,"$container_def" \
             -o "/out/${dll_base}.dll" \
@@ -170,13 +199,35 @@ build_exe() {
         container_srcs="$container_srcs $(to_container_path "$src")"
     done
 
+    # Select compiler based on arch field in sample.info (default: 64)
+    local CC
+    CC=$(select_compiler "$src_dir")
+
+    # Read optimization level from sample.info (default: 2)
+    local OPT_LEVEL="2"
+    if [ -f "$src_dir/sample.info" ]; then
+        local opt_val
+        opt_val=$(parse_sample_info "$src_dir/sample.info" "optimize")
+        if [[ "$opt_val" =~ ^[012]$ ]]; then
+            OPT_LEVEL="$opt_val"
+        fi
+    fi
+
+    # 32-bit MinGW-w64 enables -fstack-protector-strong by default, which crashes
+    # at -O2 when EBP is used as a data register. Disable it for 32-bit builds.
+    local EXTRA_FLAGS=""
+    if [ "$CC" = "i686-w64-mingw32-gcc" ]; then
+        EXTRA_FLAGS="-fno-stack-protector"
+    fi
+
     echo "  CC  $name (mingw)"
     docker run --rm \
         -v "$PROJECT_DIR:/project:ro" \
         -v "$src_dir:/out" \
         "$IMAGE_NAME" \
-        x86_64-w64-mingw32-gcc \
-        -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O2 -mconsole \
+        "$CC" \
+        -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O${OPT_LEVEL} -mconsole \
+        $EXTRA_FLAGS \
         -o "/out/${name}.exe" \
         $container_srcs 2>&1 || {
             echo "  FAIL $name"
@@ -234,30 +285,117 @@ run_sample() {
         timeout_sec=$(parse_sample_info "$info" "timeout")
     fi
 
-    echo "  RUN $name (under my_wine, expect exit=$expected_exit, timeout=${timeout_sec}s)"
+    # Capture stdout to a temp file for optional output comparison
+    local output_file
+    local ret_file
+    output_file=$(mktemp) || { echo "  ERR: $name (mktemp failed)"; return 1; }
+    ret_file=$(mktemp) || { rm -f "$output_file"; echo "  ERR: $name (mktemp failed)"; return 1; }
+    trap "rm -f '$output_file' '$ret_file' '${output_file}.err'" RETURN
 
-    # Run with timeout; capture exit code without triggering set -e
-    # Suppress my_wine debug logs (DBG_*) on stderr unless DEBUG is set
-    local ret=0
-    if [ -n "${DEBUG:-}" ]; then
-        timeout "$timeout_sec" "$MY_WINE" "$exe" || ret=$?
-    else
-        timeout "$timeout_sec" "$MY_WINE" "$exe" 2>/dev/null || ret=$?
+    # Export MY_WINE_DEBUG when in debug mode
+    if [ "${DEBUG}" != "0" ]; then
+        export MY_WINE_DEBUG=1
     fi
 
-    if [ "$ret" -eq "$expected_exit" ]; then
-        echo "  PASS  $name (exit=$ret, expected=$expected_exit)"
-        return 0
+    # Run with timeout; capture stdout into temp file for output comparison.
+    # The subshell always exits 0 (writing the real exit code to a temp file)
+    # so the parent bash never sees a signal-based exit status and never prints
+    # its own diagnostic (e.g. "Erreur de segmentation" / "Segmentation fault").
+    # The outer 2>/dev/null catches any residual output.
+    if [ "${DEBUG}" != "0" ]; then
+        (
+            set +e
+            timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>"${output_file}.err"
+            echo $? >"$ret_file"
+            exit 0
+        ) 2>/dev/null
     else
+        (
+            set +e
+            timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null
+            echo $? >"$ret_file"
+            exit 0
+        ) 2>/dev/null
+    fi
+    local ret=0
+    if [ -f "$ret_file" ]; then
+        ret=$(cat "$ret_file")
+        [ -z "$ret" ] && ret=0
+    fi
+
+    # --- Output display in debug mode — show both stdout and stderr ---
+    if [ "${DEBUG}" != "0" ] && [ -s "$output_file" ]; then
+        cat "$output_file"
+    fi
+    if [ "${DEBUG}" != "0" ] && [ -s "${output_file}.err" ]; then
+        cat "${output_file}.err" >&2
+    fi
+
+    # --- Check exit code ---
+    if [ "$ret" -ne "$expected_exit" ]; then
         echo "  FAIL  $name (exit=$ret, expected=$expected_exit)"
         return 1
     fi
+
+    # --- Check expected_output.txt (byte-for-byte) ---
+    if [ -f "$src_dir/expected_output.txt" ]; then
+        if ! diff -q "$src_dir/expected_output.txt" "$output_file" >/dev/null 2>&1; then
+            echo "  FAIL  $name (output mismatch)"
+            return 1
+        fi
+    fi
+
+    # --- Check expected_output_regex.txt (line-by-line regex, auto-anchored) ---
+    if [ -f "$src_dir/expected_output_regex.txt" ]; then
+        # Read regex patterns into an array
+        local -a regex_lines=()
+        while IFS= read -r line || [ -n "$line" ]; do
+            regex_lines+=("${line%$'\r'}")
+        done < "$src_dir/expected_output_regex.txt"
+
+        # Count actual lines the same way (handles CRLF and missing final newline)
+        local actual_count=0
+        local idx=0
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            local pattern="^${regex_lines[$idx]}$"
+            if ! printf '%s\n' "$line" | grep -qE "$pattern"; then
+                echo "  FAIL  $name (output regex mismatch)"
+                return 1
+            fi
+            actual_count=$((actual_count + 1))
+            idx=$((idx + 1))
+        done < "$output_file"
+        local expected_count=${#regex_lines[@]}
+
+        # Line count must match
+        if [ "$actual_count" -ne "$expected_count" ]; then
+            echo "  FAIL  $name (output regex mismatch)"
+            return 1
+        fi
+    fi
+
+    # --- PASS ---
+    echo "  PASS  $name"
+    return 0
 }
 
 # ── Main ──────────────────────────────────────────────────────────
 
-MODE="${1:-build}"
-TARGET="${2:-}"
+# Strip --debug from positional args for MODE/TARGET parsing
+filter_args() {
+    local args=()
+    for arg in "$@"; do
+        if [ "$arg" != "--debug" ]; then
+            args+=("$arg")
+        fi
+    done
+    printf '%s\n' "${args[@]}"
+}
+
+FILTERED=($(filter_args "$@"))
+MODE="${FILTERED[0]:-build}"
+TARGET="${FILTERED[1]:-}"
 
 case "$MODE" in
     build)
@@ -286,6 +424,11 @@ case "$MODE" in
             exit 0
         fi
         pass=0 fail=0 skip=0
+        if [ "${DEBUG}" != "0" ]; then
+            echo "============================"
+            echo "  DEBUG MODE (MY_WINE_DEBUG=1)"
+            echo "============================"
+        fi
         for name in $samples; do
             # Build the sample first
             if ! build_sample "$name"; then

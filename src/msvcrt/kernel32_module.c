@@ -4,38 +4,85 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <pthread.h>
 #include <sys/mman.h>
 
 #include "kernel32_priv.h"
+#include "include/pe_priv.h"
 #include "../loader/loader_priv.h"
+#include "../loader/loader_state.h"
 
 static char g_dll_path[512];
 
+/* ── Debug helpers: syscall-safe formatted output to stderr ──── */
+static inline void dbg_fmt_hex(char *dst, uintptr_t val)
+{
+    for (int i = 7; i >= 0; i--) {
+        dst[i] = "0123456789abcdef"[val & 0xf];
+        val >>= 4;
+    }
+}
+
+static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+{
+    char buf[64];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p; ) buf[i++] = *p++;
+    buf[i++] = '0'; buf[i++] = 'x';
+    dbg_fmt_hex(buf + i, val);
+    i += 8;
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
+
+static inline void dbg_write_bool(const char *prefix, int val)
+{
+    char buf[64];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p; ) buf[i++] = *p++;
+    buf[i++] = val ? '1' : '0';
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
+
 /* ── LoadLibraryA ─────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *LoadLibraryA(const char *lpLibFileName)
 {
+    const char msg1[] = "LoadLibraryA: ENTER\n";
+    INLINE_SYSCALL_WRITE(2, msg1, sizeof(msg1) - 1);
+
+    dbg_write_ptr("LoadLibraryA: arg=", (uintptr_t)lpLibFileName);
+
     if (lpLibFileName == NULL) {
+        dbg_write_ptr("LoadLibraryA: ret=", 0);
         return FORCE_PTR_RETURN(NULL);
     }
 
     loaded_module_t *mod = find_module_by_name_safe(lpLibFileName);
+    dbg_write_ptr("LoadLibraryA: find_module=", mod ? (uintptr_t)mod->base : 0);
     if (mod != NULL) {
         mod->load_count++;
+        dbg_write_ptr("LoadLibraryA: ret=", (uintptr_t)mod->base);
         return FORCE_PTR_RETURN(mod->base);
     }
 
-    if (!find_dll_path(lpLibFileName, g_dll_path, sizeof(g_dll_path))) {
+    int found = find_dll_path(lpLibFileName, g_dll_path, sizeof(g_dll_path));
+    dbg_write_bool("LoadLibraryA: find_path=", found);
+    if (!found) {
+        dbg_write_ptr("LoadLibraryA: ret=", 0);
         return FORCE_PTR_RETURN(NULL);
     }
 
     mod = load_dll(g_dll_path, 0);
     if (mod == NULL) {
+        dbg_write_ptr("LoadLibraryA: ret=", 0);
         return FORCE_PTR_RETURN(NULL);
     }
 
+    dbg_write_ptr("LoadLibraryA: ret=", (uintptr_t)mod->base);
     return FORCE_PTR_RETURN(mod->base);
 }
 
@@ -46,7 +93,7 @@ void *_LoadLibraryA(const char *lpLibFileName)
 
 /* ── GetProcAddress ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *GetProcAddress(void *hModule, const char *lpProcName)
 {
     if (hModule == NULL || lpProcName == NULL)
@@ -66,12 +113,12 @@ void *_GetProcAddress(void *hModule, const char *lpProcName)
 
 /* ── GetModuleHandleA ──────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *GetModuleHandleA(const char *lpModuleName)
 {
     if (lpModuleName == NULL) {
-        if (module_count > 0)
-            return FORCE_PTR_RETURN(module_list[0].base);
+        if (g_loader.module_count > 0)
+            return FORCE_PTR_RETURN(g_loader.modules[0].base);
         return FORCE_PTR_RETURN(NULL);
     }
 
@@ -86,7 +133,7 @@ void *_GetModuleHandleA(const char *lpModuleName)
 
 /* ── FreeLibraryA ──────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int FreeLibraryA(void *hModule)
 {
     loaded_module_t *mod = find_module_by_addr(hModule);
@@ -99,11 +146,11 @@ int FreeLibraryA(void *hModule)
 
     reset_export_cache(mod);
 
-    if (g_peb_ldr != NULL && mod->ldr_linked)
+    if (loader_get_peb_ldr() != NULL && mod->ldr_linked)
         ldr_remove_module(mod);
 
     if (mod->base && mod->nt) {
-        uint32_t size = mod->nt->OptionalHeader.SizeOfImage;
+        uint32_t size = pe_size_of_image(mod->nt);
         munmap(mod->base, size);
     }
 
@@ -119,11 +166,15 @@ int _FreeLibraryA(void *hModule)
 
 /* ── FreeLibraryAndExitThread ──────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 __attribute__((noreturn)) void FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)
 {
     FreeLibraryA(hModule);
-    pthread_exit((void *)(uintptr_t)exitCode);
+#ifdef MY_WINE32
+    INLINE_SYSCALL_EXIT((int)exitCode);
+#else
+    _exit((int)exitCode);
+#endif
 }
 
 void _FreeLibraryAndExitThread(void *hModule, uint32_t exitCode)
