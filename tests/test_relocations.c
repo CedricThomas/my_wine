@@ -106,6 +106,7 @@ static IMAGE_NT_HEADERS *setup_nt_headers(void *base,
 
     nt->u.nt64.OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
     nt->u.nt64.OptionalHeader.ImageBase = image_base;
+    nt->u.nt64.OptionalHeader.SizeOfImage = 0x4000;
     nt->u.nt64.OptionalHeader.SectionAlignment = 0x1000;
     nt->u.nt64.OptionalHeader.FileAlignment = 0x200;
     nt->u.nt64.OptionalHeader.NumberOfRvaAndSizes =
@@ -435,6 +436,35 @@ static void test_multiple_blocks(void)
           *val1 == (uint64_t)(uintptr_t)base);
     check("val at 0x2000 patched by second block",
           *val2 == (uint64_t)(uintptr_t)base + 0x200);
+
+    munmap(base, 0x4000);
+}
+
+/* ---------------------------------------------------------------- */
+/* Test 8: malformed relocation target outside SizeOfImage            */
+/* ---------------------------------------------------------------- */
+
+static void test_relocation_target_out_of_bounds(void)
+{
+    printf("\n--- Malformed relocation target out of bounds ---\n");
+
+    void *base = mmap(NULL, 0x4000, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (base == MAP_FAILED) { printf("  SKIP: mmap failed\n"); return; }
+
+    uint64_t old_image_base = 0x140000000ULL;
+    setup_dos_header(base);
+
+    uint32_t block_va = 0x1100;
+    setup_single_dir64_block(base, block_va, 0x3ff8, 0);
+
+    IMAGE_NT_HEADERS *nt =
+        setup_nt_headers(base, old_image_base, block_va,
+                         sizeof(IMAGE_BASE_RELOCATION) + sizeof(uint16_t), 0);
+    nt->u.nt64.OptionalHeader.SizeOfImage = 0x3ffc;
+
+    int rc = apply_relocations(base, nt);
+    check("apply_relocations rejects out-of-bounds target", rc == -1);
 
     munmap(base, 0x4000);
 }
@@ -857,6 +887,7 @@ int main(int argc, char *argv[])
     test_delta_zero();
     test_relocs_stripped();
     test_multiple_blocks();
+    test_relocation_target_out_of_bounds();
 
     /* Integration tests with real PE file */
     if (argc > 1) {

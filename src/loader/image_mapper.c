@@ -137,6 +137,21 @@ void *map_image_at(const char *path,
 
     (void)section_alignment; /* Used by caller; available via accessor */
 
+    if (image_size == 0 || image_size > (size_t)UINT32_MAX) {
+        DEBUG("Invalid SizeOfImage");
+        wine_munmap(file_base, file_size);
+        INLINE_SYSCALL_CLOSE(fd);
+        return NULL;
+    }
+
+    uint32_t headers_size = pe_size_of_headers(&nt);
+    if (headers_size > file_size || headers_size > image_size) {
+        DEBUG("Invalid SizeOfHeaders");
+        wine_munmap(file_base, file_size);
+        INLINE_SYSCALL_CLOSE(fd);
+        return NULL;
+    }
+
     /* Determine the image base address */
     uint64_t image_base;
     if (desired_base != 0) {
@@ -165,7 +180,8 @@ void *map_image_at(const char *path,
                   (unsigned long)image_base, (unsigned long)PE32_DEFAULT_IMAGE_BASE);
             image_base = PE32_DEFAULT_IMAGE_BASE;
         }
-        if ((image_base + image_size) >= ADDR32_LIMIT) {
+        if (image_base > ADDR32_LIMIT ||
+            (uint64_t)image_size > ADDR32_LIMIT - image_base) {
             DEBUG("PE32: image extends beyond 32-bit address space, "
                   "forcing base to 0x%lx",
                   (unsigned long)PE32_DEFAULT_IMAGE_BASE);
@@ -173,11 +189,18 @@ void *map_image_at(const char *path,
         }
     }
 
+#ifdef MAP_FIXED_NOREPLACE
+    int fixed_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE;
+#else
+    /* Older kernels/libcs lack MAP_FIXED_NOREPLACE. MAP_FIXED is required only
+     * to honor a PE preferred or reserved base; failure falls back to relocation. */
+    int fixed_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED;
+#endif
     void *base = wine_mmap((void *)(uintptr_t)image_base, image_size,
                        PROT_READ|PROT_WRITE|PROT_EXEC,
-                       MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
+                       fixed_flags, -1, 0);
     if (base == MAP_FAILED) {
-        DEBUG("MAP_FIXED at 0x%lx failed for %s image, trying without MAP_FIXED",
+        DEBUG("fixed map at 0x%lx failed for %s image, trying relocatable map",
               (unsigned long)image_base,
               pe_is_pe32(&nt) ? "PE32" : "PE32+");
 
@@ -196,14 +219,30 @@ void *map_image_at(const char *path,
     for (int i = 0; i < num_sections; i++) {
         if (sections[i].SizeOfRawData == 0)
             continue; /* .bss etc. - zero-filled, already anonymous */
-        void *dest = (char *)base + sections[i].VirtualAddress;
+        if (!pe_rva_range_is_valid(sections[i].VirtualAddress,
+                                   sections[i].SizeOfRawData,
+                                   image_size)) {
+            DEBUG("section raw copy exceeds image bounds");
+            wine_munmap(base, image_size);
+            wine_munmap(file_base, file_size);
+            INLINE_SYSCALL_CLOSE(fd);
+            return NULL;
+        }
+        void *dest = pe_rva_to_ptr(base, &nt, sections[i].VirtualAddress,
+                                   sections[i].SizeOfRawData);
         void *src  = (char *)file_base + sections[i].PointerToRawData;
+        if (dest == NULL) {
+            DEBUG("invalid section destination");
+            wine_munmap(base, image_size);
+            wine_munmap(file_base, file_size);
+            INLINE_SYSCALL_CLOSE(fd);
+            return NULL;
+        }
         memcpy(dest, src, sections[i].SizeOfRawData);
     }
 
     /* Copy PE file headers (DOS + NT + section table) into the image */
     {
-        uint32_t headers_size = pe_size_of_headers(&nt);
         if (headers_size > 0) {
             memcpy(base, file_base, headers_size);
             /* Re-point sections into the image */
@@ -237,6 +276,14 @@ void *map_image_at(const char *path,
         if (size == 0)
             size = sections[i].SizeOfRawData;
         size = (size + PAGE_MASK) & ~(size_t)PAGE_MASK;
+
+        if (!pe_rva_range_is_valid(sections[i].VirtualAddress, size, image_size)) {
+            DEBUG("section protection exceeds image bounds");
+            wine_munmap(base, image_size);
+            wine_munmap(file_base, file_size);
+            INLINE_SYSCALL_CLOSE(fd);
+            return NULL;
+        }
 
         if (wine_mprotect((char *)base + sections[i].VirtualAddress, size, prot) != 0) {
             DEBUG("mprotect failed");

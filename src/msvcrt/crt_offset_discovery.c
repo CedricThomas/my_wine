@@ -64,7 +64,15 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS *nt,
     uint64_t text_vaddr = text_sec->VirtualAddress;
     uint64_t text_size = text_sec->Misc.VirtualSize;
     if (text_size == 0) text_size = text_sec->SizeOfRawData;
-    uint8_t *text_base = (uint8_t *)image_base + text_vaddr;
+    if (text_vaddr > UINT32_MAX || text_size > image_size ||
+        text_vaddr > image_size - text_size) {
+        return;
+    }
+    uint8_t *text_base = pe_rva_to_ptr(image_base, nt, (uint32_t)text_vaddr,
+                                       (size_t)text_size);
+    if (text_base == NULL) {
+        return;
+    }
 
     int found = 0;
     for (uint64_t off = 0; off + 7 < text_size; off++) {
@@ -77,7 +85,11 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS *nt,
         uint64_t instr_rva = text_vaddr + off;
         uint64_t target_rva = instr_rva + 7 + disp;
 
-        if (target_rva >= image_size) continue;
+        if (target_rva > UINT32_MAX ||
+            !pe_rva_range_is_valid((uint32_t)target_rva, sizeof(uint64_t),
+                                   image_size)) {
+            continue;
+        }
         if (target_rva >= text_vaddr && target_rva < text_vaddr + text_size) continue;
 
         /* Look forward up to 40 bytes for deref+write pattern:
@@ -113,15 +125,22 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS *nt,
         if (!has_write_deref) continue;
 
         /* Found refptr target at target_rva. Check if in a data section. */
-        uint64_t *target_ptr = (uint64_t *)((char *)image_base + target_rva);
+        uint64_t *target_ptr = pe_rva_to_ptr(image_base, nt,
+                                             (uint32_t)target_rva,
+                                             sizeof(uint64_t));
+        if (target_ptr == NULL) continue;
         uint64_t current = *target_ptr;
         int in_data_section = 0;
         const char *sec_name = "unknown";
         for (uint16_t si = 0; si < pe_section_count(nt); si++) {
             IMAGE_SECTION_HEADER *sec = &sections[si];
             if (sec == text_sec) continue;
-            uint64_t sec_end = sec->VirtualAddress +
-                (sec->Misc.VirtualSize > 0 ? sec->Misc.VirtualSize : sec->SizeOfRawData);
+            uint64_t sec_size = sec->Misc.VirtualSize > 0
+                                ? sec->Misc.VirtualSize
+                                : sec->SizeOfRawData;
+            if (sec_size > UINT32_MAX - sec->VirtualAddress)
+                continue;
+            uint64_t sec_end = sec->VirtualAddress + sec_size;
             if (target_rva >= sec->VirtualAddress && target_rva < sec_end) {
                 sec_name = (const char *)sec->Name;
                 if ((target_rva - sec->VirtualAddress) % 8 == 0) {
@@ -182,17 +201,37 @@ static int open_and_map_symbols(
     close(fd);
     if (file_map == MAP_FAILED) return -1;
 
-    IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)((char *)file_map + sym_ptr);
     size_t sym_table_size = (size_t)sym_count * IMAGE_SIZEOF_SYMBOL;
+    if (sym_count != 0 && sym_table_size / IMAGE_SIZEOF_SYMBOL != sym_count) {
+        munmap(file_map, st.st_size);
+        return -1;
+    }
+
+    IMAGE_SYMBOL *symbols = (IMAGE_SYMBOL *)safe_ptr_at(file_map, sym_ptr,
+                                                        sym_table_size,
+                                                        (size_t)st.st_size);
+    if (symbols == NULL) {
+        munmap(file_map, st.st_size);
+        return -1;
+    }
 
     char *string_table = NULL;
     size_t str_off = sym_ptr + sym_table_size;
-    if (str_off + 4 <= (size_t)st.st_size) {
-        uint32_t str_size = *((const uint32_t *)((char *)file_map + str_off));
+    if ((size_t)st.st_size >= sizeof(uint32_t) &&
+        str_off >= sym_ptr &&
+        str_off <= (size_t)st.st_size - sizeof(uint32_t)) {
+        const uint32_t *str_size_ptr = safe_ptr_at(file_map, str_off,
+                                                   sizeof(uint32_t),
+                                                   (size_t)st.st_size);
+        if (str_size_ptr == NULL) {
+            munmap(file_map, st.st_size);
+            return -1;
+        }
+        uint32_t str_size = *str_size_ptr;
         /* Allow small overhang (up to 64 bytes) for string table that extends
          * past the file. Some PE tools include padding in the size field. */
         size_t str_end = str_off + 4 + str_size;
-        if (str_end <= (size_t)st.st_size + 64 && str_size > 0) {
+        if (str_end >= str_off && str_end <= (size_t)st.st_size + 64 && str_size > 0) {
             string_table = (char *)file_map + str_off + 4;
         }
     }
@@ -216,6 +255,8 @@ static uint64_t compute_rva_from_symbol(
 
     if (section_num > 0 && (size_t)section_num <= pe_section_count(nt)) {
         IMAGE_SECTION_HEADER *sec = &sections[section_num - 1];
+        if (sym->Value > UINT32_MAX - sec->VirtualAddress)
+            return 0;
         return sec->VirtualAddress + sym->Value;
     }
     if (section_num == 0) {

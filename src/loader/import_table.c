@@ -303,20 +303,47 @@ int build_flat_import_array(void *base, IMAGE_NT_HEADERS *nt,
 {
     IMAGE_DATA_DIRECTORY imp_dir;
     if (!pe_get_import_dir(nt, &imp_dir)) return 0;
-    uint64_t import_rva = imp_dir.VirtualAddress;
-    IMAGE_IMPORT_DESCRIPTOR *desc_start = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
+    if (imp_dir.VirtualAddress == 0 ||
+        !pe_rva_range_is_valid(imp_dir.VirtualAddress, imp_dir.Size,
+                               pe_size_of_image(nt))) {
+        return 0;
+    }
+    uint32_t import_rva = imp_dir.VirtualAddress;
+    IMAGE_IMPORT_DESCRIPTOR *desc_start = pe_rva_to_ptr(base, nt, import_rva,
+                                                        sizeof(IMAGE_IMPORT_DESCRIPTOR));
+    if (desc_start == NULL) return 0;
 
     bool is32 = pe_is_pe32(nt);
     int num_flat = 0;
     IMAGE_IMPORT_DESCRIPTOR *desc = desc_start;
-    while (desc->Name != 0 && num_flat < MAX_FLAT_IMPORTS) {
-        const char *dll_name = (const char *)((char *)base + desc->Name);
+    uint32_t desc_offset = 0;
+    while (desc_offset + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= imp_dir.Size &&
+           desc->Name != 0 && num_flat < MAX_FLAT_IMPORTS) {
+        if (!pe_rva_range_is_valid(desc->Name, 1, pe_size_of_image(nt)))
+            break;
+        const char *dll_name = (const char *)base + desc->Name;
 
         if (is32) {
-            IMAGE_THUNK_DATA32 *orig_thunks = (IMAGE_THUNK_DATA32 *)((char *)base + desc->u1.OriginalFirstThunk);
-            IMAGE_THUNK_DATA32 *iath = (IMAGE_THUNK_DATA32 *)((char *)base + desc->FirstThunk);
+            uint32_t ilt_rva = desc->u1.OriginalFirstThunk != 0
+                               ? desc->u1.OriginalFirstThunk
+                               : desc->FirstThunk;
+            IMAGE_THUNK_DATA32 *orig_thunks = pe_rva_to_ptr(base, nt, ilt_rva,
+                                                            sizeof(IMAGE_THUNK_DATA32));
+            IMAGE_THUNK_DATA32 *iath = pe_rva_to_ptr(base, nt, desc->FirstThunk,
+                                                     sizeof(IMAGE_THUNK_DATA32));
+            if (orig_thunks == NULL || iath == NULL)
+                break;
 
             for (int i = 0; orig_thunks[i].AddressOfData != 0 && num_flat < MAX_FLAT_IMPORTS; i++) {
+                size_t thunk_off = (size_t)i * sizeof(IMAGE_THUNK_DATA32);
+                if (thunk_off / sizeof(IMAGE_THUNK_DATA32) != (size_t)i ||
+                    thunk_off > SIZE_MAX - sizeof(IMAGE_THUNK_DATA32) ||
+                    !pe_rva_range_is_valid(ilt_rva, thunk_off + sizeof(IMAGE_THUNK_DATA32),
+                                           pe_size_of_image(nt)) ||
+                    !pe_rva_range_is_valid(desc->FirstThunk, thunk_off + sizeof(IMAGE_THUNK_DATA32),
+                                           pe_size_of_image(nt))) {
+                    return num_flat;
+                }
                 flat[num_flat].ilt_value = orig_thunks[i].AddressOfData;
                 flat[num_flat].resolved_addr = (uint64_t)(uint32_t)iath[i].AddressOfData;
                 flat[num_flat].iat_addr = (uint64_t)(uintptr_t)&iath[i].AddressOfData;
@@ -326,16 +353,35 @@ int build_flat_import_array(void *base, IMAGE_NT_HEADERS *nt,
                     const char *fname = ordinal_lookup(dll_name, ordinal);
                     flat[num_flat].func_name = fname ? fname : "<ordinal>";
                 } else {
-                    IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData);
+                    IMAGE_IMPORT_BY_NAME *imp_name = pe_rva_to_ptr(base, nt,
+                        orig_thunks[i].AddressOfData, sizeof(IMAGE_IMPORT_BY_NAME));
+                    if (imp_name == NULL)
+                        return num_flat;
                     flat[num_flat].func_name = (const char *)imp_name->Name;
                 }
                 num_flat++;
             }
         } else {
-            IMAGE_THUNK_DATA64 *orig_thunks = (IMAGE_THUNK_DATA64 *)((char *)base + desc->u1.OriginalFirstThunk);
-            IMAGE_THUNK_DATA64 *iath = (IMAGE_THUNK_DATA64 *)((char *)base + desc->FirstThunk);
+            uint32_t ilt_rva = desc->u1.OriginalFirstThunk != 0
+                               ? desc->u1.OriginalFirstThunk
+                               : desc->FirstThunk;
+            IMAGE_THUNK_DATA64 *orig_thunks = pe_rva_to_ptr(base, nt, ilt_rva,
+                                                            sizeof(IMAGE_THUNK_DATA64));
+            IMAGE_THUNK_DATA64 *iath = pe_rva_to_ptr(base, nt, desc->FirstThunk,
+                                                     sizeof(IMAGE_THUNK_DATA64));
+            if (orig_thunks == NULL || iath == NULL)
+                break;
 
             for (int i = 0; orig_thunks[i].AddressOfData != 0 && num_flat < MAX_FLAT_IMPORTS; i++) {
+                size_t thunk_off = (size_t)i * sizeof(IMAGE_THUNK_DATA64);
+                if (thunk_off / sizeof(IMAGE_THUNK_DATA64) != (size_t)i ||
+                    thunk_off > SIZE_MAX - sizeof(IMAGE_THUNK_DATA64) ||
+                    !pe_rva_range_is_valid(ilt_rva, thunk_off + sizeof(IMAGE_THUNK_DATA64),
+                                           pe_size_of_image(nt)) ||
+                    !pe_rva_range_is_valid(desc->FirstThunk, thunk_off + sizeof(IMAGE_THUNK_DATA64),
+                                           pe_size_of_image(nt))) {
+                    return num_flat;
+                }
                 flat[num_flat].ilt_value = orig_thunks[i].AddressOfData;
                 flat[num_flat].resolved_addr = iath[i].AddressOfData;
                 flat[num_flat].iat_addr = (uint64_t)(uintptr_t)&iath[i].AddressOfData;
@@ -345,13 +391,22 @@ int build_flat_import_array(void *base, IMAGE_NT_HEADERS *nt,
                     const char *fname = ordinal_lookup(dll_name, ordinal);
                     flat[num_flat].func_name = fname ? fname : "<ordinal>";
                 } else {
-                    IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + orig_thunks[i].AddressOfData);
+                    if (orig_thunks[i].AddressOfData > UINT32_MAX)
+                        return num_flat;
+                    IMAGE_IMPORT_BY_NAME *imp_name = pe_rva_to_ptr(base, nt,
+                        (uint32_t)orig_thunks[i].AddressOfData, sizeof(IMAGE_IMPORT_BY_NAME));
+                    if (imp_name == NULL)
+                        return num_flat;
                     flat[num_flat].func_name = (const char *)imp_name->Name;
                 }
                 num_flat++;
             }
         }
-        desc++;
+        desc_offset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        desc = pe_rva_to_ptr(base, nt, import_rva + desc_offset,
+                             sizeof(IMAGE_IMPORT_DESCRIPTOR));
+        if (desc == NULL)
+            break;
     }
 
     return num_flat;
@@ -426,5 +481,4 @@ bool strategy_ilt_offset_match(void *target_ptr, uint64_t target,
 
     return false;
 }
-
 

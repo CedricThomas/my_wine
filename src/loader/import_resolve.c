@@ -60,6 +60,21 @@ static inline void dbg_write_str(int level, const char *prefix, const char *str)
 
 #define MAX_IMPORT_DEPTH 8
 
+static int image_cstr_valid(void *base, IMAGE_NT_HEADERS *nt, uint32_t rva)
+{
+    size_t image_size = pe_size_of_image(nt);
+    const char *s;
+
+    if (!pe_rva_range_is_valid(rva, 1, image_size))
+        return 0;
+    s = (const char *)base + rva;
+    for (size_t off = rva; off < image_size; off++) {
+        if (*s++ == '\0')
+            return 1;
+    }
+    return 0;
+}
+
 /**
  * Find the .text jmp-thunk address whose IAT entry resolves to target_addr.
  */
@@ -180,23 +195,51 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
         return 0;
     }
 
-    uint64_t import_rva = imp_dir.VirtualAddress;
-    IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
+    if (imp_dir.VirtualAddress == 0 ||
+        !pe_rva_range_is_valid(imp_dir.VirtualAddress, imp_dir.Size,
+                               pe_size_of_image(nt))) {
+        return -1;
+    }
+
+    uint32_t import_rva = imp_dir.VirtualAddress;
+    IMAGE_IMPORT_DESCRIPTOR *desc = pe_rva_to_ptr(base, nt, import_rva,
+                                                  sizeof(IMAGE_IMPORT_DESCRIPTOR));
+    if (desc == NULL) {
+        return -1;
+    }
+    uint32_t desc_offset = 0;
 
     bool is32 = pe_is_pe32(nt);
     uint64_t high_bit_mask = is32 ? 0x80000000 : 0x8000000000000000ULL;
     size_t thunk_size = is32 ? sizeof(uint32_t) : sizeof(uint64_t);
 
-    while (desc->Name != 0) {
-        const char *dll_name = (const char *)((char *)base + desc->Name);
+    while (desc_offset + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= imp_dir.Size &&
+           desc->Name != 0) {
+        if (!image_cstr_valid(base, nt, desc->Name))
+            return -1;
+        const char *dll_name = (const char *)base + desc->Name;
         dbg_write_str(2, "resolve_imports: DLL=", dll_name);
 
-        uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
-        uint8_t *iat_base  = (uint8_t *)((char *)base + desc->FirstThunk);
+        uint32_t ilt_rva = desc->u1.OriginalFirstThunk != 0
+                           ? desc->u1.OriginalFirstThunk
+                           : desc->FirstThunk;
+        uint8_t *orig_base = pe_rva_to_ptr(base, nt, ilt_rva, thunk_size);
+        uint8_t *iat_base  = pe_rva_to_ptr(base, nt, desc->FirstThunk, thunk_size);
+        if (orig_base == NULL || iat_base == NULL)
+            return -1;
         int i;
 
         for (i = 0; ; i++) {
             uint64_t thunk_val;
+            size_t thunk_off = (size_t)i * thunk_size;
+            if (thunk_off / thunk_size != (size_t)i ||
+                thunk_off > SIZE_MAX - thunk_size ||
+                !pe_rva_range_is_valid(ilt_rva, thunk_off + thunk_size,
+                                       pe_size_of_image(nt)) ||
+                !pe_rva_range_is_valid(desc->FirstThunk, thunk_off + thunk_size,
+                                       pe_size_of_image(nt))) {
+                return -1;
+            }
             if (is32) {
                 thunk_val = (uint32_t)*((uint32_t *)(orig_base + i * thunk_size));
             } else {
@@ -215,7 +258,19 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                 }
             } else {
                 /* Name import */
-                IMAGE_IMPORT_BY_NAME *imp_name = (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk_val);
+                if (thunk_val > UINT32_MAX - sizeof(uint16_t) ||
+                    !pe_rva_range_is_valid((uint32_t)thunk_val,
+                                           sizeof(uint16_t) + 1,
+                                           pe_size_of_image(nt)) ||
+                    !image_cstr_valid(base, nt,
+                                      (uint32_t)thunk_val + sizeof(uint16_t))) {
+                    return -1;
+                }
+                IMAGE_IMPORT_BY_NAME *imp_name =
+                    pe_rva_to_ptr(base, nt, (uint32_t)thunk_val,
+                                  sizeof(IMAGE_IMPORT_BY_NAME));
+                if (imp_name == NULL)
+                    return -1;
                 addr = resolve_import(dll_name, (const char *)imp_name->Name);
             }
 
@@ -285,8 +340,15 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
             }
         }
 
-        desc++;
+        desc_offset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        desc = pe_rva_to_ptr(base, nt, import_rva + desc_offset,
+                             sizeof(IMAGE_IMPORT_DESCRIPTOR));
+        if (desc == NULL)
+            return -1;
     }
+
+    if (desc_offset + sizeof(IMAGE_IMPORT_DESCRIPTOR) > imp_dir.Size)
+        return -1;
 
     return 0;
 }
@@ -317,7 +379,11 @@ static int patch_thunk_targets(void *base, IMAGE_NT_HEADERS *nt,
     int matched = 0;
     for (int t = 0; t < num_targets; t++) {
         uint64_t target = targets[t];
-        void *target_ptr = (char *)base + target;
+        if (target > UINT32_MAX)
+            continue;
+        void *target_ptr = pe_rva_to_ptr(base, nt, (uint32_t)target, thunk_size);
+        if (target_ptr == NULL)
+            continue;
         uint64_t current_val;
         if (is32) {
             current_val = (uint32_t)*((uint32_t *)target_ptr);
@@ -400,13 +466,27 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
         return 0; /* No imports */
     }
 
-    uint64_t import_rva = imp_dir.VirtualAddress;
-    IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
+    if (imp_dir.VirtualAddress == 0 ||
+        !pe_rva_range_is_valid(imp_dir.VirtualAddress, imp_dir.Size,
+                               pe_size_of_image(nt))) {
+        return -1;
+    }
+
+    uint32_t import_rva = imp_dir.VirtualAddress;
+    IMAGE_IMPORT_DESCRIPTOR *desc = pe_rva_to_ptr(base, nt, import_rva,
+                                                  sizeof(IMAGE_IMPORT_DESCRIPTOR));
+    if (desc == NULL) {
+        return -1;
+    }
 
     /* First pass: ensure all dependency DLLs are loaded */
     IMAGE_IMPORT_DESCRIPTOR *d = desc;
-    while (d->Name != 0) {
-        const char *dll_name = (const char *)((char *)base + d->Name);
+    uint32_t desc_offset = 0;
+    while (desc_offset + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= imp_dir.Size &&
+           d->Name != 0) {
+        if (!image_cstr_valid(base, nt, d->Name))
+            return -1;
+        const char *dll_name = (const char *)base + d->Name;
 
         /* Check if already loaded */
         loaded_module_t *dep = find_module_by_name(dll_name);
@@ -415,7 +495,11 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
             if (dll_strcasecmp("kernel32.dll", dll_name) == 0 ||
                 dll_strcasecmp("ntdll.dll", dll_name) == 0 ||
                 dll_strcasecmp("msvcrt.dll", dll_name) == 0) {
-                d++;
+                desc_offset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+                d = pe_rva_to_ptr(base, nt, import_rva + desc_offset,
+                                  sizeof(IMAGE_IMPORT_DESCRIPTOR));
+                if (d == NULL)
+                    return -1;
                 continue;
             }
 
@@ -431,8 +515,14 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
                 return -1;
             }
         }
-        d++;
+        desc_offset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        d = pe_rva_to_ptr(base, nt, import_rva + desc_offset,
+                          sizeof(IMAGE_IMPORT_DESCRIPTOR));
+        if (d == NULL)
+            return -1;
     }
+    if (desc_offset + sizeof(IMAGE_IMPORT_DESCRIPTOR) > imp_dir.Size)
+        return -1;
 
     /* Second pass: resolve all imports using the three-tier resolver */
     if (resolve_imports(base, nt) != 0) {

@@ -231,6 +231,52 @@ static void test_parse_no_export(void)
     munmap(base, buf_size);
 }
 
+/* ── Test: malformed export arrays outside image bounds ───────── */
+
+static void test_parse_malformed_export_bounds(void)
+{
+    printf("\n=== parse_export_table (malformed bounds) ===\n");
+
+    const char *names[] = { "Alpha" };
+    size_t buf_size = 0x3000;
+
+    IMAGE_NT_HEADERS *nt = NULL;
+    void *base = build_pe_with_exports(buf_size, names, 1, 0, &nt);
+    if (!base) { printf("  SKIP\n"); return; }
+
+    IMAGE_EXPORT_DIRECTORY *exp = (IMAGE_EXPORT_DIRECTORY *)((uint8_t *)base + 0x2000);
+    exp->AddressOfNames = 0x2fff; /* one byte before end, too small for uint32_t */
+
+    loaded_module_t *mod = make_test_mod(base, nt);
+    int rc = parse_export_table(mod);
+    check("parse_export_table rejects out-of-bounds name table", rc == -1);
+    check("export cache remains empty after malformed parse",
+          mod->export_cache.number_of_names == 0);
+
+    munmap(base, buf_size);
+}
+
+static void test_lookup_malformed_export_name(void)
+{
+    printf("\n=== lookup_export (malformed name RVA) ===\n");
+
+    const char *names[] = { "Alpha" };
+    size_t buf_size = 0x3000;
+
+    IMAGE_NT_HEADERS *nt = NULL;
+    void *base = build_pe_with_exports(buf_size, names, 1, 0, &nt);
+    if (!base) { printf("  SKIP\n"); return; }
+
+    loaded_module_t *mod = make_test_mod(base, nt);
+    parse_export_table(mod);
+    mod->export_cache.name_table[0] = 0x2fff; /* no room for a bounded string */
+
+    check("lookup_export rejects malformed name RVA",
+          lookup_export(mod, "Alpha") == NULL);
+
+    munmap(base, buf_size);
+}
+
 /* ── Test: lookup_export (binary search) ─────────────────────── */
 
 static void test_lookup_export(void)
@@ -359,7 +405,9 @@ int main(void)
 
     test_parse_export_table();
     test_parse_no_export();
+    test_parse_malformed_export_bounds();
     test_lookup_export();
+    test_lookup_malformed_export_name();
     test_lookup_export_by_ordinal();
     test_forwarder_detection();
     test_reset_export_cache();

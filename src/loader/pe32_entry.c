@@ -302,7 +302,12 @@ static uint32_t resolve_entry(const char *path)
                 init_rva = bss->VirtualAddress + 0x40;
         }
         if (init_rva != 0) {
-            uint8_t *addr = (uint8_t *)g_loader.image_base + init_rva;
+            uint8_t *addr = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
+                                          init_rva, sizeof(uint32_t));
+            if (addr == NULL) {
+                free(symbols);
+                return entry_rva;
+            }
             uintptr_t page = (uintptr_t)addr & ~(uintptr_t)PAGE_MASK;
             long rc = INLINE_SYSCALL_MPROTECT((void *)page, PAGE_SIZE,
                                                PROT_READ | PROT_WRITE);
@@ -601,7 +606,9 @@ static void seed_bss_vars(void *base, IMAGE_NT_HEADERS *nt)
     if (bss_size == 0) bss_size = bss_sec->SizeOfRawData;
     if (bss_size == 0) return;
 
-    uint8_t *bss_base = (uint8_t *)base + bss_sec->VirtualAddress;
+    uint8_t *bss_base = pe_rva_to_ptr(base, nt, bss_sec->VirtualAddress,
+                                      bss_size);
+    if (bss_base == NULL) return;
 
     /* Ensure .bss is writable */
     uintptr_t bss_page = (uintptr_t)bss_base & ~(uintptr_t)PAGE_MASK;
@@ -780,15 +787,28 @@ int main(int argc, char **argv)
         void *ll_addr = (void *)(uintptr_t)0;
         void *ll_iat_ptr = NULL; /* pointer to the IAT cell for LoadLibraryA */
         if (pe_get_import_dir(&g_nt_headers, &imp_dir) && imp_dir.VirtualAddress != 0) {
-            uint64_t import_rva = imp_dir.VirtualAddress;
+            uint32_t import_rva = imp_dir.VirtualAddress;
             IMAGE_IMPORT_DESCRIPTOR *desc =
-                (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
-            while (desc->Name != 0) {
-                const char *dll_name = (const char *)((char *)base + desc->Name);
+                pe_rva_to_ptr(base, &g_nt_headers, import_rva,
+                              sizeof(IMAGE_IMPORT_DESCRIPTOR));
+            uint32_t desc_offset = 0;
+            while (desc != NULL &&
+                   desc_offset + sizeof(IMAGE_IMPORT_DESCRIPTOR) <= imp_dir.Size &&
+                   desc->Name != 0) {
+                const char *dll_name =
+                    pe_rva_to_ptr(base, &g_nt_headers, desc->Name, 1);
+                if (dll_name == NULL) break;
                 /* Case-insensitive DLL name check (PE may use "KERNEL32.dll") */
                 if (dll_strcasecmp(dll_name, "kernel32.dll") == 0) {
-                    uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
-                    uint8_t *iat_base = (uint8_t *)((char *)base + desc->FirstThunk);
+                    uint32_t ilt_rva = desc->u1.OriginalFirstThunk != 0
+                                       ? desc->u1.OriginalFirstThunk
+                                       : desc->FirstThunk;
+                    uint8_t *orig_base = pe_rva_to_ptr(base, &g_nt_headers,
+                                                       ilt_rva, sizeof(uint32_t));
+                    uint8_t *iat_base = pe_rva_to_ptr(base, &g_nt_headers,
+                                                      desc->FirstThunk,
+                                                      sizeof(uint32_t));
+                    if (orig_base == NULL || iat_base == NULL) break;
 
                     /* Log IAT check addresses */
                     {
@@ -808,6 +828,17 @@ int main(int argc, char **argv)
                     }
 
                     for (int j = 0; ; j++) {
+                        size_t thunk_off = (size_t)j * sizeof(uint32_t);
+                        if (thunk_off / sizeof(uint32_t) != (size_t)j ||
+                            thunk_off > SIZE_MAX - sizeof(uint32_t) ||
+                            !pe_rva_range_is_valid(ilt_rva,
+                                                   thunk_off + sizeof(uint32_t),
+                                                   pe_size_of_image(&g_nt_headers)) ||
+                            !pe_rva_range_is_valid(desc->FirstThunk,
+                                                   thunk_off + sizeof(uint32_t),
+                                                   pe_size_of_image(&g_nt_headers))) {
+                            break;
+                        }
                         uint32_t thunk_val = (uint32_t)*((uint32_t *)(orig_base + j * 4));
                         if (thunk_val == 0) break;
 
@@ -832,7 +863,9 @@ int main(int argc, char **argv)
 
                         if (thunk_val & 0x80000000) continue;
                         IMAGE_IMPORT_BY_NAME *imp_name =
-                            (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk_val);
+                            pe_rva_to_ptr(base, &g_nt_headers, thunk_val,
+                                          sizeof(IMAGE_IMPORT_BY_NAME));
+                        if (imp_name == NULL) break;
                         const char *fname = (const char *)imp_name->Name;
                         if (fname[0] == 'L' && fname[1] == 'o' && fname[2] == 'a' &&
                             fname[3] == 'd' && fname[4] == 'L' && fname[5] == 'i' &&
@@ -865,7 +898,10 @@ int main(int argc, char **argv)
                     }
                     if (ll_addr) break;
                 }
-                desc++;
+                desc_offset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+                desc = pe_rva_to_ptr(base, &g_nt_headers,
+                                     import_rva + desc_offset,
+                                     sizeof(IMAGE_IMPORT_DESCRIPTOR));
             }
         }
         {
@@ -905,7 +941,11 @@ int main(int argc, char **argv)
             int zero_count = 0;
             for (int t = 0; t < num_targets; t++) {
                 uint64_t target_rva = targets[t];
-                uint32_t *target_ptr = (uint32_t *)((char *)base + target_rva);
+                if (target_rva > UINT32_MAX) continue;
+                uint32_t *target_ptr = pe_rva_to_ptr(base, &g_nt_headers,
+                                                     (uint32_t)target_rva,
+                                                     sizeof(uint32_t));
+                if (target_ptr == NULL) continue;
                 if ((uint32_t)*target_ptr == 0x0) {
                     zero_count++;
                     char buf[80];

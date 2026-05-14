@@ -22,6 +22,15 @@ static inline const void *safe_ptr_at(const void *base, size_t offset, size_t le
     return (const uint8_t *)base + offset;
 }
 
+/* Return true when rva..rva+len is fully inside image_size. */
+static inline bool pe_rva_range_is_valid(uint32_t rva, size_t len, size_t image_size)
+{
+    size_t srva = (size_t)rva;
+    if (len > image_size || srva > image_size - len)
+        return false;
+    return true;
+}
+
 /* ── PE32/PE64 type checks ─────────────────────────────────────── */
 
 static inline bool pe_is_pe32(const IMAGE_NT_HEADERS *nt)
@@ -74,6 +83,28 @@ static inline uint32_t pe_size_of_image(const IMAGE_NT_HEADERS *nt)
         return nt->u.nt32.OptionalHeader.SizeOfImage;
     else
         return nt->u.nt64.OptionalHeader.SizeOfImage;
+}
+
+/* Convert an RVA in a mapped image to a pointer after checking image bounds. */
+static inline void *pe_rva_to_ptr(void *base, const IMAGE_NT_HEADERS *nt,
+                                  uint32_t rva, size_t len)
+{
+    if (!base || !nt)
+        return NULL;
+    if (!pe_rva_range_is_valid(rva, len, pe_size_of_image(nt)))
+        return NULL;
+    return (uint8_t *)base + rva;
+}
+
+static inline const void *pe_rva_to_const_ptr(const void *base,
+                                              const IMAGE_NT_HEADERS *nt,
+                                              uint32_t rva, size_t len)
+{
+    if (!base || !nt)
+        return NULL;
+    if (!pe_rva_range_is_valid(rva, len, pe_size_of_image(nt)))
+        return NULL;
+    return (const uint8_t *)base + rva;
 }
 
 static inline uint32_t pe_size_of_headers(const IMAGE_NT_HEADERS *nt)
@@ -185,9 +216,14 @@ static inline int rva_to_offset(const IMAGE_NT_HEADERS *nt, const IMAGE_SECTION_
     for (uint16_t i = 0; i < num; i++) {
         const IMAGE_SECTION_HEADER *sec = &sections[i];
         uint32_t sec_start = sec->VirtualAddress;
-        uint32_t sec_end   = sec_start + sec->Misc.VirtualSize;
+        uint32_t sec_size = sec->Misc.VirtualSize;
+        if (sec_size == 0 || sec_size < sec->SizeOfRawData)
+            sec_size = sec->SizeOfRawData;
+        if (sec_size > UINT32_MAX - sec_start)
+            return -1;
+        uint32_t sec_end = sec_start + sec_size;
         if (rva >= sec_start && rva < sec_end) {
-            size_t off = (size_t)(sec->PointerToRawData + (rva - sec_start));
+            size_t off = (size_t)sec->PointerToRawData + (size_t)(rva - sec_start);
             if (off <= file_size)
                 return (int)off;
             return -1;
@@ -197,6 +233,20 @@ static inline int rva_to_offset(const IMAGE_NT_HEADERS *nt, const IMAGE_SECTION_
     if (rva < pe_size_of_headers(nt))
         return (int)rva;
     return -1;
+}
+
+/* Convert an RVA range to a file offset only if the whole range is readable. */
+static inline int rva_range_to_offset(const IMAGE_NT_HEADERS *nt,
+                                      const IMAGE_SECTION_HEADER *sections,
+                                      uint32_t rva, size_t len,
+                                      size_t file_size)
+{
+    int off = rva_to_offset(nt, sections, rva, file_size);
+    if (off < 0)
+        return -1;
+    if (len > file_size || (size_t)off > file_size - len)
+        return -1;
+    return off;
 }
 
 /* Derive section table offset from DOS header and NT headers */

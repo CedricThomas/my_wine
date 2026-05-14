@@ -95,7 +95,13 @@ int apply_relocations(void *base, IMAGE_NT_HEADERS *nt)
     }
 
     /* Iterate relocation blocks */
-    const uint8_t *block_ptr = (const uint8_t *)base + p_dir->VirtualAddress;
+    const uint8_t *block_ptr = pe_rva_to_const_ptr(base, nt,
+                                                   p_dir->VirtualAddress,
+                                                   p_dir->Size);
+    if (block_ptr == NULL) {
+        fprintf(stderr, "Error: relocation directory exceeds image bounds\n");
+        return -1;
+    }
     const uint8_t *block_end = block_ptr + p_dir->Size;
 
     while (block_ptr < block_end) {
@@ -109,6 +115,10 @@ int apply_relocations(void *base, IMAGE_NT_HEADERS *nt)
 
         uint32_t va   = block->virtualAddress;
         uint32_t size = block->sizeOfBlock;
+        if ((size_t)(block_end - block_ptr) < size) {
+            fprintf(stderr, "Error: relocation block exceeds directory bounds\n");
+            return -1;
+        }
 
         /* Number of relocation entries in this block. */
         /* PE spec: entry count = (sizeOfBlock - 8) / 2 */
@@ -131,36 +141,79 @@ int apply_relocations(void *base, IMAGE_NT_HEADERS *nt)
             }
 
             if (is_pe32) {
-                uint32_t *target = (uint32_t *)((char *)base + va + offset);
+                if (va > UINT32_MAX - offset) {
+                    fprintf(stderr,
+                            "Error: PE32 relocation target RVA overflow "
+                            "at VA 0x%x+0x%x\n",
+                            va, offset);
+                    return -1;
+                }
                 switch (type) {
                     case IMAGE_REL_BASED_DIR32:
                         /* Add full 32-bit delta */
+                    case IMAGE_REL_BASED_HIGHLOW: {
+                        uint32_t *target = pe_rva_to_ptr(base, nt, va + offset,
+                                                         sizeof(uint32_t));
+                        if (target == NULL) {
+                            fprintf(stderr,
+                                    "Error: PE32 relocation target out of bounds "
+                                    "at VA 0x%x+0x%x\n",
+                                    va, offset);
+                            return -1;
+                        }
                         *target += (uint32_t)delta;
                         break;
-                    case IMAGE_REL_BASED_HIGHLOW:
-                        /* HIGHLOW is equivalent to DIR32 — add full 32-bit delta */
-                        *target += (uint32_t)delta;
-                        break;
-                    case IMAGE_REL_BASED_HIGH:
+                    }
+                    case IMAGE_REL_BASED_HIGH: {
                         /* Add high 16 bits of delta */
+                        uint16_t *target = pe_rva_to_ptr(base, nt, va + offset,
+                                                         sizeof(uint16_t));
+                        if (target == NULL) {
+                            fprintf(stderr,
+                                    "Error: PE32 relocation target out of bounds "
+                                    "at VA 0x%x+0x%x\n",
+                                    va, offset);
+                            return -1;
+                        }
                         *target += (uint16_t)(delta >> 16);
                         break;
-                    case IMAGE_REL_BASED_LOW:
+                    }
+                    case IMAGE_REL_BASED_LOW: {
                         /* Add low 16 bits of delta */
+                        uint16_t *target = pe_rva_to_ptr(base, nt, va + offset,
+                                                         sizeof(uint16_t));
+                        if (target == NULL) {
+                            fprintf(stderr,
+                                    "Error: PE32 relocation target out of bounds "
+                                    "at VA 0x%x+0x%x\n",
+                                    va, offset);
+                            return -1;
+                        }
                         *target += (uint16_t)(delta & 0xFFFF);
                         break;
-                    case IMAGE_REL_BASED_HIGHADJ:
+                    }
+                    case IMAGE_REL_BASED_HIGHADJ: {
                         /*
                          * HIGHADJ is a 16-bit adjustment that pairs with
                          * a preceding HIGH entry.  Treat as HIGH for safety
                          * with a warning.
                          */
+                        uint16_t *target = pe_rva_to_ptr(base, nt, va + offset,
+                                                         sizeof(uint16_t));
+                        if (target == NULL) {
+                            fprintf(stderr,
+                                    "Error: PE32 relocation target out of bounds "
+                                    "at VA 0x%x+0x%x\n",
+                                    va, offset);
+                            return -1;
+                        }
                         fprintf(stderr,
                                 "WARNING: treating HIGHADJ as HIGH for PE32 "
                                 "relocation type 0x%x at VA 0x%x+0x%x\n",
                                 type, va, offset);
                         *target += (uint16_t)(delta >> 16);
                         break;
+                    }
                     default:
                         fprintf(stderr,
                                 "WARNING: unsupported PE32 relocation type "
@@ -171,8 +224,22 @@ int apply_relocations(void *base, IMAGE_NT_HEADERS *nt)
             } else {
                 /* PE32+ */
                 if (type == IMAGE_REL_BASED_DIR64) {
-                    uint64_t *target =
-                        (uint64_t *)((char *)base + va + offset);
+                    if (va > UINT32_MAX - offset) {
+                        fprintf(stderr,
+                                "Error: PE32+ relocation target RVA overflow "
+                                "at VA 0x%x+0x%x\n",
+                                va, offset);
+                        return -1;
+                    }
+                    uint64_t *target = pe_rva_to_ptr(base, nt, va + offset,
+                                                     sizeof(uint64_t));
+                    if (target == NULL) {
+                        fprintf(stderr,
+                                "Error: PE32+ relocation target out of bounds "
+                                "at VA 0x%x+0x%x\n",
+                                va, offset);
+                        return -1;
+                    }
                     *target += delta;
                 } else {
                     fprintf(stderr,

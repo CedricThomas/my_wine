@@ -36,17 +36,22 @@ static int _scan_rip_jumps(void *image_base,
         return 0;
 
     uint64_t text_start = text->VirtualAddress;
-    uint64_t text_end   = text_start + text->Misc.VirtualSize;
-    if (text_end < text_start || text->Misc.VirtualSize > text->SizeOfRawData)
-        text_end = text_start + text->SizeOfRawData;
+    uint64_t text_len = text->Misc.VirtualSize;
+    if (text_len == 0 || text_len > text->SizeOfRawData)
+        text_len = text->SizeOfRawData;
+    if (text_len > UINT32_MAX || text_start > UINT32_MAX - text_len)
+        return 0;
 
-    uint64_t text_size = text_end - text_start;
+    uint64_t text_size = text_len;
 
     /* Section too small for any valid instruction (need at least 6 bytes) */
     if (text_size < 6)
         return 0;
 
-    uint8_t *text_base = (uint8_t *)image_base + text_start;
+    uint8_t *text_base = pe_rva_to_ptr(image_base, nt, (uint32_t)text_start,
+                                       (size_t)text_size);
+    if (text_base == NULL)
+        return 0;
     bool is32 = pe_is_pe32(nt);
     int count = 0;
 
@@ -80,6 +85,13 @@ static int _scan_rip_jumps(void *image_base,
             /* PE32+: RIP-relative. target = instr_addr + 6 + disp (RVA) */
             uint64_t instr_addr = text_start + off;
             target_rva = instr_addr + 6 + disp;
+        }
+
+        if (target_rva > UINT32_MAX ||
+            !pe_rva_range_is_valid((uint32_t)target_rva,
+                                   is32 ? sizeof(uint32_t) : sizeof(uint64_t),
+                                   pe_size_of_image(nt))) {
+            continue;
         }
 
         if (!cb(off, target_rva, user_data))
@@ -145,9 +157,9 @@ int scan_rip_relative_jumps(void *image_base,
 typedef struct {
     void *image_base;
     bool is32;
-    uint64_t image_max;
     uint64_t target_val;
     uint64_t text_start;
+    const IMAGE_NT_HEADERS *nt;
     void **result;
 } rip_scan_find_ctx;
 
@@ -157,19 +169,25 @@ static bool rip_scan_find_cb(uint64_t offset, uint64_t target_rva, void *user_da
 
     /* Bounds check: PE32 uses 4-byte IAT entries, PE32+ uses 8-byte */
     if (ctx->is32) {
-        if (target_rva + 4 > ctx->image_max)
+        uint32_t *target_ptr = pe_rva_to_ptr(ctx->image_base, ctx->nt,
+                                             (uint32_t)target_rva,
+                                             sizeof(uint32_t));
+        if (target_ptr == NULL)
             return true;
-        uint32_t *target_ptr = (uint32_t *)((char *)ctx->image_base + target_rva);
         if ((uint64_t)(uint32_t)*target_ptr == (uint64_t)(uint32_t)ctx->target_val) {
-            *ctx->result = (void *)((char *)ctx->image_base + ctx->text_start + offset);
+            *ctx->result = pe_rva_to_ptr(ctx->image_base, ctx->nt,
+                                         (uint32_t)(ctx->text_start + offset), 1);
             return false;  /* stop scanning */
         }
     } else {
-        if (target_rva + 8 > ctx->image_max)
+        uint64_t *target_ptr = pe_rva_to_ptr(ctx->image_base, ctx->nt,
+                                             (uint32_t)target_rva,
+                                             sizeof(uint64_t));
+        if (target_ptr == NULL)
             return true;
-        uint64_t *target_ptr = (uint64_t *)((char *)ctx->image_base + target_rva);
         if (*target_ptr == ctx->target_val) {
-            *ctx->result = (void *)((char *)ctx->image_base + ctx->text_start + offset);
+            *ctx->result = pe_rva_to_ptr(ctx->image_base, ctx->nt,
+                                         (uint32_t)(ctx->text_start + offset), 1);
             return false;  /* stop scanning */
         }
     }
@@ -187,20 +205,12 @@ void *find_rip_relative_jump_to(void *image_base,
     if (text == NULL)
         return NULL;
 
-    /* Compute image bounds from all sections for safe pointer dereference */
-    uint64_t image_max = 0;
-    for (int i = 0; i < num_sections; i++) {
-        uint64_t s_end = sections[i].VirtualAddress + sections[i].Misc.VirtualSize;
-        if (s_end > image_max)
-            image_max = s_end;
-    }
-
     rip_scan_find_ctx ctx = {
         .image_base = image_base,
         .is32 = pe_is_pe32(nt),
-        .image_max = image_max,
         .target_val = (uint64_t)(uintptr_t)target_addr,
         .text_start = text->VirtualAddress,
+        .nt = nt,
         .result = NULL
     };
 

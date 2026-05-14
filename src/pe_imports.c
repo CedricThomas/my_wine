@@ -12,6 +12,18 @@
 #include "include/pe_parser.h"
 #include "include/pe_priv.h"
 
+static int has_bounded_cstr(const void *base, size_t file_size, size_t offset)
+{
+    const char *s = safe_ptr_at(base, offset, 1, file_size);
+    if (!s)
+        return 0;
+    for (size_t i = offset; i < file_size; i++) {
+        if (((const char *)base)[i] == '\0')
+            return 1;
+    }
+    return 0;
+}
+
 int parse_imports(const void *base, size_t file_size,
                   const IMAGE_NT_HEADERS *nt_headers,
                   IMAGE_IMPORT_DESCRIPTOR **out_first_descriptor)
@@ -40,7 +52,10 @@ int parse_imports(const void *base, size_t file_size,
         return -1;
 
     /* Convert import directory RVA to file offset */
-    int imp_offset = rva_to_offset(nt_headers, sections, imp_dir.VirtualAddress, file_size);
+    int imp_offset = rva_range_to_offset(nt_headers, sections,
+                                         imp_dir.VirtualAddress,
+                                         imp_dir.Size,
+                                         file_size);
     if (imp_offset < 0)
         return -1;
 
@@ -60,9 +75,11 @@ int parse_imports(const void *base, size_t file_size,
 
     int count = 0;
     size_t current = (size_t)imp_offset;
+    size_t import_end = (size_t)imp_offset + imp_dir.Size;
 
     while (1) {
-        if (current + sizeof(IMAGE_IMPORT_DESCRIPTOR) > file_size)
+        if (current > import_end ||
+            sizeof(IMAGE_IMPORT_DESCRIPTOR) > import_end - current)
             return -1;
 
         const IMAGE_IMPORT_DESCRIPTOR *desc = safe_ptr_at(base, current,
@@ -77,6 +94,8 @@ int parse_imports(const void *base, size_t file_size,
         /* Validate Name RVA is accessible */
         int name_off = rva_to_offset(nt_headers, sections, desc->Name, file_size);
         if (name_off < 0)
+            return -1;
+        if (!has_bounded_cstr(base, file_size, (size_t)name_off))
             return -1;
 
         /* Validate OriginalFirstThunk RVA (points to ILT) */
@@ -100,10 +119,6 @@ int parse_imports(const void *base, size_t file_size,
 
         count++;
         current += sizeof(IMAGE_IMPORT_DESCRIPTOR);
-
-        /* Check we haven't gone past the import directory size */
-        if (current > (size_t)imp_offset + imp_dir.Size)
-            return -1;
     }
 
     if (count == 0)

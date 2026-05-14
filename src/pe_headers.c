@@ -82,8 +82,10 @@ int parse_nt_headers(const void *base, size_t file_size,
 
     if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
         /* PE32 */
-        uint32_t nt32_end = pe_offset + sizeof(IMAGE_NT_HEADERS32);
-        if (nt32_end > file_size)
+        if (file_hdr->SizeOfOptionalHeader < sizeof(IMAGE_OPTIONAL_HEADER32))
+            return -1;
+        if (pe_offset > UINT32_MAX - sizeof(IMAGE_NT_HEADERS32) ||
+            (size_t)pe_offset + sizeof(IMAGE_NT_HEADERS32) > file_size)
             return -1;
 
         const IMAGE_NT_HEADERS32 *nt = safe_ptr_at(base, pe_offset, sizeof(IMAGE_NT_HEADERS32), file_size);
@@ -94,8 +96,10 @@ int parse_nt_headers(const void *base, size_t file_size,
         memcpy(&out_nt_headers->u.nt32, nt, sizeof(IMAGE_NT_HEADERS32));
     } else if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
         /* PE32+ */
-        uint32_t nt64_end = pe_offset + sizeof(IMAGE_NT_HEADERS64);
-        if (nt64_end > file_size)
+        if (file_hdr->SizeOfOptionalHeader < sizeof(IMAGE_OPTIONAL_HEADER64))
+            return -1;
+        if (pe_offset > UINT32_MAX - sizeof(IMAGE_NT_HEADERS64) ||
+            (size_t)pe_offset + sizeof(IMAGE_NT_HEADERS64) > file_size)
             return -1;
 
         const IMAGE_NT_HEADERS64 *nt = safe_ptr_at(base, pe_offset, sizeof(IMAGE_NT_HEADERS64), file_size);
@@ -119,6 +123,8 @@ int parse_sections(const void *base, size_t file_size,
 {
     uint16_t num = pe_section_count(nt_headers);
     size_t section_table_size = num * sizeof(IMAGE_SECTION_HEADER);
+    if (num != 0 && section_table_size / sizeof(IMAGE_SECTION_HEADER) != num)
+        return -1;
 
     /* Re-parse DOS header to get the PE offset for section table location */
     const IMAGE_DOS_HEADER *dos = safe_ptr_at(base, 0, sizeof(IMAGE_DOS_HEADER), file_size);
