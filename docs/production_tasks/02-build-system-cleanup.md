@@ -20,6 +20,22 @@ artifacts.
 - Keep existing command behavior stable unless changing it is deliberate and
   documented.
 
+## Audit Inputs
+
+Use `audit/source-inventory.md` to preserve the current build groups:
+
+- Three binaries: `my_wine`, `my_wine64`, and `my_wine32`.
+- PE32-only files such as `src/loader/pe32_entry.c`,
+  `src/loader/pe32_run_guest.S`, `src/syscall/clone.S`,
+  `src/syscall/mmap2_asm.S`, and `src/heap/musl_malloc_32_compat.c`.
+- PE32+-only files such as `src/main.c`, `src/run_guest.S`,
+  `src/syscall/clone64.S`, and the musl oldmalloc files.
+- Shared guest-sensitive groups in `src/loader/`, `src/syscall/`,
+  `src/msvcrt/`, `src/heap/`, and `src/crt/`.
+- Ignored local artifacts: `build/`, `build32/`, sample `.exe/.dll` files,
+  `src/syscall/dispatcher_generated.c`, `include/crt_offsets_generated.h`, and
+  the stray `src/loader/import_resolve.d`.
+
 ## Suggested Steps
 
 1. Group variables: toolchain, directories, source lists, object lists.
@@ -29,6 +45,8 @@ artifacts.
 5. Group test target rules.
 6. Group sample targets.
 7. Group clean/rebuild helper targets.
+8. Keep audit architecture classifications intact or update the audit if a
+   build grouping changes.
 
 ## Done Criteria
 
@@ -37,4 +55,3 @@ artifacts.
   still behave as documented.
 - The Makefile can be read top-to-bottom without jumping between unrelated
   sections.
-

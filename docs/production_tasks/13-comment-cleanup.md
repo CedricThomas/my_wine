@@ -17,15 +17,29 @@ non-obvious choices.
 - Keep comments about ABI, FS/GS, syscall-safety, memory layout, PE format
   quirks, and Windows/Linux semantic differences.
 
+## Audit Inputs
+
+Preserve comments that explain constraints captured by the audit, especially:
+
+- FS/GS switch restrictions.
+- No-glibc/guest-safe code paths.
+- PE32 vs PE32+ ABI and pointer-size differences.
+- Generated-file workflow and generated-adjacent vendored code.
+- Known risky files that need tests before refactoring.
+
+Remove or rewrite comments that match the audit's stale-code and stale-doc
+candidates.
+
 ## Suggested Steps
 
 1. Clean comments in one module at a time.
 2. Avoid mixing comment cleanup with functional refactors.
 3. Replace long comments with links to current docs where useful.
+4. Update the audit if a comment cleanup uncovers a new stale architecture
+   claim.
 
 ## Done Criteria
 
 - Comments are shorter and more accurate.
 - Important runtime constraints remain documented near the code.
 - No stale architecture claims remain in source comments.
-

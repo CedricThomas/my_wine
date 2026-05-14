@@ -20,6 +20,22 @@ stable.
 - Doom95 implementation path and old subplans.
 - `improvement_for_later.md`.
 
+## Audit Inputs
+
+Use the audit's stale-doc candidates and current source inventory as the
+starting point:
+
+- Treat `samples/doom95/docs` as planning/reference material unless rewritten
+  against current PE32 support.
+- Review `samples/doom95/docs/reference/risks.md` and
+  `samples/doom95/docs/reference/loader_notes.md` for stale "no PE32 support"
+  claims.
+- Review `docs/debug.md` against the current three-binary direct-dispatch
+  runtime.
+- Keep `README.md`, `docs/onboarding.md`, `docs/architecture.md`,
+  `docs/rationale.md`, and `docs/PE32.md` aligned with the final source
+  boundaries after cleanup.
+
 ## Suggested Steps
 
 1. Mark stale docs as stale or move them to an archive while cleanup is ongoing.
@@ -27,6 +43,7 @@ stable.
 3. Keep current architecture docs short and operational.
 4. Keep deep dives only where they are actively maintained.
 5. Delete obsolete implementation plans when they no longer represent work.
+6. Update `audit/source-inventory.md` if docs refresh changes stale-doc status.
 
 ## Done Criteria
 
@@ -34,4 +51,3 @@ stable.
 - Stale Doom95 or historical implementation paths are removed or clearly
   archived.
 - `improvement_for_later.md` contains only current, actionable items.
-

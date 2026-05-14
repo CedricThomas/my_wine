@@ -16,6 +16,21 @@ see what APIs are stable, internal, architecture-specific, or test-only.
 - Split large headers by responsibility.
 - Remove unused declarations.
 
+## Audit Inputs
+
+Start from the audit's header inventory:
+
+- Architecture-critical headers: `include/wine_abi.h`, `include/pe.h`,
+  `include/nt_constants.h`, `include/nt_syscalls.def`.
+- Guest ABI headers: `include/kernel32.h`, `include/msvcrt.h`,
+  `include/ntdll.h`, `include/syscall/*.h`.
+- PE32-only or stale candidates: `include/loader/pe32_trampoline.h`,
+  `include/syscall/signal_handler.h`.
+- Future-work/stale boundary candidate: `include/render_backend.h`.
+
+Do not move declarations across glibc-safe and no-glibc boundaries without
+making that boundary explicit in the header name or location.
+
 ## Suggested Steps
 
 1. Inventory which `.c` files include each header.
@@ -23,10 +38,10 @@ see what APIs are stable, internal, architecture-specific, or test-only.
 3. Move private headers to module directories.
 4. Reduce transitive includes.
 5. Run the full build after each move.
+6. Reconcile the resulting header classification with the audit.
 
 ## Done Criteria
 
 - Public headers expose only intentional project-wide contracts.
 - Private headers are named and located as private implementation details.
 - No source file includes broad headers just to get one unrelated declaration.
-

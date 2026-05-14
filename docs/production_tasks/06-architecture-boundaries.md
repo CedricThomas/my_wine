@@ -18,16 +18,30 @@ files.
 - Mark libc-allowed vs syscall-only areas.
 - Separate PE32-only and PE32+-only responsibilities.
 
+## Audit Inputs
+
+Use these audit sections as the first draft of the boundary document:
+
+- "Source Folders And Responsibilities"
+- "Runtime Source Inventory"
+- "Architecture Classification"
+- "Files That Must Not Call Glibc After FS/GS Switch"
+
+The boundary work should preserve the PE32-only, PE32+-only, wrapper-only,
+shared, test-only, and sample-only classifications unless a deliberate code
+move changes them.
+
 ## Suggested Steps
 
 1. Write a short architecture boundary document from current source behavior.
 2. Create a dependency rule table.
 3. Move only low-risk files first, if movement is needed.
 4. Add include path restrictions or reviewer rules later.
+5. Update `audit/source-inventory.md` after any file move or layer ownership
+   change.
 
 ## Done Criteria
 
 - Each major source file has an obvious owning layer.
 - PE32-only and PE32+-only code paths are easy to locate.
 - Shared code is intentionally shared, not shared by accident.
-

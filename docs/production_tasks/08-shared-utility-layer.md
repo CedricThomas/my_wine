@@ -18,16 +18,36 @@ duplication makes correctness harder to maintain.
 - Checked arithmetic and range helpers.
 - Guest pointer validation helpers.
 
+## Audit Inputs
+
+Use the audit's duplicate-helper list to decide what belongs in the utility
+layer. Known duplicate families include:
+
+- Hand-rolled string/memory helpers in `src/loader/import_resolve.c`,
+  `src/loader/module_list.c`, `src/loader/dll_loader.c`,
+  `src/loader/export_table.c`, `src/loader/import_table.c`,
+  `src/msvcrt/kernel32_misc.c`, and `src/loader/pe32_entry.c`.
+- Direct stderr/syscall logging helpers in `src/msvcrt/kernel32_priv.h`,
+  `src/msvcrt/kernel32_console.c`, `src/msvcrt/crt_stdio.c`,
+  `src/msvcrt/crt_stdlib.c`, and crash/setup paths.
+- Architecture-dependent pointer writes in `src/loader/teb_peb.c`,
+  `src/loader/import_table.c`, `src/msvcrt/crt_refptrs.c`, and
+  `src/loader/pe32_entry.c`.
+
+Split host/setup utilities from guest-safe utilities. Do not make a helper
+shared unless it is safe for every caller listed in the audit.
+
 ## Suggested Steps
 
 1. Identify duplicate helper implementations.
 2. Split helpers into libc-allowed and syscall-safe groups.
 3. Replace callers gradually.
 4. Add tests for utility functions with edge cases.
+5. Update the audit when duplicate helper candidates are consolidated or found
+   to be intentionally separate.
 
 ## Done Criteria
 
 - Duplicate helper implementations are reduced.
 - Utility names clearly state whether they are syscall-safe.
 - Callers in post-FS/GS-switch paths do not accidentally call glibc.
-
