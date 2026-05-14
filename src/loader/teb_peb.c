@@ -398,7 +398,7 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
 
     /* Allocate stack (grows downward on x86_64) */
     void *stack_base = wine_mmap(NULL, (size_t)commit, PROT_READ|PROT_WRITE,
-                             MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK, -1, 0);
+                             MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK|MAP_32BIT, -1, 0);
     if (stack_base == MAP_FAILED) {
         wine_log_error("mmap stack");
         return NULL;

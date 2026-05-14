@@ -32,7 +32,7 @@ int setup_unix_stack(void)
 {
     void *base = wine_mmap(NULL, UNIX_STACK_SIZE,
                       PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
 
     if (base == MAP_FAILED) {
         DEBUG("wine: failed to allocate UNIX stack");

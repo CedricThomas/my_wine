@@ -267,7 +267,7 @@ void setup_signal_handlers(void)
      */
 #ifdef MY_WINE32
     void *sigstack_mem = INLINE_SYSCALL_MMAP(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
-                              MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+                              MAP_PRIVATE|MAP_ANONYMOUS|MAP_32BIT, -1, 0);
 #else
     void *sigstack_mem = mmap(NULL, SIG_STACK_SIZE, PROT_READ|PROT_WRITE,
                               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
