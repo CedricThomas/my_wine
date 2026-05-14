@@ -25,6 +25,39 @@
 #include "dll_path.h"
 #include "dll_loader.h"
 
+/* ── Debug helpers: syscall-safe formatted output to stderr ──── */
+static inline void dbg_fmt_hex(char *dst, uintptr_t val)
+{
+    for (int i = 7; i >= 0; i--) {
+        dst[i] = "0123456789abcdef"[val & 0xf];
+        val >>= 4;
+    }
+}
+
+static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+{
+    char buf[64];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p; ) buf[i++] = *p++;
+    buf[i++] = '0'; buf[i++] = 'x';
+    dbg_fmt_hex(buf + i, val);
+    i += 8;
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
+
+static inline void dbg_write_str(const char *prefix, const char *str)
+{
+    char buf[256];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p && i < 240; ) buf[i++] = *p++;
+    for (p = str; *p && i < 250; ) buf[i++] = *p++;
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
+
 /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
  * Uses atomic operations for allocation — still not fully thread-safe (mmap
  * and module registration are separate steps), but prevents overlapping bases.
@@ -72,6 +105,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     g_loader.is_32bit = saved_is_32bit;
     dll_copy_str(g_loader.pe_path, saved_pe_path, sizeof(g_loader.pe_path));
 
+    dbg_write_ptr("load_dll: map=", base ? (uintptr_t)base : 0);
     if (base == NULL) {
         return NULL;
     }
@@ -132,6 +166,7 @@ loaded_module_t *load_dll(const char *path, int depth)
 
     /* Register in module list */
     loaded_module_t *mod = add_module(base, name, img_nt);
+    dbg_write_ptr("load_dll: add_module=", mod ? (uintptr_t)mod : 0);
     if (mod == NULL) {
         uintptr_t sz = pe_size_of_image(img_nt);
         INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
@@ -142,11 +177,14 @@ loaded_module_t *load_dll(const char *path, int depth)
     /* Add to PEB LDR */
     if (g_loader.peb_ldr != NULL) {
         ldr_add_module(mod);
+        dbg_write_str("load_dll: ldr_add=", "ok");
     }
 
     /* Resolve this DLL's own imports (recursive).
      * resolve_module_imports also calls parse_export_table internally. */
-    if (resolve_module_imports(mod, depth + 1) != 0) {
+    int resolve_rc = resolve_module_imports(mod, depth + 1);
+    dbg_write_str("load_dll: resolve_imports=", resolve_rc == 0 ? "ok" : "fail");
+    if (resolve_rc != 0) {
         /* Cleanup all resources allocated above */
         if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
             ldr_remove_module(mod);
@@ -165,6 +203,7 @@ loaded_module_t *load_dll(const char *path, int depth)
         pe_get_data_dir(img_nt, DIRECTORY_ENTRY_EXPORT, &exp_dir) &&  /* check export dir */
         exp_dir.VirtualAddress != 0) {
         parse_export_table(mod);
+        dbg_write_str("load_dll: parse_export=", "ok");
     }
 
     return mod;

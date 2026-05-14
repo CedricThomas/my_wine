@@ -23,6 +23,39 @@
 #include "dll_path.h"
 #include "dll_loader.h"
 
+/* ── Debug helpers (syscall-safe, no glibc) ── */
+static inline void dbg_fmt_hex(char *dst, uintptr_t val)
+{
+    for (int i = 7; i >= 0; i--) {
+        dst[i] = "0123456789abcdef"[val & 0xf];
+        val >>= 4;
+    }
+}
+
+static inline void dbg_write_ptr(const char *prefix, uintptr_t val)
+{
+    char buf[64];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p; ) buf[i++] = *p++;
+    buf[i++] = '0'; buf[i++] = 'x';
+    dbg_fmt_hex(buf + i, val);
+    i += 8;
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
+
+static inline void dbg_write_str(const char *prefix, const char *str)
+{
+    char buf[256];
+    int i = 0;
+    const char *p;
+    for (p = prefix; *p && i < 240; ) buf[i++] = *p++;
+    for (p = str; *p && i < 250; ) buf[i++] = *p++;
+    buf[i++] = '\n';
+    INLINE_SYSCALL_WRITE(2, buf, i);
+}
+
 #define MAX_IMPORT_DEPTH 8
 
 /**
@@ -66,6 +99,22 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     }
 #endif
     if (entry != NULL && entry->address != NULL) {
+        { char buf[256]; int i = 0;
+          const char *p;
+          for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
+          for (p = dll_name; *p && i < 250; ) buf[i++] = *p++;
+          if (i < 250) buf[i++] = '!';
+          for (p = func_name; *p && i < 250; ) buf[i++] = *p++;
+          if (i < 250) buf[i++] = ' ';
+          if (i < 250) buf[i++] = '-';
+          if (i < 250) buf[i++] = '>';
+          if (i < 250) buf[i++] = ' ';
+          if (i < 250) buf[i++] = '0';
+          if (i < 250) buf[i++] = 'x';
+          dbg_fmt_hex(buf + i, (uintptr_t)entry->address); i += 8;
+          if (i < 255) buf[i++] = '\n';
+          INLINE_SYSCALL_WRITE(2, buf, i);
+        }
         return entry->address;
     }
 
@@ -74,11 +123,42 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     if (mod != NULL && mod->export_cache.number_of_names > 0) {
         void *addr = lookup_export(mod, func_name);
         if (addr != NULL) {
+            { char buf[256]; int i = 0;
+              const char *p;
+              for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
+              for (p = dll_name; *p && i < 250; ) buf[i++] = *p++;
+              if (i < 250) buf[i++] = '!';
+              for (p = func_name; *p && i < 250; ) buf[i++] = *p++;
+              if (i < 250) buf[i++] = ' ';
+              if (i < 250) buf[i++] = '-';
+              if (i < 250) buf[i++] = '>';
+              if (i < 250) buf[i++] = ' ';
+              if (i < 250) buf[i++] = '0';
+              if (i < 250) buf[i++] = 'x';
+              dbg_fmt_hex(buf + i, (uintptr_t)addr); i += 8;
+              if (i < 255) buf[i++] = '\n';
+              INLINE_SYSCALL_WRITE(2, buf, i);
+            }
             return addr;
         }
     }
 
     /* Tier 3: not found */
+    { char buf[256]; int i = 0;
+      const char *p;
+      for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
+      for (p = dll_name; *p && i < 250; ) buf[i++] = *p++;
+      if (i < 250) buf[i++] = '!';
+      for (p = func_name; *p && i < 250; ) buf[i++] = *p++;
+      if (i < 250) buf[i++] = ' ';
+      if (i < 250) buf[i++] = '-';
+      if (i < 250) buf[i++] = '>';
+      if (i < 250) buf[i++] = ' ';
+      const char *notf = "(null)";
+      for (p = notf; *p && i < 255; ) buf[i++] = *p++;
+      if (i < 255) buf[i++] = '\n';
+      INLINE_SYSCALL_WRITE(2, buf, i);
+    }
     return NULL;
 }
 
@@ -104,6 +184,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
 
     while (desc->Name != 0) {
         const char *dll_name = (const char *)((char *)base + desc->Name);
+        dbg_write_str("resolve_imports: DLL=", dll_name);
 
         uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
         uint8_t *iat_base  = (uint8_t *)((char *)base + desc->FirstThunk);
@@ -227,6 +308,7 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS *nt)
  */
 int resolve_imports(void *base, IMAGE_NT_HEADERS *nt)
 {
+    dbg_write_ptr("resolve_imports: base=", (uintptr_t)base);
     if (resolve_import_pass1(base, nt) != 0)
         return -1;
     return resolve_import_pass2(base, nt);

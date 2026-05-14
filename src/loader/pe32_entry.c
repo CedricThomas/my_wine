@@ -709,6 +709,64 @@ int main(int argc, char **argv)
         INLINE_SYSCALL_EXIT_GROUP(1);
     }
 
+    /* Debug: verify IAT entry for LoadLibraryA is non-zero */
+    {
+        const char msg_iat[] = "pe32_entry: imports resolved, testing IAT entry\n";
+        INLINE_SYSCALL_WRITE(2, msg_iat, sizeof(msg_iat) - 1);
+
+        void *base = g_loader.image_base;
+        IMAGE_DATA_DIRECTORY imp_dir;
+        void *ll_addr = (void *)(uintptr_t)0;
+        if (pe_get_import_dir(&g_nt_headers, &imp_dir) && imp_dir.VirtualAddress != 0) {
+            uint64_t import_rva = imp_dir.VirtualAddress;
+            IMAGE_IMPORT_DESCRIPTOR *desc =
+                (IMAGE_IMPORT_DESCRIPTOR *)((char *)base + import_rva);
+            while (desc->Name != 0) {
+                const char *dll_name = (const char *)((char *)base + desc->Name);
+                if (dll_name[0] == 'k' && dll_name[1] == 'e' &&
+                    dll_name[2] == 'r' && dll_name[3] == 'n' &&
+                    dll_name[4] == 'e' && dll_name[5] == 'l' &&
+                    dll_name[6] == '3' && dll_name[7] == '2' &&
+                    dll_name[8] == '.' && dll_name[9] == 'd' &&
+                    dll_name[10] == 'l' && dll_name[11] == 'l' &&
+                    dll_name[12] == '\0') {
+                    uint8_t *orig_base = (uint8_t *)((char *)base + desc->u1.OriginalFirstThunk);
+                    uint8_t *iat_base = (uint8_t *)((char *)base + desc->FirstThunk);
+                    for (int j = 0; ; j++) {
+                        uint32_t thunk_val = (uint32_t)*((uint32_t *)(orig_base + j * 4));
+                        if (thunk_val == 0) break;
+                        if (thunk_val & 0x80000000) continue;
+                        IMAGE_IMPORT_BY_NAME *imp_name =
+                            (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk_val);
+                        const char *fname = (const char *)imp_name->Name;
+                        if (fname[0] == 'L' && fname[1] == 'o' && fname[2] == 'a' &&
+                            fname[3] == 'd' && fname[4] == 'L' && fname[5] == 'i' &&
+                            fname[6] == 'b' && fname[7] == 'r' && fname[8] == 'a' &&
+                            fname[9] == 'r' && fname[10] == 'y' &&
+                            fname[11] == 'A' && fname[12] == '\0') {
+                            ll_addr = (void *)(uintptr_t)*(uint32_t *)(iat_base + j * 4);
+                            break;
+                        }
+                    }
+                    if (ll_addr) break;
+                }
+                desc++;
+            }
+        }
+        {
+            char buf[48];
+            int i = 0;
+            const char *p = "IAT: LoadLibraryA=0x";
+            while (*p) buf[i++] = *p++;
+            for (int h = 7; h >= 0; h--) {
+                uintptr_t v = (uintptr_t)ll_addr;
+                buf[i++] = "0123456789abcdef"[(v >> (h * 4)) & 0xf];
+            }
+            buf[i++] = '\n';
+            INLINE_SYSCALL_WRITE(2, buf, i);
+        }
+    }
+
     /* 3. Determine entry point */
     entry_rva = resolve_entry(pe_path);
     entry_abs = (uint32_t)(uintptr_t)g_loader.image_base + entry_rva;
