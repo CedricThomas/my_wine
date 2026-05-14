@@ -328,11 +328,22 @@ run_sample() {
         # Read regex patterns into an array
         local -a regex_lines=()
         while IFS= read -r line || [ -n "$line" ]; do
-            regex_lines+=("$line")
+            regex_lines+=("${line%$'\r'}")
         done < "$src_dir/expected_output_regex.txt"
 
-        local actual_count
-        actual_count=$(wc -l < "$output_file")
+        # Count actual lines the same way (handles CRLF and missing final newline)
+        local actual_count=0
+        local idx=0
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            local pattern="^${regex_lines[$idx]}$"
+            if ! printf '%s\n' "$line" | grep -qE "$pattern"; then
+                echo "  FAIL  $name (output regex mismatch)"
+                return 1
+            fi
+            actual_count=$((actual_count + 1))
+            idx=$((idx + 1))
+        done < "$output_file"
         local expected_count=${#regex_lines[@]}
 
         # Line count must match
@@ -340,17 +351,6 @@ run_sample() {
             echo "  FAIL  $name (output regex mismatch)"
             return 1
         fi
-
-        # Compare each actual line against corresponding regex (auto-anchored)
-        local idx=0
-        while IFS= read -r line || [ -n "$line" ]; do
-            local pattern="^${regex_lines[$idx]}$"
-            if ! printf '%s\n' "$line" | grep -qE "$pattern"; then
-                echo "  FAIL  $name (output regex mismatch)"
-                return 1
-            fi
-            idx=$((idx + 1))
-        done < "$output_file"
     fi
 
     # --- PASS ---
