@@ -6,15 +6,30 @@ Welcome to my_wine. This guide walks you through the documentation and helps you
 
 ## What Is my_wine?
 
-my_wine is a minimal user-space PE (Portable Executable) loader for Linux x86_64. It runs mingw-w64-compiled Windows executables without Wine — no virtual machine, no translation layer, just a thin loader that maps the PE image into memory and intercepts the few syscalls the guest needs.
+my_wine is a minimal user-space PE (Portable Executable) loader for Linux. It
+runs selected PE32+ and PE32 Windows executables without Wine: no virtual
+machine, no full Windows subsystem, just a thin loader that maps PE images into
+memory and implements the small Windows API surface the samples need.
 
-The loader maps the PE at its preferred base address, patches CRT globals (`.refptr` section), resolves imports by wiring them to stub functions, and sets up the TEB/PEB structures expected by Windows x64 code. It then generates syscall thunks that call `__wine_dispatcher` directly, switching from the guest stack to a pre-allocated UNIX stack for each intercepted syscall.
+The `my_wine` wrapper reads PE headers and `execvp`s either `my_wine64` for
+PE32+ or `my_wine32` for PE32. Each backend maps the PE at its preferred base
+when possible, applies relocations when needed, resolves imports by wiring them
+to local stubs or loaded PE DLL exports, and sets up the TEB/PEB structures
+expected by guest code.
 
-The result: Windows executables compiled with mingw-w64 can run natively on Linux with minimal overhead.
+The result: current MinGW samples and selected PE32 tests can run natively on
+Linux with minimal overhead. This is not a replacement for Wine.
 
-The project uses a **single-process model**: everything runs in one process. The loader performs all heavy lifting (mapping, import resolution, TEB/PEB setup, thunk generation, signal handlers) in the same process that subsequently runs the guest code. There is no `fork()` — the guest executes in-place after setup completes. This simplifies debugging, eliminates the parent/child lifecycle, and mirrors Wine's architecture more closely.
+The project uses a **single-process backend model**. The wrapper is replaced by
+the chosen backend; the backend performs mapping, import resolution, TEB/PEB
+setup, thunk generation, signal handlers, and guest execution in one process.
+There is no loader parent process waiting on a child.
 
-Syscall interception works through **direct dispatch**: each NT syscall has a dynamically generated 23-byte thunk (absolute indirect call via `push rdi; mov rdi,imm32; mov rax,imm64; call rax; pop rdi; ret`) that calls `__wine_dispatcher`. The assembly dispatcher saves guest register state to a global struct (`__wine_guest_regs` in `dispatcher_entry.c`), switches to a pre-allocated UNIX stack, calls the C dispatcher (`c_dispatch_syscall`), writes results back, restores guest state, and returns. No seccomp filters or signal handlers are not used for dispatch.
+Syscall interception works through **direct dispatch**. PE32+ uses generated
+23-byte thunks and PE32 uses generated 15-byte thunks. Both call
+`__wine_dispatcher`, which saves guest register state, switches to a
+pre-allocated UNIX stack, calls `c_dispatch_syscall`, writes results back,
+restores guest state, and returns. Dispatch does not use seccomp or SIGSYS.
 
 ## Quick Start
 
@@ -57,8 +72,10 @@ High-level directory layout (not the full tree from README):
 | `src/main.c` | Entry point: 10-step pipeline orchestrator | Read first |
 | `src/loader/` | Image mapping, import resolution, TEB/PEB, guest setup, entry | `main.c` → `loader/` |
 | `src/msvcrt/` | Windows API stub implementations (ntdll, kernel32, msvcrt) | `ntdll_*.c`, `kernel32_*.c`, `crt_*.c` |
+| `src/crt/` | CRT flavor detection and CRT-specific setup policy | `crt.c`, `crt_mingw.c`, `crt_watcom.c` |
+| `src/heap/` | Guest heap backends and Windows heap API storage | `wine_heap.c`, backend files |
 | `src/syscall/` | Thunk generation, dispatcher entry, UNIX stack management, NT syscall dispatcher | `thunk_gen.c`, `dispatcher_entry_asm.S`, `dispatcher_entry.c`, `dispatcher.c` |
-| `src/pe_*.c` | PE format parsing (headers, imports, symbols, RIP scan | `pe_headers.c` |
+| `src/pe_*.c` | PE format parsing: headers, imports, symbols, thunk scans | `pe_headers.c` |
 | `src/run_guest.S` | Naked assembly trampoline — switches to guest stack and jumps to PE entry | — |
 | `include/` | Public headers (PE structs, ABI macros, syscall constants) | `pe.h`, `pe_parser.h`, `nt_constants.h`, `wine_abi.h`, `syscall/*.h` |
 | `samples/` | Mingw-w64 test programs | `hello_world/` |
@@ -99,7 +116,7 @@ The pipeline in `src/main.c` (`main()`) runs its loading pipeline:
 
 3. **`patch_crt_refptrs()`** in `src/msvcrt/crt_refptrs.c` — Fixes CRT `.refptr` pointers so the PE can find our Linux-side stub variables (CTOR/DTOR lists, image base, etc.).
 
-4. **`resolve_imports()`** in `src/loader/import_resolve.c` — Walks the import descriptor chain and patches IAT entries to point at our stub functions from `import_table`.
+4. **`resolve_imports()`** in `src/loader/import_resolve.c` — Walks the import descriptor chain and patches IAT entries to point at local stubs or loaded module exports.
 
 5. **`setup_teb_peb()`** in `src/loader/teb_peb.c` — Allocates and populates the TEB and PEB via `mmap`; sets TEB self-referential pointers and PEB image base. Does NOT set GS base yet (deferred until guest_setup.c to avoid corrupting glibc TLS).
 
@@ -145,7 +162,7 @@ Practical advice for new contributors:
 - **Run with** `./my_wine samples/hello_world/hello_world.exe` to see it working.
 - **Add a new stub:** Create a function with the `WINE_STUB` attribute (defined in `include/wine_abi.h` — this gives `ms_abi` calling convention + `force_align_arg_pointer`), add an entry to `src/loader/import_table.c`, and if it's a syscall handler, add a case to `c_dispatch_syscall()` in `src/syscall/dispatcher.c`.
 - **Note:** All stubs use `ms_abi` (Microsoft x64 calling convention: RCX, RDX, R8, R9 for the first four args), not the Linux System V ABI. The `WINE_STUB` macro handles this — never forget it on stub functions.
-- **Run tests** with `make run-test` after any changes.
+- **Run tests** with `make run-tests` after any changes.
 - **Debug tip:** Start with `hello_world` as your test case — it's the simplest PE and exercises the core flow.
 - **Understanding a new import:** Search the PE's import table for the function name, then check `src/loader/import_table.c` to see if it's already registered. If not, add a `WINE_STUB` function and a dispatcher case.
 - **Adding a new sample:** Create a C file in `samples/`, add it to `scripts/samples.sh`, and run `make samples SAMPLE=your_sample` to cross-compile it.
@@ -171,7 +188,7 @@ Practical advice for new contributors:
 2. Run it: `./my_wine samples/hello_world/hello_world.exe`
 3. If it crashes, run under `gdb` or `strace` to get more info.
 4. After any changes, rebuild with `make` and re-run the sample.
-5. Run `make run-test` to ensure existing tests still pass.
+5. Run `make run-tests` to ensure existing tests still pass.
 
 ### Common Pitfalls
 
@@ -190,5 +207,4 @@ Practical advice for new contributors:
 - [Rationale](rationale.md) — Design decisions, requirements, limitations
 - [Architecture](architecture.md) — Deep-dive architecture
 - [CRT refptr Patching](refptr.md) — CRT .refptr patching deep-dive
-- [Limitations & Investigations](limitations_investigations.md) — Known limitations and investigation notes
 - [Wine vs my_wine](wine_vs_my_wine.md) — Comparison with the full Wine project

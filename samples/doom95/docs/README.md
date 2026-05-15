@@ -1,5 +1,12 @@
 # DOOM95 on my_wine — Documentation Index
 
+> Status: planning/reference material.
+>
+> These notes describe a possible Doom95 implementation path and imported API
+> surface. They are not maintained as current source architecture. For the
+> active runtime architecture, see `docs/architecture.md`, `docs/PE32.md`, and
+> `audit/architecture-boundaries.md`.
+
 ## Quick Lookup
 
 To implement function `X` from DLL `Y`:
@@ -45,11 +52,11 @@ Self-contained extracts from the original large documents. Each 50–150 lines.
 
 ---
 
-## Implementation Plan
+## Historical Implementation Plan
 
 | File | Content |
 |------|---------|
-| [subplan_00_tracking.md](subplan_00_tracking.md) | Subplan index and status |
+| [subplan_00_tracking.md](subplan_00_tracking.md) | Historical subplan index and status |
 | [subplans/subplan_01_foundation.md](subplans/subplan_01_foundation.md) | Phase 1: Foundation |
 | [subplans/subplan_02_sdl2_backend.md](subplans/subplan_02_sdl2_backend.md) | Phase 2: SDL2 Backend |
 | [subplans/subplan_03_windowing.md](subplans/subplan_03_windowing.md) | Phase 3: Windowing |

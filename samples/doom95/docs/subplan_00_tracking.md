@@ -1,5 +1,11 @@
 # DOOM95 Implementation Tracking
 
+> Status: historical planning reference.
+>
+> These subplans predate later PE32/runtime cleanup. Treat them as old planning
+> notes, not current work tracking. Re-audit current source boundaries before
+> using any file paths or estimates below.
+
 7 independent subplans. One per session. Check off as you go.
 
 | # | Subplan | Files | ~Lines | ~Days | Status |

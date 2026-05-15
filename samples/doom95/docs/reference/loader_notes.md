@@ -1,5 +1,12 @@
 # Loader Notes — What Needs to Change for New DLLs
 
+> Status: historical Doom95 planning reference.
+>
+> This file is useful for imported API inventory, but some paths and limitations
+> predate the current wrapper/backend PE32 runtime. Check `docs/architecture.md`,
+> `docs/PE32.md`, and `audit/architecture-boundaries.md` before implementing
+> from these notes.
+
 ## Adding a New DLL (e.g., user32, gdi32, ddraw, dsound, winmm, dplay)
 
 ### Required File Changes
@@ -18,7 +25,8 @@ Also needs `#include "include/user32.h"` (or whatever header).
 // DOOM95 DPLAY uses ordinal #1 — this is how it's resolved
 ```
 
-**3. New stub file** — e.g., `src/stubs/user32.c` or `src/msvcrt/user32.c`:
+**3. New stub file** — current stubs live under `src/msvcrt/`; historical
+plans may mention `src/stubs/`, which no longer exists:
 - Each function marked `__attribute__((ms_abi))`
 - Must handle Windows calling convention args
 - May call into `handler_Nt*()` or implement directly
@@ -37,7 +45,8 @@ Also needs `#include "include/user32.h"` (or whatever header).
 - Regenerate dispatcher: `python3 scripts/gen_dispatcher.py --generate`
 
 **8. `src/syscall/thunk_gen.c`** (if new syscalls needed):
-- Add to `nt_syscall_list[]` array
+- Syscall definitions are driven from `include/nt_syscalls.def` and generated
+  dispatcher code. Recheck current source before adding manual tables.
 
 **9. `src/loader/import_resolve.c`** (if DLL can be dynamically loaded):
 - Add to the "known stub library" check in `resolve_module_imports()`:
@@ -142,12 +151,15 @@ Current handle table (ntdll_priv.h):
 
 Object tables: `handle_table[256]`, `sections[64]`, `views[64]`, `events[64]`, `mutexes[64]`, `threads[32]`.
 
-**No type-safe handle management** — HANDLE is just `uint64_t`. fd field acts as type indicator.
+Current source has `include/handle_manager.h` and
+`src/msvcrt/handle_manager.c`. Doom95-specific HWND/HDC/DDraw object modeling
+is still not implemented by these historical notes.
 
 ### Missing Handle Types for DOOM95
 - **HWND** — not implemented
 - **HDC** — not implemented
-- **HINSTANCE/HMODULE** — `LoadLibraryA` returns NULL
+- **HINSTANCE/HMODULE** — recheck current `LoadLibraryA`/module behavior
+  against Doom95's needs
 - **HBITMAP/HFONT/HPALETTE** — not implemented (needed for GDI/DDraw)
 - **IDirectDraw/IDirectDrawSurface** — not implemented (needed for DDraw)
 
@@ -155,13 +167,16 @@ Object tables: `handle_table[256]`, `sections[64]`, `views[64]`, `events[64]`, `
 
 ## Open Questions / Gaps
 
-1. **No PE32 (32-bit) support** — all loader code assumes PE32+
+1. **PE32 breadth is incomplete** — `my_wine32` exists, but Doom95 is not a maintained passing sample
 2. **No window creation** — `CreateWindowEx`, `ShowWindow`, `SetWindowLong` etc. not stubbed
 3. **No DDraw/Direct3D stubs** — DDraw is the primary rendering API for DOOM95
 4. **No DirectSound stubs** — DSOUND needed for audio
 5. **No DPlay stubs** — DPlay ordinal #1 needs resolution
 6. **Handle types incomplete** — HWND, HDC, HBITMAP, IDirectDraw, IDirectDrawSurface all need handle→object mapping tables
-7. **No real `LoadLibraryA` / `GetProcAddress`** — both return NULL
-8. **No `GetModuleHandleA` implementation** — returns NULL
+7. **Dynamic module support must be rechecked** — `LoadLibraryA`,
+   `FreeLibraryA`, and `GetProcAddress` have current implementations, but
+   Doom95's DLL/API needs may exceed them
+8. **Module handle behavior must be rechecked** against current
+   `kernel32_module.c`
 9. **No registry access** — `Reg*` functions not stubbed
 10. **MSVCRT is mingw-w64 specific** — refptr patches are hardcoded for mingw-w64 CRT layout

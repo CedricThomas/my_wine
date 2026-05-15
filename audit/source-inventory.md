@@ -365,11 +365,23 @@ Suggested tests to pin before editing:
 
 ## Stale Docs Candidates
 
-- `samples/doom95/docs/reference/risks.md`: claims no PE32 support and recommends parser-only PE32 support, but current code has `my_wine32` and substantial PE32 runtime support.
-- `samples/doom95/docs/reference/loader_notes.md`: says no PE32 support in current limitations; stale relative to `src/loader/pe32_entry.c` and `docs/PE32.md`.
-- `samples/doom95/docs/*`: many files describe planned SDL2/render/backend work not present in current source; archive or clearly label as DOOM95 planning docs.
-- `docs/debug.md`: crash-status examples and kernel notes may be historical; verify against current direct-dispatch and three-binary runtime.
-- `README.md`, `docs/onboarding.md`, `docs/architecture.md`, `docs/rationale.md`, `docs/PE32.md`: broadly aligned with current three-binary/direct-dispatch model, but should be refreshed after code cleanup rather than first.
+- `samples/doom95/docs/reference/risks.md`: refreshed in task 14 to note that
+  the old "no PE32 support" risk is historical and that the current risk is
+  Doom95/Watcom breadth on top of `my_wine32`.
+- `samples/doom95/docs/reference/loader_notes.md`: refreshed in task 14 to
+  mark historical paths/limitations and point readers to current architecture
+  docs before implementing new DLL support.
+- `samples/doom95/docs/*`: top-level README and tracking docs now label the
+  tree as Doom95 planning/reference material. Individual subplans still contain
+  historical paths and estimates by design.
+- `docs/debug.md`: rewritten in task 14 around the current three-binary,
+  direct-dispatch runtime.
+- `README.md`, `docs/onboarding.md`, `docs/PE32.md`: refreshed in task 14 for
+  current build targets, source layout, PE32 status, and direct dispatch.
+- `docs/architecture.md`, `docs/rationale.md`: still broadly aligned with the
+  current direct-dispatch model; keep future edits tied to source behavior.
+- `improvement_for_later.md`: referenced by older planning docs but not present
+  in the repository at task 14 time.
 
 ## Cleanup Dependency Map
 

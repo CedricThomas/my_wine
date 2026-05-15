@@ -1,10 +1,21 @@
 # Risks and Mitigations
 
+> Status: historical Doom95 planning reference.
+>
+> The PE32 risk below predates the current `my_wine` wrapper plus `my_wine32`
+> backend. Current PE32 architecture is documented in `docs/PE32.md`.
+
 ---
 
-## Risk 1: PE32 (32-bit) Incompatibility — **HIGH likelihood, CRITICAL impact**
+## Risk 1: PE32 (32-bit) Compatibility — **UPDATED**
 
-**The gap:** DOOM95 is PE32 (i386). my_wine currently only supports PE32+ (x64). The import table uses `IMAGE_THUNK_DATA64`, PEB offsets are for x64, and thunks are x86_64 machine code.
+**Current state:** DOOM95 is PE32 (i386), and my_wine now has a PE32 path:
+`my_wine` detects PE32 and `execvp`s `my_wine32`, a standalone 32-bit backend.
+The current remaining risk is not "no PE32 support"; it is whether the PE32
+backend and Watcom CRT setup are broad enough for DOOM95.
+
+The mitigation options below are historical and should not be used as current
+implementation guidance without re-auditing the source.
 
 **Mitigation options** (in order of preference):
 1. **Shim DOOM95 through a 32-bit compatibility layer**: Add `IMAGE_THUNK_DATA32` support to the import parser. This is the minimal change — the PE32 vs PE32+ difference is mostly in thunk size (4 bytes vs 8 bytes) and header layout. The stub functions still execute as x64 on the host, so only the PE parser needs PE32 awareness. **Estimated effort: 200 lines, 2 days.**
@@ -17,7 +28,7 @@
 
 ## Risk 2: Watcom CRT vs mingw-w64 CRT — **MEDIUM likelihood, HIGH impact**
 
-**The gap:** DOOM95 is compiled with Watcom C/C++ 3.1. The CRT startup sequence (`__watcom_startup` → env parsing → heap init → `D_DoomMain`) is completely different from mingw-w64's `__getmainargs` path. my_wine currently patches mingw-w64-specific `.rdata` refptrs.
+    **The gap:** DOOM95 is compiled with Watcom C/C++ 3.1. The CRT startup sequence (`__watcom_startup` → env parsing → heap init → `D_DoomMain`) is completely different from mingw-w64's `__getmainargs` path. my_wine currently patches mingw-w64-specific `.rdata` refptrs.
 
 **Impact:** If the CRT startup code calls into `kernel32.dll` or `msvcrt.dll` functions we haven't stubbed, it will crash before `D_DoomMain` is reached. The entry point is at `0x004444d8` → jumps to Watcom CRT → eventually calls `D_DoomMain`.
 
