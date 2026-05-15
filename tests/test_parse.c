@@ -573,10 +573,10 @@ int main(int argc, char *argv[])
         pe_path = argv[1];
     } else {
         /* Check common locations */
-        if (access("hello.exe", F_OK) == 0) {
-            pe_path = "hello.exe";
-        } else if (access("examples/hello.exe", F_OK) == 0) {
-            pe_path = "examples/hello.exe";
+        if (access("hello_world.exe", F_OK) == 0) {
+            pe_path = "hello_world.exe";
+        } else if (access("samples/hello_world/hello_world.exe", F_OK) == 0) {
+            pe_path = "samples/hello_world/hello_world.exe";
         }
     }
 

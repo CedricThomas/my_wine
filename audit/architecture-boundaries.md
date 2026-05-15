@@ -19,7 +19,7 @@ file move or ownership change changes those classifications.
 | Heap | `src/heap/*`, `src/heap/wine_heap.h` | Provide Windows heap APIs and CRT allocator backing. | Shared API; PE32+ uses musl malloc pieces, PE32 uses mmap-per-allocation compatibility allocator. | Guest-facing allocator path must not depend on glibc allocator or TLS. Treat vendored musl files as heap internals. |
 | CRT module policy | `src/crt/*`, `include/crt.h` | Detect CRT flavor and apply CRT-specific setup/refptr/BSS policy. | Shared policy, PE32/PE32+ aware through PE metadata. | Setup layer. Glibc is allowed before guest handoff; review any guest-reachable calls. |
 | Shared diagnostics and support | `src/common.c`, `src/debug.c`, `include/common.h`, `include/debug.h`, `include/syscall_safe_utils.h`, `include/wine_abi.h` | Debug flags, protection helpers, syscall-safe leaf utilities, guest ABI macros, and common support definitions. | Shared. | `DEBUG` uses `fprintf`; do not use it from glibc-free paths. Helpers named `syscall_safe_*` are header-only and intended for glibc-free paths. |
-| Tests, samples, tools, docs | `tests/`, `samples/`, `examples/`, `scripts/`, `docs/`, `audit/` | Test coverage, sample PE inputs, generated-file tooling, and documentation. | Test-only, sample-only, or host tooling. | Runtime libc restrictions do not apply. |
+| Tests, samples, tools, docs | `tests/`, `samples/`, `scripts/`, `docs/`, `audit/` | Test coverage, sample PE inputs, generated-file tooling, and documentation. | Test-only, sample-only, or host tooling. | Runtime libc restrictions do not apply. |
 
 ## Dependency Rules
 
@@ -74,7 +74,7 @@ Keep PE32-only and PE32+-only responsibilities easy to locate:
 | PE32-only | `src/loader/pe32_entry.c`, `src/loader/pe32_process.c`, `src/loader/pe32_process.h`, `src/loader/pe32_run_guest.S`, `src/syscall/clone.S`, `src/syscall/mmap2_asm.S`, `src/heap/pe32_mmap_heap_backend.c`, PE32 samples. |
 | PE32+-only | `src/main.c`, `src/run_guest.S`, `src/syscall/clone64.S`, `src/heap/pe32plus_musl_malloc_backend.c`, `src/heap/musl_src/*`, `src/heap/musl_stubs/*`. |
 | Shared runtime | Root PE helpers, most `src/loader/`, `src/syscall/dispatcher*`, `src/syscall/abi_wrappers.c`, `src/syscall/thunk_gen.c`, guest-facing `src/msvcrt/`, `src/crt/`, and most public headers. |
-| Test/sample/tooling | `tests/`, `samples/`, `examples/`, `scripts/`, generated artifacts. |
+| Test/sample/tooling | `tests/`, `samples/`,  `scripts/`, generated artifacts. |
 
 Shared files are shared intentionally only when they preserve both ABI models:
 

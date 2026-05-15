@@ -29,7 +29,6 @@ Date: 2026-05-14
 | `samples/` | PE programs and metadata used as integration samples. | PE32+ and PE32 sample-only inputs. | Not runtime host code. |
 | `scripts/` | Build/test/sample/generation support scripts. | Host tooling. | Glibc not relevant. |
 | `docs/` | Project docs and production task plan. | Documentation. | Not runtime code. |
-| `examples/` | Small example source. | Sample-only. | Not runtime host code. |
 
 ## Runtime Source Inventory
 
@@ -238,7 +237,6 @@ Date: 2026-05-14
 
 ### Sample-only files
 
-- `examples/hello.c`
 - `samples/cmdline/cmdline.c`, `samples/cmdline/sample.info`
 - `samples/dispatcher_regs_32/dispatcher_regs_32.c`, `samples/dispatcher_regs_32/dispatcher_regs_32.s`, `samples/dispatcher_regs_32/expected_output.txt`, `samples/dispatcher_regs_32/sample.info`
 - `samples/dll_loader/dll_loader.c`, `samples/dll_loader/dlls/exportlib.c`, `samples/dll_loader/dlls/exportlib.def`, `samples/dll_loader/expected_output_regex.txt`, `samples/dll_loader/sample.info`
