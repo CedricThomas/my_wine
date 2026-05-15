@@ -18,8 +18,9 @@ stale architecture assumptions alive.
 
 ## Audit Inputs
 
-Start from the audit's "Duplicate Helpers And Dead-Code Candidates" section.
-Initial candidates are:
+Start from the audit's "Duplicate Helpers And Dead-Code Candidates" section and
+check `audit/architecture-boundaries.md` before deleting anything that sits on a
+layer boundary. Initial candidates are:
 
 - `include/syscall/signal_handler.h`
 - `src/trampoline.S`
@@ -28,8 +29,8 @@ Initial candidates are:
 - `src/crt/crt_watcom.c` TODO/fallback offset paths
 
 Do not delete behavior solely because it is not obvious. Require compiler,
-linker, search, test, or runtime evidence, especially for PE32 and guest-safe
-paths.
+linker, search, test, or runtime evidence, especially for PE32, guest-safe
+paths, and files that the boundary document marks as architecture-critical.
 
 ## Suggested Steps
 
@@ -39,6 +40,8 @@ paths.
 4. Add tests before deleting behavior that might be implicitly relied on.
 5. Remove or update stale docs that reference deleted code, and update the
    audit candidate list.
+6. Update `audit/architecture-boundaries.md` if deleting a file changes layer
+   ownership or allowed dependencies.
 
 ## Done Criteria
 

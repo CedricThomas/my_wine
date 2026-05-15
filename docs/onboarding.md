@@ -38,11 +38,12 @@ The docs below form a learning path. Each step builds on the previous — start 
 2. **[PE Format Primer](pe_format.md)** — Understand PE file structure (headers, sections, imports, RVA). You need this before reading the architecture.
 3. **[Rationale](rationale.md)** — Why single-process, why direct dispatch, requirements, limitations. Understand the design choices.
 4. **[Architecture](architecture.md)** — How it works: data flow, single-process model, syscall dispatch, TEB/PEB. The deep-dive.
-5. **[CRT refptr Patching](refptr.md)** — CRT `.refptr` patching deep-dive. Specialized topic.
+5. **[Architecture Boundaries](../audit/architecture-boundaries.md)** — Ownership layers, dependency rules, and libc-safe versus syscall-only regions.
+6. **[CRT refptr Patching](refptr.md)** — CRT `.refptr` patching deep-dive. Specialized topic.
 
 ```
-README.md → pe_format.md → rationale.md → architecture.md → refptr.md
-  (build)      (format)        (why)           (how)         (deep-dive)
+README.md → pe_format.md → rationale.md → architecture.md → audit/architecture-boundaries.md → refptr.md
+  (build)      (format)        (why)           (how)              (boundaries)           (deep-dive)
 ```
 
 ---

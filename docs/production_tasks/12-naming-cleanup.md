@@ -20,8 +20,9 @@ names slow down future work.
 
 ## Audit Inputs
 
-Use the audit classifications to avoid renaming files before ownership is
-clear. Names should preserve or clarify these categories:
+Use the audit classifications and `audit/architecture-boundaries.md` to avoid
+renaming files before ownership is clear. Names should preserve or clarify
+these categories:
 
 - PE32-only
 - PE32+-only
@@ -31,6 +32,8 @@ clear. Names should preserve or clarify these categories:
 - sample-only
 - generated or generated-adjacent
 - guest-safe/no-glibc
+- layer ownership, such as loader core, guest setup, syscall dispatch, Windows
+  API stubs, heap, or CRT module policy
 
 ## Suggested Steps
 
@@ -39,6 +42,8 @@ clear. Names should preserve or clarify these categories:
 3. Rename in small batches.
 4. Keep compatibility wrappers only when needed.
 5. Update the audit when paths or names change.
+6. Update `audit/architecture-boundaries.md` when renamed files change how a
+   layer is described.
 
 ## Done Criteria
 

@@ -2,6 +2,10 @@
 
 Deep-dive into how my_wine loads and runs a PE binary on Linux.
 
+For the audit-level ownership map, allowed dependencies, and libc-safe versus
+syscall-only regions, see
+[Architecture Boundaries](../audit/architecture-boundaries.md).
+
 ---
 
 ## 0. Three-Binary Layout

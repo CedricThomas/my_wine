@@ -19,8 +19,9 @@ errors and debug diagnostics.
 
 ## Audit Inputs
 
-Use the audit's "Files That Must Not Call Glibc After FS/GS Switch" section
-before touching diagnostics. In particular:
+Use `audit/architecture-boundaries.md` and the source inventory's "Files That
+Must Not Call Glibc After FS/GS Switch" section before touching diagnostics. In
+particular:
 
 - Do not add `DEBUG`, `fprintf`, `perror`, or other libc-backed logging to
   `src/loader/import_resolve.c`, `src/loader/dll_loader.c`,
@@ -38,6 +39,8 @@ before touching diagnostics. In particular:
 3. Separate `TRACE`, `DEBUG`, `WARNING`, and `ERROR` behavior.
 4. Add tests or sample assertions that normal execution is quiet.
 5. Update the audit if a file's glibc-safety classification changes.
+6. Update `audit/architecture-boundaries.md` if logging helpers change which
+   layers are libc-allowed or syscall-only.
 
 ## Done Criteria
 

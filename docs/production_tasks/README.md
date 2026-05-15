@@ -21,9 +21,11 @@ Recommended order:
 13. [Comment Cleanup](13-comment-cleanup.md)
 14. [Docs Refresh](14-docs-refresh.md)
 
-The audit output in `audit/source-inventory.md` is the baseline for tasks 2-14.
-Before starting any follow-up task, read the relevant audit sections and update
-the task if the source layout has changed since the audit.
+The audit outputs in `audit/source-inventory.md` and
+`audit/architecture-boundaries.md` are the baseline for tasks 2-14. Before
+starting any follow-up task, read the relevant audit sections and update the
+task if the source layout, ownership layers, dependency rules, or glibc-safety
+boundaries have changed since the audit.
 
 Default done criteria for every task:
 
@@ -33,4 +35,6 @@ Default done criteria for every task:
   recorded for the docs refresh task.
 - Any change to architecture classification, generated artifacts, glibc-safety
   constraints, or stale-doc candidates is reflected in `audit/source-inventory.md`.
+- Any change to layer ownership, allowed dependencies, or libc/syscall-only
+  zones is reflected in `audit/architecture-boundaries.md`.
 - The change stays scoped to the task, unless a small prerequisite fix is needed.

@@ -18,7 +18,8 @@ see what APIs are stable, internal, architecture-specific, or test-only.
 
 ## Audit Inputs
 
-Start from the audit's header inventory:
+Start from the audit's header inventory and
+`audit/architecture-boundaries.md` dependency rules:
 
 - Architecture-critical headers: `include/wine_abi.h`, `include/pe.h`,
   `include/nt_constants.h`, `include/nt_syscalls.def`.
@@ -29,7 +30,9 @@ Start from the audit's header inventory:
 - Future-work/stale boundary candidate: `include/render_backend.h`.
 
 Do not move declarations across glibc-safe and no-glibc boundaries without
-making that boundary explicit in the header name or location.
+making that boundary explicit in the header name or location. Use the boundary
+document to decide whether a header is a public contract, layer-private API, or
+guest-safe/syscall-only API.
 
 ## Suggested Steps
 
@@ -39,6 +42,8 @@ making that boundary explicit in the header name or location.
 4. Reduce transitive includes.
 5. Run the full build after each move.
 6. Reconcile the resulting header classification with the audit.
+7. Update `audit/architecture-boundaries.md` if header moves change allowed
+   dependencies between layers.
 
 ## Done Criteria
 

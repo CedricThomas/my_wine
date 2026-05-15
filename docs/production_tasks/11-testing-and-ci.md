@@ -22,7 +22,9 @@ and build reproducibility.
 ## Audit Inputs
 
 The audit moved this task earlier because risky refactors need tests first.
-Prioritize coverage for:
+Use `audit/source-inventory.md` for risky files and
+`audit/architecture-boundaries.md` for ownership/dependency and libc-zone
+coverage. Prioritize coverage for:
 
 - PE32 and PE32+ sample runs: `hello_world`, `file_io`, `heap_test`,
   `sync_test`, `virtual_mem`, and `dll_loader` variants.
@@ -32,6 +34,8 @@ Prioritize coverage for:
 - Generated dispatcher freshness.
 - Malformed PE parser coverage before hardening.
 - Guest-safe/glibc-free paths that the audit marks high risk.
+- Boundary-sensitive transitions: wrapper backend dispatch, PE32 vs PE32+
+  entry, GS/FS handoff, syscall dispatch, Windows API stubs, and heap calls.
 
 ## Suggested Steps
 
@@ -42,6 +46,8 @@ Prioritize coverage for:
 5. Add malformed PE corpus tests.
 6. Add sanitizer builds where compatible.
 7. Record any untestable audit risk explicitly before refactoring that area.
+8. Add targeted tests before changing any boundary-owned layer that lacks
+   coverage.
 
 ## Done Criteria
 

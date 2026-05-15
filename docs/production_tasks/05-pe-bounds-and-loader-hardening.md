@@ -22,7 +22,8 @@ validate these before dereferencing or copying.
 ## Audit Inputs
 
 Prioritize files marked risky or parser/memory-sensitive in
-`audit/source-inventory.md`:
+`audit/source-inventory.md`, and keep the layer/dependency rules from
+`audit/architecture-boundaries.md` in view:
 
 - `src/pe_headers.c`, `src/pe_imports.c`, `src/pe_rip_scan.c`,
   `src/pe_symbols.c`
@@ -32,7 +33,9 @@ Prioritize files marked risky or parser/memory-sensitive in
 - `src/msvcrt/crt_offset_discovery.c`
 - `src/loader/pe32_entry.c`
 
-Keep PE32 and PE32+ pointer-size differences explicit while hardening.
+Keep PE32 and PE32+ pointer-size differences explicit while hardening. Checked
+RVA and pointer helpers should not make PE parsing depend on loader state or
+make syscall-only loader paths depend on libc-backed parser utilities.
 
 ## Suggested Steps
 
@@ -42,6 +45,8 @@ Keep PE32 and PE32+ pointer-size differences explicit while hardening.
 4. Replace dangerous `MAP_FIXED` usage where possible with safer behavior.
 5. Document when fixed mappings are required.
 6. Cover PE32 and PE32+ cases from the audit before changing shared helpers.
+7. Update `audit/architecture-boundaries.md` if hardening introduces a new
+   shared helper layer or changes allowed dependencies.
 
 ## Done Criteria
 

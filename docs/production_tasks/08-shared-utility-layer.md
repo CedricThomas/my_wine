@@ -20,8 +20,9 @@ duplication makes correctness harder to maintain.
 
 ## Audit Inputs
 
-Use the audit's duplicate-helper list to decide what belongs in the utility
-layer. Known duplicate families include:
+Use the audit's duplicate-helper list and
+`audit/architecture-boundaries.md` to decide what belongs in the utility layer.
+Known duplicate families include:
 
 - Hand-rolled string/memory helpers in `src/loader/import_resolve.c`,
   `src/loader/module_list.c`, `src/loader/dll_loader.c`,
@@ -35,7 +36,8 @@ layer. Known duplicate families include:
   `src/loader/pe32_entry.c`.
 
 Split host/setup utilities from guest-safe utilities. Do not make a helper
-shared unless it is safe for every caller listed in the audit.
+shared unless it is safe for every caller listed in the audit and legal under
+the boundary document's dependency table.
 
 ## Suggested Steps
 
@@ -45,6 +47,8 @@ shared unless it is safe for every caller listed in the audit.
 4. Add tests for utility functions with edge cases.
 5. Update the audit when duplicate helper candidates are consolidated or found
    to be intentionally separate.
+6. Update `audit/architecture-boundaries.md` if the new utility layer changes
+   ownership or allowed dependencies.
 
 ## Done Criteria
 

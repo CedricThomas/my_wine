@@ -26,9 +26,10 @@ Likely candidates:
 ## Audit Inputs
 
 Use the audit's "Risky Files Needing Tests Before Refactor" section as the
-priority list. Before splitting a file, copy its architecture and glibc-safety
-constraints into the refactor notes so extracted modules do not accidentally
-cross guest-safe boundaries.
+priority list, then use `audit/architecture-boundaries.md` to choose the target
+layer for each extracted module. Before splitting a file, copy its architecture,
+allowed dependency, and glibc-safety constraints into the refactor notes so
+extracted modules do not accidentally cross guest-safe boundaries.
 
 ## Suggested Steps
 
@@ -38,6 +39,8 @@ cross guest-safe boundaries.
 4. Keep commits behavior-preserving.
 5. Rename after extraction, not before.
 6. Update `audit/source-inventory.md` after each file split.
+7. Update `audit/architecture-boundaries.md` after each split that changes
+   ownership, dependency rules, or libc zones.
 
 ## Done Criteria
 

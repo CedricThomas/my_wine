@@ -4,7 +4,8 @@
 
 Create a source-of-truth inventory of the codebase before refactoring.
 
-Current source of truth: `audit/source-inventory.md`.
+Current sources of truth: `audit/source-inventory.md` and
+`audit/architecture-boundaries.md`.
 
 ## Why
 
@@ -60,15 +61,19 @@ The inventory document should include:
 ## Current Output
 
 - Source inventory: `audit/source-inventory.md`.
+- Architecture boundaries: `audit/architecture-boundaries.md`.
 - Later tasks should treat that file as the source-of-truth baseline for
-  architecture classification, generated artifacts, glibc-safety constraints,
-  duplicate/dead-code candidates, stale-doc candidates, and risky files needing
-  tests.
+  architecture classification, generated artifacts, duplicate/dead-code
+  candidates, stale-doc candidates, and risky files needing tests. Treat the
+  boundary document as the baseline for ownership layers, allowed dependencies,
+  and libc-safe versus syscall-only zones.
 - Follow-up task docs have `Audit Inputs` sections that point to the relevant
-  parts of the inventory.
+  parts of the inventory and boundary document.
 
 ## Maintenance Rule
 
 If a later task moves files, changes generated-file policy, changes a
 glibc-safety boundary, removes duplicate/dead-code candidates, or resolves stale
-docs, update `audit/source-inventory.md` in the same change set.
+docs, update `audit/source-inventory.md` in the same change set. If a later
+task changes layer ownership, allowed dependencies, or libc/syscall-only zones,
+update `audit/architecture-boundaries.md` in the same change set.

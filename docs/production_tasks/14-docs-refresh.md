@@ -22,8 +22,8 @@ stable.
 
 ## Audit Inputs
 
-Use the audit's stale-doc candidates and current source inventory as the
-starting point:
+Use the audit's stale-doc candidates, current source inventory, and
+`audit/architecture-boundaries.md` as the starting point:
 
 - Treat `samples/doom95/docs` as planning/reference material unless rewritten
   against current PE32 support.
@@ -35,6 +35,9 @@ starting point:
 - Keep `README.md`, `docs/onboarding.md`, `docs/architecture.md`,
   `docs/rationale.md`, and `docs/PE32.md` aligned with the final source
   boundaries after cleanup.
+- Keep user-facing architecture docs concise, and link to
+  `audit/architecture-boundaries.md` for detailed ownership/dependency rules
+  unless the audit file is replaced by an equivalent maintained doc.
 
 ## Suggested Steps
 
@@ -44,6 +47,8 @@ starting point:
 4. Keep deep dives only where they are actively maintained.
 5. Delete obsolete implementation plans when they no longer represent work.
 6. Update `audit/source-inventory.md` if docs refresh changes stale-doc status.
+7. Update `audit/architecture-boundaries.md` if docs refresh identifies a
+   boundary description that no longer matches source behavior.
 
 ## Done Criteria
 

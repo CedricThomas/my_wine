@@ -22,7 +22,8 @@ artifacts.
 
 ## Audit Inputs
 
-Use `audit/source-inventory.md` to preserve the current build groups:
+Use `audit/source-inventory.md` and `audit/architecture-boundaries.md` to
+preserve the current build groups and ownership layers:
 
 - Three binaries: `my_wine`, `my_wine64`, and `my_wine32`.
 - PE32-only files such as `src/loader/pe32_entry.c`,
@@ -35,6 +36,9 @@ Use `audit/source-inventory.md` to preserve the current build groups:
 - Ignored local artifacts: `build/`, `build32/`, sample `.exe/.dll` files,
   `src/syscall/dispatcher_generated.c`, `include/crt_offsets_generated.h`, and
   the stray `src/loader/import_resolve.d`.
+- Boundary ownership for wrapper, PE parsing, loader core, guest setup,
+  PE32 runtime entry, syscall dispatch, Windows API stubs, heap, and CRT module
+  policy.
 
 ## Suggested Steps
 
@@ -45,8 +49,8 @@ Use `audit/source-inventory.md` to preserve the current build groups:
 5. Group test target rules.
 6. Group sample targets.
 7. Group clean/rebuild helper targets.
-8. Keep audit architecture classifications intact or update the audit if a
-   build grouping changes.
+8. Keep audit architecture classifications and boundary ownership intact, or
+   update the audit if a build grouping changes.
 
 ## Done Criteria
 

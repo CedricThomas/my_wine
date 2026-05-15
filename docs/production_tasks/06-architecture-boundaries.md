@@ -45,3 +45,10 @@ move changes them.
 - Each major source file has an obvious owning layer.
 - PE32-only and PE32+-only code paths are easy to locate.
 - Shared code is intentionally shared, not shared by accident.
+
+## Result
+
+- Added `audit/architecture-boundaries.md` as the current boundary map.
+- Linked it from `docs/architecture.md` and `docs/onboarding.md`.
+- No source files were moved, so `audit/source-inventory.md` classifications
+  remain unchanged.

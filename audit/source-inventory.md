@@ -10,6 +10,9 @@ Date: 2026-05-14
 - `git status --short` was clean before creating this audit.
 - The Makefile builds three runtime binaries: `my_wine` wrapper, `my_wine64` for PE32+, and `my_wine32` for PE32.
 - Ignored build outputs are present locally, including `build/`, `build32/`, sample `.exe/.dll` outputs, `src/syscall/dispatcher_generated.c`, and `src/loader/import_resolve.d`.
+- `audit/architecture-boundaries.md` defines the current ownership layers,
+  allowed dependencies, and libc-safe versus syscall-only regions derived from
+  this inventory.
 
 ## Source Folders And Responsibilities
 
@@ -386,7 +389,8 @@ Recommended adjusted order:
 ## Follow-up Task Adjustments
 
 - Task 03 should explicitly inventory `include/crt_offsets_generated.h`, `src/syscall/dispatcher_generated.c`, sample `.exe/.dll`, build `.d` files, and the stray `src/loader/import_resolve.d`.
-- Task 06 should produce an enforced "glibc-free after FS/GS switch" boundary, not only folder layering.
+- Task 06 produced `audit/architecture-boundaries.md`; later tasks should use it
+  for ownership, dependency, and libc/syscall-only boundary checks.
 - Task 08 should define a guest-safe utility layer separate from host/setup utilities. A single shared string helper layer is not sufficient unless it has no-libc guarantees.
 - Task 09 should review `include/syscall/signal_handler.h` and `src/trampoline.S` first because they appear disconnected.
 - Task 10 should prioritize `src/loader/pe32_entry.c`, `src/msvcrt/kernel32_misc.c`, `src/syscall/dispatcher.c`, `src/loader/import_resolve.c`, and `src/msvcrt/crt_offset_discovery.c`.
