@@ -12,28 +12,48 @@ static inline rb_palette *get_palette(rb_palette_t pal)
     return (rb_palette *)wine_handle_get((uint32_t)pal);
 }
 
+static int rb_format_to_bpp(rb_pixel_format_t format)
+{
+    switch (format) {
+    case RB_FORMAT_8BIT:
+        return 8;
+    case RB_FORMAT_15BIT:
+        return 15;
+    case RB_FORMAT_16BIT:
+        return 16;
+    case RB_FORMAT_32BIT:
+        return 32;
+    default:
+        return 0;
+    }
+}
+
+static int rb_surface_pitch_for_bpp(int width, int bpp)
+{
+    if (bpp == 8)
+        return width;
+    if (bpp <= 16)
+        return width * 2;
+    return width * 4;
+}
+
 rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
                                rb_palette_t palette, uint32_t flags)
 {
     (void)flags;
 
-    int bpp;
-    switch (format) {
-        case RB_FORMAT_8BIT:  bpp = 8;  break;
-        case RB_FORMAT_15BIT: bpp = 15; break;
-        case RB_FORMAT_16BIT: bpp = 16; break;
-        case RB_FORMAT_32BIT: bpp = 32; break;
-        default: return 0;
-    }
+    if (w <= 0 || h <= 0)
+        return 0;
 
-    int pitch;
-    if (bpp == 8) pitch = w;
-    else if (bpp <= 16) pitch = w * 2;
-    else pitch = w * 4;
+    int bpp = rb_format_to_bpp(format);
+    if (bpp == 0)
+        return 0;
 
+    int pitch = rb_surface_pitch_for_bpp(w, bpp);
     int buf_size = pitch * h;
     uint8_t *buf = malloc(buf_size);
-    if (!buf) return 0;
+    if (!buf)
+        return 0;
     memset(buf, 0, buf_size);
 
     uint32_t rmask = 0, gmask = 0, bmask = 0, amask = 0;
@@ -49,18 +69,32 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     } else if (bpp == 16) { rmask = 0xF800; gmask = 0x07E0; bmask = 0x001F; }
     else if (bpp == 32) { rmask = 0xFF000000; gmask = 0x00FF0000; bmask = 0x0000FF00; amask = 0x000000FF; }
 
+    uintptr_t saved_gs = rb_host_context_enter();
     SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(buf, w, h, bpp, pitch,
-                                                     rmask, gmask, bmask, amask);
-    if (!surface) { free(buf); return 0; }
+                                                    rmask, gmask, bmask, amask);
+    rb_host_context_leave(saved_gs);
+    if (!surface) {
+        free(buf);
+        return 0;
+    }
 
     if (palette) {
         rb_palette *p = get_palette(palette);
-        if (p && p->palette)
+        if (p && p->palette) {
+            saved_gs = rb_host_context_enter();
             SDL_SetSurfacePalette(surface, p->palette);
+            rb_host_context_leave(saved_gs);
+        }
     }
 
     rb_surface *s = malloc(sizeof(*s));
-    if (!s) { SDL_FreeSurface(surface); free(buf); return 0; }
+    if (!s) {
+        saved_gs = rb_host_context_enter();
+        SDL_FreeSurface(surface);
+        rb_host_context_leave(saved_gs);
+        free(buf);
+        return 0;
+    }
     s->surface = surface;
     s->own_buf = buf;
     s->palette = palette;
@@ -112,7 +146,9 @@ int rb_surface_destroy(rb_surface_t surf)
     rb_surface *s = get_surface(surf);
     if (!s) return RB_FAIL;
 
+    uintptr_t saved_gs = rb_host_context_enter();
     SDL_FreeSurface(s->surface);
+    rb_host_context_leave(saved_gs);
     if (s->own_buf) free(s->own_buf);
     free(s);
     wine_handle_free((uint32_t)surf);
@@ -123,7 +159,11 @@ int rb_surface_lock(rb_surface_t surf, const rb_rect_t *rect,
                     uint8_t **out_data, int *out_pitch)
 {
     rb_surface *s = get_surface(surf);
-    if (!s || !s->surface) return RB_FAIL;
+    if (!s || !s->surface || !out_data || !out_pitch)
+        return RB_FAIL;
+    if (rect && (rect->x < 0 || rect->y < 0 ||
+                 rect->x > s->surface->w || rect->y > s->surface->h))
+        return RB_FAIL;
 
     *out_data = s->surface->pixels;
     if (rect && (rect->x != 0 || rect->y != 0)) {
@@ -156,7 +196,11 @@ int rb_surface_blt(rb_surface_t dst, const rb_rect_t *dst_rect,
         } else {
             dr = (SDL_Rect){0, 0, ds->surface->w, ds->surface->h};
         }
-        SDL_FillRect(ds->surface, &dr, color);
+        uintptr_t saved_gs = rb_host_context_enter();
+        int ret = SDL_FillRect(ds->surface, &dr, color);
+        rb_host_context_leave(saved_gs);
+        if (ret < 0)
+            return RB_FAIL;
         ds->dirty = 1;
         return RB_OK;
     }
@@ -178,10 +222,16 @@ int rb_surface_blt(rb_surface_t dst, const rb_rect_t *dst_rect,
         }
 
         if (sr.w != dr.w || sr.h != dr.h) {
-            if (SDL_SoftStretch(ss->surface, &sr, ds->surface, &dr) < 0)
+            uintptr_t saved_gs = rb_host_context_enter();
+            int ret = SDL_SoftStretch(ss->surface, &sr, ds->surface, &dr);
+            rb_host_context_leave(saved_gs);
+            if (ret < 0)
                 return RB_FAIL;
         } else {
-            if (SDL_BlitSurface(ss->surface, &sr, ds->surface, &dr) < 0)
+            uintptr_t saved_gs = rb_host_context_enter();
+            int ret = SDL_BlitSurface(ss->surface, &sr, ds->surface, &dr);
+            rb_host_context_leave(saved_gs);
+            if (ret < 0)
                 return RB_FAIL;
         }
         ds->dirty = 1;
@@ -199,11 +249,13 @@ int rb_surface_flip(rb_surface_t surf)
     if (s->window) {
         rb_window *wnd = (rb_window *)wine_handle_get((uint32_t)s->window);
         if (wnd && wnd->window) {
+            uintptr_t saved_gs = rb_host_context_enter();
             SDL_Surface *ws = SDL_GetWindowSurface(wnd->window);
             if (ws) {
                 SDL_BlitSurface(s->surface, NULL, ws, NULL);
                 SDL_UpdateWindowSurface(wnd->window);
             }
+            rb_host_context_leave(saved_gs);
         }
 
         /* Swap with backbuffer: primary becomes backbuffer for next frame */
@@ -255,7 +307,11 @@ int rb_surface_set_palette(rb_surface_t surf, rb_palette_t pal)
     rb_palette *p = get_palette(pal);
     if (!p || !p->palette) return RB_FAIL;
 
-    SDL_SetSurfacePalette(s->surface, p->palette);
+    uintptr_t saved_gs = rb_host_context_enter();
+    int ret = SDL_SetSurfacePalette(s->surface, p->palette);
+    rb_host_context_leave(saved_gs);
+    if (ret < 0)
+        return RB_FAIL;
     s->palette = pal;
     return RB_OK;
 }

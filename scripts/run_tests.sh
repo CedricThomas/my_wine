@@ -44,7 +44,7 @@ run_test() {
 	local output
 	output=$(timeout 5 ./"$BUILDDIR"/"$name" "$@" 2>&1 | tr -d '\0') || true
 
-	if echo "$output" | grep -q "Failed: 0"; then
+	if echo "$output" | grep -q "Failed: 0\|PASS: All tests passed"; then
 		PASS=$((PASS + 1))
 		if [ "$DEBUG" = "1" ]; then
 			echo "$output"
@@ -122,6 +122,9 @@ run_test test_syscall_safe_utils
 
 # test_entry_symbols
 run_test test_entry_symbols
+
+# test_sdl2_backend
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy run_test test_sdl2_backend
 
 # --- Summary ---
 TOTAL=$((PASS + FAIL + SKIP))

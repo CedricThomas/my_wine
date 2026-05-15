@@ -150,7 +150,8 @@ HICON LoadIconA(HINSTANCE hInstance, const char *lpIconName)
 
 /* ── 7. wsprintfA ─────────────────────────────────────────── */
 /*
- * Windows-style formatted string output. Wraps vsprintf.
+ * Windows-style formatted string output. Windows wsprintfA is capped at 1024
+ * bytes, so use vsnprintf instead of an unbounded write.
  * Windows format strings use the same % syntax as printf, so no
  * translation is needed beyond the varargs forwarding.
  * Returns the number of characters written (excluding null terminator).
@@ -158,9 +159,12 @@ HICON LoadIconA(HINSTANCE hInstance, const char *lpIconName)
 KERNEL32_STUB
 int wsprintfA(char *lpOut, const char *fmt, ...)
 {
+    if (!lpOut || !fmt)
+        return 0;
+
     va_list ap;
     va_start(ap, fmt);
-    int ret = vsprintf(lpOut, fmt, ap);
+    int ret = vsnprintf(lpOut, 1024, fmt, ap);
     va_end(ap);
     return ret;
 }

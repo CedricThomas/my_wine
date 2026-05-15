@@ -172,10 +172,13 @@ int rb_audio_buffer_lock(rb_audio_buf_t buf, uint32_t offset, uint32_t bytes,
                          uint8_t **out_ptr, uint32_t *out_len)
 {
     rb_audio_buf *b = get_audio_buf(buf);
-    if (!b)
+    if (!b || !out_ptr || !out_len)
         return RB_FAIL;
 
-    if ((int)(offset + bytes) > b->buffer_size)
+    if (offset >= (uint32_t)b->buffer_size)
+        return RB_FAIL;
+
+    if (bytes > (uint32_t)b->buffer_size - offset)
         bytes = (uint32_t)(b->buffer_size - offset);
 
     *out_ptr = b->data + offset;

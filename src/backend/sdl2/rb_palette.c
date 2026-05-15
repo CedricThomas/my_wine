@@ -72,6 +72,9 @@ int rb_palette_set_colors(rb_palette_t pal,
     if (start + count > (uint32_t)p->num_colors)
         count = (uint32_t)p->num_colors - start;
 
+    if (count == 0)
+        return RB_OK;
+
     SDL_Color *arr = malloc(sizeof(SDL_Color) * count);
     if (!arr)
         return RB_FAIL;
@@ -101,6 +104,9 @@ int rb_palette_get_colors(rb_palette_t pal,
         return RB_FAIL;
     if (start + count > (uint32_t)p->num_colors)
         count = (uint32_t)p->num_colors - start;
+
+    if (count == 0)
+        return RB_OK;
 
     /* Read directly from palette->colors (SDL_GetPaletteColors not available in all SDL2 versions) */
     for (uint32_t i = 0; i < count; i++) {

@@ -27,12 +27,14 @@ static uintptr_t rb_sdl_init_call(void *arg)
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
     int ret = SDL_Init(a->flags);
-    if (ret < 0 && getenv("DISPLAY") && !getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
+    if (ret < 0 && getenv("DISPLAY") && !getenv("SDL_VIDEODRIVER") &&
+        !getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "x11", 1);
         ret = SDL_Init(a->flags);
     }
-    if (ret < 0 && getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
+    if (ret < 0 && !getenv("SDL_VIDEODRIVER") &&
+        getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "dummy", 1);
         ret = SDL_Init(a->flags);

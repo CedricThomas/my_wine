@@ -39,7 +39,7 @@ int rb_joy_get_caps(int idx, char *name, int name_len,
         return RB_FAIL;
 
     const char *n = SDL_JoystickName(joy);
-    if (name && n) {
+    if (name && name_len > 0 && n) {
         strncpy(name, n, name_len - 1);
         name[name_len - 1] = '\0';
     }
@@ -66,6 +66,11 @@ int rb_joy_get_state(int idx,
     SDL_Joystick *joy = SDL_JoystickOpen(idx);
     if (!joy)
         return RB_FAIL;
+
+    if ((n_axes > 0 && !axes) || (n_buttons > 0 && !buttons)) {
+        SDL_JoystickClose(joy);
+        return RB_FAIL;
+    }
 
     for (int i = 0; i < n_axes; i++) {
         int16_t raw = SDL_JoystickGetAxis(joy, i);  // range -32768..32767
