@@ -9,7 +9,7 @@ SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2")
 
 # 32-bit SDL2 detection — test if -m32 linking actually finds a 32-bit SDL2 lib.
 # Without lib32-sdl2 installed the linker rejects 64-bit .so files.
-SDL2_LIBS_32 := $(shell $(CC) -m32 -x c /dev/null -o /tmp/__sdl2_32_test $(SDL2_LIBS) -lm 2>/dev/null && \
+SDL2_LIBS_32 := $(shell echo 'int main(void){return 0;}' | $(CC) -m32 -x c - -o /tmp/__sdl2_32_test $(SDL2_LIBS) -lm 2>/dev/null && \
 	echo "$(SDL2_LIBS) -lm" && rm -f /tmp/__sdl2_32_test || echo "")
 
 # Special flags for entry points, loader core, stubs, syscall infra.

@@ -83,9 +83,10 @@ typedef struct rb_cursor {
 } rb_cursor;
 
 /*
- * Guest-facing USER32 stubs enter the SDL backend with GS pointing at the
- * emulated TEB. SDL/glibc expect the host GS value, so restore it for host
- * library calls and put the guest value back before returning to guest code.
+ * Guest-facing USER32 stubs enter the SDL backend with GS (64-bit) / FS (32-bit)
+ * pointing at the emulated TEB.  SDL/glibc expect the host selector, so restore
+ * it for host library calls and put the guest value back before returning to
+ * guest code.
  */
 static inline uintptr_t rb_host_context_enter(void)
 {
@@ -100,6 +101,17 @@ static inline uintptr_t rb_host_context_enter(void)
     if (guest_gs != host_gs)
         __asm__ volatile("wrgsbase %0" :: "r"(host_gs));
     return guest_gs;
+#elif defined(__i386__)
+    uint16_t host_fs = (&g_loader != 0) ? loader_get_host_fs_selector() : 0;
+    uint16_t guest_fs;
+
+    if (&g_loader == 0)
+        return 0;
+
+    __asm__ volatile("mov %%fs, %0" : "=r"(guest_fs));
+    if (guest_fs != host_fs && host_fs != 0)
+        __asm__ volatile("mov %0, %%fs" :: "r"(host_fs) : "memory");
+    return (uintptr_t)guest_fs;
 #else
     return 0;
 #endif
@@ -110,6 +122,11 @@ static inline void rb_host_context_leave(uintptr_t saved_gs)
 #if defined(__x86_64__)
     if (&g_loader != 0 && saved_gs && saved_gs != loader_get_host_gs_base())
         __asm__ volatile("wrgsbase %0" :: "r"(saved_gs));
+#elif defined(__i386__)
+    uint16_t saved_fs = (uint16_t)saved_gs;
+    uint16_t host_fs = (&g_loader != 0) ? loader_get_host_fs_selector() : 0;
+    if (&g_loader != 0 && saved_fs && saved_fs != host_fs)
+        __asm__ volatile("mov %0, %%fs" :: "r"(saved_fs) : "memory");
 #else
     (void)saved_gs;
 #endif
@@ -141,6 +158,38 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
         : "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11", "memory", "cc");
 
     rb_host_context_leave(saved_gs);
+    return ret;
+#elif defined(__i386__)
+    uintptr_t ret;
+    uintptr_t old_esp;
+    uintptr_t saved_fs = rb_host_context_enter();
+
+    if (&unix_stack_ptr_val == 0 || !unix_stack_ptr_val) {
+        ret = fn(arg);
+        rb_host_context_leave(saved_fs);
+        return ret;
+    }
+
+    uintptr_t new_esp = (uintptr_t)unix_stack_ptr_val;
+    __asm__ volatile(
+        "push %%ebx\n\t"
+        "push %%esi\n\t"
+        "push %%edi\n\t"
+        "mov %%esp, %[old_esp]\n\t"
+        "mov %[new_esp], %%esp\n\t"
+        "push %[arg]\n\t"
+        "call *%[fn]\n\t"
+        "addl $4, %%esp\n\t"
+        "mov %[old_esp], %%esp\n\t"
+        "pop %%edi\n\t"
+        "pop %%esi\n\t"
+        "pop %%ebx\n\t"
+        : "=a"(ret), [old_esp] "=&r"(old_esp)
+        : [new_esp] "r"(new_esp), [fn] "r"(fn), [arg] "r"(arg)
+        : "memory", "cc"
+    );
+
+    rb_host_context_leave(saved_fs);
     return ret;
 #else
     return fn(arg);

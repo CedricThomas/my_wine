@@ -28,7 +28,8 @@ typedef struct {
     loaded_module_t modules[MAX_MODULES]; /* Loaded module registry */
     int           module_count;           /* Number of loaded modules */
     int           is_32bit;               /* PE32 (32-bit) image flag */
-    uintptr_t     host_gs_base;          /* Host GS base after switch */
+    uintptr_t     host_gs_base;          /* Host GS base after switch (64-bit) */
+    uint16_t      host_fs_selector;      /* Host FS selector before switch (32-bit) */
 } wine_loader_state_t;
 
 extern wine_loader_state_t g_loader;
@@ -105,6 +106,14 @@ static inline uintptr_t loader_get_host_gs_base(void) {
 
 static inline void loader_set_host_gs_base(uintptr_t base) {
     g_loader.host_gs_base = base;
+}
+
+static inline uint16_t loader_get_host_fs_selector(void) {
+    return g_loader.host_fs_selector;
+}
+
+static inline void loader_set_host_fs_selector(uint16_t sel) {
+    g_loader.host_fs_selector = sel;
 }
 
 #endif /* MY_WINE_LOADER_STATE_H */

@@ -65,6 +65,10 @@ void scan_text_for_refptrs(void *image_base,
 /* ── MinGW entry symbols ──────────────────────────────────────── */
 
 static const char *mingw_entry_symbols[] = {
+    "_WinMain@16",
+    "_wWinMain@16",
+    "_WinMain",
+    "_wWinMain",
     "main",
     NULL
 };
