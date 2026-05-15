@@ -47,19 +47,9 @@
 #include "peb_ldr.h"
 #include "module_list.h"
 #include "loader_state.h"
+#include "pe32_process.h"
 #include "include/syscall_safe_utils.h"
 #include "../heap/wine_heap.h"
-
-/*
- * Local BSS offset defines for MinGW CRT layout.
- *
- * This is a standalone 32-bit binary that cannot load CRT modules,
- * so we use hardcoded offsets matching the MinGW CRT .bss layout.
- */
-#define CRT_BSS_INITENV   0x018   /* __initenv / _environ pointer */
-#define CRT_BSS_ARGV      0x020   /* _argv pointer */
-#define CRT_BSS_ARGC      0x028   /* _argc */
-#define CRT_BSS_ACMDLN    0x030   /* _acmdln pointer (for GetCommandLineA) */
 
 /*
  * PE32 threading safety
@@ -91,71 +81,6 @@ extern void seh_crash_handler(void *, void *, void *, void *);
 extern char _acmdln[];
 extern void pe32_run_guest(uint32_t entry_abs, void *stack_top) __attribute__((noreturn));
 
-/*
- * 32-bit argv/envp setup for CRT bypass.
- * g_argv_ptr and g_argv_page store the allocated 32-bit argv array and
- * its backing page (allocated with MAP_32BIT below 4GB). These are set
- * up by ensure_argv_setup() and used by both seed_bss_vars() and
- * setup_fs_and_jump() to provide consistent CRT globals.
- */
-static uint32_t g_argv_ptr = 0;  /* 32-bit address of the argv array */
-void *g_argv_page = NULL; /* backing page (MAP_32BIT) */
-
-/**
- * ensure_argv_setup — allocate 32-bit argv/envp arrays and path copy.
- *
- * Allocates a page below 4GB (MAP_32BIT), copies pe_path into it,
- * then builds:
- *   argv = { path_copy, NULL }
- *   envp = { (char*)environ }
- *
- * Stores result in g_argv_ptr (for BSS seeding) and g_argv_page.
- * Idempotent: second call is a no-op if g_argv_ptr is already set.
- */
-static void ensure_argv_setup(const char *pe_path)
-{
-    if (g_argv_ptr != 0)
-        return;  /* already set up */
-
-    /* Allocate page below 4GB for argv/envp arrays and path copy */
-    void *page = INLINE_SYSCALL_MMAP(NULL, PAGE_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
-    if (page == MAP_FAILED || page == NULL) {
-        const char err[] = "my_wine32: failed to alloc 32-bit argv page\n";
-        INLINE_SYSCALL_WRITE_ERR(err, sizeof(err) - 1);
-        INLINE_SYSCALL_EXIT_GROUP(1);
-    }
-    g_argv_page = page;
-
-    uint8_t *p = (uint8_t *)page;
-    memset(page, 0, PAGE_SIZE);
-
-    /* Copy pe_path into the 32-bit page (argv[0] string).
-     * Use syscall_safe_copy_str instead of strncpy: in the 32-bit standalone build,
-     * musl's strncpy is an ifunc whose PLT resolver returns without executing
-     * the actual copy (compiler ifunc bug). syscall_safe_copy_str is a static
-     * inline byte loop, avoiding the ifunc issue. */
-    char *path_copy = (char *)(p + 0);       /* offset 0x00 */
-    syscall_safe_copy_str(path_copy, pe_path, 511);
-    path_copy[510] = '\0';
-
-    /* Build argv array at offset 0x200 (512 bytes into the page) */
-    uint32_t *argv = (uint32_t *)(p + 0x200);
-    argv[0] = (uint32_t)(uintptr_t)path_copy;
-    argv[1] = 0;  /* NULL terminator */
-
-    /* Build envp array at offset 0x208 */
-    uint32_t *envp = (uint32_t *)(p + 0x208);
-    {
-        extern char **environ;
-        envp[0] = (uint32_t)(uintptr_t)environ;
-    }
-    envp[1] = 0;  /* NULL terminator */
-
-    g_argv_ptr = (uint32_t)(uintptr_t)argv;
-}
-
 /* ── Error messages (null-terminated, written via syscall to stderr) ── */
 static const char err_bad_env[]    = "my_wine32: missing or invalid WINE32_PE_PATH\n";
 static const char err_map[]        = "my_wine32: failed to map PE image\n";
@@ -166,9 +91,6 @@ static const char err_thunks[]     = "my_wine32: failed to generate thunks\n";
 static const char err_stack[]      = "my_wine32: failed to setup guest stack\n";
 static const char err_fs[]         = "my_wine32: set_thread_area (FS→TEB) failed\n";
 static const char err_import[]     = "my_wine32: import resolution failed\n";
-
-/* ── Externs for PEB wiring ──────────────────────────────────── */
-extern void *g_process_heap;
 
 /* ── SEH frame (stable location for TEB+0x00 exception chain) ──
  * EXCEPTION_REGISTRATION_RECORD: placed in static BSS so the TEB
@@ -405,246 +327,6 @@ static void prepare_dispatch(void)
     setup_signal_handlers();
 }
 
-/* ── PEB field wiring (split into sub-functions) ──────────────────── */
-
-/**
- * wire_peb32_heap — initialize process heap and write into PEB.
- */
-static void wire_peb32_heap(void *peb)
-{
-    uint8_t *p = (uint8_t *)peb;
-
-    if (g_process_heap == NULL) {
-        g_process_heap = init_process_heap();
-    }
-    if (g_process_heap) {
-        uint32_t heap_val = (uint32_t)(uintptr_t)g_process_heap;
-        *(uint32_t *)(p + 0x18) = heap_val;   /* WinXP PEB.ProcessHeap */
-        *(uint32_t *)(p + 0x3C) = heap_val;   /* Win7+ PEB.ProcessHeap */
-    }
-}
-
-/**
- * wire_peb32_params — create RTL_USER_PROCESS_PARAMETERS.
- *
- * Standard Win32 (32-bit) layout:
- *   0x00  MaximumLength (ULONG)
- *   0x04  Length (ULONG)
- *   0x08  Reserved1 (ULONG)
- *   0x0C  Reserved2 (ULONG)
- *   0x10  CurrentDirectoryHandle (PVOID)
- *   0x14  CurrentDirectoryDosPathPointer (PVOID → UNICODE_STRING)
- *   0x18  DllPathPointer (PVOID → UNICODE_STRING)
- *   0x1C  CommandLinePointer (PVOID → UNICODE_STRING)
- *
- * All unicode strings are stored in the mmap'd page after the struct
- * fields to ensure they persist beyond the calling stack frame.
- */
-static void wire_peb32_params(void *peb, const char *pe_path)
-{
-    uint8_t *p = (uint8_t *)peb;
-
-    /* Allocate a page for the params struct, below 4GB */
-    void *params = INLINE_SYSCALL_MMAP(NULL, PAGE_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
-    if (params == MAP_FAILED || params == NULL) {
-        return;
-    }
-
-    uint8_t *q = (uint8_t *)params;
-    memset(params, 0, PAGE_SIZE);
-
-    /* MaximumLength = 0x200 (512 byte allocation) */
-    *(uint32_t *)(q + 0x00) = 0x200;
-    /* Length = actual used portion of the struct (through CommandLine string) */
-    *(uint32_t *)(q + 0x04) = 0x0E8;
-    /* Reserved1 = 0 (already zeroed) */
-    /* Reserved2 = 0 (already zeroed) */
-    /* CurrentDirectoryHandle = NULL (already zeroed) */
-
-    /* ── CurrentDirectoryDosPath: L"C:\\" ──
-     * Pointer at 0x14 → UNICODE_STRING at 0x50
-     * String data at 0x60 in the mmap'd page. */
-    {
-        uint16_t *cur_str = (uint16_t *)(q + 0x60);
-        cur_str[0] = 'C'; cur_str[1] = ':'; cur_str[2] = '\\'; cur_str[3] = 0;
-
-        /* UNICODE_STRING at 0x50 */
-        *(uint16_t *)(q + 0x50) = 6;                          /* Length = 3 chars * 2 */
-        *(uint16_t *)(q + 0x52) = 8;                          /* MaximumLength */
-        *(uint32_t *)(q + 0x54) = (uint32_t)(uintptr_t)cur_str; /* Buffer */
-
-        /* Pointer at PEB field */
-        *(uint32_t *)(q + 0x14) = (uint32_t)(uintptr_t)(q + 0x50);
-    }
-
-    /* ── DllPath: L"C:\\" (shares string data with CurrentDirectory) ──
-     * Pointer at 0x18 → UNICODE_STRING at 0x68
-     * String data at 0x60 in the mmap'd page (shared with CurrentDirectory).
-     *
-     * The UNICODE_STRING is placed at 0x68 (after the 6-byte string at 0x60-0x65)
-     * so its Buffer field at 0x6C does NOT overlap the string data. */
-    {
-        uint16_t *dll_str = (uint16_t *)(q + 0x60);  /* same as cur_str */
-
-        /* UNICODE_STRING at 0x68 */
-        *(uint16_t *)(q + 0x68) = 6;                          /* Length */
-        *(uint16_t *)(q + 0x6A) = 8;                          /* MaximumLength */
-        *(uint32_t *)(q + 0x6C) = (uint32_t)(uintptr_t)dll_str; /* Buffer */
-
-        /* Pointer at PEB field */
-        *(uint32_t *)(q + 0x18) = (uint32_t)(uintptr_t)(q + 0x68);
-    }
-
-    /* ── CommandLine: pe_path as UTF-16LE ──
-     * Pointer at 0x1C → UNICODE_STRING at 0x74
-     * String data at 0x80 in the mmap'd page. */
-    {
-        uint16_t *cmd_buf = (uint16_t *)(q + 0x80);
-        size_t cmd_len = 0;
-        const char *s = pe_path;
-        while (*s && cmd_len < 255) {
-            cmd_buf[cmd_len] = (uint16_t)(uint8_t)*s;
-            s++;
-            cmd_len++;
-        }
-        cmd_buf[cmd_len] = 0;
-
-        /* UNICODE_STRING at 0x74 */
-        *(uint16_t *)(q + 0x74) = (uint16_t)(cmd_len * 2);      /* Length */
-        *(uint16_t *)(q + 0x76) = (uint16_t)((cmd_len + 1) * 2); /* MaximumLength */
-        *(uint32_t *)(q + 0x78) = (uint32_t)(uintptr_t)cmd_buf; /* Buffer */
-
-        /* Pointer at PEB field */
-        *(uint32_t *)(q + 0x1C) = (uint32_t)(uintptr_t)(q + 0x74);
-    }
-
-    /* Set PEB.ProcessParameters pointer */
-    *(uint32_t *)(p + 0x10) = (uint32_t)(uintptr_t)params;
-}
-
-/**
- * wire_peb32_ldr — initialize PEB_LDR_DATA and register main PE image.
- */
-static void wire_peb32_ldr(void *peb, void *image_base, IMAGE_NT_HEADERS *nt)
-{
-    uint8_t *p = (uint8_t *)peb;
-
-    if (loader_get_peb_ldr() == NULL) {
-        init_module_list();
-        loader_set_peb_ldr(init_peb_ldr());
-    }
-    if (loader_get_peb_ldr()) {
-        *(uint32_t *)(p + 0x0C) = (uint32_t)(uintptr_t)loader_get_peb_ldr();
-
-        /* Register main PE image if not already linked */
-        int mod_idx = -1;
-        for (int i = 0; i < g_loader.module_count && i < MAX_MODULES; i++) {
-            if (g_loader.modules[i].base == image_base) {
-                mod_idx = i;
-                break;
-            }
-        }
-        if (mod_idx < 0) {
-            loaded_module_t *mod = add_module(image_base, "main.exe", nt);
-            if (mod) {
-                ldr_add_module(mod);
-            }
-        } else if (!g_loader.modules[mod_idx].ldr_linked) {
-            ldr_add_module(&g_loader.modules[mod_idx]);
-        }
-    }
-}
-
-/**
- * wire_peb32_os_version — set OSMajorVersion, OSMinorVersion, OSBuildNumber.
- * Windows 10 21H2: 10.0.19041
- */
-static void wire_peb32_os_version(void *peb)
-{
-    uint8_t *p = (uint8_t *)peb;
-
-    *(uint16_t *)(p + 0x2E) = 0x0A;     /* OSMajorVersion = 10 */
-    *(uint16_t *)(p + 0x30) = 0x00;     /* OSMinorVersion = 0 */
-    *(uint16_t *)(p + 0x34) = 0x4A11;   /* OSBuildNumber = 19041 */
-}
-
-/**
- * wire_peb32_fields — initialize all PEB fields beyond the basic ImageBase.
- * Delegates to sub-functions for each PEB region.
- */
-static void wire_peb32_fields(void *peb, void *image_base,
-                              IMAGE_NT_HEADERS *nt, const char *pe_path)
-{
-    wire_peb32_heap(peb);
-    wire_peb32_params(peb, pe_path);
-    wire_peb32_ldr(peb, image_base, nt);
-    wire_peb32_os_version(peb);
-}
-
-/* ── BSS Seeding ──────────────────────────────────────────────── */
-
-/*
- * seed_bss_vars — pre-seed CRT globals in the PE .bss section.
- *
- * Many PE32 CRTs (MinGW, Watcom) expect _argc, _argv, _environ
- * to be pre-initialized in .bss before entry. We use local
- * CRT_BSS_* defines for the 32-bit standalone build since the
- * CRT module system is not available in the 32-bit child.
- *
- * Uses INLINE_SYSCALL_MPROTECT for mprotect (already in syscalls_inline.h).
- */
-static void seed_bss_vars(void *base, IMAGE_NT_HEADERS *nt)
-{
-    IMAGE_SECTION_HEADER *sections = get_image_sections(base, nt);
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
-    if (bss_sec == NULL) {
-        return;  /* No .bss — nothing to seed */
-    }
-
-    size_t bss_size = bss_sec->Misc.VirtualSize;
-    if (bss_size == 0) bss_size = bss_sec->SizeOfRawData;
-    if (bss_size == 0) return;
-
-    uint8_t *bss_base = pe_rva_to_ptr(base, nt, bss_sec->VirtualAddress,
-                                      bss_size);
-    if (bss_base == NULL) return;
-
-    /* Ensure .bss is writable */
-    uintptr_t bss_page = (uintptr_t)bss_base & ~(uintptr_t)PAGE_MASK;
-    size_t bss_pages = ((bss_size + PAGE_MASK) & ~(size_t)PAGE_MASK);
-    if (bss_pages == 0) bss_pages = PAGE_SIZE;
-    long mprot_rc = INLINE_SYSCALL_MPROTECT((void *)bss_page, bss_pages,
-                                             PROT_READ | PROT_WRITE);
-    if (mprot_rc != 0) {
-        return;  /* Can't mprotect — skip seeding */
-    }
-
-    /* _argc = 1 */
-    if (CRT_BSS_ARGC < bss_size) {
-        *(uint32_t *)(bss_base + CRT_BSS_ARGC) = 1;
-    }
-
-    /* _argv → our 32-bit argv array (set by ensure_argv_setup) */
-    if (CRT_BSS_ARGV < bss_size && g_argv_ptr != 0) {
-        *(uint32_t *)(bss_base + CRT_BSS_ARGV) = g_argv_ptr;
-    }
-
-    /* _envp/__initenv → our 32-bit envp array */
-    if (CRT_BSS_INITENV < bss_size && g_argv_page != NULL) {
-        uint32_t envp_ptr = (uint32_t)(uintptr_t)((uint8_t *)g_argv_page + 0x208);
-        *(uint32_t *)(bss_base + CRT_BSS_INITENV) = envp_ptr;
-    }
-
-    /* _acmdln → pointer to the 32-bit path copy (from ensure_argv_setup)
-     * so the PE's own CRT _acmdln symbol resolves to a 32-bit string buffer. */
-    if (CRT_BSS_ACMDLN + 4 <= bss_size && g_argv_page != NULL) {
-        uint32_t path_ptr = (uint32_t)(uintptr_t)((uint8_t *)g_argv_page + 0);
-        *(uint32_t *)(bss_base + CRT_BSS_ACMDLN) = path_ptr;
-    }
-}
-
 /* ── setup_fs_and_jump ──────────────────────────────────────── */
 
 static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
@@ -696,8 +378,8 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
      */
     *(uint32_t *)(sp + 0) = entry_abs;   /* fake return addr */
     *(uint32_t *)(sp + 4) = 1;           /* argc = 1 */
-    *(uint32_t *)(sp + 8) = g_argv_ptr;  /* argv = 32-bit array */
-    *(uint32_t *)(sp + 12) = (uint32_t)(uintptr_t)((uint8_t *)g_argv_page + 0x208); /* envp */
+    *(uint32_t *)(sp + 8) = pe32_argv_ptr();  /* argv = 32-bit array */
+    *(uint32_t *)(sp + 12) = pe32_envp_ptr();
 
     /* Set FS → TEB so guest fs:[offset] accesses resolve to TEB.
      * arch_prctl(ARCH_SET_FS) returns EINVAL in 32-bit mode on a 64-bit kernel.
@@ -1008,7 +690,7 @@ int main(int argc, char **argv)
     ensure_argv_setup(pe_path);
 
     /* Pre-seed CRT globals in .bss */
-    seed_bss_vars(g_loader.image_base, &g_nt_headers);
+    seed_pe32_bss_vars(g_loader.image_base, &g_nt_headers);
 
     /* 7. Set FS → TEB and jump to PE entry */
     setup_fs_and_jump(teb, pe_path, entry_abs, stack_top);

@@ -2,8 +2,8 @@
  * hello_world_32.c — Minimal 32-bit my_wine sample.
  *
  * Uses kernel32 WriteFile + ExitProcess (the two APIs my_wine supports
- * first). Build: ./build_samples.sh hello_world_32
- * Run:   ./build_samples.sh run hello_world_32
+ * first). Build: ./scripts/samples.sh build hello_world_32
+ * Run:   ./scripts/samples.sh run hello_world_32
  */
 
 #include <windows.h>

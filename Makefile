@@ -13,28 +13,21 @@ MY_WINE32_CFLAGS = $(CFLAGS) -DMY_WINE32 -mno-red-zone -fno-stack-protector \
 	-fno-exceptions -mno-sse -fno-pie -no-pie -fno-builtin \
 	-Werror
 
-# Add generated CRT offsets if the header exists.
-ifneq ($(wildcard include/crt_offsets_generated.h),)
-CFLAGS += -DHAVE_GENERATED_CRT_OFFSETS
-endif
-
 # ── Directories ─────────────────────────────────────────────────
 BUILDDIR = build
 BUILDDIR32 = build32
 
 # ── Generated File Policy ───────────────────────────────────────
 # Required generated files are ignored by git but regenerated automatically
-# from tracked inputs. Optional generated files are ignored and only used when
-# present; hardcoded fallbacks keep the build working without them.
+# from tracked inputs.
 GENERATED_REQUIRED = src/syscall/dispatcher_generated.c
-GENERATED_OPTIONAL = include/crt_offsets_generated.h
 
 # ── Source Groups: Wrapper And PE32+ ────────────────────────────
 # Auto-discover .c per source group; objects flatten into build/.
 ROOT_SRC     = $(filter-out src/wrapper_main.c, $(sort $(shell find src/   -maxdepth 1 -name '*.c')))
 STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c, \
 		$(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c')))
-LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c))
+LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c | grep -v pe32_process.c))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
 HEAP_SRC     = $(sort $(shell find src/heap    -maxdepth 1 -name '*.c'))
 CRT_SRC      = $(sort $(shell find src/crt     -maxdepth 1 -name '*.c'))
@@ -63,6 +56,7 @@ MY_WINE32_HEAP_OBJS  = $(patsubst src/heap/%.c,$(BUILDDIR32)/%.o,$(MY_WINE32_HEA
 
 MY_WINE32_OBJS = \
 	$(BUILDDIR32)/pe32_entry.o \
+	$(BUILDDIR32)/pe32_process.o \
 	$(BUILDDIR32)/pe32_run_guest.o \
 	$(BUILDDIR32)/crash_handlers.o \
 	$(BUILDDIR32)/teb_peb.o \
@@ -165,10 +159,6 @@ gen: gen-dispatcher
 
 check-generated:
 	@python3 scripts/gen_dispatcher.py --check
-
-gen-crt-offsets:
-	@echo "Generating CRT offsets from current mingw-w64 toolchain..."
-	@bash scripts/gen_crt_offsets.sh || { echo "WARNING: CRT offset generation failed"; echo "  Try: make build-docker-image"; exit 0; }
 
 gen-dispatcher: $(GENERATED_REQUIRED)
 	@echo "Generated dispatcher switch bodies."
@@ -294,7 +284,7 @@ build-docker-image:
 clean:
 	@echo "  CLEAN build artifacts"
 	rm -rf $(BUILDDIR) $(BUILDDIR32)
-	rm -f $(GENERATED_REQUIRED) $(GENERATED_OPTIONAL)
+	rm -f $(GENERATED_REQUIRED)
 
 fclean: clean
 	@echo "  FCLEAN all end targets"
@@ -310,4 +300,4 @@ re: fclean
 # ── Auto-generated Header Dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
 
-.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-crt-offsets gen-dispatcher check-generated $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-dispatcher check-generated $(BUILDDIR) $(BUILDDIR32)

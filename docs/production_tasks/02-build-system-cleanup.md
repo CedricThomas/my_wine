@@ -34,8 +34,8 @@ preserve the current build groups and ownership layers:
 - Shared guest-sensitive groups in `src/loader/`, `src/syscall/`,
   `src/msvcrt/`, `src/heap/`, and `src/crt/`.
 - Ignored local artifacts: `build/`, `build32/`, sample `.exe/.dll` files,
-  `src/syscall/dispatcher_generated.c`, `include/crt_offsets_generated.h`, and
-  the stray `src/loader/import_resolve.d`.
+  `src/syscall/dispatcher_generated.c`, and the stray
+  `src/loader/import_resolve.d`.
 - Boundary ownership for wrapper, PE parsing, loader core, guest setup,
   PE32 runtime entry, syscall dispatch, Windows API stubs, heap, and CRT module
   policy.
