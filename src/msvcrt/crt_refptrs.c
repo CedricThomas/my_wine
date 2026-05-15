@@ -153,7 +153,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
         .envp_bss_offset = 0,
     };
 
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    const IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     void *initenv_stub = NULL;
     if (bss_sec) {
         ctx.bss_vaddr = bss_sec->VirtualAddress;
@@ -227,7 +227,7 @@ void patch_crt_refptrs(const char *file_path, void *image_base,
         const char *scan_names[] = {".rdata", ".data", NULL};
         int next_unpatched = 0;
         for (int si = 0; scan_names[si]; si++) {
-            IMAGE_SECTION_HEADER *scan_sec = find_section_by_name(nt, sections, scan_names[si]);
+            const IMAGE_SECTION_HEADER *scan_sec = find_section_by_name(nt, sections, scan_names[si]);
             if (!scan_sec) continue;
             uint64_t sec_vaddr = scan_sec->VirtualAddress;
             uint64_t sec_size = scan_sec->Misc.VirtualSize;

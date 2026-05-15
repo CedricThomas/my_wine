@@ -231,7 +231,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
         .envp_bss_offset = 0,
     };
 
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    const IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     void *initenv_stub = NULL;
     if (bss_sec) {
         ctx.bss_vaddr = bss_sec->VirtualAddress;
@@ -310,7 +310,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
         const char *scan_names[] = { ".rdata", ".data", NULL };
         int next_unpatched = 0;
         for (int si = 0; scan_names[si]; si++) {
-            IMAGE_SECTION_HEADER *scan_sec = find_section_by_name(nt, sections,
+            const IMAGE_SECTION_HEADER *scan_sec = find_section_by_name(nt, sections,
                                                                   scan_names[si]);
             if (!scan_sec) continue;
             uint64_t sec_vaddr = scan_sec->VirtualAddress;
@@ -381,7 +381,7 @@ static void mingw_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     uint8_t *bss_base = (uint8_t *)image_base + g_crt.crt_ctx.bss_vaddr;
 
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    const IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec == NULL) {
         fprintf(stderr, "WARNING: .bss section not found in headers, "
                 "skipping pre-seed\n");

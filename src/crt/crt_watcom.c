@@ -229,7 +229,7 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
         .envp_bss_offset = 0,
     };
 
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    const IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec) {
         ctx.bss_vaddr = bss_sec->VirtualAddress;
         DEBUG_LEVEL(2, "watcom_patch_refptrs: .bss at VA=0x%lx",
@@ -244,12 +244,25 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
 
     /* Set the 'initialized' flag to 1 to skip CRT startup */
     if (bss_sec) {
-        uint32_t *initialized_ptr = (uint32_t *)((char *)image_base +
-                                                  ctx.bss_vaddr +
-                                                  WATCOM_BSS_INITIALIZED);
-        *initialized_ptr = 1;
-        DEBUG_LEVEL(2, "watcom_patch_refptrs: set initialized=1 at %p",
-              (void *)initialized_ptr);
+        uint8_t *bss_base = (uint8_t *)image_base + ctx.bss_vaddr;
+
+        /* Ensure .bss page is writable (same pattern as watcom_seed_bss) */
+        size_t bss_size = bss_sec->Misc.VirtualSize;
+        if (bss_size == 0) bss_size = bss_sec->SizeOfRawData;
+
+        uintptr_t bss_page = (uintptr_t)bss_base & ~(uintptr_t)PAGE_MASK;
+        if (mprotect((void *)bss_page,
+                     (bss_size + PAGE_MASK) & ~(size_t)PAGE_MASK,
+                     PROT_READ | PROT_WRITE) != 0) {
+            fprintf(stderr, "WARNING: mprotect .bss failed in watcom_patch_refptrs, "
+                    "skipping initialized write\n");
+        } else {
+            uint32_t *initialized_ptr = (uint32_t *)(bss_base +
+                                                     WATCOM_BSS_INITIALIZED);
+            *initialized_ptr = 1;
+            DEBUG_LEVEL(2, "watcom_patch_refptrs: set initialized=1 at %p",
+                  (void *)initialized_ptr);
+        }
     }
 
     DEBUG_LEVEL(2, "watcom_patch_refptrs: no refptr mappings to patch (empty table)");
@@ -272,7 +285,7 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     uint8_t *bss_base = (uint8_t *)image_base + g_crt.crt_ctx.bss_vaddr;
 
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    const IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec == NULL) {
         fprintf(stderr, "WARNING: .bss section not found in headers, "
                 "skipping pre-seed\n");

@@ -325,7 +325,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
 static int collect_thunk_targets(void *base, IMAGE_NT_HEADERS *nt,
                                  uint64_t targets[MAX_THUNK_TARGETS])
 {
-    IMAGE_SECTION_HEADER *sections = get_image_sections(base, nt);
+    const IMAGE_SECTION_HEADER *sections = get_image_sections(base, nt);
 
     return scan_rip_relative_jumps(base, nt, sections,
                                     pe_section_count(nt),

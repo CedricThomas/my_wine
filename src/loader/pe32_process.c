@@ -203,7 +203,7 @@ void wire_peb32_fields(void *peb, void *image_base,
 void seed_pe32_bss_vars(void *base, IMAGE_NT_HEADERS *nt)
 {
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, nt);
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    const IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec == NULL) {
         return;
     }

@@ -220,7 +220,7 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
     /* Validate: the RVA must fall within a code section */
     IMAGE_SECTION_HEADER *sections =
         get_image_sections(g_loader.image_base, &g_nt_headers);
-    IMAGE_SECTION_HEADER *code = find_code_section(&g_nt_headers, sections);
+    const IMAGE_SECTION_HEADER *code = find_code_section(&g_nt_headers, sections);
     if (code == NULL)
         return 0;
 
@@ -264,7 +264,7 @@ static uint32_t resolve_entry_symbol(const char *path)
     uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
     uint32_t num_sym = pe_number_of_symbols(&g_nt_headers);
 
-    IMAGE_SECTION_HEADER *sections =
+    const IMAGE_SECTION_HEADER *sections =
         get_image_sections(g_loader.image_base, &g_nt_headers);
     int num_sections = pe_section_count(&g_nt_headers);
 
@@ -337,7 +337,7 @@ static void patch_crt_initialized(const char *path)
 
     if (ptr_sym == 0 || num_sym == 0) return;
 
-    IMAGE_SECTION_HEADER *sections =
+    const IMAGE_SECTION_HEADER *sections =
         get_image_sections(g_loader.image_base, &g_nt_headers);
     int num_sections = pe_section_count(&g_nt_headers);
 
@@ -351,7 +351,7 @@ static void patch_crt_initialized(const char *path)
                                            sections, num_sections,
                                            "_initialized");
     if (init_rva == 0) {
-        IMAGE_SECTION_HEADER *bss = find_section_by_name(&g_nt_headers,
+        const IMAGE_SECTION_HEADER *bss = find_section_by_name(&g_nt_headers,
                                                          sections, ".bss");
         if (bss)
             init_rva = bss->VirtualAddress + 0x40;

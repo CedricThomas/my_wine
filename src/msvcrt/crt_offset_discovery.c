@@ -48,7 +48,7 @@ void scan_text_for_refptrs(void *image_base, IMAGE_NT_HEADERS *nt,
                            IMAGE_SECTION_HEADER *sections,
                            uint64_t image_size, void *initenv_stub)
 {
-    IMAGE_SECTION_HEADER *text_sec = find_code_section(nt, sections);
+    const IMAGE_SECTION_HEADER *text_sec = find_code_section(nt, sections);
     if (!text_sec) {
         DEBUG("crt_offset_discovery: no code section");
         return;

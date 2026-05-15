@@ -64,7 +64,7 @@ static void seed_bss_vars(void *base,
 
     uint8_t *bss_base = (uint8_t *)base + g_crt.crt_ctx.bss_vaddr;
 
-    IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
+    const IMAGE_SECTION_HEADER *bss_sec = find_section_by_name(nt, sections, ".bss");
     if (bss_sec == NULL) {
         fprintf(stderr, "WARNING: .bss section not found in headers, "
                 "skipping pre-seed\n");
@@ -180,7 +180,7 @@ static int init_loader(int argc, char **argv,
     if (!stack_top) return -1;
 
     {
-        IMAGE_SECTION_HEADER *data_sec = find_section_by_name(&nt, sections, ".data");
+        const IMAGE_SECTION_HEADER *data_sec = find_section_by_name(&nt, sections, ".data");
         if (data_sec == NULL) {
             fprintf(stderr, "WARNING: .data section not found\n");
         } else {
