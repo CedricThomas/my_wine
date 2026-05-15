@@ -34,7 +34,7 @@ GENERATED_REQUIRED = src/syscall/dispatcher_generated.c
 # ── Source Groups: Wrapper And PE32+ ────────────────────────────
 # Auto-discover .c per source group; objects flatten into build/.
 ROOT_SRC     = $(filter-out src/wrapper_main.c, $(sort $(shell find src/   -maxdepth 1 -name '*.c')))
-STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c src/msvcrt/user32_window.c src/msvcrt/user32_message.c src/msvcrt/user32_input.c, \
+STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c, \
 		$(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c')))
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c | grep -v pe32_process.c))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
@@ -120,13 +120,13 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/dll_path.o $(BUILDDIR)/dll_loader.o
 
 # Shared objects used by import-resolution and teb_peb tests.
-TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
+TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
 	$(CRT_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o $(BUILDDIR)/clone64.o
 
 # Non-crt stubs (syscall dispatch test does not need the CRT stubs).
-STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o, $(STUBS_OBJS))
+STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS))
 
 # kernel32_module.c depends on loader functions not available in syscall test,
 # so exclude it from the non-CRT stubs used here.
@@ -305,7 +305,7 @@ $(BUILDDIR32)/backend/%.o: %.c | $(BUILDDIR32)
 TEST_sdl2_backend32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o
 $(BUILDDIR32)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend32_OBJS)
 	@echo "  LD32 $@"
-	@$(MY_WINE32_CC) -no-pie $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS_32)
+	@$(MY_WINE32_CC) -no-pie $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS_32)
 
 # ── Samples ─────────────────────────────────────────────────────
 # Cross-compile samples to PE .exe via Docker (mingw-w64).
