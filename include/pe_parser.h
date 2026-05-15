@@ -42,17 +42,17 @@ int parse_sections(const void *base, size_t file_size,
  * Find a section by name (case-insensitive, up to 8 chars).
  * Returns NULL if not found.
  */
-IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
-                                            const IMAGE_SECTION_HEADER *sections,
-                                            const char *name);
+const IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
+                                                  const IMAGE_SECTION_HEADER *sections,
+                                                  const char *name);
 
 /*
  * Find the primary code section. Tries name lookup (.text, BEGTEXT, TEXT,
  * CODE) then falls back to Characteristics-based detection.
  * Returns NULL if no code section found.
  */
-IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
-                                         const IMAGE_SECTION_HEADER *sections);
+const IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
+                                               const IMAGE_SECTION_HEADER *sections);
 
 /*
  * Parse the import descriptor chain.

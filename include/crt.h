@@ -154,6 +154,9 @@ void crt_set_active(const crt_module_t *mod);
 /* Get the globally active CRT module without re-detection */
 const crt_module_t *crt_get_active(void);
 
+/* Get the CRT type of a module */
+crt_type_t crt_module_type(const crt_module_t *mod);
+
 /* Check whether the module provides a seed_bss vtable entry */
 int crt_has_seed_bss(const crt_module_t *mod);
 

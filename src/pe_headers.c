@@ -162,9 +162,9 @@ int parse_sections(const void *base, size_t file_size,
 extern int _m_strncasecmp(const char *a, const char *b, size_t n);
 #endif
 
-IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
-                                            const IMAGE_SECTION_HEADER *sections,
-                                            const char *name)
+const IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
+                                                  const IMAGE_SECTION_HEADER *sections,
+                                                  const char *name)
 {
     uint16_t num = pe_section_count(nt_headers);
     size_t name_len = strlen(name);
@@ -179,7 +179,7 @@ IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
         int cmp = strncasecmp((const char *)sections[i].Name, name, name_len);
 #endif
         if (cmp == 0 && sections[i].Name[name_len] == '\0') {
-            return (IMAGE_SECTION_HEADER *)&sections[i];
+            return (const IMAGE_SECTION_HEADER *)&sections[i];
         }
     }
     DEBUG_LEVEL(3, "find_section_by_name: not found '%s' (searched %d sections)", name, num);

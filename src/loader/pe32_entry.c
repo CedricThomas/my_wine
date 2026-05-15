@@ -32,7 +32,6 @@
 #include <fcntl.h>
 
 #include "include/crt.h"
-#include "../crt/crt_priv.h"
 #include "../syscall/syscalls_inline.h"
 #include "include/syscall/dispatcher_entry.h"
 #include "include/pe.h"
@@ -188,7 +187,7 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
 {
     /* Only attempt when the active CRT is Watcom (the only one with this pattern) */
     const crt_module_t *mod = crt_get_active();
-    if (mod == NULL || mod->type != CRT_TYPE_WATCOM)
+    if (mod == NULL || crt_module_type(mod) != CRT_TYPE_WATCOM)
         return 0;
 
     /* Read 15 bytes from the PE entry point:

@@ -166,3 +166,8 @@ int crt_has_seed_bss(const crt_module_t *mod)
 {
     return mod != NULL && mod->seed_bss != NULL;
 }
+
+crt_type_t crt_module_type(const crt_module_t *mod)
+{
+    return mod ? mod->type : CRT_TYPE_UNKNOWN;
+}
