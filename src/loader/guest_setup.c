@@ -83,19 +83,17 @@ static void acrt_iob_patch_cb(void *arg)
     for (int k = 11; k < 15; k++) code[k] = X86_NOP;
 }
 
-/* Compute .text section end for bounds checking */
+/* Compute .text/code section end for bounds checking */
 static uint64_t find_text_end(IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections)
 {
-    for (uint16_t i = 0; i < pe_section_count(nt); i++) {
-        if (memcmp(sections[i].Name, ".text", 5) == 0) {
-            uint64_t end = sections[i].VirtualAddress + sections[i].Misc.VirtualSize;
-            if (end < sections[i].VirtualAddress ||
-                sections[i].SizeOfRawData > sections[i].Misc.VirtualSize)
-                end = sections[i].VirtualAddress + sections[i].SizeOfRawData;
-            return end;
-        }
-    }
-    return 0;
+    const IMAGE_SECTION_HEADER *text = find_code_section(nt, sections);
+    if (!text)
+        return 0;
+    uint64_t end = text->VirtualAddress + text->Misc.VirtualSize;
+    if (end < text->VirtualAddress ||
+        text->SizeOfRawData > text->Misc.VirtualSize)
+        end = text->VirtualAddress + text->SizeOfRawData;
+    return end;
 }
 
 /* Validate opcode, check bounds, apply the iob patch */

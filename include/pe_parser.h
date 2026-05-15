@@ -47,6 +47,14 @@ IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
                                             const char *name);
 
 /*
+ * Find the primary code section. Tries name lookup (.text, BEGTEXT, TEXT,
+ * CODE) then falls back to Characteristics-based detection.
+ * Returns NULL if no code section found.
+ */
+IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
+                                         const IMAGE_SECTION_HEADER *sections);
+
+/*
  * Parse the import descriptor chain.
  * Returns number of import descriptors on success, -1 on error, 0 if none.
  * out_first_descriptor points into the file mapping.

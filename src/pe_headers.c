@@ -186,6 +186,53 @@ IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
     return NULL;
 }
 
+/* ── Find code section ────────────────────────────────────────── */
+
+/*
+ * Find the primary code section. Tries name lookup in priority order:
+ *   .text, BEGTEXT, TEXT, CODE (case-insensitive)
+ * Falls back to scanning for Characteristics with both
+ * IMAGE_SCN_CNT_CODE and IMAGE_SCN_MEM_EXECUTE set.
+ * Returns NULL if no code section found.
+ */
+
+#define IMAGE_SCN_CNT_CODE        0x00000020
+#define IMAGE_SCN_MEM_EXECUTE     0x20000000
+
+IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
+                                         const IMAGE_SECTION_HEADER *sections)
+{
+    uint16_t num = pe_section_count(nt_headers);
+    if (num == 0)
+        return NULL;
+
+    /* Priority-ordered name lookup (case-insensitive) */
+    static const char *const code_names[] = { ".text", "BEGTEXT", "TEXT", "CODE" };
+    for (size_t n = 0; n < sizeof(code_names) / sizeof(code_names[0]); n++) {
+        size_t name_len = strlen(code_names[n]);
+        for (uint16_t i = 0; i < num; i++) {
+#ifdef MY_WINE32
+            int cmp = _m_strncasecmp((const char *)sections[i].Name, code_names[n], name_len);
+#else
+            int cmp = strncasecmp((const char *)sections[i].Name, code_names[n], name_len);
+#endif
+            if (cmp == 0 && sections[i].Name[name_len] == '\0') {
+                return (IMAGE_SECTION_HEADER *)&sections[i];
+            }
+        }
+    }
+
+    /* Fallback: first section with both code and execute flags */
+    for (uint16_t i = 0; i < num; i++) {
+        if ((sections[i].Characteristics & IMAGE_SCN_CNT_CODE) &&
+            (sections[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) {
+            return (IMAGE_SECTION_HEADER *)&sections[i];
+        }
+    }
+
+    return NULL;
+}
+
 /* ── Dump headers (debug) ───────────────────────────────────────── */
 
 void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,

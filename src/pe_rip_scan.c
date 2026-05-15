@@ -30,8 +30,8 @@ static int _scan_rip_jumps(void *image_base,
                            void *user_data)
 {
     (void)num_sections;
-    /* Find .text section */
-    const IMAGE_SECTION_HEADER *text = find_section_by_name(nt, sections, ".text");
+    /* Find code section (.text, BEGTEXT, etc.) */
+    const IMAGE_SECTION_HEADER *text = find_code_section(nt, sections);
     if (text == NULL)
         return 0;
 
@@ -200,8 +200,8 @@ void *find_rip_relative_jump_to(void *image_base,
                                 int num_sections,
                                 void *target_addr)
 {
-    /* Find .text section */
-    const IMAGE_SECTION_HEADER *text = find_section_by_name(nt, sections, ".text");
+    /* Find code section (.text, BEGTEXT, etc.) */
+    const IMAGE_SECTION_HEADER *text = find_code_section(nt, sections);
     if (text == NULL)
         return NULL;
 
