@@ -168,6 +168,11 @@ static void *map_pe(const char *path)
 #define AT_FDCWD ((long)-100)
 #endif
 
+static inline uint32_t le32(const uint8_t *p)
+{
+    return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
+}
+
 /*
  * extract_entry_from_entry_point — extract the user entry function RVA
  * from the Watcom CRT startup pattern at the PE AddressOfEntryPoint.
@@ -208,10 +213,7 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
 
     /* Verify disp32 (bytes 2..5) is non-zero — a zero disp32 means
      * it's not writing anywhere meaningful. */
-    uint32_t disp32 = (uint32_t)((uint32_t)p[2]       |
-                                 ((uint32_t)p[3] << 8)  |
-                                 ((uint32_t)p[4] << 16) |
-                                 ((uint32_t)p[5] << 24));
+    uint32_t disp32 = le32(p + 2);
     if (disp32 == 0)
         return 0;
 
@@ -221,10 +223,7 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
         return 0;
 
     /* Extract imm32 (bytes 6..9) — absolute runtime address of user entry */
-    uint32_t imm32 = (uint32_t)((uint32_t)p[6]       |
-                                ((uint32_t)p[7] << 8)  |
-                                ((uint32_t)p[8] << 16) |
-                                ((uint32_t)p[9] << 24));
+    uint32_t imm32 = le32(p + 6);
 
     /* Convert absolute address to RVA */
     uint32_t base = (uint32_t)(uintptr_t)g_loader.image_base;
@@ -248,6 +247,8 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
     if (rva < code_start || code_size == 0)
         return 0;
     uint32_t code_end = code_start + code_size;
+    if (code_end < code_start)
+        return 0;
     if (rva >= code_end)
         return 0;
 
@@ -267,16 +268,18 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
  * FPU reset, and other CRT init code that causes crashes in the
  * 32-bit loader (EIP=0x0 after _out returns).
  *
- * If COFF symbols are absent (stripped binaries like Watcom DOOM95),
- * tries extracting the entry RVA from the Watcom CRT startup pattern
- * at the PE AddressOfEntryPoint. If that also fails, falls back to
- * the PE AddressOfEntryPoint (which points to CRT startup code).
+ * If no entry symbol was found in COFF symbols (stripped binaries or
+ * unrecognized symbol names), tries extracting the entry RVA from the
+ * Watcom CRT startup pattern at the PE AddressOfEntryPoint. If that
+ * also fails, falls back to the PE AddressOfEntryPoint (which points
+ * to CRT startup code).
  *
  * @return entry_rva
  */
 static uint32_t resolve_entry_symbol(const char *path)
 {
-    uint32_t entry_rva = pe_entry_rva(&g_nt_headers);
+    uint32_t pe_entry = pe_entry_rva(&g_nt_headers);
+    uint32_t entry_rva = pe_entry;
     uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
     uint32_t num_sym = pe_number_of_symbols(&g_nt_headers);
 
@@ -327,8 +330,11 @@ static uint32_t resolve_entry_symbol(const char *path)
         }
     }
 
-    /* COFF symbols absent — try extracting entry from Watcom CRT startup pattern */
-    if (ptr_sym == 0 || num_sym == 0) {
+    /* Entry symbol not found from COFF — try extracting from Watcom CRT startup
+     * pattern at the PE AddressOfEntryPoint. This covers both stripped binaries
+     * (no COFF symbols) and binaries with symbols but no recognizable entry.
+     * Falls back to pe_entry_rva if extraction fails. */
+    if (entry_rva == pe_entry) {
         uint32_t extracted_rva;
         if (extract_entry_from_entry_point(&extracted_rva)) {
             DEBUG_LEVEL(1, "watcom_entry_extract: user_func VA=0x%x -> RVA=0x%x",
@@ -336,6 +342,7 @@ static uint32_t resolve_entry_symbol(const char *path)
                         extracted_rva);
             entry_rva = extracted_rva;
         }
+        /* else: falls back to pe_entry_rva (already in entry_rva) */
     }
 
     return entry_rva;
