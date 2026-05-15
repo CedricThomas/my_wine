@@ -106,7 +106,7 @@ rb_cursor_t rb_cursor_create(int idc)
     switch (idc) {
         case 0: type = SDL_SYSTEM_CURSOR_ARROW;    break;  /* IDC_ARROW  */
         case 1: type = SDL_SYSTEM_CURSOR_CROSSHAIR; break;  /* IDC_CROSS  */
-        case 2: type = SDL_SYSTEM_CURSOR_UP;        break;  /* IDC_UPARROW*/
+        case 2: type = SDL_SYSTEM_CURSOR_ARROW;     break;  /* IDC_UPARROW — no SDL_SYSTEM_CURSOR_UP */
         case 3: type = SDL_SYSTEM_CURSOR_WAIT;      break;  /* IDC_WAIT   */
         case 4: type = SDL_SYSTEM_CURSOR_IBEAM;     break;  /* IDC_IBEAM  */
         case 5: type = SDL_SYSTEM_CURSOR_SIZEALL;   break;  /* IDC_SIZE   */
