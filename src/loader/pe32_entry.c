@@ -607,12 +607,15 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
      */
     uintptr_t aligned_sp = ((uintptr_t)stack_top & ~(uintptr_t)15) - 4;
     uint8_t *sp = (uint8_t *)aligned_sp;
-    /* Zero the argument frame region (16 bytes: return addr + 3 args).
-     * sp = stack_top - 12, so sp + 16 = stack_top + 4.
-     * The stack grows downward from stack_top, so the usable region
-     * is below stack_top. We zero only the 16 bytes we actually use,
-     * staying within the last page of the committed stack. */
-    __builtin_memset(sp, 0, 16);
+    /*
+     * Zero top of guest stack and write a proper
+     * cdecl argument frame based on entry type.
+     *
+     * For ENTRY_TYPE_MAIN: [fake_ret, argc=1, argv, envp] (4 DWORDs = 16 bytes)
+     * For ENTRY_TYPE_WINMAIN/WWINMAIN: [fake_ret, hInstance, hPrevInstance, lpCmdLine, nCmdShow] (5 DWORDs = 20 bytes)
+     */
+    uint32_t zero_len = (g_entry_type == ENTRY_TYPE_MAIN) ? 16 : 20;
+    __builtin_memset(sp, 0, zero_len);
 
     /*
      * Write a proper cdecl argument frame with fake return address.
@@ -620,16 +623,32 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
      * address is pushed. We write entry_abs itself as a fake return addr
      * so if main() does `ret`, it re-enters the entry point.
      *
-     * Layout at ESP:
+     * For ENTRY_TYPE_MAIN:
      *   [ESP+0]  = fake return address (entry_abs)
      *   [ESP+4]  = argc (1)
      *   [ESP+8]  = argv pointer
      *   [ESP+12] = envp pointer
+     *
+     * For ENTRY_TYPE_WINMAIN / ENTRY_TYPE_WWINMAIN:
+     *   [ESP+0]  = fake return address (entry_abs)
+     *   [ESP+4]  = hInstance (= image_base)
+     *   [ESP+8]  = hPrevInstance (= 0)
+     *   [ESP+12] = lpCmdLine (= pe_path_ptr from g_argv_page + 0)
+     *   [ESP+16] = nCmdShow (= 5 = SW_SHOW)
      */
     *(uint32_t *)(sp + 0) = entry_abs;   /* fake return addr */
-    *(uint32_t *)(sp + 4) = 1;           /* argc = 1 */
-    *(uint32_t *)(sp + 8) = pe32_argv_ptr();  /* argv = 32-bit array */
-    *(uint32_t *)(sp + 12) = pe32_envp_ptr();
+
+    if (g_entry_type == ENTRY_TYPE_MAIN) {
+        *(uint32_t *)(sp + 4) = 1;           /* argc = 1 */
+        *(uint32_t *)(sp + 8) = pe32_argv_ptr();  /* argv = 32-bit array */
+        *(uint32_t *)(sp + 12) = pe32_envp_ptr(); /* envp */
+    } else {
+        /* WinMain / wWinMain stack layout */
+        *(uint32_t *)(sp + 4) = (uint32_t)(uintptr_t)g_loader.image_base;  /* hInstance */
+        *(uint32_t *)(sp + 8) = 0;                       /* hPrevInstance */
+        *(uint32_t *)(sp + 12) = (uint32_t)(uintptr_t)((uint8_t *)g_argv_page + 0); /* lpCmdLine / lpCmdLineW */
+        *(uint32_t *)(sp + 16) = 5;                      /* nCmdShow = SW_SHOW */
+    }
 
     /* Set FS → TEB so guest fs:[offset] accesses resolve to TEB.
      * arch_prctl(ARCH_SET_FS) returns EINVAL in 32-bit mode on a 64-bit kernel.
