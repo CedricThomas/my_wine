@@ -284,9 +284,9 @@ $(BUILDDIR)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend_OBJ
 	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
 
 $(BUILDDIR)/backend/%.o: %.c | $(BUILDDIR)
-	@mkdir -p $(BUILDDIR)/backend
+	@mkdir -p $(@D)
 	@echo "  CC-SDL2 $<"
-	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -c $< -o $@
+	@$(CC) $(filter-out -mno-sse,$(CFLAGS)) $(SDL2_CFLAGS) -c $< -o $@
 
 # ── Samples ─────────────────────────────────────────────────────
 # Cross-compile samples to PE .exe via Docker (mingw-w64).
@@ -331,5 +331,6 @@ re: fclean
 
 # ── Auto-generated Header Dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
+-include $(wildcard $(BACKEND_OBJS:.o=.d))
 
 .PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)
