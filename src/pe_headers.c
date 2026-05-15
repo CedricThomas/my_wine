@@ -155,12 +155,7 @@ int parse_sections(const void *base, size_t file_size,
 
 /* ── Find section by name ───────────────────────────────────────── */
 
-/* In the 32-bit standalone build, musl's strncasecmp is an ifunc whose PLT
- * resolver returns without executing the actual comparison (same bug as
- * strncpy). Use our hand-rolled _m_strncasecmp from crt_32_stub.c instead. */
-#ifdef MY_WINE32
-extern int _m_strncasecmp(const char *a, const char *b, size_t n);
-#endif
+/* _m_strncasecmp declared in common.h (guarded by MY_WINE32). */
 
 const IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
                                                   const IMAGE_SECTION_HEADER *sections,

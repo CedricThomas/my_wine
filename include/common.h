@@ -9,6 +9,12 @@
 #include <stddef.h>
 #include "debug.h"
 
+/* Hand-rolled strncasecmp for 32-bit standalone builds where musl's
+ * strncasecmp is an ifunc whose PLT resolver fails to call the target. */
+#ifdef MY_WINE32
+extern int _m_strncasecmp(const char *a, const char *b, size_t n);
+#endif
+
 /* Global debug level: set from MY_WINE_DEBUG_LEVEL before guest handoff. */
 extern int g_debug_level;
 int parse_debug_level(const char *value);

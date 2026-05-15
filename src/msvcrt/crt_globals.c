@@ -43,7 +43,10 @@ static __attribute__((constructor)) void crt_init_self_refs(void)
  * These MUST be functions (not data) because MinGW CRT imports them
  * via JMP thunks — if the IAT contains a data address, the CPU will
  * try to execute it as instructions → SIGSEGV.
- * These are for the 64-bit build (crt_32_stub.c has its own for 32-bit).
+ *
+ * These are excluded under MY_WINE32 because the 32-bit standalone
+ * build (crt_32_stub.c) provides its own implementations that avoid
+ * musl's ifunc resolution issues in that environment.
  */
 #ifndef MY_WINE32
 char *__p__acmdln_func(void) { return g_crt.acmdln; }
