@@ -28,9 +28,9 @@ preserve the current build groups and ownership layers:
 - Three binaries: `my_wine`, `my_wine64`, and `my_wine32`.
 - PE32-only files such as `src/loader/pe32_entry.c`,
   `src/loader/pe32_run_guest.S`, `src/syscall/clone.S`,
-  `src/syscall/mmap2_asm.S`, and `src/heap/musl_malloc_32_compat.c`.
+  `src/syscall/mmap2_asm.S`, and `src/heap/pe32_mmap_heap_backend.c`.
 - PE32+-only files such as `src/main.c`, `src/run_guest.S`,
-  `src/syscall/clone64.S`, and the musl oldmalloc files.
+  `src/syscall/clone64.S`, and the musl malloc backend files.
 - Shared guest-sensitive groups in `src/loader/`, `src/syscall/`,
   `src/msvcrt/`, `src/heap/`, and `src/crt/`.
 - Ignored local artifacts: `build/`, `build32/`, sample `.exe/.dll` files,

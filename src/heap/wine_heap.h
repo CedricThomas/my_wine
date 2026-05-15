@@ -5,8 +5,6 @@
 #include <pthread.h>
 #include <stddef.h>
 
-/* musl backend interface (externs in wine_heap.c) */
-
 /* Process heap */
 void *init_process_heap(void);
 extern void *g_process_heap;

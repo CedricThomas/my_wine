@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include "../heap/heap_backend.h"
 #include "syscalls_inline.h"
 
 #ifndef PAGE_SIZE
@@ -17,32 +18,26 @@
  * after GS has been switched to TEB. They MUST NOT use glibc, because
  * glibc accesses vDSO via GS-relative offsets and will crash.
  *
- * Memory management uses musl oldmalloc (arena-based, mmap-backed).
+ * Memory management uses the architecture-selected heap backend.
  * String ops use compiler builtins (no vDSO).
  */
-
-/* musl backend (defined in src/heap/musl_malloc_wrapper.c) */
-extern void *musl_malloc(size_t);
-extern void  musl_free(void *);
-extern void *musl_calloc(size_t, size_t);
-extern void *musl_realloc(void *, size_t);
 
 __attribute__((sysv_abi))
 void *sysv_malloc(size_t s)
 {
-    return musl_malloc(s);
+    return heap_backend_malloc(s);
 }
 
 __attribute__((sysv_abi))
 void *sysv_calloc(size_t n, size_t s)
 {
-    return musl_calloc(n, s);
+    return heap_backend_calloc(n, s);
 }
 
 __attribute__((sysv_abi))
 void sysv_free(void *p)
 {
-    musl_free(p);
+    heap_backend_free(p);
 }
 
 __attribute__((sysv_abi))

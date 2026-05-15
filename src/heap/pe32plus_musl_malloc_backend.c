@@ -1,7 +1,7 @@
 /*
- * musl_malloc_wrapper.c — musl oldmalloc integration for my_wine
+ * pe32plus_musl_malloc_backend.c - PE32+ musl malloc integration
  *
- * Wraps musl's oldmalloc (src/malloc/oldmalloc/) as our heap backend.
+ * Wraps vendored musl malloc sources as the PE32+ heap backend.
  * Replaces the raw mmap-per-allocation approach with a proper arena-based
  * allocator featuring bin management, coalescing.
  *
@@ -21,6 +21,8 @@
 #include <string.h>
 #include <limits.h>
 #include <stdint.h>
+
+#include "heap_backend.h"
 
 /* ── Step 1: Include musl stubs (defines libc, atomics, etc.) ── */
 
@@ -111,18 +113,18 @@ extern void __libc_free(void *);
 #include "musl_src/malloc_usable_size.c"
 #pragma GCC diagnostic pop
 
-/* ── Step 7: Export wrapper functions for use by abi_wrappers.c ──
- * These are the public interface. The musl internal functions
+/* ── Step 7: Export the heap backend interface ──
+ * These are the internal backend entry points. The musl internal functions
  * (__libc_malloc_impl, __libc_realloc, __libc_free) are used here. */
 
 __attribute__((sysv_abi))
-void *musl_malloc(size_t s)
+void *heap_backend_malloc(size_t s)
 {
     return __libc_malloc_impl(s);
 }
 
 __attribute__((sysv_abi))
-void *musl_calloc(size_t n, size_t s)
+void *heap_backend_calloc(size_t n, size_t s)
 {
     size_t total = n * s;
     if (n && s > (size_t)-1 / n) return 0;
@@ -133,25 +135,25 @@ void *musl_calloc(size_t n, size_t s)
 }
 
 __attribute__((sysv_abi))
-void *musl_realloc(void *p, size_t s)
+void *heap_backend_realloc(void *p, size_t s)
 {
     return __libc_realloc(p, s);
 }
 
 __attribute__((sysv_abi))
-void musl_free(void *p)
+void heap_backend_free(void *p)
 {
     __libc_free(p);
 }
 
 __attribute__((sysv_abi))
-void *musl_aligned_alloc(size_t align, size_t len)
+void *heap_backend_aligned_alloc(size_t align, size_t len)
 {
     return aligned_alloc(align, len);
 }
 
 __attribute__((sysv_abi))
-size_t musl_malloc_usable_size(void *p)
+size_t heap_backend_usable_size(void *p)
 {
     return malloc_usable_size(p);
 }

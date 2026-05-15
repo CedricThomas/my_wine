@@ -780,7 +780,7 @@ Note: the UNIX stack is cleaned up by `cleanup_unix_stack()` in
 | `src/loader/export_table.c` | `parse_export_table()`, `lookup_export()` (binary search), `lookup_export_by_ordinal()` |
 | `src/loader/peb_ldr.c` | PEB_LDR_DATA management — `ldr_add_module`, `ldr_remove_module`, three linked lists |
 | `src/loader/ordinal_table.c` | Ordinal import name lookup (ntdll/kernel32/msvcrt) |
-| `src/heap/wine_heap.c` | `HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap` (musl malloc backend) |
+| `src/heap/wine_heap.c` | `HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap` (architecture-selected heap backend) |
 
 ---
 

@@ -48,7 +48,7 @@ MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c, \
 	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) src/msvcrt/crt_32_stub.c
 
 # 32-bit heap: use mmap-based allocator instead of musl (musl atomics are x86_64-only).
-MY_WINE32_HEAP_SRC = src/heap/wine_heap.c src/heap/musl_malloc_32_compat.c
+MY_WINE32_HEAP_SRC = src/heap/wine_heap.c src/heap/pe32_mmap_heap_backend.c
 
 # Flatten paths: src/msvcrt/foo.c -> build32/foo.o, src/heap/foo.c -> build32/foo.o.
 MY_WINE32_STUBS_OBJS = $(patsubst src/msvcrt/%.c,$(BUILDDIR32)/%.o,$(MY_WINE32_STUBS_SRC))
@@ -137,8 +137,8 @@ $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(SYSCALL_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
-# musl_malloc_wrapper needs extra include paths for stubs and musl source.
-CFLAGS_musl_malloc_wrapper.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/heap/musl_src
+# pe32plus_musl_malloc_backend needs extra include paths for stubs and musl source.
+CFLAGS_pe32plus_musl_malloc_backend.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/heap/musl_src
 
 # ── Default Target ──────────────────────────────────────────────
 all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \

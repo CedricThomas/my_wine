@@ -22,7 +22,7 @@ Date: 2026-05-14
 | `src/loader/` | PE image mapping, imports/exports, DLL loading, TEB/PEB, guest setup, entry handoff, crash handling, PE32 entry. | Mixed PE32, PE32+, shared loader core. | Some files are explicitly glibc-free or post-switch sensitive; others are setup-only. |
 | `src/syscall/` | Runtime thunk generation, dispatcher entry, dispatcher argument decoding, inline syscall wrappers, clone/mmap assembly. | Mixed PE32/PE32+ with architecture-specific assembly. | Dispatcher and direct syscall helpers must be glibc-free after guest handoff. |
 | `src/msvcrt/` | MSVCRT, kernel32, ntdll, handle, CRT startup, and syscall handler stubs exposed to guest code. | Shared with PE32-specific exceptions. | Guest-facing stubs must not rely on glibc after FS/GS changes unless proven safe for that build. |
-| `src/heap/` | Heap backend exposed through Windows heap APIs and CRT allocation stubs. | PE32+ musl oldmalloc; PE32 mmap compatibility allocator. | Guest-callable heap path must avoid glibc allocator/TLS assumptions. |
+| `src/heap/` | Heap backend exposed through Windows heap APIs and CRT allocation stubs. | PE32+ musl malloc; PE32 mmap compatibility allocator. | Guest-callable heap path must avoid glibc allocator/TLS assumptions. |
 | `src/crt/` | CRT module abstraction and MinGW/Watcom-specific CRT patching logic. | Shared policy with CRT-specific behavior; PE32/PE32+ aware through header data. | Setup-time code uses glibc; any calls after guest handoff need review. |
 | `include/` | Public and semi-public headers for PE, ABI, stubs, dispatcher, constants, render backend. | Mixed. | Header declarations must encode guest ABI and glibc-free constraints where relevant. |
 | `tests/` | Native unit/integration tests for parser, loader submodules, dispatcher, PE32 parsing, relocations. | Test-only; mostly host/native. | Glibc allowed. |
@@ -123,10 +123,10 @@ Date: 2026-05-14
 
 | Files | Responsibility | Constraint |
 |---|---|---|
-| `src/heap/wine_heap.c`, `src/heap/wine_heap.h` | Windows heap API backed by musl malloc or PE32 allocator. | Shared guest-facing; `wine_heap.h` includes pthread but handle locking is custom elsewhere. |
-| `src/heap/musl_malloc_wrapper.c` | Integrates musl oldmalloc for 64-bit heap backend. | PE32+-only in Makefile. |
-| `src/heap/musl_malloc_32_compat.c` | Minimal mmap-per-allocation allocator for 32-bit builds. | PE32-only. |
-| `src/heap/musl_src/aligned_alloc.c`, `src/heap/musl_src/malloc.c`, `src/heap/musl_src/malloc_usable_size.c` | Vendored musl oldmalloc source pieces. | PE32+ heap internals; treat as vendored/generated-adjacent. |
+| `src/heap/wine_heap.c`, `src/heap/wine_heap.h`, `src/heap/heap_backend.h` | Windows heap API backed by the architecture-selected heap backend. | Shared guest-facing; `wine_heap.h` includes pthread but handle locking is custom elsewhere. |
+| `src/heap/pe32plus_musl_malloc_backend.c` | Integrates musl malloc for 64-bit heap backend. | PE32+-only in Makefile. |
+| `src/heap/pe32_mmap_heap_backend.c` | Minimal mmap-per-allocation allocator for 32-bit builds. | PE32-only. |
+| `src/heap/musl_src/aligned_alloc.c`, `src/heap/musl_src/malloc.c`, `src/heap/musl_src/malloc_usable_size.c` | Vendored musl malloc source pieces. | PE32+ heap internals; treat as vendored/generated-adjacent. |
 | `src/heap/musl_stubs/atomic.h`, `src/heap/musl_stubs/dynlink.h`, `src/heap/musl_stubs/fork_impl.h`, `src/heap/musl_stubs/libc.h`, `src/heap/musl_stubs/malloc_impl.h`, `src/heap/musl_stubs/pthread_impl.h` | Stub headers required to compile vendored musl code. | PE32+ heap internals. |
 
 ### `src/crt/`
@@ -153,7 +153,7 @@ Date: 2026-05-14
 - `src/loader/pe32_run_guest.S`
 - `src/syscall/clone.S`
 - `src/syscall/mmap2_asm.S`
-- `src/heap/musl_malloc_32_compat.c`
+- `src/heap/pe32_mmap_heap_backend.c`
 - PE32 sample sources: all `samples/*_32/*.c`, `samples/dispatcher_regs_32/dispatcher_regs_32.s`, and `samples/doom95/*`.
 
 ### PE32+-only files
@@ -161,7 +161,7 @@ Date: 2026-05-14
 - `src/main.c`
 - `src/run_guest.S`
 - `src/syscall/clone64.S`
-- `src/heap/musl_malloc_wrapper.c`
+- `src/heap/pe32plus_musl_malloc_backend.c`
 - `src/heap/musl_src/aligned_alloc.c`
 - `src/heap/musl_src/malloc.c`
 - `src/heap/musl_src/malloc_usable_size.c`
@@ -312,8 +312,8 @@ High-confidence no-glibc zones:
 - `src/loader/gs_base.c`
 - Guest-facing `src/msvcrt/*.c` stubs called from PE imports
 - `src/heap/wine_heap.c`
-- `src/heap/musl_malloc_wrapper.c`
-- `src/heap/musl_malloc_32_compat.c`
+- `src/heap/pe32plus_musl_malloc_backend.c`
+- `src/heap/pe32_mmap_heap_backend.c`
 
 Known warning signs:
 

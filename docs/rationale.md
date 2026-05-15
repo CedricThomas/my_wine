@@ -364,7 +364,7 @@ is used for all functions called from guest PE code.
 | Export table parsing + lookup (name & ordinal) | ✅ | `export_table.c` |
 | Module registry + PEB LDR (3 doubly-linked lists) | ✅ | `module_list.c`, `peb_ldr.c` |
 | TEB / PEB + GS base setup | ✅ | `teb_peb.c`, `gs_base.c` |
-| Heap management (`HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap`) | ✅ | `wine_heap.c` (musl malloc backend) |
+| Heap management (`HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap`) | ✅ | `wine_heap.c` (architecture-selected heap backend) |
 | Synchronization (CRITICAL_SECTION, Events, Mutexes) | ✅ | `kernel32_sync.c`, `ntdll_synchronization.c` |
 | Thread creation (`NtCreateThreadEx` via `clone()`) | ✅ | `ntdll_objects.c` |
 | 25 NT syscall handlers | ✅ | `nt_syscalls.def` → `dispatcher_generated.c` |
