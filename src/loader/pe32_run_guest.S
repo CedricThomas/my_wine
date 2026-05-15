@@ -22,6 +22,8 @@
 
 .globl pe32_run_guest
 .type pe32_run_guest, @function
+.globl pe32_guest_return_exit
+.type pe32_guest_return_exit, @function
 
 pe32_run_guest:
     /*
@@ -38,8 +40,8 @@ pe32_run_guest:
      *
      * Align ESP to 16 bytes for Microsoft x86 ABI safety.
      * After `call` pushes 4 bytes, ESP%16 == 8 (matching x64 convention).
-     * The top of the stack has been pre-zeroed and seeded with entry_abs
-     * as a return address (see pe32_entry.c setup_fs_and_jump).
+     * The top of the stack has been pre-zeroed and seeded with a native
+     * return trampoline (see pe32_entry.c setup_fs_and_jump).
      */
     movl 8(%esp), %eax      /* stack_top */
     movl %eax, %esp
@@ -59,8 +61,17 @@ pe32_run_guest:
     /* Jump to PE entry point (in ESI). Should not return. */
     jmp *%esi
 
+pe32_guest_return_exit:
+    movl %eax, %ebx
+    movl $1, %eax
+    int $0x80
+1:
+    hlt
+    jmp 1b
+
 pe32_run_guest_end:
 .size pe32_run_guest, pe32_run_guest_end - pe32_run_guest
+.size pe32_guest_return_exit, pe32_run_guest_end - pe32_guest_return_exit
 
 #else
 #error "pe32_run_guest.S must be compiled with -m32 (__i386__)"

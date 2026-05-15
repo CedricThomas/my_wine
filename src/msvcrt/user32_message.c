@@ -22,6 +22,10 @@
 
 /* Forward declarations for cross-referenced stubs within this file */
 KERNEL32_STUB LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+KERNEL32_STUB BOOL DestroyWindow(HWND hwnd);
+
+static int g_quit_pending = 0;
+static int g_quit_exit_code = 0;
 
 /* ── Helper: copy an rb_msg_t into an MSG ──────────────────── */
 static void copy_rb_msg_to_MSG(const rb_msg_t *src, MSG *dst)
@@ -60,6 +64,14 @@ BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
     if (g_user32_window_create_attempted && g_user32_live_windows == 0) {
         memset(lpMsg, 0, sizeof(*lpMsg));
         lpMsg->message = WM_QUIT;
+        return 0;
+    }
+
+    if (g_quit_pending) {
+        g_quit_pending = 0;
+        memset(lpMsg, 0, sizeof(*lpMsg));
+        lpMsg->message = WM_QUIT;
+        lpMsg->wParam = (WPARAM)g_quit_exit_code;
         return 0;
     }
 
@@ -133,6 +145,10 @@ LRESULT DispatchMessageA(const MSG *lpMsg)
     if (!lpMsg)
         return 0;
 
+#if defined(__i386__)
+    return DefWindowProcA(lpMsg->hwnd, lpMsg->message,
+                          lpMsg->wParam, lpMsg->lParam);
+#else
     wine_window_entry *entry = get_window_entry(lpMsg->hwnd);
     if (entry && entry->wnd_proc) {
         WNDPROC proc = (WNDPROC)entry->wnd_proc;
@@ -140,6 +156,7 @@ LRESULT DispatchMessageA(const MSG *lpMsg)
     }
     return DefWindowProcA(lpMsg->hwnd, lpMsg->message,
                           lpMsg->wParam, lpMsg->lParam);
+#endif
 }
 
 /* ── 5. PostMessageA ──────────────────────────────────────── */
@@ -169,6 +186,9 @@ BOOL PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 KERNEL32_STUB
 void PostQuitMessage(int nExitCode)
 {
+    g_quit_pending = 1;
+    g_quit_exit_code = nExitCode;
+
     rb_msg_t rb;
     memset(&rb, 0, sizeof(rb));
     rb.hwnd    = 0;
@@ -254,10 +274,11 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 KERNEL32_STUB
 LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-    (void)hWnd;
-    (void)Msg;
     (void)wParam;
     (void)lParam;
+    if (Msg == WM_CLOSE) {
+        DestroyWindow(hWnd);
+    }
     return 0;
 }
 

@@ -170,20 +170,23 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
         return ret;
     }
 
-    uintptr_t new_esp = (uintptr_t)unix_stack_ptr_val;
+    uintptr_t new_esp = ((uintptr_t)unix_stack_ptr_val & ~(uintptr_t)15) - 8;
     __asm__ volatile(
+        "push %%ebp\n\t"
         "push %%ebx\n\t"
         "push %%esi\n\t"
         "push %%edi\n\t"
         "mov %%esp, %[old_esp]\n\t"
         "mov %[new_esp], %%esp\n\t"
+        "push %[old_esp]\n\t"
         "push %[arg]\n\t"
         "call *%[fn]\n\t"
         "addl $4, %%esp\n\t"
-        "mov %[old_esp], %%esp\n\t"
+        "mov (%%esp), %%esp\n\t"
         "pop %%edi\n\t"
         "pop %%esi\n\t"
         "pop %%ebx\n\t"
+        "pop %%ebp\n\t"
         : "=a"(ret), [old_esp] "=&r"(old_esp)
         : [new_esp] "r"(new_esp), [fn] "r"(fn), [arg] "r"(arg)
         : "memory", "cc"

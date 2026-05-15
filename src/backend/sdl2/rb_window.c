@@ -34,15 +34,29 @@ static uintptr_t rb_sdl_create_window_call(void *arg)
 static uintptr_t rb_sdl_show_raise_pump_call(void *arg)
 {
     SDL_Window *window = arg;
+    SDL_ShowWindow(window);
+    SDL_RaiseWindow(window);
+    SDL_PumpEvents();
+
     SDL_Surface *surface = SDL_GetWindowSurface(window);
     if (surface) {
         uint32_t color = SDL_MapRGB(surface->format, 0, 0, 0);
         SDL_FillRect(surface, NULL, color);
         SDL_UpdateWindowSurface(window);
     }
-    SDL_ShowWindow(window);
-    SDL_RaiseWindow(window);
     SDL_PumpEvents();
+    return 0;
+}
+
+static uintptr_t rb_sdl_push_quit_if_autoquit_call(void *arg)
+{
+    (void)arg;
+    if (getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
+        SDL_Event ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_QUIT;
+        SDL_PushEvent(&ev);
+    }
     return 0;
 }
 
@@ -69,6 +83,7 @@ rb_window_t rb_window_create(const char *title,
     if (!sdl_win)
         return 0;
     rb_call_on_host_stack(rb_sdl_show_raise_pump_call, sdl_win);
+    rb_call_on_host_stack(rb_sdl_push_quit_if_autoquit_call, NULL);
 
     uintptr_t saved_gs = rb_host_context_enter();
     rb_window *win = malloc(sizeof(*win));

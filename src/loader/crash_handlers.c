@@ -70,7 +70,7 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 {
     /* Recursion guard: if we're already in the handler, just exit immediately */
     if (g_in_crash_handler) {
-        INLINE_SYSCALL_EXIT(EXIT_SIGSEGV);
+        INLINE_SYSCALL_EXIT_GROUP(EXIT_SIGSEGV);
     }
     g_in_crash_handler = 1;
 
@@ -244,13 +244,15 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
     }
 
     /*
-     * Use INLINE_SYSCALL_EXIT (direct syscall) instead of _exit().
+     * Use INLINE_SYSCALL_EXIT_GROUP (direct syscall) instead of _exit().
      * In the signal handler context, the guest stack may be corrupted
      * and GS base points to the TEB — glibc's _exit needs TLS and other
      * internal state that can segfault in this context.
-     * A direct syscall is fully async-signal-safe and avoids this.
+     * A direct syscall is fully async-signal-safe and avoids this. Use
+     * exit_group so a fault in an SDL/helper thread cannot leave the main
+     * thread blocked forever.
      */
-    INLINE_SYSCALL_EXIT(EXIT_SIGSEGV);
+    INLINE_SYSCALL_EXIT_GROUP(EXIT_SIGSEGV);
 }
 
 /**

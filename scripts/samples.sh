@@ -308,6 +308,13 @@ run_sample() {
         export MY_WINE_DEBUG_LEVEL="$DEBUG_LEVEL"
     fi
 
+    # SDL window smoke samples are run non-interactively; force the dummy video
+    # driver so a host Wayland/X11 setting cannot make CI-style runs fail.
+    if [[ "$name" == sdl2_* ]]; then
+        export SDL_VIDEODRIVER=dummy
+        export MY_WINE_SAMPLE_AUTOQUIT=1
+    fi
+
     # Run with timeout; capture stdout into temp file for output comparison.
     # The subshell always exits 0 (writing the real exit code to a temp file)
     # so the parent bash never sees a signal-based exit status and never prints

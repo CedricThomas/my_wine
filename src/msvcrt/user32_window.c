@@ -207,6 +207,11 @@ BOOL DestroyWindow(HWND hwnd)
     if (!entry)
         return FALSE;
 
+    if (entry->wnd_proc) {
+        WNDPROC proc = (WNDPROC)entry->wnd_proc;
+        proc(hwnd, WM_DESTROY, 0, 0);
+    }
+
     rb_window_destroy(entry->sdl_window);
     wine_handle_free((uint32_t)hwnd);
     free(entry);

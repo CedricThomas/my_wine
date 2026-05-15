@@ -85,6 +85,7 @@ extern void seh_crash_handler(void *, void *, void *, void *);
  * Seeded in main() so GetCommandLineA() returns the PE path. */
 extern char _acmdln[];
 extern void pe32_run_guest(uint32_t entry_abs, void *stack_top) __attribute__((noreturn));
+extern void pe32_guest_return_exit(void);
 
 /* ── Error messages (null-terminated, written via syscall to stderr) ── */
 static const char err_bad_path[]   = "my_wine32: missing PE path\n";
@@ -618,25 +619,25 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
     __builtin_memset(sp, 0, zero_len);
 
     /*
-     * Write a proper cdecl argument frame with fake return address.
+     * Write a proper argument frame with a native return trampoline.
      * pe32_run_guest.S does `jmp *entry_abs` (no `call`), so no return
-     * address is pushed. We write entry_abs itself as a fake return addr
-     * so if main() does `ret`, it re-enters the entry point.
+     * address is pushed. If the entry point returns, the trampoline exits
+     * with the return value left in EAX.
      *
      * For ENTRY_TYPE_MAIN:
-     *   [ESP+0]  = fake return address (entry_abs)
+     *   [ESP+0]  = return trampoline
      *   [ESP+4]  = argc (1)
      *   [ESP+8]  = argv pointer
      *   [ESP+12] = envp pointer
      *
      * For ENTRY_TYPE_WINMAIN / ENTRY_TYPE_WWINMAIN:
-     *   [ESP+0]  = fake return address (entry_abs)
+     *   [ESP+0]  = return trampoline
      *   [ESP+4]  = hInstance (= image_base)
      *   [ESP+8]  = hPrevInstance (= 0)
      *   [ESP+12] = lpCmdLine (= pe_path_ptr from g_argv_page + 0)
      *   [ESP+16] = nCmdShow (= 5 = SW_SHOW)
      */
-    *(uint32_t *)(sp + 0) = entry_abs;   /* fake return addr */
+    *(uint32_t *)(sp + 0) = (uint32_t)(uintptr_t)pe32_guest_return_exit;
 
     if (g_entry_type == ENTRY_TYPE_MAIN) {
         *(uint32_t *)(sp + 4) = 1;           /* argc = 1 */
@@ -654,6 +655,15 @@ static __attribute__((noreturn)) void setup_fs_and_jump(void *teb,
      * arch_prctl(ARCH_SET_FS) returns EINVAL in 32-bit mode on a 64-bit kernel.
      * Use set_thread_area (syscall 243) to allocate an LDT entry pointing
      * to the TEB, then load the returned selector into %fs (Wine approach). */
+
+    /* Save host FS selector before switching to TEB.
+     * The SDL backend needs this to restore the host FS when calling into
+     * SDL/glibc from 32-bit guest-facing stubs. */
+    { uint16_t host_fs;
+      __asm__ volatile("mov %%fs, %0" : "=r"(host_fs));
+      loader_set_host_fs_selector(host_fs);
+    }
+
     struct modify_ldt_ldt_s ldt = {
         .entry_number    = -1,           /* auto-allocate */
         .base_addr       = (unsigned int)(uintptr_t)teb,

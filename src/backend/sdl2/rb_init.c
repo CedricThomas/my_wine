@@ -5,6 +5,9 @@
  */
 
 #include "rb_sdl2_priv.h"
+#include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int g_initialized = 0;
@@ -20,7 +23,23 @@ typedef struct {
 static uintptr_t rb_sdl_init_call(void *arg)
 {
     rb_sdl_init_args *a = arg;
-    return (uintptr_t)SDL_Init(a->flags);
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+    int ret = SDL_Init(a->flags);
+    if (ret < 0 && getenv("DISPLAY") && !getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
+        SDL_Quit();
+        setenv("SDL_VIDEODRIVER", "x11", 1);
+        ret = SDL_Init(a->flags);
+    }
+    if (ret < 0 && getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
+        SDL_Quit();
+        setenv("SDL_VIDEODRIVER", "dummy", 1);
+        ret = SDL_Init(a->flags);
+    }
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+    return (uintptr_t)ret;
 }
 
 static uintptr_t rb_sdl_quit_call(void *arg)
@@ -44,6 +63,7 @@ int rb_init(void)
 
     rb_sdl_init_args args = { SDL_INIT_VIDEO | SDL_INIT_EVENTS };
     if ((int)rb_call_on_host_stack(rb_sdl_init_call, &args) < 0) {
+        fprintf(stderr, "WARNING: SDL_Init failed: %s\n", SDL_GetError());
         return RB_FAIL;
     }
 

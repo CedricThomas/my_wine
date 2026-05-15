@@ -295,13 +295,13 @@ $(BUILDDIR)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend_OBJ
 $(BUILDDIR)/backend/%.o: %.c | $(BUILDDIR)
 	@mkdir -p $(@D)
 	@echo "  CC-SDL2 $<"
-	@$(CC) $(filter-out -mno-sse,$(CFLAGS)) $(SDL2_CFLAGS) -c $< -o $@
+	@$(CC) $(filter-out -mno-sse,$(CFLAGS)) -mstackrealign $(SDL2_CFLAGS) -c $< -o $@
 
 # 32-bit backend compile rule
 $(BUILDDIR32)/backend/%.o: %.c | $(BUILDDIR32)
 	@mkdir -p $(@D)
 	@echo "  CC32-SDL2 $<"
-	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -c $< -o $@
+	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) -mstackrealign $(SDL2_CFLAGS) -c $< -o $@
 
 # SDL2 backend test (32-bit)
 TEST_sdl2_backend32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o

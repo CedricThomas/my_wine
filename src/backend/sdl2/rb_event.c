@@ -68,6 +68,21 @@ static uintptr_t rb_sdl_push_event_call(void *arg)
     return (uintptr_t)SDL_PushEvent((SDL_Event *)arg);
 }
 
+static void repaint_active_window_black(uint32_t window_id)
+{
+    SDL_Window *window = SDL_GetWindowFromID(window_id);
+    if (!window)
+        return;
+
+    SDL_Surface *surface = SDL_GetWindowSurface(window);
+    if (!surface)
+        return;
+
+    uint32_t color = SDL_MapRGB(surface->format, 0, 0, 0);
+    SDL_FillRect(surface, NULL, color);
+    SDL_UpdateWindowSurface(window);
+}
+
 /* ---- translate_sdl_event ----
  * Returns 1 on successful translation, 0 for unknown/untranslatable events. */
 
@@ -149,47 +164,27 @@ static int translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
 
     case SDL_WINDOWEVENT:
         switch (sdl->window.event) {
+        case SDL_WINDOWEVENT_EXPOSED:
+        case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
-            msg->message = WM_SIZE;
-            msg->wParam  = sdl->window.data1;  /* width */
-            msg->lParam  = sdl->window.data2;  /* height */
-            msg->time    = (uint32_t)sdl->window.timestamp;
-            break;
+            repaint_active_window_black(sdl->window.windowID);
+            return 0;
 
         case SDL_WINDOWEVENT_MOVED:
-            msg->message = WM_MOVE;
-            msg->wParam  = sdl->window.data1;  /* x */
-            msg->lParam  = sdl->window.data2;  /* y */
-            msg->time    = (uint32_t)sdl->window.timestamp;
-            break;
+            return 0;
 
         case SDL_WINDOWEVENT_CLOSE:
-            msg->message = WM_CLOSE;
+            msg->message = WM_QUIT;
             msg->wParam  = 0;
             msg->lParam  = 0;
             msg->time    = (uint32_t)sdl->window.timestamp;
             break;
 
         case SDL_WINDOWEVENT_MINIMIZED:
-            msg->message = WM_SYSCOMMAND;
-            msg->wParam  = SC_MINIMIZE;
-            msg->lParam  = 0;
-            msg->time    = (uint32_t)sdl->window.timestamp;
-            break;
+            return 0;
 
         case SDL_WINDOWEVENT_RESTORED:
-            msg->message = WM_SYSCOMMAND;
-            msg->wParam  = SC_RESTORE;
-            msg->lParam  = 0;
-            msg->time    = (uint32_t)sdl->window.timestamp;
-            break;
-
-        case SDL_WINDOWEVENT_SHOWN:
-            msg->message = WM_CREATE;
-            msg->wParam  = 0;
-            msg->lParam  = 0;
-            msg->time    = (uint32_t)sdl->window.timestamp;
-            break;
+            return 0;
 
         default:
             return 0; /* unhandled window sub-event */
