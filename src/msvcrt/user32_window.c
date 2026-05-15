@@ -173,6 +173,11 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
 
     /* Allocate the entry in the handle manager as HANDLE_TYPE_HWIN */
     uint64_t handle = wine_handle_alloc(HANDLE_TYPE_HWIN, entry);
+    if (!handle) {
+        rb_window_destroy(rb_win);
+        free(entry);
+        return FORCE_HANDLE_RETURN(0, HWND);
+    }
     return FORCE_HANDLE_RETURN(handle, HWND);
 }
 
@@ -484,6 +489,10 @@ HDC BeginPaint(HWND hwnd, PAINTSTRUCT *lpPaint)
 
     rb_dc_t dc = rb_window_get_dc(entry->sdl_window);
     uint64_t handle = wine_handle_alloc(HANDLE_TYPE_DC, (void *)(uintptr_t)dc);
+    if (!handle) {
+        rb_window_release_dc(entry->sdl_window, dc);
+        return FORCE_HANDLE_RETURN(0, HDC);
+    }
     return FORCE_HANDLE_RETURN(handle, HDC);
 }
 
@@ -589,6 +598,10 @@ HDC GetDC(HWND hwnd)
 
     rb_dc_t dc = rb_window_get_dc(entry->sdl_window);
     uint64_t handle = wine_handle_alloc(HANDLE_TYPE_DC, (void *)(uintptr_t)dc);
+    if (!handle) {
+        rb_window_release_dc(entry->sdl_window, dc);
+        return FORCE_HANDLE_RETURN(0, HDC);
+    }
     return FORCE_HANDLE_RETURN(handle, HDC);
 }
 

@@ -143,9 +143,6 @@ int16_t rb_keyboard_get_async_state(int vk);
 /* ---- Display Info ---- */
 void rb_display_get_size(int *out_w, int *out_h);
 
-/* ---- Display ---- */
-void rb_display_get_size(int *out_w, int *out_h);
-
 /* ---- Constants / Flags ---- */
 #define RB_HINT_AUTO      -1
 
