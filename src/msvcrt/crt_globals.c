@@ -45,7 +45,9 @@ static __attribute__((constructor)) void crt_init_self_refs(void)
  * try to execute it as instructions → SIGSEGV.
  * These are for the 64-bit build (crt_32_stub.c has its own for 32-bit).
  */
+#ifndef MY_WINE32
 char *__p__acmdln_func(void) { return g_crt.acmdln; }
 char **__initenv_func(void)  { return g_crt.initenv; }
 char *__p__fmode_func(void)  { return (char*)&g_crt.fmode; }
 char *__p__commode_func(void){ return (char*)&g_crt.commode; }
+#endif

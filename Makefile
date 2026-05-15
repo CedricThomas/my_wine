@@ -43,12 +43,20 @@ OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(
 
 # ── Source Groups: PE32 Child ───────────────────────────────────
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager.
-# Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child).
+# Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child),
+# but re-include the CRT infra needed by crt_mingw.c for the 32-bit CRT module path.
 MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c, \
-	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) src/msvcrt/crt_32_stub.c
+	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) \
+	src/msvcrt/crt_32_stub.c \
+	src/msvcrt/crt_globals.c \
+	src/msvcrt/crt_offset_discovery.c \
+	src/msvcrt/crt_refptrs.c
 
 # 32-bit heap: use mmap-based allocator instead of musl (musl atomics are x86_64-only).
 MY_WINE32_HEAP_SRC = src/heap/wine_heap.c src/heap/pe32_mmap_heap_backend.c
+
+# 32-bit CRT module sources (use glibc; all CRT calls happen before FS switch).
+MY_WINE32_CRT_OBJS = $(patsubst src/crt/%.c,$(BUILDDIR32)/%.o,$(CRT_SRC))
 
 # Flatten paths: src/msvcrt/foo.c -> build32/foo.o, src/heap/foo.c -> build32/foo.o.
 MY_WINE32_STUBS_OBJS = $(patsubst src/msvcrt/%.c,$(BUILDDIR32)/%.o,$(MY_WINE32_STUBS_SRC))
@@ -84,7 +92,8 @@ MY_WINE32_OBJS = \
 	$(BUILDDIR32)/mmap2_asm.o \
 	$(BUILDDIR32)/clone.o \
 	$(MY_WINE32_STUBS_OBJS) \
-	$(MY_WINE32_HEAP_OBJS)
+	$(MY_WINE32_HEAP_OBJS) \
+	$(MY_WINE32_CRT_OBJS)
 
 # ── Source Groups: Tests ────────────────────────────────────────
 PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \

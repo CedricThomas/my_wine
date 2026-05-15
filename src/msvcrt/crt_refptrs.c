@@ -84,7 +84,7 @@ void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     }
 
     uint64_t *refptr = (uint64_t *)((char *)image_base + rva);
-    char *page_start = (char *)((uint64_t)(char *)refptr & ~(uint64_t)PAGE_MASK);
+    char *page_start = (char *)((uintptr_t)(char *)refptr & ~(uintptr_t)PAGE_MASK);
 
     /* Compute the correct restore_prot from the section that contains this refptr.
      * For PE32, refptrs in .idata (which is R+W) must be restored to PROT_READ|PROT_WRITE
@@ -94,7 +94,7 @@ void apply_refptr_patch(void *image_base, uint64_t rva, void *target,
     int restore_prot = PROT_READ;  /* fallback */
     if (nt && sections) {
         /* Convert page_start to an RVA for comparison against section RVAs */
-        uint64_t page_rva = (uint64_t)(uintptr_t)page_start - (uint64_t)(uintptr_t)image_base;
+        uintptr_t page_rva = (uintptr_t)page_start - (uintptr_t)image_base;
         for (uint16_t i = 0; i < pe_section_count(nt); i++) {
             uint64_t sec_start = sections[i].VirtualAddress;
             uint64_t sec_end = sec_start +
