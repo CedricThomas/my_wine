@@ -50,3 +50,16 @@ void rb_shutdown(void)
     SDL_Quit();
     g_initialized = 0;
 }
+
+void rb_display_get_size(int *out_w, int *out_h)
+{
+    if (out_w) *out_w = 0;
+    if (out_h) *out_h = 0;
+    if (!g_initialized)
+        return;
+    SDL_DisplayMode mode;
+    if (SDL_GetDisplayMode(0, 0, &mode) == 0) {
+        if (out_w) *out_w = mode.w;
+        if (out_h) *out_h = mode.h;
+    }
+}

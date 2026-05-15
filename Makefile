@@ -29,7 +29,7 @@ GENERATED_REQUIRED = src/syscall/dispatcher_generated.c
 # ── Source Groups: Wrapper And PE32+ ────────────────────────────
 # Auto-discover .c per source group; objects flatten into build/.
 ROOT_SRC     = $(filter-out src/wrapper_main.c, $(sort $(shell find src/   -maxdepth 1 -name '*.c')))
-STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c, \
+STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c src/msvcrt/user32_window.c, \
 		$(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c')))
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c | grep -v pe32_process.c))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
@@ -53,7 +53,7 @@ OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager.
 # Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child),
 # but re-include the CRT infra needed by crt_mingw.c for the 32-bit CRT module path.
-MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c, \
+MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c src/msvcrt/user32_window.c, \
 	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) \
 	src/msvcrt/crt_32_stub.c \
 	src/msvcrt/crt_globals.c \
@@ -113,13 +113,13 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/dll_path.o $(BUILDDIR)/dll_loader.o
 
 # Shared objects used by import-resolution and teb_peb tests.
-TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(STUBS_OBJS) $(HEAP_OBJS) \
+TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
 	$(CRT_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o $(BUILDDIR)/clone64.o
 
 # Non-crt stubs (syscall dispatch test does not need the CRT stubs).
-STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o, $(STUBS_OBJS))
+STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o, $(STUBS_OBJS))
 
 # kernel32_module.c depends on loader functions not available in syscall test,
 # so exclude it from the non-CRT stubs used here.
