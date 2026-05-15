@@ -1,8 +1,7 @@
 /*
  * crt_globals.c — Global variable definitions for MSVCRT stubs.
  *
- * All CRT globals are now consolidated into wine_crt_state_t g_crt.
- * Previously-scattered individual globals (~20+) have been removed.
+ * Owns the singleton CRT state shared by the MSVCRT stubs.
  */
 
 #define _GNU_SOURCE
@@ -10,7 +9,6 @@
 #include "msvcrt_priv.h"
 #include "include/common.h"
 
-/* ── Consolidated CRT global state ────────────────────────── */
 /*
  * SINGLE-THREAD ONLY: g_crt is not safe for concurrent access.
  * g_crt.crt_ctx is written during patch_crt_refptrs() and read in

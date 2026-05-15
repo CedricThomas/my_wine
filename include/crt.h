@@ -14,15 +14,11 @@
 #include "pe.h"
 #include "common.h"
 
-/* ── CRT type enumeration ──────────────────────────────────────── */
-
 typedef enum {
     CRT_TYPE_MINGW,
     CRT_TYPE_WATCOM,
     CRT_TYPE_UNKNOWN
 } crt_type_t;
-
-/* ── CRT context (moved from include/msvcrt.h) ────────────────── */
 
 typedef struct {
     uint64_t image_base;
@@ -31,8 +27,6 @@ typedef struct {
     uint32_t argv_bss_offset;
     uint32_t envp_bss_offset;
 } crt_context_t;
-
-/* ── FILE structures for g_crt.iob ────────────────────────────── */
 
 #define WINE_FILE_SIZE 48
 #define WINE_IOEOF  0x8000
@@ -61,35 +55,26 @@ typedef struct {
 
 _Static_assert(sizeof(wine_FILE) == WINE_FILE_SIZE, "wine_FILE size mismatch");
 
+/* Exactly three CRT FILE objects: stdin, stdout, stderr. */
 typedef union {
     wine_FILE f[3];
     char      bytes[48 * 3];
 } iob_union;
 
-/* ── Consolidated CRT global state ─────────────────────────────── */
-/*
- * wine_crt_state_t — All CRT global state in one struct.
- * Defined as g_crt in src/msvcrt/crt_globals.c.
- */
-
 typedef struct {
-    /* App / mode flags */
     int app_type;
     int commode;
     int fmode;
 
-    /* Environment / argv pointers */
     char **environ;
     char **initenv;
     char **guest_argv;
     char **guest_envp;
 
-    /* Command line storage */
     char cmdline_storage[PAGE_SIZE];
     char *acmdln;
     char *p_acmdln;
 
-    /* Startup state */
     uint64_t native_startup_lock;
     int native_startup_state;
     int dowildcard;
@@ -113,24 +98,17 @@ typedef struct {
     /* Initenv stub */
     void **imp_initenv_stub;
 
-    /* FILE structures */
     iob_union iob;
 } wine_crt_state_t;
 
 extern wine_crt_state_t g_crt;
-
-/* ── Refptr mapping (moved from src/msvcrt/msvcrt_priv.h) ─────── */
 
 typedef struct {
     const char *name;
     void       *target;
 } refptr_mapping_t;
 
-/* ── Opaque CRT module ─────────────────────────────────────────── */
-
 typedef struct crt_module crt_module_t;
-
-/* ── Accessor declarations ─────────────────────────────────────── */
 
 /* Detect which CRT type a PE image was linked against */
 crt_type_t crt_detect_type(const char *file_path, IMAGE_NT_HEADERS *nt);

@@ -210,7 +210,7 @@ static void mingw_discover_offsets(const char *file_path,
  *
  * 1. Finds .bss section and computes initenv_stub address
  * 2. Calls mingw_discover_offsets() to populate ctx
- * 3. Syncs ctx into g_crt_ctx
+ * 3. Syncs ctx into g_crt.crt_ctx
  * 4. Sets initialized=1 flag in .bss to skip __do_global_ctors
  * 5. Iterates mingw_refptr_mappings, patches via COFF symbol lookup
  * 6. Falls back to scanning .rdata/.data for unpatched .bss refptrs
@@ -222,7 +222,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
 {
     if (!image_base || !nt || !sections) return;
 
-    /* Build local context — avoids reading g_crt_ctx during patching */
+    /* Build local context; avoid reading global CRT state during patching. */
     crt_context_t ctx = {
         .image_base = (uint64_t)(uintptr_t)image_base,
         .bss_vaddr = 0,
@@ -366,7 +366,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
  * mingw_seed_bss — port of seed_bss_vars() from main.c,
  * adapted for the module interface.
  *
- * Uses g_crt_ctx offsets to write argc/argv/envp into the PE's .bss.
+ * Uses g_crt.crt_ctx offsets to write argc/argv/envp into the PE's .bss.
  * Writes argc=1, argv=NULL, envp=NULL. Uses mprotect to ensure .bss
  * is writable.
  */

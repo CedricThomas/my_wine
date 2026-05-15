@@ -48,3 +48,25 @@ candidates.
 - Comments are shorter and more accurate.
 - Important runtime constraints remain documented near the code.
 - No stale architecture claims remain in source comments.
+
+## Completion Notes
+
+Completed as a focused source-comment cleanup:
+
+- Removed migration-history comments such as "moved from", "previously split",
+  and stale `g_crt_ctx` references from CRT, loader, and common code.
+- Removed decorative section dividers and step-number comments where the code
+  already made the flow clear.
+- Kept comments that document ABI, FS/GS safety, fixed memory layouts, CRT BSS
+  offset discovery, and guest/syscall-safe behavior.
+- Rewrote the critical-section slow-path comment to describe the non-obvious
+  auto-reset event behavior without narrating each statement.
+- Updated current architecture wording from the old PE32 "dual-process" label
+  to the wrapper/backend model where it appeared as current documentation.
+
+Validation:
+
+- `make my_wine64`
+- `make my_wine32`
+- `make run-tests`
+- `git diff --check`

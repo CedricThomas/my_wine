@@ -75,8 +75,7 @@ void __set_app_type(int type)
     g_crt.app_type = type;
 }
 
-/* __initenv is a data symbol (char**), not a function — MSVCRT exports it as such.
- * Renamed the no-op stub to avoid conflict with the data variable below. */
+/* __initenv is a data symbol (char**), not a function. */
 
 WINE_STUB
 void _initterm(void)

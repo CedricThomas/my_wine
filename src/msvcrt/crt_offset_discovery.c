@@ -408,7 +408,7 @@ uint64_t find_symbol_rva_from_file(const char *file_path,
  * Discover CRT global variable offsets (argc/argv/envp) from COFF symbol table.
  * Sets ctx->argc_bss_offset, ctx->argv_bss_offset, ctx->envp_bss_offset.
  * Falls back to hardcoded offsets if COFF lookup is incomplete.
- * Accepts ctx parameter instead of reading g_crt_ctx directly for reentrancy.
+ * Accepts ctx parameter instead of reading global CRT state directly for reentrancy.
  */
 void discover_crt_offsets(const char *file_path,
                           IMAGE_NT_HEADERS *nt,

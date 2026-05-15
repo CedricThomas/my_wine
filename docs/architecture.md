@@ -44,7 +44,7 @@ my_wine hello.exe
 ## 1. High-Level Data Flow
 
 > The following describes the PE32+ path (`my_wine64`).
-> For PE32, see [Section 3](#3-pe32-dual-process-model).
+> For PE32, see [Section 3](#3-pe32-wrapperbackend-model).
 
 ```
   PE file (hello.exe)
@@ -279,7 +279,7 @@ exits from the same process.
 
 ---
 
-## 3. PE32 Dual-Process Model
+## 3. PE32 Wrapper/Backend Model
 
 > For full details, see [PE32.md](PE32.md).
 

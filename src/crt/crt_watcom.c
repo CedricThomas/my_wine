@@ -191,9 +191,9 @@ static void watcom_discover_offsets(const char *file_path,
 /* ── Refptr patching ──────────────────────────────────────────── */
 
 /*
- * watcom_patch_refptrs — minimal: just discovers offsets and sets
- * g_crt_ctx.  No refptr patching needed since watcom_refptr_mappings
- * is empty.
+ * watcom_patch_refptrs — minimal: discovers offsets and stores them in
+ * g_crt.crt_ctx. No refptr patching is needed because watcom_refptr_mappings is
+ * empty.
  */
 static void watcom_patch_refptrs(const char *file_path, void *image_base,
                                  IMAGE_NT_HEADERS *nt,
@@ -238,7 +238,7 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
 /* ── BSS seeding ───────────────────────────────────────────────── */
 
 /*
- * watcom_seed_bss — BSS seeding using g_crt_ctx offsets.
+ * watcom_seed_bss — BSS seeding using g_crt.crt_ctx offsets.
  * Same pattern as MinGW seed_bss.
  */
 static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,

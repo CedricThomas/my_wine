@@ -55,4 +55,3 @@ Use the audit's stale-doc candidates, current source inventory, and
 - A new contributor can build, test, and understand the active architecture.
 - Stale Doom95 or historical implementation paths are removed or clearly
   archived.
-- `improvement_for_later.md` contains only current, actionable items.

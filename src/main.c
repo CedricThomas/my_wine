@@ -28,13 +28,10 @@
 #include "src/pe_priv.h"
 #include "include/debug.h"
 
-/* g_crt is declared in include/crt.h (via msvcrt.h) and defined in crt_globals.c */
 void patch_crt_refptrs(const char *file_path, void *image_base,
                        IMAGE_NT_HEADERS *nt, IMAGE_SECTION_HEADER *sections);
 
-extern char **environ;  // from libc, for guest envp
-
-/* ── Helpers ─────────────────────────────────────────────────── */
+extern char **environ;
 
 /* Scan char** envp for "KEY=..." and return the value (after '=')
  * or NULL if not found. */
@@ -49,11 +46,11 @@ static const char *envp_lookup(char *const envp[], const char *key)
     return NULL;
 }
 
-/* Pre-seed argc/argv/envp in .bss using COFF-derived offsets
- * from g_crt_ctx. Explicit mprotect ensures .bss is writable.
+/* Pre-seed argc/argv/envp in .bss using COFF-derived offsets from g_crt.crt_ctx.
+ * Explicit mprotect ensures .bss is writable.
  *
  * This is a fallback used when the active CRT module does not
- * provide a seed_bss vtable entry. g_crt_ctx must be populated
+ * provide a seed_bss vtable entry. g_crt.crt_ctx must be populated
  * by patch_crt_refptrs() (or the module's discover_offsets) first. */
 static void seed_bss_vars(void *base,
                           const IMAGE_NT_HEADERS *nt,
@@ -77,7 +74,6 @@ static void seed_bss_vars(void *base,
     size_t bss_size = bss_sec->Misc.VirtualSize;
     if (bss_size == 0) bss_size = bss_sec->SizeOfRawData;
 
-    /* Ensure .bss page is writable */
     uintptr_t bss_page = (uintptr_t)bss_base & ~(uintptr_t)PAGE_MASK;
     if (mprotect((void *)bss_page, (bss_size + PAGE_MASK) & ~(size_t)PAGE_MASK,
                   PROT_READ | PROT_WRITE) != 0) {
@@ -118,8 +114,6 @@ static void seed_bss_vars(void *base,
     }
 }
 
-/* ── init_loader ─────────────────────────────────────────────── */
-
 /**
  * Map the PE, detect PE32 vs PE32+, and either:
  *   - For PE32:  unmap, print error, return -1 (use my_wine32 instead).
@@ -138,13 +132,12 @@ static int init_loader(int argc, char **argv,
         return -1;
     }
 
-    /* 0. Parse MY_WINE_DEBUG_LEVEL before GS switch. Any non-zero value enables traces. */
+    /* Parse setup-time environment before GS can point at the guest TEB. */
     {
         const char *debug_level = envp_lookup(environ, "MY_WINE_DEBUG_LEVEL");
         g_debug_level = parse_debug_level(debug_level);
     }
 
-    /* 0b. Cache WINE_DLL_PATH before GS switch so find_dll_path is syscall-safe */
     {
         const char *dll_path = envp_lookup(environ, "WINE_DLL_PATH");
         if (dll_path != NULL) {
@@ -153,24 +146,19 @@ static int init_loader(int argc, char **argv,
         }
     }
 
-    /* 1. Map the PE image (open file, parse headers, copy sections, set protections) */
     IMAGE_DOS_HEADER dos;
     IMAGE_NT_HEADERS nt;
     size_t nt_size;
     void *base = map_image(argv[1], &dos, &nt, &nt_size);
     if (!base) return -1;
 
-    /* 1b. Detect CRT type and select the active CRT module */
     crt_type_t crt_type = crt_detect_type(argv[1], &nt);
     const crt_module_t *mod = crt_get_module(crt_type);
     crt_set_active(mod);
 
-    /* 2. Get section headers (from the live image) */
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
 
-    /* ── PE32: not supported by this binary ─────────────────── */
     if (pe_is_pe32(&nt)) {
-        /* Unmap the temporary image before erroring */
         if (munmap(base, (size_t)nt_size) != 0) {
             perror("WARNING: munmap on PE32 reject");
         }
@@ -178,27 +166,19 @@ static int init_loader(int argc, char **argv,
         return -1;
     }
 
-    /* ── PE32+ path: full loader setup ─────────────────────── */
-
-    /* 3. Initialize dynamic msvcrt import entries, then sort for bsearch */
     init_msvcrt_imports();
     init_import_table();
 
-    /* 4. Patch CRT refptrs so the PE can find our global variables */
     patch_crt_refptrs(argv[1], base, &nt, sections);
 
-    /* 5. Resolve imports */
     resolve_imports(base, &nt);
 
-    /* 6. Set up TEB/PEB */
     void *teb = setup_teb_peb();
     if (!teb) return -1;
 
-    /* 7. Set up stack */
     void *stack_top = setup_stack(&nt);
     if (!stack_top) return -1;
 
-    /* 8a. Zero .data section */
     {
         IMAGE_SECTION_HEADER *data_sec = find_section_by_name(&nt, sections, ".data");
         if (data_sec == NULL) {
@@ -218,19 +198,12 @@ static int init_loader(int argc, char **argv,
                 DEBUG_LEVEL(2, ".data section: vaddr=0x%lx, size=0x%lx, no padding to zero",
                        (unsigned long)data_vaddr, (unsigned long)data_sec->Misc.VirtualSize);
             }
-
         }
     }
 
-    /* 8b. Pre-seed argc/argv/envp in .bss
-     *
-     * If the active CRT module provides a seed_bss vtable entry, use it.
-     * Otherwise fall back to the local seed_bss_vars().
-     *
-     * g_crt.crt_ctx is populated by patch_crt_refptrs (step 4) via the module's
-     * discover_offsets, which looks up _argc/__argc, _argv/__argv,
-     * _environ/__envp in the COFF symbol table and computes offsets
-     * relative to .bss base.
+    /*
+     * Prefer CRT-specific BSS seeding. The fallback uses offsets discovered
+     * during refptr patching from _argc/__argc, _argv/__argv, and _environ/__envp.
      */
     const crt_module_t *active = crt_get_active();
     if (crt_has_seed_bss(active)) {
@@ -239,26 +212,19 @@ static int init_loader(int argc, char **argv,
         seed_bss_vars(base, &nt, sections);
     }
 
-    /* 9. Build guest argv/envp from actual host arguments */
     static char *guest_argv[2];
     guest_argv[0] = argv[1];  /* the PE path */
     guest_argv[1] = NULL;
-    char **guest_envp = environ;  /* real host environment */
+    char **guest_envp = environ;
 
-    /* Set msvcrt globals so __getmainargs can return the real values */
     g_crt.guest_argv = guest_argv;
     g_crt.guest_envp = guest_envp;
 
-    /* Fill g_crt.cmdline_storage so g_crt.acmdln points to the actual PE path
-     * g_crt.acmdln is initialized to point to g_crt.cmdline_storage by crt_init_self_refs */
+    /* Keep __getmainargs/GetCommandLineA pointed at the actual PE path. */
     strncpy(g_crt.cmdline_storage, argv[1], sizeof(g_crt.cmdline_storage) - 1);
     g_crt.cmdline_storage[sizeof(g_crt.cmdline_storage) - 1] = '\0';
 
-    /* 10. Look up user entry symbol
-     *  - Use crt_entry_symbols() from the active CRT module to iterate
-     *    entry symbol candidates
-     *  - Fall back to PE entry point if no symbol found
-     */
+    /* CRT modules may bypass startup by naming a user entry symbol. */
     uint64_t main_rva = 0;
     {
         IMAGE_SYMBOL *symbols = NULL;
@@ -279,7 +245,7 @@ static int init_loader(int argc, char **argv,
                                               sections, pe_section_count(&nt),
                                               "main");
             }
-            free(symbols);  // free the malloc'd buffer
+            free(symbols);
         }
     }
 
@@ -295,7 +261,6 @@ static int init_loader(int argc, char **argv,
                 "using entry point 0x%lx\n", (unsigned long)entry_abs);
     }
 
-    /* Write outputs for caller */
     *out_entry = entry_abs;
     *out_base = base;
     *out_stack = stack_top;
@@ -304,8 +269,6 @@ static int init_loader(int argc, char **argv,
 
     return 0;
 }
-
-/* ── main ────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[])
 {
@@ -317,7 +280,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* ── PE32+: single-process flow ───────────────────────── */
     run_guest_entry(entry, base, stack_top, teb, g_crt.guest_argv, g_crt.guest_envp);
     return 0;
 }
