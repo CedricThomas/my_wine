@@ -120,6 +120,9 @@ run_test test_pe32
 # test_syscall_safe_utils
 run_test test_syscall_safe_utils
 
+# test_entry_symbols
+run_test test_entry_symbols
+
 # --- Summary ---
 TOTAL=$((PASS + FAIL + SKIP))
 echo ""

@@ -67,6 +67,11 @@
 
 /* Module-level vars for NT headers (needed for setup_stack and other modules) */
 static IMAGE_NT_HEADERS g_nt_headers;
+
+/* Entry type tracking — set by resolve_entry_symbol(), used for stack layout decisions */
+typedef enum { ENTRY_TYPE_MAIN, ENTRY_TYPE_WINMAIN, ENTRY_TYPE_WWINMAIN } entry_type_t;
+static entry_type_t g_entry_type = ENTRY_TYPE_MAIN;
+
 void *map_image(const char *path, IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS *out_nt, size_t *out_nt_size);
 
@@ -366,11 +371,29 @@ static uint32_t resolve_entry_symbol(const char *path)
 
             if (entry_syms) {
                 /* Try each CRT-specified entry symbol */
-                for (int si = 0; entry_syms[si] != NULL; si++) {
+                int si;
+                for (si = 0; entry_syms[si] != NULL; si++) {
                     main_rva = lookup_symbol_rva(symbols, sym_count, string_table,
                                                   sections, num_sections,
                                                   entry_syms[si]);
                     if (main_rva != 0) break;
+                }
+
+                /* Set entry type based on matched symbol */
+                if (main_rva != 0 && entry_syms[si] != NULL) {
+                    const char *sym = entry_syms[si];
+                    const char *p = sym;
+                    if (*p == '_') p++;
+                    if ((strcmp(p, "WinMain@16") == 0) ||
+                        (strcmp(p, "WinMain") == 0) ||
+                        (strcmp(p, "Main@16") == 0)) {
+                        g_entry_type = ENTRY_TYPE_WINMAIN;
+                    } else if ((strcmp(p, "wWinMain@16") == 0) ||
+                               (strcmp(p, "wWinMain") == 0) ||
+                               (strcmp(p, "wMain@16") == 0)) {
+                        g_entry_type = ENTRY_TYPE_WWINMAIN;
+                    }
+                    /* else: ENTRY_TYPE_MAIN (default, already set) */
                 }
             }
 

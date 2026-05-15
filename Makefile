@@ -147,6 +147,7 @@ TEST_module_registry_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/teb_peb.o \
 TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o \
 	$(BUILDDIR)/debug.o $(PE_OBJS) $(BUILDDIR)/common.o
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
+TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $(BUILDDIR)/crt_watcom.o $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_offset_discovery.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/common.o $(BUILDDIR)/debug.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
@@ -169,7 +170,7 @@ all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
+	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 # ── Generated Files ─────────────────────────────────────────────
 # Dispatcher switch bodies from include/nt_syscalls.def.
@@ -254,7 +255,7 @@ tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_res
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
+		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 run-tests: tests
 	@echo "==== Running tests ===="
@@ -278,6 +279,7 @@ $(eval $(call TEST_RULE,relocations,$(TEST_relocations_OBJS)))
 $(eval $(call TEST_RULE,module_registry,$(TEST_module_registry_OBJS)))
 $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 $(eval $(call TEST_RULE,pe32,$(TEST_pe32_OBJS)))
+$(eval $(call TEST_RULE,entry_symbols,$(TEST_entry_symbols_OBJS)))
 $(eval $(call TEST_RULE,syscall_safe_utils,))
 
 # ── SDL2 Backend Library ────────────────────────────────────────

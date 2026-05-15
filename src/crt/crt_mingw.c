@@ -69,6 +69,10 @@ static const char *mingw_entry_symbols[] = {
     "_wWinMain@16",
     "_WinMain",
     "_wWinMain",
+    "WinMain@16",
+    "wWinMain@16",
+    "Main@16",
+    "wMain@16",
     "main",
     NULL
 };
