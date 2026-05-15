@@ -4,7 +4,7 @@
  * Maps a DLL at a reserved base below 4GB, applies relocations,
  * registers in module list + LDR, and resolves its imports.
  *
- * Glibc-free: all string/memory ops use dll_* macros from loader_utils.h.
+ * Glibc-free: string/memory/debug helpers use syscall_safe_* utilities.
  * No PLT calls — safe to call from WINE_STUB context after GS→TEB switch.
  *
  * Extracted from import_resolve.c.
@@ -20,45 +20,10 @@
 #include "module_list.h"
 #include "peb_ldr.h"
 #include "../syscall/syscalls_inline.h"
-#include "loader_utils.h"
+#include "include/syscall_safe_utils.h"
 #include "image_mapper.h"
 #include "dll_path.h"
 #include "dll_loader.h"
-
-/* ── Debug helpers: syscall-safe formatted output to stderr ──── */
-static inline void dbg_fmt_hex(char *dst, uintptr_t val)
-{
-    for (int i = 7; i >= 0; i--) {
-        dst[i] = "0123456789abcdef"[val & 0xf];
-        val >>= 4;
-    }
-}
-
-static inline void dbg_write_ptr(int level, const char *prefix, uintptr_t val)
-{
-    if (g_debug_level < level) return;
-    char buf[64];
-    int i = 0;
-    const char *p;
-    for (p = prefix; *p; ) buf[i++] = *p++;
-    buf[i++] = '0'; buf[i++] = 'x';
-    dbg_fmt_hex(buf + i, val);
-    i += 8;
-    buf[i++] = '\n';
-    INLINE_SYSCALL_WRITE(2, buf, i);
-}
-
-static inline void dbg_write_str(int level, const char *prefix, const char *str)
-{
-    if (g_debug_level < level) return;
-    char buf[256];
-    int i = 0;
-    const char *p;
-    for (p = prefix; *p && i < 240; ) buf[i++] = *p++;
-    for (p = str; *p && i < 250; ) buf[i++] = *p++;
-    buf[i++] = '\n';
-    INLINE_SYSCALL_WRITE(2, buf, i);
-}
 
 /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
  * Uses atomic operations for allocation — still not fully thread-safe (mmap
@@ -70,7 +35,7 @@ static inline void dbg_write_str(int level, const char *prefix, const char *str)
  * load_dll: map a DLL, apply relocations, register in module list + LDR,
  * resolve its imports. Returns the loaded_module_t or NULL on failure.
  *
- * Glibc-free: all string/memory ops are hand-rolled or __builtin.
+ * Glibc-free: string/memory ops use syscall_safe_* helpers.
  * Suitable for calling from WINE_STUB context on guest stack. */
 loaded_module_t *load_dll(const char *path, int depth)
 {
@@ -83,7 +48,7 @@ loaded_module_t *load_dll(const char *path, int depth)
     void *saved_image_base = g_loader.image_base;
     int saved_is_32bit = g_loader.is_32bit;
     char saved_pe_path[512];
-    dll_copy_str(saved_pe_path, g_loader.pe_path, sizeof(saved_pe_path));
+    syscall_safe_copy_str(saved_pe_path, g_loader.pe_path, sizeof(saved_pe_path));
 
     /* Atomically reserve a page-aligned base for this DLL using CAS loop.
      * This prevents two threads from mapping at the same address.
@@ -107,9 +72,9 @@ loaded_module_t *load_dll(const char *path, int depth)
     /* Restore main PE globals (regardless of success/failure) */
     g_loader.image_base = saved_image_base;
     g_loader.is_32bit = saved_is_32bit;
-    dll_copy_str(g_loader.pe_path, saved_pe_path, sizeof(g_loader.pe_path));
+    syscall_safe_copy_str(g_loader.pe_path, saved_pe_path, sizeof(g_loader.pe_path));
 
-    dbg_write_ptr(2, "load_dll: map=", base ? (uintptr_t)base : 0);
+    syscall_safe_debug_write_ptr(2, "load_dll: map=", base ? (uintptr_t)base : 0);
     if (base == NULL) {
         return NULL;
     }
@@ -140,10 +105,10 @@ loaded_module_t *load_dll(const char *path, int depth)
         const uint16_t *magic = (const uint16_t *)((char *)base + opt_off);
         if (*magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
             img_nt->pe_type = PE_TYPE_32;
-            dll_memcpy(&img_nt->u.nt32, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS32));
+            syscall_safe_memcpy(&img_nt->u.nt32, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS32));
         } else {
             img_nt->pe_type = PE_TYPE_64;
-            dll_memcpy(&img_nt->u.nt64, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS64));
+            syscall_safe_memcpy(&img_nt->u.nt64, (char *)base + pe_off, sizeof(IMAGE_NT_HEADERS64));
         }
     }
 
@@ -170,7 +135,7 @@ loaded_module_t *load_dll(const char *path, int depth)
 
     /* Register in module list */
     loaded_module_t *mod = add_module(base, name, img_nt);
-    dbg_write_ptr(2, "load_dll: add_module=", mod ? (uintptr_t)mod : 0);
+    syscall_safe_debug_write_ptr(2, "load_dll: add_module=", mod ? (uintptr_t)mod : 0);
     if (mod == NULL) {
         uintptr_t sz = pe_size_of_image(img_nt);
         INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
@@ -181,13 +146,13 @@ loaded_module_t *load_dll(const char *path, int depth)
     /* Add to PEB LDR */
     if (g_loader.peb_ldr != NULL) {
         ldr_add_module(mod);
-        dbg_write_str(2, "load_dll: ldr_add=", "ok");
+        syscall_safe_debug_write_str(2, "load_dll: ldr_add=", "ok");
     }
 
     /* Resolve this DLL's own imports (recursive).
      * resolve_module_imports also calls parse_export_table internally. */
     int resolve_rc = resolve_module_imports(mod, depth + 1);
-    dbg_write_str(2, "load_dll: resolve_imports=", resolve_rc == 0 ? "ok" : "fail");
+    syscall_safe_debug_write_str(2, "load_dll: resolve_imports=", resolve_rc == 0 ? "ok" : "fail");
     if (resolve_rc != 0) {
         /* Cleanup all resources allocated above */
         if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
@@ -207,7 +172,7 @@ loaded_module_t *load_dll(const char *path, int depth)
         pe_get_data_dir(img_nt, DIRECTORY_ENTRY_EXPORT, &exp_dir) &&  /* check export dir */
         exp_dir.VirtualAddress != 0) {
         parse_export_table(mod);
-        dbg_write_str(2, "load_dll: parse_export=", "ok");
+        syscall_safe_debug_write_str(2, "load_dll: parse_export=", "ok");
     }
 
     return mod;

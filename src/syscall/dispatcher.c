@@ -8,6 +8,7 @@
 #include "include/syscall/dispatcher_entry.h"
 #include "syscalls_inline.h"
 #include "include/debug.h"
+#include "include/syscall_safe_utils.h"
 
 /*
  * dispatcher.c — NT syscall dispatcher
@@ -31,32 +32,6 @@
  */
 
 /* ── Guest stack reader ───────────────────────────────────────── */
-
-/*
- * is_valid_guest_ptr — check if a guest-space pointer is in a reasonable
- * range (image, stack, or heap). Prevents segfaults from garbage pointers.
- *
- * @ptr   the guest-space pointer value to validate
- *
- * @return 1 if the pointer passes all checks, 0 otherwise.
- */
-static inline int is_valid_guest_ptr(uint64_t ptr)
-{
-    if (ptr == 0) return 0;               /* NULL is explicitly handled */
-#if defined(__i386__)
-    if (ptr > 0xFFFF8000UL)               /* must be in 32-bit user-space */
-#else
-    if (ptr > 0xfffffffffffe0000UL)       /* must be in user-space       */
-#endif
-        return 0;
-    /* Alignment check: pointer must be at least native-width aligned */
-#if defined(__i386__)
-    if (ptr & 3) return 0;
-#else
-    if (ptr & 7) return 0;
-#endif
-    return 1;
-}
 
 /* Format "TRACE: syscall 0xXXXXXXXXXXXXXXXX\n" into buf (signal-safe, no snprintf) */
 static void format_trace_syscall(char *buf, uint64_t nr)
@@ -173,7 +148,7 @@ static inline uint64_t read_guest_stack(int index)
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return 0;
     }
-    if (!is_valid_guest_ptr((uint64_t)esp)) {
+    if (!syscall_safe_guest_ptr_is_valid((uint64_t)esp)) {
         char buf[64];
         format_err_rsp_check(buf, (uint64_t)esp);
         return 0;
@@ -192,7 +167,7 @@ static inline uint64_t read_guest_stack(int index)
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
         return 0;
     }
-    if (!is_valid_guest_ptr((uint64_t)rsp)) {
+    if (!syscall_safe_guest_ptr_is_valid((uint64_t)rsp)) {
         char buf[64];
         format_err_rsp_check(buf, (uint64_t)rsp);
         return 0;
@@ -226,7 +201,7 @@ static int read_guest_ptr(uint64_t guest_ptr, uint64_t *out_val, void **out_ptr,
         if (out_ptr) *out_ptr = NULL;
         return 0;
     }
-    if (!is_valid_guest_ptr(guest_ptr)) {
+    if (!syscall_safe_guest_ptr_is_valid(guest_ptr)) {
         char buf[64];
         format_err_guest_ptr(buf, sizeof(buf), guest_ptr, name);
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);

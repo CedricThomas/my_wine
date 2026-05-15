@@ -19,44 +19,9 @@
 #include "module_list.h"
 #include "peb_ldr.h"
 #include "../syscall/syscalls_inline.h"
-#include "loader_utils.h"
+#include "include/syscall_safe_utils.h"
 #include "dll_path.h"
 #include "dll_loader.h"
-
-/* ── Debug helpers (syscall-safe, no glibc) ── */
-static inline void dbg_fmt_hex(char *dst, uintptr_t val)
-{
-    for (int i = 7; i >= 0; i--) {
-        dst[i] = "0123456789abcdef"[val & 0xf];
-        val >>= 4;
-    }
-}
-
-static inline void dbg_write_ptr(int level, const char *prefix, uintptr_t val)
-{
-    if (g_debug_level < level) return;
-    char buf[64];
-    int i = 0;
-    const char *p;
-    for (p = prefix; *p; ) buf[i++] = *p++;
-    buf[i++] = '0'; buf[i++] = 'x';
-    dbg_fmt_hex(buf + i, val);
-    i += 8;
-    buf[i++] = '\n';
-    INLINE_SYSCALL_WRITE(2, buf, i);
-}
-
-static inline void dbg_write_str(int level, const char *prefix, const char *str)
-{
-    if (g_debug_level < level) return;
-    char buf[256];
-    int i = 0;
-    const char *p;
-    for (p = prefix; *p && i < 240; ) buf[i++] = *p++;
-    for (p = str; *p && i < 250; ) buf[i++] = *p++;
-    buf[i++] = '\n';
-    INLINE_SYSCALL_WRITE(2, buf, i);
-}
 
 #define MAX_IMPORT_DEPTH 8
 
@@ -129,7 +94,7 @@ static void *resolve_import(const char *dll_name, const char *func_name)
           if (i < 250) buf[i++] = ' ';
           if (i < 250) buf[i++] = '0';
           if (i < 250) buf[i++] = 'x';
-          dbg_fmt_hex(buf + i, (uintptr_t)entry->address); i += 8;
+          syscall_safe_format_hex(buf + i, (uintptr_t)entry->address, 8); i += 8;
           if (i < 255) buf[i++] = '\n';
           INLINE_SYSCALL_WRITE(2, buf, i);
         }
@@ -154,7 +119,7 @@ static void *resolve_import(const char *dll_name, const char *func_name)
               if (i < 250) buf[i++] = ' ';
               if (i < 250) buf[i++] = '0';
               if (i < 250) buf[i++] = 'x';
-              dbg_fmt_hex(buf + i, (uintptr_t)addr); i += 8;
+              syscall_safe_format_hex(buf + i, (uintptr_t)addr, 8); i += 8;
               if (i < 255) buf[i++] = '\n';
               INLINE_SYSCALL_WRITE(2, buf, i);
             }
@@ -218,7 +183,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
         if (!image_cstr_valid(base, nt, desc->Name))
             return -1;
         const char *dll_name = (const char *)base + desc->Name;
-        dbg_write_str(2, "resolve_imports: DLL=", dll_name);
+        syscall_safe_debug_write_str(2, "resolve_imports: DLL=", dll_name);
 
         uint32_t ilt_rva = desc->u1.OriginalFirstThunk != 0
                            ? desc->u1.OriginalFirstThunk
@@ -295,9 +260,9 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                     for (p = ", dll="; *p && n < 240; ) buf[n++] = *p++;
                     for (p = dll_name; *p && n < 245; ) buf[n++] = *p++;
                     for (p = ", ILT=0x"; *p && n < 245; ) buf[n++] = *p++;
-                    dbg_fmt_hex(buf + n, (uintptr_t)(orig_base + idx * thunk_size)); n += 8;
+                    syscall_safe_format_hex(buf + n, (uintptr_t)(orig_base + idx * thunk_size), 8); n += 8;
                     for (p = ", IAT=0x"; *p && n < 245; ) buf[n++] = *p++;
-                    dbg_fmt_hex(buf + n, (uintptr_t)(iat_base + idx * thunk_size)); n += 8;
+                    syscall_safe_format_hex(buf + n, (uintptr_t)(iat_base + idx * thunk_size), 8); n += 8;
                     buf[n++] = '\n';
                     INLINE_SYSCALL_WRITE(2, buf, n);
                 }
@@ -321,9 +286,9 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                         readback = *((uint64_t *)(iat_base + idx * thunk_size));
                     }
                     for (p = "  IAT written=0x"; *p && n < 245; ) buf[n++] = *p++;
-                    dbg_fmt_hex(buf + n, (uintptr_t)addr); n += 8;
+                    syscall_safe_format_hex(buf + n, (uintptr_t)addr, 8); n += 8;
                     for (p = ", readback=0x"; *p && n < 245; ) buf[n++] = *p++;
-                    dbg_fmt_hex(buf + n, (uintptr_t)readback); n += 8;
+                    syscall_safe_format_hex(buf + n, (uintptr_t)readback, 8); n += 8;
                     if (is32) {
                         for (p = ", offset="; *p && n < 245; ) buf[n++] = *p++;
                         { int d = n; int v = (int)(iat_base + idx * thunk_size - (uint8_t *)base);
@@ -440,7 +405,7 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS *nt)
  */
 int resolve_imports(void *base, IMAGE_NT_HEADERS *nt)
 {
-    dbg_write_ptr(2, "resolve_imports: base=", (uintptr_t)base);
+    syscall_safe_debug_write_ptr(2, "resolve_imports: base=", (uintptr_t)base);
     if (resolve_import_pass1(base, nt) != 0)
         return -1;
     return resolve_import_pass2(base, nt);
@@ -492,9 +457,9 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
         loaded_module_t *dep = find_module_by_name(dll_name);
         if (dep == NULL) {
             /* Check if this is a known stub library */
-            if (dll_strcasecmp("kernel32.dll", dll_name) == 0 ||
-                dll_strcasecmp("ntdll.dll", dll_name) == 0 ||
-                dll_strcasecmp("msvcrt.dll", dll_name) == 0) {
+            if (syscall_safe_strcasecmp("kernel32.dll", dll_name) == 0 ||
+                syscall_safe_strcasecmp("ntdll.dll", dll_name) == 0 ||
+                syscall_safe_strcasecmp("msvcrt.dll", dll_name) == 0) {
                 desc_offset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
                 d = pe_rva_to_ptr(base, nt, import_rva + desc_offset,
                                   sizeof(IMAGE_IMPORT_DESCRIPTOR));

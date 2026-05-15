@@ -15,7 +15,7 @@
 #include "peb_ldr.h"
 #include "image_mapper.h"
 #include "include/common.h"
-#include "loader_utils.h"
+#include "include/syscall_safe_utils.h"
 #include "loader_state.h"
 #include "../syscall/syscalls_inline.h"
 
@@ -114,7 +114,7 @@ int ldr_remove_module(loaded_module_t *mod)
     list_remove(&entry->DoubleList[2]);
 
     /* Reset the entry */
-    dll_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
+    syscall_safe_memset(entry, 0, sizeof(LDR_DATA_TABLE_ENTRY));
 
     mod->ldr_linked = 0;
 

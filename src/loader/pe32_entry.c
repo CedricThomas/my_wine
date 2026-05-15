@@ -47,7 +47,7 @@
 #include "peb_ldr.h"
 #include "module_list.h"
 #include "loader_state.h"
-#include "loader_utils.h"
+#include "include/syscall_safe_utils.h"
 #include "../heap/wine_heap.h"
 
 /*
@@ -132,12 +132,12 @@ static void ensure_argv_setup(const char *pe_path)
     memset(page, 0, PAGE_SIZE);
 
     /* Copy pe_path into the 32-bit page (argv[0] string).
-     * Use dll_copy_str instead of strncpy: in the 32-bit standalone build,
+     * Use syscall_safe_copy_str instead of strncpy: in the 32-bit standalone build,
      * musl's strncpy is an ifunc whose PLT resolver returns without executing
-     * the actual copy (compiler ifunc bug). dll_copy_str is a static inline
-     * that uses only __builtin_ operations, avoiding the ifunc issue. */
+     * the actual copy (compiler ifunc bug). syscall_safe_copy_str is a static
+     * inline byte loop, avoiding the ifunc issue. */
     char *path_copy = (char *)(p + 0);       /* offset 0x00 */
-    dll_copy_str(path_copy, pe_path, 511);
+    syscall_safe_copy_str(path_copy, pe_path, 511);
     path_copy[510] = '\0';
 
     /* Build argv array at offset 0x200 (512 bytes into the page) */
@@ -761,10 +761,10 @@ int main(int argc, char **argv)
     }
 
     /* Seed _acmdln so GetCommandLineA() returns the PE path.
-     * Uses dll_copy_str to avoid the musl ifunc PLT resolution bug in
+     * Uses syscall_safe_copy_str to avoid the musl ifunc PLT resolution bug in
      * 32-bit static builds (same pattern used in ensure_argv_setup).
-     * dll_copy_str always null-terminates so no separate terminator is needed. */
-    dll_copy_str(_acmdln, pe_path, 256);
+     * syscall_safe_copy_str always null-terminates so no separate terminator is needed. */
+    syscall_safe_copy_str(_acmdln, pe_path, 256);
 
     /* 2. Map the PE image */
     g_loader.image_base = map_pe(pe_path);
@@ -800,7 +800,7 @@ int main(int argc, char **argv)
                     pe_rva_to_ptr(base, &g_nt_headers, desc->Name, 1);
                 if (dll_name == NULL) break;
                 /* Case-insensitive DLL name check (PE may use "KERNEL32.dll") */
-                if (dll_strcasecmp(dll_name, "kernel32.dll") == 0) {
+                if (syscall_safe_strcasecmp(dll_name, "kernel32.dll") == 0) {
                     uint32_t ilt_rva = desc->u1.OriginalFirstThunk != 0
                                        ? desc->u1.OriginalFirstThunk
                                        : desc->FirstThunk;

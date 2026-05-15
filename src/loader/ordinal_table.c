@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include <string.h>
-#include "loader_utils.h"
+#include "include/syscall_safe_utils.h"
 
 typedef struct {
     const char *dll_name;
@@ -194,7 +194,7 @@ static const ordinal_entry_t ordinal_table[] = {
 const char *ordinal_lookup(const char *dll_name, uint16_t ordinal)
 {
     for (int i = 0; ordinal_table[i].dll_name != NULL; i++) {
-        if (dll_strcasecmp(ordinal_table[i].dll_name, dll_name) == 0 &&
+        if (syscall_safe_strcasecmp(ordinal_table[i].dll_name, dll_name) == 0 &&
             ordinal_table[i].ordinal == ordinal) {
             return ordinal_table[i].func_name;
         }

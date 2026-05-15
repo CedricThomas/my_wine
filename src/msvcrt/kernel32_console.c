@@ -9,7 +9,7 @@
 KERNEL32_STUB
 void write_to_stderr(const char *msg)
 {
-    INLINE_SYSCALL_WRITE_ERR(msg, (size_t)__builtin_strlen(msg));
+    syscall_safe_stderr_write_cstr(msg);
 }
 
 

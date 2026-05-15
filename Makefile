@@ -150,7 +150,8 @@ CFLAGS_musl_malloc_wrapper.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/hea
 all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
-	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
+	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
+	$(BUILDDIR)/test_syscall_safe_utils
 
 # ── Generated Files ─────────────────────────────────────────────
 # Dispatcher switch bodies from include/nt_syscalls.def.
@@ -238,7 +239,8 @@ $(SHELL.EXE):
 tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
-		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32
+		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
+		$(BUILDDIR)/test_syscall_safe_utils
 
 run-tests: tests
 	@echo "==== Running tests ===="
@@ -262,6 +264,7 @@ $(eval $(call TEST_RULE,relocations,$(TEST_relocations_OBJS)))
 $(eval $(call TEST_RULE,module_registry,$(TEST_module_registry_OBJS)))
 $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 $(eval $(call TEST_RULE,pe32,$(TEST_pe32_OBJS)))
+$(eval $(call TEST_RULE,syscall_safe_utils,))
 
 # ── Samples ─────────────────────────────────────────────────────
 # Cross-compile samples to PE .exe via Docker (mingw-w64).

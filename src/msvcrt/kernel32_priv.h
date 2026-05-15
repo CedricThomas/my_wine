@@ -15,6 +15,7 @@
 #include "include/common.h"
 #include "ntdll_priv.h"
 #include "../syscall/syscalls_inline.h"
+#include "include/syscall_safe_utils.h"
 
 /* Shared helper: write a static message to stderr via direct syscall */
 KERNEL32_STUB

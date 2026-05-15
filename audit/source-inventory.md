@@ -42,6 +42,7 @@ Date: 2026-05-14
 | `src/run_guest.S` | PE32+ stack switch and entry trampoline. | PE32+-only; no glibc. |
 | `src/trampoline.S` | Assembly trampoline symbol `trampoline_jump`; not referenced by Makefile or code search. | Dead-code candidate until proven used externally. |
 | `src/common.c`, `include/common.h` | Shared debug flag and `with_mprotect_rw`; architecture support guard. | Shared; `common.c` currently uses libc/string/mprotect and is in `SPECIAL_CFLAGS`. |
+| `include/syscall_safe_utils.h` | Header-only syscall-safe string/memory, bounded copy, path, formatting/debug-write, checked range, and guest pointer write helpers. | Shared PE32/PE32+; no libc calls or out-of-line helper calls in guest-sensitive paths. |
 | `src/debug.c`, `include/debug.h` | Shared debug infrastructure/macros. | Shared; `DEBUG` uses `fprintf`, so do not add DEBUG calls in glibc-free guest paths. Runtime traces are controlled by level-based `MY_WINE_DEBUG_LEVEL` values. |
 | `src/pe_headers.c`, `src/pe_priv.h`, `include/pe.h`, `include/pe_parser.h` | DOS/NT header parsing, RVA conversion, section helpers, PE structs. | Shared PE32/PE32+; glibc allowed in parser tests/setup unless called post-switch. `src/pe_priv.h` is an implementation/test helper, not a public header. |
 | `src/pe_imports.c` | Import descriptor parsing and thunk-size-aware walking. | Shared PE32/PE32+. |
@@ -70,7 +71,7 @@ Date: 2026-05-14
 | `src/loader/teb_peb.c`, `src/loader/teb_peb.h` | TEB/PEB allocation, guest stack allocation, process parameters. | Shared PE32/PE32+; GS/FS sensitive. `remap_stack_below_4gb` is marked unused but is called. |
 | `src/loader/gs_base.c`, `src/loader/gs_base.h` | GS base set/get with FSGSBASE fallback. | PE32+ GS-sensitive; no casual libc additions. |
 | `src/loader/crash_handlers.c`, `src/loader/crash_handlers.h` | POSIX signal/SEH crash handlers and alternate signal stack. | Shared crash path; signal-safety matters. |
-| `src/loader/loader_state.h`, `src/loader/loader_priv.h`, `src/loader/loader_utils.h` | Loader globals, internal includes, glibc-free utility macros. | Shared internal API. |
+| `src/loader/loader_state.h`, `src/loader/loader_priv.h` | Loader globals and internal includes. | Shared internal API. |
 
 ### `src/syscall/`
 
@@ -229,6 +230,7 @@ Date: 2026-05-14
 - `tests/test_pe_exec5.c`
 - `tests/test_pe_exec6.c`
 - `tests/test_relocations.c`
+- `tests/test_syscall_safe_utils.c`
 - `tests/test_syscall_dispatch.c`
 - `tests/test_teb_peb.c`
 
@@ -326,11 +328,11 @@ Do not remove these during the audit. Treat this as a queue for task 08 and task
 
 Duplicate helper candidates:
 
-- Hand-rolled string/memory helpers appear in `src/loader/import_resolve.c`, `src/loader/module_list.c`, `src/loader/dll_loader.c`, `src/loader/export_table.c`, `src/loader/import_table.c`, `src/msvcrt/kernel32_misc.c`, and `src/loader/pe32_entry.c`.
-- Direct stderr/syscall logging helpers appear in `src/msvcrt/kernel32_priv.h`, `src/msvcrt/kernel32_console.c`, `src/msvcrt/crt_stdio.c`, `src/msvcrt/crt_stdlib.c`, and crash/setup paths.
+- Hand-rolled string/memory helpers have an initial shared home in `include/syscall_safe_utils.h`; loader callers use `syscall_safe_*` names directly. Remaining candidates still exist in `src/loader/import_table.c`, `src/msvcrt/kernel32_misc.c`, and `src/loader/pe32_entry.c`.
+- Direct stderr/syscall logging helpers for loader DLL resolution and `kernel32_module.c` now use `syscall_safe_debug_write_*`; remaining candidates still exist in `src/msvcrt/crt_stdio.c`, `src/msvcrt/crt_stdlib.c`, and crash/setup paths.
 - CRT BSS pre-seeding logic exists in `src/main.c`, `src/crt/crt_mingw.c`, `src/crt/crt_watcom.c`, `src/msvcrt/crt_startup.c`, and `src/loader/pe32_entry.c`.
 - PE header parsing/copying is centralized in `src/pe_headers.c`, but partial parsing also exists in `src/loader/guest_setup.c`, `src/loader/pe32_entry.c`, and `src/wrapper_main.c`.
-- Architecture-dependent pointer writes occur in `src/loader/teb_peb.c`, `src/loader/import_table.c`, `src/msvcrt/crt_refptrs.c`, and `src/loader/pe32_entry.c`.
+- Architecture-dependent pointer writes in `src/loader/teb_peb.c` now use `syscall_safe_guest_write_ptr`; remaining candidates occur in `src/loader/import_table.c`, `src/msvcrt/crt_refptrs.c`, and `src/loader/pe32_entry.c`.
 
 Dead or stale candidates:
 

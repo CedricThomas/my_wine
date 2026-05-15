@@ -6,7 +6,7 @@
  * embedded EXPORT_CACHE within loaded_module_t.
  *
  * No malloc — the cache is embedded. No glibc — all memory ops
- * use dll_memcpy/dll_memset macros (no PLT calls).
+ * use syscall_safe_memcpy/syscall_safe_memset macros (no PLT calls).
  * Glibc-free: safe to call from WINE_STUB context after GS→TEB switch.
  */
 
@@ -15,7 +15,7 @@
 #include "export_table.h"
 #include "src/pe_priv.h"
 #include "include/nt_constants.h"
-#include "loader_utils.h"
+#include "include/syscall_safe_utils.h"
 
 static int image_cstr_valid(const loaded_module_t *mod, uint32_t rva)
 {
@@ -66,7 +66,7 @@ int parse_export_table(loaded_module_t *mod)
     }
 
     /* Zero the entire cache — glibc-free */
-    dll_memset(cache, 0, sizeof(EXPORT_CACHE));
+    syscall_safe_memset(cache, 0, sizeof(EXPORT_CACHE));
 
     cache->base = mod->base;
     cache->export_dir_rva = dir.VirtualAddress;
@@ -81,7 +81,7 @@ int parse_export_table(loaded_module_t *mod)
     if ((number_of_names > 0 &&
          (exp->AddressOfNames == 0 || exp->AddressOfNameOrdinals == 0)) ||
         (number_of_functions > 0 && exp->AddressOfFunctions == 0)) {
-        dll_memset(cache, 0, sizeof(EXPORT_CACHE));
+        syscall_safe_memset(cache, 0, sizeof(EXPORT_CACHE));
         return -1;
     }
 
@@ -91,10 +91,10 @@ int parse_export_table(loaded_module_t *mod)
         uint32_t *src = pe_rva_to_ptr(mod->base, mod->nt,
                                       exp->AddressOfNames, nsize);
         if (src == NULL) {
-            dll_memset(cache, 0, sizeof(EXPORT_CACHE));
+            syscall_safe_memset(cache, 0, sizeof(EXPORT_CACHE));
             return -1;
         }
-        dll_memcpy(cache->name_table, src, nsize);
+        syscall_safe_memcpy(cache->name_table, src, nsize);
     }
 
     /* Copy AddressOfNameOrdinals array (uint16_t ordinals) */
@@ -104,10 +104,10 @@ int parse_export_table(loaded_module_t *mod)
         uint16_t *src = pe_rva_to_ptr(mod->base, mod->nt,
                                       exp->AddressOfNameOrdinals, osize);
         if (src == NULL) {
-            dll_memset(cache, 0, sizeof(EXPORT_CACHE));
+            syscall_safe_memset(cache, 0, sizeof(EXPORT_CACHE));
             return -1;
         }
-        dll_memcpy(cache->ordinal_table, src, osize);
+        syscall_safe_memcpy(cache->ordinal_table, src, osize);
     }
 
     /* Copy AddressOfFunctions array (RVAs) */
@@ -116,10 +116,10 @@ int parse_export_table(loaded_module_t *mod)
         uint32_t *src = pe_rva_to_ptr(mod->base, mod->nt,
                                       exp->AddressOfFunctions, fsize);
         if (src == NULL) {
-            dll_memset(cache, 0, sizeof(EXPORT_CACHE));
+            syscall_safe_memset(cache, 0, sizeof(EXPORT_CACHE));
             return -1;
         }
-        dll_memcpy(cache->func_table, src, fsize);
+        syscall_safe_memcpy(cache->func_table, src, fsize);
     }
 
     return 0;
@@ -163,7 +163,7 @@ void *lookup_export(loaded_module_t *mod, const char *func_name)
         }
         const char *name = (const char *)pe_rva_to_ptr(mod->base, mod->nt,
                                                        name_rva, 1);
-        int cmp = dll_strcmp(func_name, name);
+        int cmp = syscall_safe_strcmp(func_name, name);
 
         if (cmp < 0) {
             hi = mid;
@@ -209,9 +209,9 @@ void *lookup_export_by_ordinal(loaded_module_t *mod, uint16_t ordinal)
 
 /* Reset the embedded export cache (clear all fields).
  * No free needed — the cache is embedded in the module.
- * Glibc-free: uses dll_memset instead of __builtin_memset. */
+ * Glibc-free: uses syscall_safe_memset instead of __builtin_memset. */
 void reset_export_cache(loaded_module_t *mod)
 {
     if (!mod) return;
-    dll_memset(&mod->export_cache, 0, sizeof(EXPORT_CACHE));
+    syscall_safe_memset(&mod->export_cache, 0, sizeof(EXPORT_CACHE));
 }

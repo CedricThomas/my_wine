@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include "include/syscall_safe_utils.h"
 
 #if defined(MY_WINE32)
 #include "../syscall/syscalls_inline.h"
@@ -24,7 +25,7 @@
 #define wine_munmap(a, l) INLINE_SYSCALL_MUNMAP(a, l)
 #define wine_mprotect(a, l, p) INLINE_SYSCALL_MPROTECT(a, l, p)
 #define wine_log_error(msg) do { const char *_perr[] = { msg, ": " }; \
-    INLINE_SYSCALL_WRITE_ERR(_perr[0], __builtin_strlen(_perr[0])); } while(0)
+    syscall_safe_stderr_write_cstr(_perr[0]); } while(0)
 #else
 #define wine_mmap(a, l, p, f, fd, o) mmap(a, l, p, f, fd, o)
 #define wine_munmap(a, l) munmap(a, l)
@@ -97,28 +98,6 @@ void init_peb32_fields(void *peb, void *image_base)
         (uint32_t)(uintptr_t)image_base;
 }
 
-/**
- * write_guest_ptr — write a guest pointer (4 bytes for PE32, 8 for PE64) at
- *                    offset bytes into base.
- */
-static inline void write_guest_ptr(void *base, size_t offset, void *value)
-{
-    if (g_is_32bit_get()) {
-        *(uint32_t *)((char *)base + offset) = (uint32_t)(uintptr_t)value;
-    } else {
-        *(void **)((char *)base + offset) = value;
-    }
-}
-
-/**
- * write_guest_u8 — write a single byte at offset bytes into base.
- */
-static inline void write_guest_u8(void *base, size_t offset, uint8_t value)
-{
-    *(uint8_t *)((char *)base + offset) = value;
-}
-
-
 void *g_stack_base = NULL;
 size_t g_stack_size = 0;
 
@@ -166,8 +145,8 @@ static void *alloc_teb(size_t teb_size)
     if (g_is_32bit_get()) {
         init_teb32_fields(teb, NULL);
     } else {
-        write_guest_ptr(teb, TEB64_TEB_SELF_REF, teb);
-        write_guest_ptr(teb, TEB64_THREAD_PTR, teb);
+        syscall_safe_guest_write_ptr(teb, TEB64_TEB_SELF_REF, teb, g_is_32bit_get());
+        syscall_safe_guest_write_ptr(teb, TEB64_THREAD_PTR, teb, g_is_32bit_get());
     }
 
     return teb;
@@ -223,15 +202,15 @@ static int wire_peb_fields(void *teb, void *peb)
     if (g_is_32bit_get()) {
         init_teb32_fields(teb, peb);  /* sets PEB pointer (idempotent for other fields) */
     } else {
-        write_guest_ptr(teb, TEB64_PEB_PTR, peb);
+        syscall_safe_guest_write_ptr(teb, TEB64_PEB_PTR, peb, g_is_32bit_get());
     }
 
     /* Set PEB fields */
     if (g_is_32bit_get()) {
         init_peb32_fields(peb, g_loader.image_base);
     } else {
-        write_guest_ptr(peb, PEB64_IMAGE_BASE, g_loader.image_base);
-        write_guest_u8(peb, PEB64_BEING_DEBUGGED, 0);
+        syscall_safe_guest_write_ptr(peb, PEB64_IMAGE_BASE, g_loader.image_base, g_is_32bit_get());
+        syscall_safe_guest_write_u8(peb, PEB64_BEING_DEBUGGED, 0);
     }
 
     /* Initialize process heap */
@@ -242,7 +221,8 @@ static int wire_peb_fields(void *teb, void *peb)
         return -1;
     }
 #endif
-    write_guest_ptr(peb, g_is_32bit_get() ? PEB32_PROCESS_HEAP : PEB64_PROCESS_HEAP, ph);
+    syscall_safe_guest_write_ptr(peb, g_is_32bit_get() ? PEB32_PROCESS_HEAP : PEB64_PROCESS_HEAP,
+                                 ph, g_is_32bit_get());
 
     /* Initialize module registry and PEB LDR */
     init_module_list();
@@ -255,7 +235,8 @@ static int wire_peb_fields(void *teb, void *peb)
             return -1;
         }
 #endif
-        write_guest_ptr(peb, g_is_32bit_get() ? PEB32_LDR : PEB64_LDR, loader_get_peb_ldr());
+        syscall_safe_guest_write_ptr(peb, g_is_32bit_get() ? PEB32_LDR : PEB64_LDR,
+                                     loader_get_peb_ldr(), g_is_32bit_get());
 
         /* Register the main PE as the first module */
         if (g_loader.image_base != NULL) {
@@ -445,7 +426,7 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
 
     /* Store stack_base just below stack_top (guest pointer size) */
     uintptr_t sp = (uintptr_t)stack_top - (g_is_32bit_get() ? 4 : 8);
-    write_guest_ptr((void *)sp, 0, stack_base);
+    syscall_safe_guest_write_ptr((void *)sp, 0, stack_base, g_is_32bit_get());
     g_stack_base = stack_base;
     g_stack_size = (size_t)commit;
     return (void *)stack_top;

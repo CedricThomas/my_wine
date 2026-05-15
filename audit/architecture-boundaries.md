@@ -18,7 +18,7 @@ file move or ownership change changes those classifications.
 | Windows API stubs | `src/msvcrt/*`, `include/msvcrt.h`, `include/kernel32.h`, `include/ntdll.h`, `include/nt_constants.h`, `include/nt_syscalls.def` | Implement guest-facing msvcrt, kernel32, and ntdll APIs; bridge Windows handles, memory, synchronization, process, file, and CRT behavior to host primitives. | Shared with PE32-specific CRT exceptions. | Guest-callable code must be syscall-safe. Setup-only helpers may use libc when they are not reachable after segment-base switching. |
 | Heap | `src/heap/*`, `src/heap/wine_heap.h` | Provide Windows heap APIs and CRT allocator backing. | Shared API; PE32+ uses musl oldmalloc pieces, PE32 uses mmap-per-allocation compatibility allocator. | Guest-facing allocator path must not depend on glibc allocator or TLS. Treat vendored musl files as heap internals. |
 | CRT module policy | `src/crt/*`, `include/crt.h` | Detect CRT flavor and apply CRT-specific setup/refptr/BSS policy. | Shared policy, PE32/PE32+ aware through PE metadata. | Setup layer. Glibc is allowed before guest handoff; review any guest-reachable calls. |
-| Shared diagnostics and support | `src/common.c`, `src/debug.c`, `include/common.h`, `include/debug.h`, `include/wine_abi.h` | Debug flags, protection helpers, guest ABI macros, and common support definitions. | Shared. | `DEBUG` uses `fprintf`; do not use it from glibc-free paths. |
+| Shared diagnostics and support | `src/common.c`, `src/debug.c`, `include/common.h`, `include/debug.h`, `include/syscall_safe_utils.h`, `include/wine_abi.h` | Debug flags, protection helpers, syscall-safe leaf utilities, guest ABI macros, and common support definitions. | Shared. | `DEBUG` uses `fprintf`; do not use it from glibc-free paths. Helpers named `syscall_safe_*` are header-only and intended for glibc-free paths. |
 | Tests, samples, tools, docs | `tests/`, `samples/`, `examples/`, `scripts/`, `docs/`, `audit/` | Test coverage, sample PE inputs, generated-file tooling, and documentation. | Test-only, sample-only, or host tooling. | Runtime libc restrictions do not apply. |
 
 ## Dependency Rules
@@ -56,6 +56,9 @@ Specific warning signs from the audit:
   syscall-only paths.
 - `src/msvcrt/crt_startup.c` still has allocation/exit wrappers that forward
   to libc names. Keep PE32+ CRT startup tests around before changing them.
+- `include/syscall_safe_utils.h` owns shared no-libc string/memory,
+  formatting/debug-write, checked range, and simple guest pointer write helpers.
+  Use those names in guest-sensitive code instead of local duplicates.
 - `src/loader/import_table.c` intentionally uses libc sorting/string helpers on
   non-PE32 paths and local no-libc helpers under `MY_WINE32`.
 - `src/loader/pe32_entry.c` uses custom environment handling because glibc TLS
