@@ -34,17 +34,6 @@ static int find_mutex(int handle)
     return -1;
 }
 
-/* ── Helper: find semaphore by handle ────────────────────────────── */
-/* UNUSED until NtWaitForSingleObject gains semaphore support. */
-static int __attribute__((unused)) find_semaphore(int handle)
-{
-    for (int i = 0; i < ko_semaphore_count(); i++) {
-        if (ko_semaphore(i)->handle == handle)
-            return i;
-    }
-    return -1;
-}
-
 /* ── NtSetEvent (0x5C) ───────────────────────────────────────────
  *
  * Set an event to the signaled state and broadcast any waiting threads.

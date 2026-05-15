@@ -18,7 +18,7 @@ Date: 2026-05-14
 
 | Folder | Responsibility | Architecture | Glibc status |
 |---|---|---|---|
-| `src/` | Root PE parser helpers, wrapper, PE32+ main, guest trampoline, shared debug/common helpers. | Mixed: wrapper/shared plus PE32+ entry. | Host/setup code may use glibc before FS/GS switch; guest transition paths must be audited. |
+| `src/` | Root PE parser helpers, wrapper, PE32+ main, PE32+ guest handoff, shared debug/common helpers. | Mixed: wrapper/shared plus PE32+ entry. | Host/setup code may use glibc before FS/GS switch; guest transition paths must be audited. |
 | `src/loader/` | PE image mapping, imports/exports, DLL loading, TEB/PEB, guest setup, entry handoff, crash handling, PE32 entry. | Mixed PE32, PE32+, shared loader core. | Some files are explicitly glibc-free or post-switch sensitive; others are setup-only. |
 | `src/syscall/` | Runtime thunk generation, dispatcher entry, dispatcher argument decoding, inline syscall wrappers, clone/mmap assembly. | Mixed PE32/PE32+ with architecture-specific assembly. | Dispatcher and direct syscall helpers must be glibc-free after guest handoff. |
 | `src/msvcrt/` | MSVCRT, kernel32, ntdll, handle, CRT startup, and syscall handler stubs exposed to guest code. | Shared with PE32-specific exceptions. | Guest-facing stubs must not rely on glibc after FS/GS changes unless proven safe for that build. |
@@ -40,7 +40,6 @@ Date: 2026-05-14
 | `src/wrapper_main.c` | Thin wrapper that detects PE32 vs PE32+ and `execvp`s `my_wine32` or `my_wine64`. | Shared wrapper; glibc allowed because it runs before backend handoff. |
 | `src/main.c` | `my_wine64` PE32+ orchestration: map image, reject PE32, resolve imports, setup CRT/TEB/PEB, enter guest. | PE32+-only entry. Avoid new glibc calls after GS setup and guest handoff. |
 | `src/run_guest.S` | PE32+ stack switch and entry trampoline. | PE32+-only; no glibc. |
-| `src/trampoline.S` | Assembly trampoline symbol `trampoline_jump`; not referenced by Makefile or code search. | Dead-code candidate until proven used externally. |
 | `src/common.c`, `include/common.h` | Shared debug flag and `with_mprotect_rw`; architecture support guard. | Shared; `common.c` currently uses libc/string/mprotect and is in `SPECIAL_CFLAGS`. |
 | `include/syscall_safe_utils.h` | Header-only syscall-safe string/memory, bounded copy, path, formatting/debug-write, checked range, and guest pointer write helpers. | Shared PE32/PE32+; no libc calls or out-of-line helper calls in guest-sensitive paths. |
 | `src/debug.c`, `include/debug.h` | Shared debug infrastructure/macros. | Shared; `DEBUG` uses `fprintf`, so do not add DEBUG calls in glibc-free guest paths. Runtime traces are controlled by level-based `MY_WINE_DEBUG_LEVEL` values. |
@@ -81,7 +80,7 @@ Date: 2026-05-14
 | `src/syscall/dispatcher_entry.c`, `include/syscall/dispatcher_entry.h` | Pre-allocated UNIX stack for dispatcher. | Shared; dispatcher-critical and glibc-sensitive after setup. |
 | `src/syscall/dispatcher_entry_asm.S` | Assembly dispatcher entry for x86_64 and i386 guest calls. | Shared architecture-specific; no glibc. |
 | `src/syscall/dispatcher.c`, `include/syscall/dispatcher.h` | NT syscall dispatch, argument decode, pointer read/writeback. | Shared; must be glibc-free while servicing guest syscalls. Large/risky. |
-| `src/syscall/dispatcher_generated.c` | Generated switch bodies included by `dispatcher.c`. | Generated, ignored by git, present locally. |
+| `src/syscall/dispatcher_generated.c` | Generated switch body included by `dispatcher.c`. | Generated, ignored by git, present locally. |
 | `src/syscall/abi_wrappers.c`, `src/syscall/abi_wrappers.h` | SysV wrappers around direct syscalls and memory helpers. | Shared guest-safe support. |
 | `src/syscall/syscalls_inline.h` | Inline raw Linux syscall wrappers for 64-bit and 32-bit. | Shared glibc-free primitive. |
 | `src/syscall/clone64.S` | x86_64 clone wrapper. | PE32+ host/guest-thread support; no glibc. |
@@ -116,7 +115,7 @@ Date: 2026-05-14
 | `src/msvcrt/ntdll_memory.c` | `NtAllocateVirtualMemory`, sections, map/unmap view. | Shared guest-facing; uses direct syscalls/wrappers. |
 | `src/msvcrt/ntdll_objects.c` | Event/thread/context object handlers. | Shared guest-facing; clone and direct mmap/munmap. |
 | `src/msvcrt/ntdll_process.c` | `NtTerminateProcess`, callback/query process. | Shared guest-facing; cleanup order is thunk/stack sensitive. |
-| `src/msvcrt/ntdll_synchronization.c` | NT event/mutex/semaphore wait/set/reset/release. | Shared guest-facing; `find_semaphore` is unused candidate. |
+| `src/msvcrt/ntdll_synchronization.c` | NT event/mutex/semaphore wait/set/reset/release. | Shared guest-facing. |
 | `src/msvcrt/ntdll_time.c` | Time-related NT handlers. | Shared guest-facing; uses time/syscall helpers. |
 
 ### `src/heap/`
@@ -135,7 +134,7 @@ Date: 2026-05-14
 |---|---|---|
 | `src/crt/crt.c`, `src/crt/crt_priv.h`, `include/crt.h` | CRT module interface, detection, active module dispatch. | Shared setup layer. |
 | `src/crt/crt_mingw.c` | MinGW-w64 CRT detection/refptr/BSS behavior. | Shared setup; glibc allowed before guest switch. |
-| `src/crt/crt_watcom.c` | Watcom CRT detection/refptr/BSS behavior for DOOM95. | PE32/sample-driven setup; TODO offsets are copied from MinGW and need tests. |
+| `src/crt/crt_watcom.c` | Watcom CRT detection/refptr/BSS behavior for DOOM95. | PE32/sample-driven setup; uses COFF symbol discovery with documented DOOM95-compatible fallback offsets. |
 
 ### Headers Without Dedicated Source
 
@@ -336,9 +335,10 @@ Duplicate helper candidates:
 
 Dead or stale candidates:
 
-- `src/trampoline.S`: defines `trampoline_jump`, but Makefile does not build it and code search found no references.
-- `src/msvcrt/ntdll_synchronization.c`: `find_semaphore` is marked `__attribute__((unused))`.
-- `src/crt/crt_watcom.c`: TODOs say Watcom offsets are copied from MinGW and Watcom symbol discovery remains incomplete.
+- `src/trampoline.S`: removed in task 09 after Makefile and code search showed no references.
+- `src/msvcrt/ntdll_synchronization.c`: removed unused `find_semaphore`.
+- `src/crt/crt_watcom.c`: stale TODOs were replaced with explicit notes that the hardcoded offsets are DOOM95-compatible fallbacks used only when COFF symbol discovery is incomplete.
+- `scripts/gen_dispatcher.py`: removed the unused legacy dispatcher generation path and `DISPATCHER_C_BODY` include mode; `dispatcher.c` now includes one generated switch body directly inside `dispatcher_core()`.
 
 ## Risky Files Needing Tests Before Refactor
 
@@ -387,6 +387,6 @@ Recommended adjusted order:
 - Task 06 produced `audit/architecture-boundaries.md`; later tasks should use it
   for ownership, dependency, and libc/syscall-only boundary checks.
 - Task 08 should define a guest-safe utility layer separate from host/setup utilities. A single shared string helper layer is not sufficient unless it has no-libc guarantees.
-- Task 09 should review `src/trampoline.S` first because it appears disconnected.
+- Task 09 reviewed and removed disconnected `src/trampoline.S`.
 - Task 10 should prioritize `src/loader/pe32_entry.c`, `src/msvcrt/kernel32_misc.c`, `src/syscall/dispatcher.c`, `src/loader/import_resolve.c`, and `src/msvcrt/crt_offset_discovery.c`.
 - Task 14 should treat `samples/doom95/docs` as planning/reference docs, not current architecture docs, unless they are rewritten against current PE32 support.

@@ -5,7 +5,7 @@
  *
  * This module handles:
  *  - Detection via COFF symbol table markers (D_DoomMain, _cstartup, .mmh)
- *  - BSS offset discovery with hardcoded fallbacks
+ *  - BSS offset discovery with DOOM95-compatible fallback offsets
  *  - BSS seeding (argc/argv/envp pre-initialization)
  *
  * Refptr patching is empty for now — Watcom CRT layout is not yet known.
@@ -31,17 +31,12 @@
 /* g_crt is declared in include/crt.h, defined in crt_globals.c */
 
 /* ── Watcom BSS layout offsets (relative to .bss base) ───────────
- * Same as MinGW for DOOM95, may need adjustment once a real Watcom
- * binary is analyzed. */
-
-// TODO: These WATCOM_BSS_* offsets are copied from the MinGW module.
-// Verify against a real Watcom-compiled PE (e.g., DOOM95) by inspecting
-// the .bss section layout in a debugger or with objdump -s -j .bss.
-
+ * These are compatibility fallbacks for DOOM95-style PE32 images when
+ * symbol lookup cannot recover argc/argv/envp locations. Prefer COFF
+ * symbol discovery whenever symbols are present. */
 #define WATCOM_BSS_INITENV     0x018   /* __initenv / _environ pointer */
 #define WATCOM_BSS_ARGV        0x020   /* _argv pointer */
 #define WATCOM_BSS_ARGC        0x028   /* _argc */
-#define WATCOM_BSS_ACMDLN      0x030   /* _acmdln (command line string ptr) */
 #define WATCOM_BSS_INITIALIZED 0x030   /* "initialized" flag — overlaps _acmdln */
 
 /* ── Watcom entry symbols ──────────────────────────────────────── */
@@ -51,14 +46,6 @@ static const char *watcom_entry_symbols[] = {
     "_D_DoomMain",
     NULL
 };
-
-/* ── Refptr mappings for Watcom CRT ──────────────────────────────
- * Empty for now — Watcom CRT layout and required stubs are not yet
- * reverse-engineered. Fill in once a real Watcom PE is analyzed. */
-
-// TODO: Discover Watcom-specific CRT symbols (e.g., _cstartup, __heapinit)
-// by reverse-engineering a real Watcom-compiled DOOM95 binary. Map each
-// MSVCRT refptr to its Watcom equivalent here.
 
 const refptr_mapping_t watcom_refptr_mappings[] = {
     { NULL, NULL }
@@ -138,9 +125,8 @@ static int watcom_detect(const char *file_path, IMAGE_NT_HEADERS *nt)
 /*
  * watcom_discover_offsets — minimal COFF lookup for _argc/_argv/__envp.
  *
- * Same approach as MinGW: try COFF symbol table, fall back to
- * WATCOM_BSS_* defines.  Watcom layout may differ from MinGW; this
- * will be corrected once a real Watcom binary is available.
+ * Same approach as MinGW: try COFF symbol table, then use the
+ * DOOM95-compatible WATCOM_BSS_* offsets when symbols are absent.
  */
 static void watcom_discover_offsets(const char *file_path,
                                      IMAGE_NT_HEADERS *nt,

@@ -198,7 +198,6 @@ All three components have `#if defined(__i386__)` code paths:
 | `src/syscall/dispatcher_generated.c` | Auto-generated dispatcher stubs |
 | `src/syscall/mmap2_asm.S` | mmap2 syscall assembly helper |
 | `src/syscall/syscalls_inline.h` | Inline syscall definitions |
-| `src/trampoline.S` | 64-bit trampoline assembly |
 | `src/run_guest.S` | 64-bit guest execution entry |
 | `src/msvcrt/handler_abi.h` | Handler ABI definitions |
 | `src/msvcrt/ntdll_handle.c` | NTDLL handle wrappers |

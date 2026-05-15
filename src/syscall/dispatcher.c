@@ -25,8 +25,8 @@
  *   - arg1..arg4: macros resolving to STACK(1..4) on x86, register params on x86_64
  *   - writeback_ptr(p, v): writes result to guest pointer in native width
  *
- * The generated switch body (dispatcher_generated.c) is included via
- * #define DISPATCHER_C_BODY + #include, using these macros for portability.
+ * The generated switch body (dispatcher_generated.c) is included directly
+ * inside dispatcher_core(), using these macros for portability.
  *
  * Single entry point: c_dispatch_syscall().
  */
@@ -305,7 +305,7 @@ static int dispatch_ptr_inout(uint64_t guest_arg, uint64_t *ptr_val,
  * dispatcher_core — switch body shared by the dispatcher entry point.
  *
  * The generated switch body (dispatcher_generated.c) is included here
- * after defining DISPATCHER_C_BODY and the arg1-arg4 macros.
+ * after defining the arg1-arg4 macros.
  *
  * 32-bit cdecl: all arguments on stack via __ARG(1-4) for arg1-4,
  *   STACK(n) for additional args (offset by thunk frame + 4 args).
@@ -332,9 +332,7 @@ static uint32_t dispatcher_core(uint32_t nr)
     #define arg3 __ARG(3)
     #define arg4 __ARG(4)
 
-    #define DISPATCHER_C_BODY
     #include "dispatcher_generated.c"
-    #undef DISPATCHER_C_BODY
 
     #undef arg1
     #undef arg2
@@ -368,9 +366,7 @@ static uint64_t dispatcher_core(uint64_t nr, uint64_t a1, uint64_t a2,
     #define arg3 a3
     #define arg4 a4
 
-    #define DISPATCHER_C_BODY
     #include "dispatcher_generated.c"
-    #undef DISPATCHER_C_BODY
 
     #undef arg1
     #undef arg2

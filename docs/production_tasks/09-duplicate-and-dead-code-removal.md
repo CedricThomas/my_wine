@@ -22,9 +22,10 @@ Start from the audit's "Duplicate Helpers And Dead-Code Candidates" section and
 check `audit/architecture-boundaries.md` before deleting anything that sits on a
 layer boundary. Initial candidates are:
 
-- `src/trampoline.S`
-- `src/msvcrt/ntdll_synchronization.c` `find_semaphore`
-- `src/crt/crt_watcom.c` TODO/fallback offset paths
+- `src/trampoline.S` — removed after Makefile and code search showed no references.
+- `src/msvcrt/ntdll_synchronization.c` `find_semaphore` — removed after code search showed no callers.
+- `src/crt/crt_watcom.c` TODO/fallback offset paths — stale TODOs were replaced with explicit compatibility notes; fallback behavior remains because it is guest-visible for DOOM95-style PE32 images when COFF symbol lookup is incomplete.
+- `scripts/gen_dispatcher.py` legacy dispatcher mode — removed because `dispatcher.c` only includes the current `dispatcher_core()` switch body.
 
 Do not delete behavior solely because it is not obvious. Require compiler,
 linker, search, test, or runtime evidence, especially for PE32, guest-safe
