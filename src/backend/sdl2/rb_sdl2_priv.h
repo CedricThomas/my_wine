@@ -165,4 +165,7 @@ static inline int vk_to_scancode(int vk)
     return g_vk_to_scancode[idx] ? g_vk_to_scancode[idx] : -1;
 }
 
+/* ---- Event system helpers ---- */
+void rb_event_set_active_window(rb_window_t win);
+
 #endif /* RB_SDL2_PRIV_H */

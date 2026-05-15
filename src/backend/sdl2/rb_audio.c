@@ -142,11 +142,17 @@ int rb_audio_buffer_destroy(rb_audio_buf_t buf)
 
     b->playing = 0;
 
-    /* Remove from the global buffer array */
+    /* Remove from the global buffer array, compacting to avoid gaps */
     for (int i = 0; i < g_audio_buf_count; i++) {
         if (g_audio_buffers[i] == b) {
-            g_audio_buffers[i] = NULL;
             g_audio_pos[i] = 0;
+            /* Shift all higher entries down to close the gap */
+            for (int j = i; j < g_audio_buf_count - 1; j++) {
+                g_audio_buffers[j] = g_audio_buffers[j + 1];
+                g_audio_pos[j] = g_audio_pos[j + 1];
+            }
+            g_audio_buffers[g_audio_buf_count - 1] = NULL;
+            g_audio_pos[g_audio_buf_count - 1] = 0;
             g_audio_buf_count--;
             break;
         }
