@@ -33,12 +33,12 @@ restores guest state, and returns. Dispatch does not use seccomp or SIGSYS.
 
 ## Quick Start
 
-**Prerequisites:** `gcc`, Docker (for building samples).
+**Prerequisites:** `gcc`, Docker (for building sample scenarios).
 
 ```bash
 make                                    # build the loader
-make samples                            # build all sample Windows binaries (requires Docker)
-./my_wine samples/hello_world/hello_world.exe   # run a sample
+make samples                            # build all e2e sample Windows binaries
+make run-samples-scenarios SAMPLE=hello_world
 ```
 
 For full build instructions, see the [README](../README.md).
@@ -158,21 +158,24 @@ For the full flow diagram, see [Architecture](architecture.md) §1.
 
 Practical advice for new contributors:
 
-- **Build a sample** with `make samples SAMPLE=hello_world` to get a test binary.
+- **Build a sample scenario** with `make samples SAMPLE=hello_world` to get an e2e PE binary.
 - **Run with** `./my_wine samples/hello_world/hello_world.exe` to see it working.
 - **Add a new stub:** Create a function with the `WINE_STUB` attribute (defined in `include/wine_abi.h` — this gives `ms_abi` calling convention + `force_align_arg_pointer`), add an entry to `src/loader/import_table.c`, and if it's a syscall handler, add a case to `c_dispatch_syscall()` in `src/syscall/dispatcher.c`.
 - **Note:** All stubs use `ms_abi` (Microsoft x64 calling convention: RCX, RDX, R8, R9 for the first four args), not the Linux System V ABI. The `WINE_STUB` macro handles this — never forget it on stub functions.
 - **Run tests** with `make run-tests` after any changes.
 - **Debug tip:** Start with `hello_world` as your test case — it's the simplest PE and exercises the core flow.
 - **Understanding a new import:** Search the PE's import table for the function name, then check `src/loader/import_table.c` to see if it's already registered. If not, add a `WINE_STUB` function and a dispatcher case.
-- **Adding a new sample:** Create a C file in `samples/`, add it to `scripts/samples.sh`, and run `make samples SAMPLE=your_sample` to cross-compile it.
+- **Adding a new sample scenario:** Create a directory under `samples/` with a same-named C file and `sample.info`, then run `make samples SAMPLE=your_sample` to cross-compile it.
+- **Adding a graphical sample scenario:** Set `type=graphical` in `sample.info`. Optional `applied_inputs.txt` commands are replayed by `make run-samples-scenarios`.
 
 ### Useful Commands
 
-- **`make`** — Build everything: loader binary, all sample Windows binaries, and all test binaries.
-- **`make samples`** — Build all sample Windows binaries (requires Docker for mingw-w64 cross-compilation).
-- **`make samples SAMPLE=<name>`** — Build a single sample binary.
-- **`make run-samples SAMPLE=<name>`** — Build + run a sample under `./my_wine`.
+- **`make`** — Build everything: loader binary, all sample scenario Windows binaries, and all test binaries.
+- **`make samples`** — Build all sample scenario Windows binaries (requires Docker for mingw-w64 cross-compilation).
+- **`make samples SAMPLE=<name>`** — Build a single sample scenario binary.
+- **`make graphical-samples SAMPLE=<name>`** — Build a single graphical sample scenario binary.
+- **`make run-samples-scenarios SAMPLE=<name>`** — Unified runner for console and graphical sample scenarios.
+- **`make inspect-graphical-samples-scenarios SAMPLE=<name>`** — Print display/window/process status for one graphical scenario.
 - **`make tests`** — Build the loader and all test binaries.
 - **`make run-tests`** — Run all tests. Use `make run-tests TEST=<name>` to filter (e.g. `TEST=parse`).
 - **`make fclean`** — Deep clean: remove build directory, generated headers, loader binary, and all sample `.exe` files.
@@ -184,7 +187,7 @@ Practical advice for new contributors:
 
 ### Testing Workflow
 
-1. Build the sample you'll test: `make samples SAMPLE=hello_world`
+1. Build the sample scenario you'll test: `make samples SAMPLE=hello_world`
 2. Run it: `./my_wine samples/hello_world/hello_world.exe`
 3. If it crashes, run under `gdb` or `strace` to get more info.
 4. After any changes, rebuild with `make` and re-run the sample.

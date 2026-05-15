@@ -55,6 +55,18 @@ parse_sample_info() {
     grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r'
 }
 
+sample_type() {
+    local name="$1"
+    local info="$SAMPLES_DIR/$name/sample.info"
+    if [ -f "$info" ]; then
+        parse_sample_info "$info" "type"
+    fi
+}
+
+is_graphical_sample() {
+    [ "$(sample_type "$1")" = "graphical" ]
+}
+
 # Discover sample directory names (sorted).
 # With argument: echo the name if it exists as a sample dir.
 # Without argument: echo every sample dir name, one per line, sorted.
@@ -452,6 +464,14 @@ case "$MODE" in
             echo "============================"
         fi
         for name in $samples; do
+            if is_graphical_sample "$name"; then
+                if [ "${MY_WINE_SKIP_GRAPHICAL_SAMPLES_SILENT:-0}" = "1" ]; then
+                    continue
+                fi
+                echo "  SKIP  $name (graphical sample; use scripts/graphical_samples.sh or make run-samples-scenarios)"
+                skip=$((skip + 1))
+                continue
+            fi
             # Build the sample first
             if ! build_sample "$name"; then
                 echo "  FAIL  $name (build failed, not running)"

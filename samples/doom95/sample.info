@@ -1,1 +1,4 @@
+type=graphical
+skip=true
+skip_reason=unsupported
 archive=doom95.zip

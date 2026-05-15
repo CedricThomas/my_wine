@@ -309,24 +309,28 @@ $(BUILDDIR32)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend32
 	@echo "  LD32 $@"
 	@$(MY_WINE32_CC) -no-pie $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS_32)
 
-# ── Samples ─────────────────────────────────────────────────────
-# Cross-compile samples to PE .exe via Docker (mingw-w64).
+# ── Sample Scenarios ────────────────────────────────────────────
+# Cross-compile sample scenarios to PE .exe via Docker (mingw-w64).
+# Unit-style native checks live under tests/. Samples are end-to-end scenario
+# programs that exercise the loader like a user-visible PE application.
 # See: scripts/samples.sh
 #
-#   make samples                build all samples
-#   make samples SAMPLE=foo     build one sample
-#   make run-samples SAMPLE=foo build + run under ./my_wine
+#   make samples                             build all sample binaries
+#   make samples SAMPLE=foo                  build one sample binary
+#   make graphical-samples SAMPLE=foo        build one graphical sample binary
+#   make run-samples-scenarios SAMPLE=foo    unified console/graphical scenario runner
 SAMPLE ?=
 
 samples:
 	@bash scripts/samples.sh build $(SAMPLE)
 
-run-samples: all
-	@bash scripts/samples.sh run $(SAMPLE)
+inspect-graphical-samples-scenarios: all
+	@bash scripts/graphical_samples.sh inspect $(SAMPLE)
 
-debug-samples: all
-	@echo "==== Running samples with debug ===="
-	@bash scripts/samples.sh run --debug
+run-samples-scenarios: all
+	@bash scripts/run_samples.sh $(SAMPLE)
+graphical-samples:
+	@bash scripts/graphical_samples.sh build $(SAMPLE)
 
 build-docker-image:
 	@echo "Building my_wine-samples Docker image..."
@@ -355,4 +359,4 @@ re: fclean
 -include $(wildcard $(BACKEND_OBJS:.o=.d))
 -include $(wildcard $(MY_WINE32_OBJS:.o=.d))
 
-.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-tests debug-tests inspect-graphical-samples-scenarios samples run-samples-scenarios graphical-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)

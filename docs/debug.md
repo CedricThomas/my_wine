@@ -103,8 +103,9 @@ backend process directly; there is no parent loader process collecting
 make my_wine my_wine64 my_wine32
 make run-tests
 make check-generated
-make run-samples SAMPLE=hello_world
-make run-samples SAMPLE=hello_world_32
+make run-samples-scenarios SAMPLE=hello_world
+make run-samples-scenarios SAMPLE=hello_world_32
+make inspect-graphical-samples-scenarios SAMPLE=sdl2_window
 ```
 
 Use `strace ./my_wine <sample.exe>` for host syscall traces. For guest NT

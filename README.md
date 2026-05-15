@@ -43,9 +43,9 @@ explicit runtime targets above when Docker is not available.
 Samples are cross-compiled to PE `.exe` via a Docker container (mingw-w64):
 
 ```bash
-make samples                  # build all samples
-make samples SAMPLE=hello_world # build one sample
-make run-samples SAMPLE=hello_world  # build + run under ./my_wine
+make samples SAMPLE=hello_world                 # build one e2e sample binary
+make run-samples-scenarios SAMPLE=hello_world   # unified console/graphical runner
+make run-samples-scenarios SAMPLE=sdl2_window   # graphical samples run in Docker/Xvfb
 ```
 
 You should see `Hello from Windows!` printed to the terminal.
@@ -75,9 +75,16 @@ For example:
 | `make clean` | Remove the `build/` directory |
 | `make tests` | Build native test binaries |
 | `make run-tests` | Build and run unit tests |
-| `make samples` | Cross-compile all samples via Docker |
-| `make samples SAMPLE=foo` | Cross-compile one sample |
-| `make run-samples SAMPLE=foo` | Build sample + run it under `./my_wine` |
+| `make samples` | Cross-compile all e2e sample binaries via Docker |
+| `make samples SAMPLE=foo` | Cross-compile one e2e sample binary |
+| `make graphical-samples SAMPLE=foo` | Cross-compile one graphical sample binary |
+| `make run-samples-scenarios SAMPLE=foo` | Build and run one sample scenario, dispatching graphical samples to Xvfb |
+| `make run-samples-scenarios` | Unified run for console and graphical sample scenarios |
+
+Graphical samples are marked with `type=graphical` in `sample.info`. Add
+`applied_inputs.txt` beside the sample to replay deterministic events after the
+window appears. Supported commands are `sleep MS`, `focus`, `key KEY`,
+`type TEXT`, `click X Y`, `mousemove X Y`, `status LABEL`, and `windowclose`.
 
 ### Dependencies
 

@@ -78,7 +78,7 @@ Broader gate:
 ```sh
 make run-tests
 make check-generated
-make run-samples
+make run-samples-scenarios
 ```
 
 Optional local static checks:
