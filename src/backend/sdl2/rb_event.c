@@ -210,7 +210,7 @@ int rb_event_wait(rb_msg_t *out_msg)
 
     while (SDL_WaitEvent(&sdl_ev)) {
         if (translate_sdl_event(&sdl_ev, out_msg)) {
-            return (out_msg->message == WM_QUIT) ? 1 : 0;
+            return (out_msg->message == WM_QUIT) ? 0 : 1;
         }
         /* Unknown event — discard and keep waiting */
     }
@@ -326,6 +326,8 @@ int rb_event_push(rb_msg_t *msg)
         break;
 
     case WM_CHAR:
+        sdl_ev.text.type        = SDL_TEXTINPUT;
+        sdl_ev.text.windowID    = 0;
         sdl_ev.text.text[0]     = (char)msg->wParam;
         sdl_ev.text.text[1]     = '\0';
         break;

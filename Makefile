@@ -3,6 +3,10 @@ CC       = gcc
 CFLAGS   = -Wall -Wextra -Werror -O2 -g -I. -Iinclude -MMD -MP -mno-sse
 LDFLAGS  = -lrt -lpthread -ldl
 
+# SDL2 backend (optional - needed for DOOM95 render backend)
+SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null || echo "-I/usr/include/SDL2")
+SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2")
+
 # Special flags for entry points, loader core, stubs, syscall infra.
 SPECIAL_CFLAGS = $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions
 
@@ -38,6 +42,10 @@ LOADER_OBJS  = $(patsubst src/loader/%.c,$(BUILDDIR)/%.o,$(LOADER_SRC))
 SYSCALL_OBJS = $(patsubst src/syscall/%.c,$(BUILDDIR)/%.o,$(SYSCALL_SRC))
 HEAP_OBJS    = $(patsubst src/heap/%.c,$(BUILDDIR)/%.o,$(HEAP_SRC))
 CRT_OBJS     = $(patsubst src/crt/%.c,$(BUILDDIR)/%.o,$(CRT_SRC))
+
+# ── Source Groups: SDL2 Backend ─────────────────────────────────
+BACKEND_SRC = $(sort $(shell find src/backend -name '*.c' 2>/dev/null))
+BACKEND_OBJS = $(patsubst src/backend/%.c,$(BUILDDIR)/backend/%.o,$(BACKEND_SRC))
 
 OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(CRT_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o $(BUILDDIR)/clone64.o
 
@@ -134,7 +142,7 @@ TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o 
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
-vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt tests
+vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
 vpath %.S src src/syscall
 
 # Pattern rules use $(CFLAGS) by default. Override for files needing
@@ -154,7 +162,7 @@ all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-	$(BUILDDIR)/test_syscall_safe_utils
+	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend
 
 # ── Generated Files ─────────────────────────────────────────────
 # Dispatcher switch bodies from include/nt_syscalls.def.
@@ -239,7 +247,7 @@ tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_res
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-		$(BUILDDIR)/test_syscall_safe_utils
+		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend
 
 run-tests: tests
 	@echo "==== Running tests ===="
@@ -264,6 +272,21 @@ $(eval $(call TEST_RULE,module_registry,$(TEST_module_registry_OBJS)))
 $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 $(eval $(call TEST_RULE,pe32,$(TEST_pe32_OBJS)))
 $(eval $(call TEST_RULE,syscall_safe_utils,))
+
+# ── SDL2 Backend Library ────────────────────────────────────────
+backend: $(BACKEND_OBJS)
+	@echo "==== SDL2 backend objects built ===="
+
+# SDL2 backend test
+TEST_sdl2_backend_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o
+$(BUILDDIR)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend_OBJS)
+	@echo "  LD $@"
+	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
+
+$(BUILDDIR)/backend/%.o: %.c | $(BUILDDIR)
+	@mkdir -p $(BUILDDIR)/backend
+	@echo "  CC-SDL2 $<"
+	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -c $< -o $@
 
 # ── Samples ─────────────────────────────────────────────────────
 # Cross-compile samples to PE .exe via Docker (mingw-w64).
@@ -309,4 +332,4 @@ re: fclean
 # ── Auto-generated Header Dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
 
-.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-dispatcher check-generated $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)

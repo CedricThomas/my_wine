@@ -156,6 +156,11 @@ static const int g_vk_to_scancode[256] = {
     [0xA1] = SDL_SCANCODE_RSHIFT,      /* VK_RSHIFT      */
     [0xA2] = SDL_SCANCODE_LCTRL,       /* VK_LCONTROL    */
     [0xA3] = SDL_SCANCODE_RCTRL,       /* VK_RCONTROL    */
+    [0xA4] = SDL_SCANCODE_LALT,        /* VK_LMENU       */
+    [0xA5] = SDL_SCANCODE_RALT,        /* VK_RMENU       */
+    [0x10] = SDL_SCANCODE_LSHIFT,      /* VK_SHIFT (generic → left) */
+    [0x11] = SDL_SCANCODE_LCTRL,       /* VK_CONTROL (generic → left) */
+    [0x12] = SDL_SCANCODE_LALT,        /* VK_MENU (generic → left) */
 };
 
 /* ---- Helper: VK code → SDL scancode ---- */

@@ -47,7 +47,9 @@ rb_window_t rb_window_create(const char *title,
     win->primary_surface = 0;
     win->backbuffer = 0;
 
-    return (rb_window_t)wine_handle_alloc(HANDLE_TYPE_HWIN, win);
+    rb_window_t handle = (rb_window_t)wine_handle_alloc(HANDLE_TYPE_HWIN, win);
+    rb_event_set_active_window(handle);
+    return handle;
 }
 
 int rb_window_destroy(rb_window_t win)
