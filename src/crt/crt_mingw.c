@@ -27,6 +27,11 @@
 
 #include "crt_priv.h"
 
+#ifdef MY_WINE32
+extern uint32_t pe32_argv_ptr(void);
+extern uint32_t pe32_envp_ptr(void);
+#endif
+
 /*
  * g_crt is declared in include/crt.h and defined in crt_globals.c.
  * All CRT globals are now fields of g_crt.
@@ -367,8 +372,7 @@ static void mingw_patch_refptrs(const char *file_path, void *image_base,
  * adapted for the module interface.
  *
  * Uses g_crt.crt_ctx offsets to write argc/argv/envp into the PE's .bss.
- * Writes argc=1, argv=NULL, envp=NULL. Uses mprotect to ensure .bss
- * is writable.
+ * Uses mprotect to ensure .bss is writable.
  */
 static void mingw_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
                             IMAGE_SECTION_HEADER *sections)
@@ -411,11 +415,15 @@ static void mingw_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     if (g_crt.crt_ctx.argv_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
+#ifdef MY_WINE32
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = pe32_argv_ptr();
+#else
             *(uint32_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
+#endif
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         }
-        DEBUG_LEVEL(2, ".bss: wrote argv=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote argv at offset 0x%x",
               g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
@@ -424,11 +432,15 @@ static void mingw_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     if (g_crt.crt_ctx.envp_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
+#ifdef MY_WINE32
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = pe32_envp_ptr();
+#else
             *(uint32_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
+#endif
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         }
-        DEBUG_LEVEL(2, ".bss: wrote envp=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote envp at offset 0x%x",
               g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "

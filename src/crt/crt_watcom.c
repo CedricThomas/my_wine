@@ -1,11 +1,11 @@
 /*
  * crt_watcom.c — Watcom CRT module
  *
- * Implements the crt_module vtable for Watcom-compiled PEs (DOOM95).
+ * Implements the crt_module vtable for Watcom-compiled PEs.
  *
  * This module handles:
  *  - Detection via COFF symbol table markers (D_DoomMain, _cstartup, .mmh)
- *  - BSS offset discovery with DOOM95-compatible fallback offsets
+ *  - BSS offset discovery with Watcom PE32 fallback offsets
  *  - BSS seeding (argc/argv/envp pre-initialization)
  *
  * Refptr patching is empty for now — Watcom CRT layout is not yet known.
@@ -28,10 +28,15 @@
 
 #include "crt_priv.h"
 
+#ifdef MY_WINE32
+extern uint32_t pe32_argv_ptr(void);
+extern uint32_t pe32_envp_ptr(void);
+#endif
+
 /* g_crt is declared in include/crt.h, defined in crt_globals.c */
 
 /* ── Watcom BSS layout offsets (relative to .bss base) ───────────
- * These are compatibility fallbacks for DOOM95-style PE32 images when
+ * These are compatibility fallbacks for known Watcom-style PE32 images when
  * symbol lookup cannot recover argc/argv/envp locations. Prefer COFF
  * symbol discovery whenever symbols are present. */
 #define WATCOM_BSS_INITENV     0x018   /* __initenv / _environ pointer */
@@ -39,27 +44,13 @@
 #define WATCOM_BSS_ARGC        0x028   /* _argc */
 #define WATCOM_BSS_INITIALIZED 0x030   /* "initialized" flag — overlaps _acmdln */
 
-/* ── Watcom entry symbols ────────────────────────────────────────
- *
- * Symbol priority order (first match wins):
- *   1. DOOM95-specific: D_DoomMain, _D_DoomMain
- *      DOOM95 declares its entry as D_DoomMain (or _D_DoomMain with
- *      leading underscore). These are tried first so DOOM95 images
- *      resolve correctly even if generic Watcom symbols also exist.
- *
- *   2. Generic Watcom CRT entry: _cstartup, _startup, main
- *      Standard Watcom CRT uses _cstartup or _startup as the linker
- *      entry point, which eventually calls main. These are tried as
- *      fallback for non-DOOM95 Watcom-compiled PEs.
- *      'main' (without underscore) covers C++ Watcom builds where the
- *      CRT strips the leading underscore from the C++ entry point.
- */
+/* Symbols safe to use when bypassing Watcom CRT startup.
+ * CRT startup symbols such as _cstartup/_startup are detection markers only;
+ * jumping to them would re-enter CRT code with a user-entry stack frame. */
 
 static const char *watcom_entry_symbols[] = {
     "D_DoomMain",
     "_D_DoomMain",
-    "_cstartup",
-    "_startup",
     "main",
     NULL
 };
@@ -158,7 +149,7 @@ static int watcom_detect(const char *file_path, IMAGE_NT_HEADERS *nt)
  * watcom_discover_offsets — minimal COFF lookup for _argc/_argv/__envp.
  *
  * Same approach as MinGW: try COFF symbol table, then use the
- * DOOM95-compatible WATCOM_BSS_* offsets when symbols are absent.
+ * Watcom PE32 WATCOM_BSS_* offsets when symbols are absent.
  */
 static void watcom_discover_offsets(const char *file_path,
                                      IMAGE_NT_HEADERS *nt,
@@ -327,11 +318,15 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     if (g_crt.crt_ctx.argv_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
+#ifdef MY_WINE32
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = pe32_argv_ptr();
+#else
             *(uint32_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
+#endif
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.argv_bss_offset) = 0;
         }
-        DEBUG_LEVEL(2, ".bss: wrote argv=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote argv at offset 0x%x",
               g_crt.crt_ctx.argv_bss_offset);
     } else {
         fprintf(stderr, "WARNING: argv_bss_offset is 0, "
@@ -340,11 +335,15 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
 
     if (g_crt.crt_ctx.envp_bss_offset != 0) {
         if (pe_is_pe32(nt)) {
+#ifdef MY_WINE32
+            *(uint32_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = pe32_envp_ptr();
+#else
             *(uint32_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
+#endif
         } else {
             *(uint64_t *)(bss_base + g_crt.crt_ctx.envp_bss_offset) = 0;
         }
-        DEBUG_LEVEL(2, ".bss: wrote envp=NULL at offset 0x%x",
+        DEBUG_LEVEL(2, ".bss: wrote envp at offset 0x%x",
               g_crt.crt_ctx.envp_bss_offset);
     } else {
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "

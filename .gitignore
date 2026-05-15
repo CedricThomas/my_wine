@@ -11,6 +11,9 @@ build32/
 # GDB debug scripts
 *.gdb
 
+# Editor-local review metadata
+.vscode/local-reviews/
+
 # Windows executables
 *.exe
 

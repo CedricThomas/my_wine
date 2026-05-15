@@ -173,86 +173,150 @@ static inline uint32_t le32(const uint8_t *p)
     return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
 }
 
+static inline int32_t le32s(const uint8_t *p)
+{
+    return (int32_t)le32(p);
+}
+
+enum {
+    MINGW_INITIALIZED_FALLBACK_BSS_OFFSET = 0x40,
+
+    X86_OP_MOV_RM32_IMM32        = 0xc7,
+    X86_MODRM_MOV_ABS32_IMM32    = 0x05,
+    X86_OP_JMP_REL32             = 0xe9,
+    X86_OP_CALL_REL32            = 0xe8,
+
+    X86_MOV_ABS32_IMM32_DISP_OFF = 2,
+    X86_MOV_ABS32_IMM32_IMM_OFF  = 6,
+    X86_MOV_ABS32_IMM32_LEN      = 10,
+
+    X86_REL32_BRANCH_DISP_OFF    = 1,
+    X86_REL32_BRANCH_LEN         = 5,
+
+    WATCOM_ENTRY_STUB_LEN        = X86_MOV_ABS32_IMM32_LEN + X86_REL32_BRANCH_LEN,
+};
+
+static int abs32_to_rva(uint32_t abs, uint32_t *out_rva)
+{
+    uint32_t base = (uint32_t)(uintptr_t)g_loader.image_base;
+    if (abs < base)
+        return 0;
+
+    *out_rva = abs - base;
+    return pe_rva_range_is_valid(*out_rva, sizeof(uint32_t),
+                                 pe_size_of_image(&g_nt_headers));
+}
+
+static uint32_t section_span(const IMAGE_SECTION_HEADER *sec)
+{
+    uint32_t size = sec->Misc.VirtualSize;
+    if (size == 0 || sec->SizeOfRawData > size)
+        size = sec->SizeOfRawData;
+    return size;
+}
+
+static int rva_in_section(uint32_t rva, uint32_t len,
+                          const IMAGE_SECTION_HEADER *sec)
+{
+    uint32_t start = sec->VirtualAddress;
+    uint32_t size = section_span(sec);
+    uint32_t end = start + size;
+
+    if (size == 0 || end < start)
+        return 0;
+    if (rva < start || rva >= end)
+        return 0;
+    return len <= end - rva;
+}
+
+static int rva_in_section_with_flags(uint32_t rva, uint32_t len,
+                                     uint32_t required_flags)
+{
+    const IMAGE_SECTION_HEADER *sections =
+        get_image_sections(g_loader.image_base, &g_nt_headers);
+    uint16_t num_sections = pe_section_count(&g_nt_headers);
+
+    for (uint16_t i = 0; i < num_sections; i++) {
+        if ((sections[i].Characteristics & required_flags) == required_flags &&
+            rva_in_section(rva, len, &sections[i])) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 /*
- * extract_entry_from_entry_point — extract the user entry function RVA
- * from the Watcom CRT startup pattern at the PE AddressOfEntryPoint.
+ * extract_watcom_entry_from_entry_stub — extract a user entry function RVA
+ * from a stripped Watcom-style entry stub.
  *
- * Watcom CRT entry stub (at AddressOfEntryPoint):
+ * Recognized shape:
  *   c7 05 [disp32] [imm32]  ; mov dword [disp32], imm32  (10 bytes)
- *   e9 [rel32]              ; jmp crt_init               (5 bytes)
- *   (or e8 [rel32] — call crt_init — used by some Watcom versions)
+ *   e9/e8 [rel32]           ; jmp/call CRT startup       (5 bytes)
  *
- * The imm32 field is the absolute runtime address of the user entry
- * function (after relocation). Compute RVA = imm32 - image_base.
- * Validates that the resulting RVA falls within a code section.
+ * The extraction is deliberately conservative:
+ *   - only active for stripped Watcom images after symbol lookup fails
+ *   - the stored value must point into executable code
+ *   - the store destination must be in writable image data
+ *   - the branch target must point into executable code
  *
  * @param out_rva  output: extracted RVA
  * @return         1 on success, 0 on failure
  */
-static int extract_entry_from_entry_point(uint32_t *out_rva)
+static int extract_watcom_entry_from_entry_stub(uint32_t *out_rva)
 {
-    /* Only attempt when the active CRT is Watcom (the only one with this pattern) */
     const crt_module_t *mod = crt_get_active();
     if (mod == NULL || crt_module_type(mod) != CRT_TYPE_WATCOM)
         return 0;
 
-    /* Read 15 bytes from the PE entry point:
-     *   c7 05 [disp32] [imm32]  ; mov dword [disp32], imm32  (10 bytes)
-     *   e9/e8 [rel32]           ; jmp/call crt_init           (5 bytes)
-     * We validate both the mov and the jmp/call to confirm the Watcom pattern.
-     * pe_rva_to_const_ptr already verifies the range is within mapped bounds. */
     uint32_t entry_rva = pe_entry_rva(&g_nt_headers);
     const uint8_t *p = pe_rva_to_const_ptr(g_loader.image_base, &g_nt_headers,
-                                           entry_rva, 15);
+                                           entry_rva, WATCOM_ENTRY_STUB_LEN);
     if (p == NULL)
         return 0;
 
-    /* Verify Watcom CRT entry pattern: mov dword [disp32], imm32 ; jmp/call */
-    if (p[0] != 0xc7 || p[1] != 0x05)
+    if (p[0] != X86_OP_MOV_RM32_IMM32 ||
+        p[1] != X86_MODRM_MOV_ABS32_IMM32)
         return 0;
 
-    /* Verify disp32 (bytes 2..5) is non-zero — a zero disp32 means
-     * it's not writing anywhere meaningful. */
-    uint32_t disp32 = le32(p + 2);
-    if (disp32 == 0)
+    uint8_t branch_op = p[X86_MOV_ABS32_IMM32_LEN];
+    if (branch_op != X86_OP_JMP_REL32 && branch_op != X86_OP_CALL_REL32)
         return 0;
 
-    /* Verify byte 10 is 0xe9 (jmp) or 0xe8 (call) — different Watcom
-     * versions use different instructions for the CRT init jump. */
-    if (p[10] != 0xe9 && p[10] != 0xe8)
+    uint32_t store_rva;
+    uint32_t store_abs = le32(p + X86_MOV_ABS32_IMM32_DISP_OFF);
+    if (!abs32_to_rva(store_abs, &store_rva) ||
+        !rva_in_section_with_flags(store_rva, sizeof(uint32_t),
+                                   IMAGE_SCN_MEM_WRITE)) {
         return 0;
+    }
 
-    /* Extract imm32 (bytes 6..9) — absolute runtime address of user entry */
-    uint32_t imm32 = le32(p + 6);
-
-    /* Convert absolute address to RVA */
-    uint32_t base = (uint32_t)(uintptr_t)g_loader.image_base;
-    if (imm32 < base)
-        return 0;  /* underflow — not a valid relocated address */
-
-    uint32_t rva = imm32 - base;
-
-    /* Validate: the RVA must fall within a code section */
-    IMAGE_SECTION_HEADER *sections =
+    const IMAGE_SECTION_HEADER *sections =
         get_image_sections(g_loader.image_base, &g_nt_headers);
     const IMAGE_SECTION_HEADER *code = find_code_section(&g_nt_headers, sections);
     if (code == NULL)
         return 0;
 
-    uint32_t code_start = code->VirtualAddress;
-    /* Watcom can set VirtualSize=0; fall back to SizeOfRawData */
-    uint32_t code_size  = code->Misc.VirtualSize;
-    if (code_size == 0) code_size = code->SizeOfRawData;
+    uint32_t candidate_rva;
+    uint32_t candidate_abs = le32(p + X86_MOV_ABS32_IMM32_IMM_OFF);
+    if (!abs32_to_rva(candidate_abs, &candidate_rva) ||
+        !rva_in_section(candidate_rva, 1, code)) {
+        return 0;
+    }
 
-    if (rva < code_start || code_size == 0)
+    int32_t branch_rel = le32s(p + X86_MOV_ABS32_IMM32_LEN +
+                              X86_REL32_BRANCH_DISP_OFF);
+    uint32_t branch_next_rva = entry_rva + WATCOM_ENTRY_STUB_LEN;
+    int64_t branch_target = (int64_t)branch_next_rva + (int64_t)branch_rel;
+    if (branch_next_rva < entry_rva || branch_target < 0 ||
+        branch_target > UINT32_MAX ||
+        !pe_rva_range_is_valid((uint32_t)branch_target, 1,
+                               pe_size_of_image(&g_nt_headers)) ||
+        !rva_in_section((uint32_t)branch_target, 1, code)) {
         return 0;
-    uint32_t code_end = code_start + code_size;
-    if (code_end < code_start)
-        return 0;
-    if (rva >= code_end)
-        return 0;
+    }
 
-    *out_rva = rva;
+    *out_rva = candidate_rva;
     return 1;
 }
 
@@ -268,11 +332,9 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
  * FPU reset, and other CRT init code that causes crashes in the
  * 32-bit loader (EIP=0x0 after _out returns).
  *
- * If no entry symbol was found in COFF symbols (stripped binaries or
- * unrecognized symbol names), tries extracting the entry RVA from the
- * Watcom CRT startup pattern at the PE AddressOfEntryPoint. If that
- * also fails, falls back to the PE AddressOfEntryPoint (which points
- * to CRT startup code).
+ * For stripped Watcom binaries with no COFF symbols, tries extracting
+ * the entry RVA from a validated startup stub at AddressOfEntryPoint.
+ * If that fails, falls back to the PE AddressOfEntryPoint.
  *
  * @return entry_rva
  */
@@ -282,6 +344,7 @@ static uint32_t resolve_entry_symbol(const char *path)
     uint32_t entry_rva = pe_entry;
     uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
     uint32_t num_sym = pe_number_of_symbols(&g_nt_headers);
+    int had_symbols = 0;
 
     const IMAGE_SECTION_HEADER *sections =
         get_image_sections(g_loader.image_base, &g_nt_headers);
@@ -299,6 +362,7 @@ static uint32_t resolve_entry_symbol(const char *path)
                                                       &symbols, &string_table);
         if (sym_count > 0) {
             uint32_t main_rva = 0;
+            had_symbols = 1;
 
             if (entry_syms) {
                 /* Try each CRT-specified entry symbol */
@@ -330,13 +394,12 @@ static uint32_t resolve_entry_symbol(const char *path)
         }
     }
 
-    /* Entry symbol not found from COFF — try extracting from Watcom CRT startup
-     * pattern at the PE AddressOfEntryPoint. This covers both stripped binaries
-     * (no COFF symbols) and binaries with symbols but no recognizable entry.
-     * Falls back to pe_entry_rva if extraction fails. */
-    if (entry_rva == pe_entry) {
+    /* For stripped Watcom images, infer the user entry from a validated
+     * startup stub. If symbols exist but do not name a known user entry,
+     * do not guess: fall back to the PE entry point. */
+    if (entry_rva == pe_entry && !had_symbols) {
         uint32_t extracted_rva;
-        if (extract_entry_from_entry_point(&extracted_rva)) {
+        if (extract_watcom_entry_from_entry_stub(&extracted_rva)) {
             DEBUG_LEVEL(1, "watcom_entry_extract: user_func VA=0x%x -> RVA=0x%x",
                         (uint32_t)(uintptr_t)g_loader.image_base + extracted_rva,
                         extracted_rva);
@@ -388,7 +451,7 @@ static void patch_crt_initialized(const char *path)
         const IMAGE_SECTION_HEADER *bss = find_section_by_name(&g_nt_headers,
                                                          sections, ".bss");
         if (bss)
-            init_rva = bss->VirtualAddress + 0x40;
+            init_rva = bss->VirtualAddress + MINGW_INITIALIZED_FALLBACK_BSS_OFFSET;
     }
     // Only free symbols — string_table is a pointer into the same
     // combined malloc'd buffer (see parse_symbol_table_from_file).
@@ -860,6 +923,9 @@ int main(int argc, char **argv)
 
     /* 6-7. Generate thunks and set up signal handlers */
     prepare_dispatch();
+
+    /* Allocate 32-bit argv/envp arrays before CRT .bss seeding. */
+    ensure_argv_setup(pe_path);
 
     /* Pre-seed CRT globals in .bss using the active CRT module if available */
     {
