@@ -122,10 +122,10 @@ typedef struct {
 #define WM_PAINT               0x000F
 #define WM_GETTEXT             0x000D
 #define WM_GETTEXTLENGTH       0x000E
-#define WM_SETTEXT             0x0012
+#define WM_SETTEXT             0x000C
 #define WM_SETCURSOR           0x0020
 #define WM_GETMINMAXINFO       0x0024
-#define WM_QUIT                0x001B
+#define WM_QUIT                0x0012
 #define WM_DISPLAYCHANGE       0x007E
 #define WM_KEYDOWN             0x0100
 #define WM_KEYUP               0x0101
@@ -153,22 +153,25 @@ typedef struct {
 
 /*
  * ── Cursor IDs (IDC_*) ───────────────────────────────────────
+ *
+ * Per real windows.h: integer cursor IDs cast to pointer type.
+ * LoadCursorA receives these as LPCTSTR and recovers the ID via (uintptr_t)lpCursorName.
  */
 
-#define IDC_ARROW       "32512"
-#define IDC_IBEAM       "32513"
-#define IDC_WAIT        "32514"
-#define IDC_CROSS       "32515"
-#define IDC_UPARROW     "32516"
-#define IDC_SIZE        "32640"
-#define IDC_ICON        "32641"
-#define IDC_SIZENWSE    "32642"
-#define IDC_SIZENS      "32643"
-#define IDC_SIZENESW    "32644"
-#define IDC_SIZEWE      "32645"
-#define IDC_SIZEALL     "32646"
-#define IDC_HAND        "32649"
-#define IDC_NO          "32648"
+#define IDC_ARROW       ((const char *)(uintptr_t)32512)
+#define IDC_IBEAM       ((const char *)(uintptr_t)32513)
+#define IDC_WAIT        ((const char *)(uintptr_t)32514)
+#define IDC_CROSS       ((const char *)(uintptr_t)32515)
+#define IDC_UPARROW     ((const char *)(uintptr_t)32516)
+#define IDC_SIZE        ((const char *)(uintptr_t)32640)
+#define IDC_ICON        ((const char *)(uintptr_t)32641)
+#define IDC_SIZENWSE    ((const char *)(uintptr_t)32642)
+#define IDC_SIZENS      ((const char *)(uintptr_t)32643)
+#define IDC_SIZENESW    ((const char *)(uintptr_t)32644)
+#define IDC_SIZEWE      ((const char *)(uintptr_t)32645)
+#define IDC_SIZEALL     ((const char *)(uintptr_t)32646)
+#define IDC_HAND        ((const char *)(uintptr_t)32649)
+#define IDC_NO          ((const char *)(uintptr_t)32648)
 
 /*
  * ── Show Window Constants (SW_*) ─────────────────────────────
