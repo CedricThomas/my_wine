@@ -170,7 +170,9 @@ static void *map_pe(const char *path)
 #endif
 
 /*
- * resolve_entry — returns the PE entry point RVA.
+ * resolve_entry_symbol — returns the user entry point RVA.
+ *
+ * // Requires crt_set_active() to have been called before this
  *
  * For PE32: tries to find the entry symbol from the active CRT module
  * (e.g. _main for MinGW, main for Watcom) in the COFF symbol table
@@ -179,14 +181,12 @@ static void *map_pe(const char *path)
  * FPU reset, and other CRT init code that causes crashes in the
  * 32-bit loader (EIP=0x0 after _out returns).
  *
- * When jumping to _main (MinGW), we also set the _initialized CRT
- * flag so that _main's call to ___main returns immediately without
- * running __do_global_ctors (which can crash with inconsistent state).
- *
  * If COFF symbols are absent (stripped binaries like Watcom DOOM95),
  * falls back to the PE AddressOfEntryPoint.
+ *
+ * @return entry_rva
  */
-static uint32_t resolve_entry(const char *path)
+static uint32_t resolve_entry_symbol(const char *path)
 {
     uint32_t entry_rva = pe_entry_rva(&g_nt_headers);
     uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
@@ -231,28 +231,6 @@ static uint32_t resolve_entry(const char *path)
 
             if (main_rva != 0) {
                 entry_rva = main_rva;
-
-                /* Set the _initialized CRT flag so ___main skips __do_global_ctors. */
-                uint32_t init_rva = lookup_symbol_rva(symbols, sym_count, string_table,
-                                                       sections, num_sections,
-                                                       "_initialized");
-                if (init_rva == 0) {
-                    IMAGE_SECTION_HEADER *bss = find_section_by_name(&g_nt_headers,
-                                                                     sections, ".bss");
-                    if (bss)
-                        init_rva = bss->VirtualAddress + 0x40;
-                }
-                if (init_rva != 0) {
-                    uint8_t *addr = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
-                                                  init_rva, sizeof(uint32_t));
-                    if (addr != NULL) {
-                        uintptr_t page = (uintptr_t)addr & ~(uintptr_t)PAGE_MASK;
-                        long rc = INLINE_SYSCALL_MPROTECT((void *)page, PAGE_SIZE,
-                                                           PROT_READ | PROT_WRITE);
-                        if (rc == 0)
-                            *(uint32_t *)addr = 1;
-                    }
-                }
             }
 
             free(symbols);
@@ -262,6 +240,54 @@ static uint32_t resolve_entry(const char *path)
      * we cannot look up entry symbols. Fall back to PE entry_rva. */
 
     return entry_rva;
+}
+
+/*
+ * patch_crt_initialized — sets the _initialized CRT flag to 1.
+ *
+ * This ensures that when _main calls ___main (MinGW), the CRT init
+ * returns immediately without running __do_global_ctors, which can
+ * crash with inconsistent state in the 32-bit loader.
+ */
+static void patch_crt_initialized(const char *path)
+{
+    uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
+    uint32_t num_sym = pe_number_of_symbols(&g_nt_headers);
+
+    if (ptr_sym == 0 || num_sym == 0) return;
+
+    IMAGE_SECTION_HEADER *sections =
+        get_image_sections(g_loader.image_base, &g_nt_headers);
+    int num_sections = pe_section_count(&g_nt_headers);
+
+    IMAGE_SYMBOL *symbols = NULL;
+    char *string_table = NULL;
+    int sym_count = parse_symbol_table_from_file(path, &g_nt_headers,
+                                                  &symbols, &string_table);
+    if (sym_count <= 0) return;
+
+    uint32_t init_rva = lookup_symbol_rva(symbols, sym_count, string_table,
+                                           sections, num_sections,
+                                           "_initialized");
+    if (init_rva == 0) {
+        IMAGE_SECTION_HEADER *bss = find_section_by_name(&g_nt_headers,
+                                                         sections, ".bss");
+        if (bss)
+            init_rva = bss->VirtualAddress + 0x40;
+    }
+    free(symbols);
+
+    if (init_rva == 0) return;
+
+    uint8_t *addr = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
+                                  init_rva, sizeof(uint32_t));
+    if (addr == NULL) return;
+
+    uintptr_t page = (uintptr_t)addr & ~(uintptr_t)PAGE_MASK;
+    long rc = INLINE_SYSCALL_MPROTECT((void *)page, PAGE_SIZE,
+                                       PROT_READ | PROT_WRITE);
+    if (rc == 0)
+        *(uint32_t *)addr = 1;
 }
 
 /*
@@ -696,8 +722,9 @@ int main(int argc, char **argv)
         }
     }
 
-    /* 3. Determine entry point */
-    entry_rva = resolve_entry(pe_path);
+    /* 3. Determine entry point and patch CRT _initialized flag */
+    entry_rva = resolve_entry_symbol(pe_path);
+    patch_crt_initialized(pe_path);
     entry_abs = (uint32_t)(uintptr_t)g_loader.image_base + entry_rva;
 
     /* 4-5. Allocate and initialize TEB and PEB */
@@ -716,9 +743,6 @@ int main(int argc, char **argv)
 
     /* 6-7. Generate thunks and set up signal handlers */
     prepare_dispatch();
-
-    /* Allocate 32-bit argv/envp arrays (used by seed_bss_vars and entry jump) */
-    ensure_argv_setup(pe_path);
 
     /* Pre-seed CRT globals in .bss using the active CRT module if available */
     {
