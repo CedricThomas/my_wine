@@ -56,14 +56,13 @@ const refptr_mapping_t watcom_refptr_mappings[] = {
 /*
  * watcom_detect — check for Watcom CRT markers in the PE.
  *
- * Looks for:
+ * Requires at least one strong indicator:
  *   1. .mmh section (Watcom-specific heap metadata)
- *   2. BEGTEXT + DGROUP section names (Watcom code/data sections)
+ *   2. BEGTEXT + DGROUP section names (both present, Watcom code/data sections)
  *   3. D_DoomMain or _D_DoomMain in the COFF symbol table
  *   4. _cstartup or _startup (Watcom CRT entry symbols)
- *   5. Single Watcom section name (BEGTEXT or DGROUP) as tiebreaker when symbols absent
  *
- * Returns 1 if any marker found, 0 otherwise.
+ * Returns 1 if a strong indicator found, 0 otherwise.
  */
 static int watcom_detect(const char *file_path, IMAGE_NT_HEADERS *nt)
 {
@@ -88,23 +87,19 @@ static int watcom_detect(const char *file_path, IMAGE_NT_HEADERS *nt)
         return 0;
 
     IMAGE_SECTION_HEADER *sections = get_image_sections(file, nt);
-    int has_one_watcom_section = 0;
+    int has_begtext = 0, has_dgroup = 0;
     if (sections) {
         if (find_section_by_name(nt, sections, ".mmh")) {
             munmap(file, file_size);
             return 1;
         }
 
-        /* Check for Watcom-typical section names (works even when COFF symbols are stripped)
-         * BEGTEXT = Watcom code section, DGROUP = Watcom data group
-         * Both present → strong signal. One present → secondary signal used as tiebreaker. */
-        int has_begtext = find_section_by_name(nt, sections, "BEGTEXT") != NULL;
-        int has_dgroup = find_section_by_name(nt, sections, "DGROUP") != NULL;
+        has_begtext = find_section_by_name(nt, sections, "BEGTEXT") != NULL;
+        has_dgroup = find_section_by_name(nt, sections, "DGROUP") != NULL;
         if (has_begtext && has_dgroup) {
             munmap(file, file_size);
             return 1;
         }
-        has_one_watcom_section = (has_begtext || has_dgroup);
     }
 
     /* Check COFF symbol table for Watcom markers */
@@ -130,10 +125,10 @@ static int watcom_detect(const char *file_path, IMAGE_NT_HEADERS *nt)
         free(symbols);
     }
 
-    /* Tiebreaker: one Watcom section name without COFF symbols is still indicative */
-    if (count == 0 && sections && has_one_watcom_section) {
-        munmap(file, file_size);
-        return 1;
+    /* Detection failed — log if we saw a weak section hint without symbols */
+    if ((has_begtext || has_dgroup) && count <= 0) {
+        DEBUG_LEVEL(1, "watcom_detect: found Watcom section name(s) but no COFF symbols, "
+              "insufficient evidence for Watcom CRT");
     }
 
     munmap(file, file_size);

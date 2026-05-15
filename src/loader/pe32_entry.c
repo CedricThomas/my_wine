@@ -175,6 +175,7 @@ static void *map_pe(const char *path)
  * Watcom CRT entry stub (at AddressOfEntryPoint):
  *   c7 05 [disp32] [imm32]  ; mov dword [disp32], imm32  (10 bytes)
  *   e9 [rel32]              ; jmp crt_init               (5 bytes)
+ *   (or e8 [rel32] — call crt_init — used by some Watcom versions)
  *
  * The imm32 field is the absolute runtime address of the user entry
  * function (after relocation). Compute RVA = imm32 - image_base.
@@ -192,16 +193,31 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
 
     /* Read 15 bytes from the PE entry point:
      *   c7 05 [disp32] [imm32]  ; mov dword [disp32], imm32  (10 bytes)
-     *   e9 [rel32]              ; jmp crt_init               (5 bytes)
-     * We validate both the mov and the jmp to confirm the Watcom pattern. */
+     *   e9/e8 [rel32]           ; jmp/call crt_init           (5 bytes)
+     * We validate both the mov and the jmp/call to confirm the Watcom pattern.
+     * pe_rva_to_const_ptr already verifies the range is within mapped bounds. */
     uint32_t entry_rva = pe_entry_rva(&g_nt_headers);
     const uint8_t *p = pe_rva_to_const_ptr(g_loader.image_base, &g_nt_headers,
                                            entry_rva, 15);
     if (p == NULL)
         return 0;
 
-    /* Verify Watcom CRT entry pattern: mov dword [disp32], imm32 ; jmp */
-    if (p[0] != 0xc7 || p[1] != 0x05 || p[10] != 0xe9)
+    /* Verify Watcom CRT entry pattern: mov dword [disp32], imm32 ; jmp/call */
+    if (p[0] != 0xc7 || p[1] != 0x05)
+        return 0;
+
+    /* Verify disp32 (bytes 2..5) is non-zero — a zero disp32 means
+     * it's not writing anywhere meaningful. */
+    uint32_t disp32 = (uint32_t)((uint32_t)p[2]       |
+                                 ((uint32_t)p[3] << 8)  |
+                                 ((uint32_t)p[4] << 16) |
+                                 ((uint32_t)p[5] << 24));
+    if (disp32 == 0)
+        return 0;
+
+    /* Verify byte 10 is 0xe9 (jmp) or 0xe8 (call) — different Watcom
+     * versions use different instructions for the CRT init jump. */
+    if (p[10] != 0xe9 && p[10] != 0xe8)
         return 0;
 
     /* Extract imm32 (bytes 6..9) — absolute runtime address of user entry */
