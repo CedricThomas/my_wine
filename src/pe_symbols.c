@@ -18,7 +18,7 @@
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 
 /*
  * Parse the COFF symbol table directly from the PE file on disk.

@@ -25,9 +25,8 @@ Start from the audit's header inventory and
   `include/nt_constants.h`, `include/nt_syscalls.def`.
 - Guest ABI headers: `include/kernel32.h`, `include/msvcrt.h`,
   `include/ntdll.h`, `include/syscall/*.h`.
-- PE32-only or stale candidates: `include/loader/pe32_trampoline.h`,
-  `include/syscall/signal_handler.h`.
-- Future-work/stale boundary candidate: `include/render_backend.h`.
+- Removed stale candidates: `include/loader/pe32_trampoline.h`,
+  `include/syscall/signal_handler.h`, `include/render_backend.h`.
 
 Do not move declarations across glibc-safe and no-glibc boundaries without
 making that boundary explicit in the header name or location. Use the boundary

@@ -43,7 +43,7 @@ Date: 2026-05-14
 | `src/trampoline.S` | Assembly trampoline symbol `trampoline_jump`; not referenced by Makefile or code search. | Dead-code candidate until proven used externally. |
 | `src/common.c`, `include/common.h` | Shared debug flag and `with_mprotect_rw`; architecture support guard. | Shared; `common.c` currently uses libc/string/mprotect and is in `SPECIAL_CFLAGS`. |
 | `src/debug.c`, `include/debug.h` | Shared debug infrastructure/macros. | Shared; `DEBUG` uses `fprintf`, so do not add DEBUG calls in glibc-free guest paths. Runtime traces are controlled by level-based `MY_WINE_DEBUG_LEVEL` values. |
-| `src/pe_headers.c`, `include/pe.h`, `include/pe_parser.h`, `include/pe_priv.h` | DOS/NT header parsing, RVA conversion, section helpers, PE structs. | Shared PE32/PE32+; glibc allowed in parser tests/setup unless called post-switch. |
+| `src/pe_headers.c`, `src/pe_priv.h`, `include/pe.h`, `include/pe_parser.h` | DOS/NT header parsing, RVA conversion, section helpers, PE structs. | Shared PE32/PE32+; glibc allowed in parser tests/setup unless called post-switch. `src/pe_priv.h` is an implementation/test helper, not a public header. |
 | `src/pe_imports.c` | Import descriptor parsing and thunk-size-aware walking. | Shared PE32/PE32+. |
 | `src/pe_rip_scan.c` | Scans PE32+ RIP-relative and PE32 absolute import jump patterns. | Shared with arch-specific scan modes. |
 | `src/pe_symbols.c` | COFF symbol table parsing from PE files. | Shared setup-time helper; returns malloc-owned data. |
@@ -86,7 +86,6 @@ Date: 2026-05-14
 | `src/syscall/clone64.S` | x86_64 clone wrapper. | PE32+ host/guest-thread support; no glibc. |
 | `src/syscall/clone.S` | i386 clone wrapper. | PE32-only; no glibc. |
 | `src/syscall/mmap2_asm.S` | i386 direct `mmap2` wrapper to avoid GS-relative libc syscall path. | PE32-only; no glibc. |
-| `include/syscall/signal_handler.h` | Header for old SIGSYS/seccomp design. | Stale/dead candidate: no implementation or include use found. |
 
 ### `src/msvcrt/`
 
@@ -142,8 +141,6 @@ Date: 2026-05-14
 | Files | Responsibility | Constraint |
 |---|---|---|
 | `include/wine_abi.h` | Guest ABI macros for x86_64 `ms_abi`, i386 cdecl/stdcall, and pointer return workaround. | Architecture-critical. |
-| `include/loader/pe32_trampoline.h` | PE32 low-memory trampoline design constants/interface. | PE32-only; verify current implementation coverage before deleting or moving. |
-| `include/render_backend.h` | SDL/render backend interface spec. | Currently not wired into Makefile source; likely DOOM95 future-work/stale boundary. |
 
 ## Architecture Classification
 
@@ -154,7 +151,6 @@ Date: 2026-05-14
 - `src/syscall/clone.S`
 - `src/syscall/mmap2_asm.S`
 - `src/heap/musl_malloc_32_compat.c`
-- `include/loader/pe32_trampoline.h`
 - PE32 sample sources: all `samples/*_32/*.c`, `samples/dispatcher_regs_32/dispatcher_regs_32.s`, and `samples/doom95/*`.
 
 ### PE32+-only files
@@ -205,7 +201,7 @@ Date: 2026-05-14
 - `src/syscall/thunk_gen.c`
 - `src/msvcrt/*.c`
 - `src/crt/*.c`
-- most `include/*.h` except `include/loader/pe32_trampoline.h`.
+- active public headers in `include/`.
 
 ### Wrapper-only
 
@@ -338,9 +334,7 @@ Duplicate helper candidates:
 
 Dead or stale candidates:
 
-- `include/syscall/signal_handler.h`: describes SIGSYS/seccomp setup, but no implementation or active include use was found. Current docs say dispatch is direct and not SIGSYS/seccomp.
 - `src/trampoline.S`: defines `trampoline_jump`, but Makefile does not build it and code search found no references.
-- `include/render_backend.h`: no source backend is present in the current Makefile; appears to belong to future DOOM95 work rather than current runtime.
 - `src/msvcrt/ntdll_synchronization.c`: `find_semaphore` is marked `__attribute__((unused))`.
 - `src/crt/crt_watcom.c`: TODOs say Watcom offsets are copied from MinGW and Watcom symbol discovery remains incomplete.
 
@@ -370,7 +364,6 @@ Suggested tests to pin before editing:
 - `samples/doom95/docs/reference/risks.md`: claims no PE32 support and recommends parser-only PE32 support, but current code has `my_wine32` and substantial PE32 runtime support.
 - `samples/doom95/docs/reference/loader_notes.md`: says no PE32 support in current limitations; stale relative to `src/loader/pe32_entry.c` and `docs/PE32.md`.
 - `samples/doom95/docs/*`: many files describe planned SDL2/render/backend work not present in current source; archive or clearly label as DOOM95 planning docs.
-- `include/syscall/signal_handler.h`: source comment documents obsolete SIGSYS/seccomp dispatch path.
 - `docs/debug.md`: crash-status examples and kernel notes may be historical; verify against current direct-dispatch and three-binary runtime.
 - `README.md`, `docs/onboarding.md`, `docs/architecture.md`, `docs/rationale.md`, `docs/PE32.md`: broadly aligned with current three-binary/direct-dispatch model, but should be refreshed after code cleanup rather than first.
 
@@ -384,7 +377,7 @@ Recommended adjusted order:
 4. Do task 06 architecture boundaries before task 08/09. PE32-only, PE32+-only, and glibc-free zones need explicit ownership first.
 5. Do task 08 shared utility layer before task 09 duplicate removal. Several duplicates are intentional no-libc variants; centralize only after constraints are encoded.
 6. Do task 05 PE bounds hardening before or alongside large parser/loader splits, because parser behavior should be pinned before moving code.
-7. Keep task 14 docs refresh late, but add a small interim stale-doc marker for DOOM95 planning docs and `include/syscall/signal_handler.h` once task 09 handles stale code.
+7. Keep task 14 docs refresh late, but add a small interim stale-doc marker for DOOM95 planning docs once task 09 handles stale code.
 
 ## Follow-up Task Adjustments
 
@@ -392,6 +385,6 @@ Recommended adjusted order:
 - Task 06 produced `audit/architecture-boundaries.md`; later tasks should use it
   for ownership, dependency, and libc/syscall-only boundary checks.
 - Task 08 should define a guest-safe utility layer separate from host/setup utilities. A single shared string helper layer is not sufficient unless it has no-libc guarantees.
-- Task 09 should review `include/syscall/signal_handler.h` and `src/trampoline.S` first because they appear disconnected.
+- Task 09 should review `src/trampoline.S` first because it appears disconnected.
 - Task 10 should prioritize `src/loader/pe32_entry.c`, `src/msvcrt/kernel32_misc.c`, `src/syscall/dispatcher.c`, `src/loader/import_resolve.c`, and `src/msvcrt/crt_offset_discovery.c`.
 - Task 14 should treat `samples/doom95/docs` as planning/reference docs, not current architecture docs, unless they are rewritten against current PE32 support.

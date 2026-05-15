@@ -23,7 +23,7 @@
 #include "include/syscall/dispatcher.h"
 #include "include/syscall/dispatcher_entry.h"
 #include "include/common.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

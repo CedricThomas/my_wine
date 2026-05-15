@@ -26,7 +26,7 @@
 #include "nt_constants.h"
 #include "src/loader/module_list.h"
 #include "src/loader/export_table.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 
 /* ── Test harness ────────────────────────────────────────────── */
 

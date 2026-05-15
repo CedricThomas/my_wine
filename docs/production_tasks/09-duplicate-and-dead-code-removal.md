@@ -22,9 +22,7 @@ Start from the audit's "Duplicate Helpers And Dead-Code Candidates" section and
 check `audit/architecture-boundaries.md` before deleting anything that sits on a
 layer boundary. Initial candidates are:
 
-- `include/syscall/signal_handler.h`
 - `src/trampoline.S`
-- `include/render_backend.h`
 - `src/msvcrt/ntdll_synchronization.c` `find_semaphore`
 - `src/crt/crt_watcom.c` TODO/fallback offset paths
 

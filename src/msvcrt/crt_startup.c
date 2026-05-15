@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 
 #include "msvcrt_priv.h"
+#include "../loader/loader_state.h"
 
 /* ── Data symbols and functions needed by import table (not in other msvcrt files) ── */
 /* __initenv is now g_crt.initenv (in crt_globals.c) */
@@ -135,14 +136,14 @@ void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *
             *(uint32_t *)(bss + g_crt.crt_ctx.argc_bss_offset) = 1;
         /* Write pointer size matching the PE type: 4 bytes for PE32, 8 for PE32+ */
         if (g_crt.crt_ctx.argv_bss_offset) {
-            if (g_is_32bit_get()) {
+            if (loader_is_32bit()) {
                 *(uint32_t *)(bss + g_crt.crt_ctx.argv_bss_offset) = (uint32_t)(uintptr_t)(g_crt.guest_argv ? g_crt.guest_argv : 0);
             } else {
                 *(uint64_t *)(bss + g_crt.crt_ctx.argv_bss_offset) = (uint64_t)(uintptr_t)(g_crt.guest_argv ? g_crt.guest_argv : 0);
             }
         }
         if (g_crt.crt_ctx.envp_bss_offset) {
-            if (g_is_32bit_get()) {
+            if (loader_is_32bit()) {
                 *(uint32_t *)(bss + g_crt.crt_ctx.envp_bss_offset) = (uint32_t)(uintptr_t)(g_crt.guest_envp ? g_crt.guest_envp : 0);
             } else {
                 *(uint64_t *)(bss + g_crt.crt_ctx.envp_bss_offset) = (uint64_t)(uintptr_t)(g_crt.guest_envp ? g_crt.guest_envp : 0);

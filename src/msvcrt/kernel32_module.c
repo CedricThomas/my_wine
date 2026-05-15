@@ -8,7 +8,7 @@
 
 #include "kernel32_priv.h"
 #include "include/common.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "../loader/loader_priv.h"
 #include "../loader/loader_state.h"
 

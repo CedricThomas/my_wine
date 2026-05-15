@@ -6,7 +6,7 @@
  */
 
 #include "module_list.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "loader_utils.h"
 #include "loader_state.h"
 

@@ -2,7 +2,7 @@
  * pe_headers.c — DOS/NT header parsing, section table, RVA conversion
  *
  * Parses DOS header, NT headers, sections, and provides debug dumping.
- * Shared helpers (safe_ptr_at, rva_to_offset, compute_section_table_offset) are in include/pe_priv.h.
+ * Shared helpers (safe_ptr_at, rva_to_offset, compute_section_table_offset) are in src/pe_priv.h.
  */
 
 #define _GNU_SOURCE
@@ -18,7 +18,7 @@
 #include "include/pe_parser.h"
 #include "include/common.h"
 #include "include/debug.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 
 /* ── DOS Header ────────────────────────────────────────────────── */
 

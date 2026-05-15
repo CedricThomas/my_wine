@@ -35,7 +35,7 @@
 #include "../syscall/syscalls_inline.h"
 #include "include/syscall/dispatcher_entry.h"
 #include "include/pe.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "include/pe_parser.h"
 #include "include/nt_constants.h"
 #include "include/common.h"
@@ -46,6 +46,7 @@
 #include "import_resolve.h"
 #include "peb_ldr.h"
 #include "module_list.h"
+#include "loader_state.h"
 #include "loader_utils.h"
 #include "../heap/wine_heap.h"
 

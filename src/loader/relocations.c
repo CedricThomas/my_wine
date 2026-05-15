@@ -21,7 +21,7 @@
 
 #include "include/nt_constants.h"
 #include "include/pe.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "loader_priv.h"
 
 #ifndef IMAGE_REL_BASED_ABSOLUTE

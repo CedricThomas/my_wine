@@ -1,8 +1,9 @@
 /*
  * pe_priv.h — Internal PE helper functions
  *
- * Private utility functions for working with PE images.
- * Not intended for inclusion outside the loader.
+ * Private utility functions for working with PE images. Runtime code and
+ * white-box tests may include this header directly; it is not a public
+ * project-wide contract.
  */
 
 #ifndef MY_WINE_PE_PRIV_H

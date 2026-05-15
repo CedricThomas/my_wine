@@ -34,7 +34,7 @@
 
 #include "teb_peb.h"
 #include "include/pe.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "include/nt_constants.h"
 #include "loader_priv.h"
 #include "include/debug.h"

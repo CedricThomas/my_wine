@@ -20,6 +20,7 @@
 #include "src/loader/module_list.h"
 #include "src/loader/peb_ldr.h"
 #include "src/loader/export_table.h"
+#include "src/loader/loader_state.h"
 #include "include/kernel32.h"
 #include "include/common.h"
 

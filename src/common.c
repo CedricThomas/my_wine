@@ -1,4 +1,5 @@
 #include "include/common.h"
+#include "loader/loader_state.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>

@@ -10,7 +10,7 @@
 
 #include "include/pe.h"
 #include "include/pe_parser.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 
 static int has_bounded_cstr(const void *base, size_t file_size, size_t offset)
 {

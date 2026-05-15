@@ -25,7 +25,7 @@
 #include "include/crt.h"
 #include "include/common.h"
 #include "loader/loader_priv.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "include/debug.h"
 
 /* g_crt is declared in include/crt.h (via msvcrt.h) and defined in crt_globals.c */

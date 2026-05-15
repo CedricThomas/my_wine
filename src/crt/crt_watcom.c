@@ -24,7 +24,7 @@
 #include "include/debug.h"
 #include "include/pe.h"
 #include "include/pe_parser.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 
 #include "crt_priv.h"
 

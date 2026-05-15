@@ -13,7 +13,7 @@
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "include/common.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 
 /* Callback receives (offset_in_text, target_rva). Return true to continue, false to stop. */
 typedef bool (*rip_scan_callback)(uint64_t offset, uint64_t target_rva, void *user_data);

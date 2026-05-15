@@ -31,7 +31,7 @@
 #include "include/common.h"
 #include "include/crt.h"
 #include "include/pe_parser.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "msvcrt_priv.h"
 #include "include/debug.h"
 

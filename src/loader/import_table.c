@@ -20,7 +20,7 @@
 #include "include/common.h"
 
 #include "loader_priv.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "include/debug.h"
 
 /* Stub function declarations from crt_32_stub.c (available in both 32-bit and 64-bit builds) */

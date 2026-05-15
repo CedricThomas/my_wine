@@ -14,7 +14,7 @@
 #include "include/crt.h"
 #include "include/common.h"
 #include "include/debug.h"
-#include "include/pe_priv.h"
+#include "src/pe_priv.h"
 #include "msvcrt_priv.h"
 
 #define CRT_BSS_INITIALIZED 0x30

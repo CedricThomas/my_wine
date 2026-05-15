@@ -91,6 +91,14 @@ static inline void loader_set_32bit(bool val) {
     g_loader.is_32bit = val;
 }
 
+static inline bool g_is_32bit_get(void) {
+    return loader_is_32bit();
+}
+
+static inline void g_is_32bit_set(int val) {
+    loader_set_32bit(val != 0);
+}
+
 static inline uintptr_t loader_get_host_gs_base(void) {
     return g_loader.host_gs_base;
 }

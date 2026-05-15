@@ -529,7 +529,7 @@ RVA directly (headers start at file offset 0).
 
 ### C Implementation
 
-The `rva_to_offset()` helper in `pe_priv.h` implements this:
+The `rva_to_offset()` helper in `src/pe_priv.h` implements this:
 
 ```c
 static inline int rva_to_offset(const IMAGE_NT_HEADERS64 *nt,
