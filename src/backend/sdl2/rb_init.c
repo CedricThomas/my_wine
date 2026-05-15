@@ -9,8 +9,8 @@
 
 static int g_initialized = 0;
 
-struct rb_audio_state g_audio;
-struct rb_audio_buf *g_audio_buffers[32];
+rb_audio_state g_audio;
+rb_audio_buf *g_audio_buffers[32];
 int g_audio_buf_count = 0;
 
 int rb_init(void)

@@ -26,29 +26,30 @@
  */
 
 /* ---- Private window state ---- */
-struct rb_window {
+typedef struct rb_window {
     SDL_Window *window;
     rb_surface_t primary_surface; /* flip-chain primary surface handle */
-};
+    rb_surface_t backbuffer;      /* flip-chain backbuffer handle (owned by window) */
+} rb_window;
 
 /* ---- Private surface state ---- */
-struct rb_surface {
+typedef struct rb_surface {
     SDL_Surface *surface;
     uint8_t *own_buf;       /* malloc'd pixel buffer we own */
     rb_palette_t palette;   /* palette handle bound to this surface */
     int dirty;              /* flag: surface contents changed, needs update */
     rb_window_t window;     /* which window this surface is bound to */
     int pitch;              /* row stride in bytes */
-};
+} rb_surface;
 
 /* ---- Private palette state ---- */
-struct rb_palette {
+typedef struct rb_palette {
     SDL_Palette *palette;
     int num_colors;
-};
+} rb_palette;
 
 /* ---- Private audio buffer state ---- */
-struct rb_audio_buf {
+typedef struct rb_audio_buf {
     uint8_t *data;
     int buffer_size;
     int format;           /* AUDIO_S16SYS, etc. */
@@ -60,26 +61,26 @@ struct rb_audio_buf {
     float gain;           /* 0.0..1.0, derived from volume */
     float pan_left;       /* 0.0..1.0 */
     float pan_right;      /* 0.0..1.0 */
-};
+} rb_audio_buf;
 
 /* ---- Private audio device state ---- */
-struct rb_audio_state {
+typedef struct rb_audio_state {
     SDL_AudioDeviceID device_id;
     int opened;           /* 0 = closed, 1 = open */
     int sample_rate;
     int channels;
     int bits_per_sample;
     int buffer_size;
-};
+} rb_audio_state;
 
 /* ---- Private cursor state ---- */
-struct rb_cursor {
+typedef struct rb_cursor {
     SDL_Cursor *cursor;
-};
+} rb_cursor;
 
 /* ---- Global audio state ---- */
-extern struct rb_audio_state g_audio;
-extern struct rb_audio_buf *g_audio_buffers[32];
+extern rb_audio_state g_audio;
+extern rb_audio_buf *g_audio_buffers[32];
 extern int g_audio_buf_count;
 
 /* ---- Audio callback (registered with SDL) ---- */
