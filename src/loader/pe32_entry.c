@@ -170,6 +170,72 @@ static void *map_pe(const char *path)
 #endif
 
 /*
+ * extract_entry_from_entry_point — extract the user entry function RVA
+ * from the Watcom CRT startup pattern at the PE AddressOfEntryPoint.
+ *
+ * Watcom CRT entry stub (at AddressOfEntryPoint):
+ *   c7 05 [disp32] [imm32]  ; mov dword [disp32], imm32  (10 bytes)
+ *   e9 [rel32]              ; jmp crt_init               (5 bytes)
+ *
+ * The imm32 field is the absolute runtime address of the user entry
+ * function (after relocation). Compute RVA = imm32 - image_base.
+ * Validates that the resulting RVA falls within a code section.
+ *
+ * @param out_rva  output: extracted RVA
+ * @return         1 on success, 0 on failure
+ */
+static int extract_entry_from_entry_point(uint32_t *out_rva)
+{
+    /* Only attempt when the active CRT is Watcom (the only one with this pattern) */
+    const crt_module_t *mod = crt_get_active();
+    if (mod == NULL || mod->type != CRT_TYPE_WATCOM)
+        return 0;
+
+    /* Read 10 bytes from the PE entry point (c7 05 [disp32] [imm32]) */
+    uint32_t entry_rva = pe_entry_rva(&g_nt_headers);
+    const uint8_t *p = pe_rva_to_const_ptr(g_loader.image_base, &g_nt_headers,
+                                           entry_rva, 10);
+    if (p == NULL)
+        return 0;
+
+    /* Verify Watcom CRT entry pattern: mov dword [disp32], imm32 */
+    if (p[0] != 0xc7 || p[1] != 0x05)
+        return 0;
+
+    /* Extract imm32 (bytes 6..9) — absolute runtime address of user entry */
+    uint32_t imm32 = (uint32_t)((uint32_t)p[6]       |
+                                ((uint32_t)p[7] << 8)  |
+                                ((uint32_t)p[8] << 16) |
+                                ((uint32_t)p[9] << 24));
+
+    /* Convert absolute address to RVA */
+    uint32_t base = (uint32_t)(uintptr_t)g_loader.image_base;
+    if (imm32 < base)
+        return 0;  /* underflow — not a valid relocated address */
+
+    uint32_t rva = imm32 - base;
+
+    /* Validate: the RVA must fall within a code section */
+    IMAGE_SECTION_HEADER *sections =
+        get_image_sections(g_loader.image_base, &g_nt_headers);
+    IMAGE_SECTION_HEADER *code = find_code_section(&g_nt_headers, sections);
+    if (code == NULL)
+        return 0;
+
+    uint32_t code_start = code->VirtualAddress;
+    uint32_t code_size  = code->Misc.VirtualSize;
+
+    if (rva < code_start || code_size == 0)
+        return 0;
+    uint32_t code_end = code_start + code_size;
+    if (rva >= code_end)
+        return 0;
+
+    *out_rva = rva;
+    return 1;
+}
+
+/*
  * resolve_entry_symbol — returns the user entry point RVA.
  *
  * // Requires crt_set_active() to have been called before this
@@ -182,7 +248,9 @@ static void *map_pe(const char *path)
  * 32-bit loader (EIP=0x0 after _out returns).
  *
  * If COFF symbols are absent (stripped binaries like Watcom DOOM95),
- * falls back to the PE AddressOfEntryPoint.
+ * tries extracting the entry RVA from the Watcom CRT startup pattern
+ * at the PE AddressOfEntryPoint. If that also fails, falls back to
+ * the PE AddressOfEntryPoint (which points to CRT startup code).
  *
  * @return entry_rva
  */
@@ -236,8 +304,13 @@ static uint32_t resolve_entry_symbol(const char *path)
             free(symbols);
         }
     }
-    /* If COFF symbols are absent (ptr_sym==0 || num_sym==0),
-     * we cannot look up entry symbols. Fall back to PE entry_rva. */
+    /* COFF symbols absent — try extracting entry from Watcom CRT startup pattern */
+    if (ptr_sym == 0 || num_sym == 0) {
+        uint32_t extracted_rva;
+        if (extract_entry_from_entry_point(&extracted_rva)) {
+            entry_rva = extracted_rva;
+        }
+    }
 
     return entry_rva;
 }
