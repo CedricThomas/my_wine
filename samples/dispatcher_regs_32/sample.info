@@ -1,4 +1,3 @@
 arch=32
 exit=0
 timeout=5
-optimize=0
