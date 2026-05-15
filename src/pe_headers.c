@@ -196,8 +196,8 @@ const IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_head
  * Returns NULL if no code section found.
  */
 
-IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
-                                         const IMAGE_SECTION_HEADER *sections)
+const IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
+                                               const IMAGE_SECTION_HEADER *sections)
 {
     uint16_t num = pe_section_count(nt_headers);
     if (num == 0)
@@ -214,7 +214,7 @@ IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
             int cmp = strncasecmp((const char *)sections[i].Name, code_names[n], name_len);
 #endif
             if (cmp == 0 && sections[i].Name[name_len] == '\0') {
-                return (IMAGE_SECTION_HEADER *)&sections[i];
+                return (const IMAGE_SECTION_HEADER *)&sections[i];
             }
         }
     }
@@ -223,7 +223,7 @@ IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
     for (uint16_t i = 0; i < num; i++) {
         if ((sections[i].Characteristics & IMAGE_SCN_CNT_CODE) &&
             (sections[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) {
-            return (IMAGE_SECTION_HEADER *)&sections[i];
+            return (const IMAGE_SECTION_HEADER *)&sections[i];
         }
     }
 
