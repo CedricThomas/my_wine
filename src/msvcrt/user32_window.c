@@ -47,13 +47,6 @@
 #define HWND_TOPMOST         ((void *)-1)
 #define HWND_NOTOPMOST       ((void *)-2)
 
-/*
- * FORCE_HANDLE_RETURN(v, type) — like FORCE_PTR_RETURN but for integer
- * handle return types (HWND, HDC).  The macro returns void * but the outer
- * cast to the handle type suppresses the -Wint-conversion warning.
- */
-#define FORCE_HANDLE_RETURN(v, type) ((type)(uintptr_t)FORCE_PTR_RETURN((void *)(uintptr_t)(v)))
-
 /* ── Class table (linear search by strcmp) ─────────────────── */
 
 /*
@@ -77,15 +70,6 @@ static int find_class(const char *name)
         }
     }
     return -1;
-}
-
-/* Helper: get the wine_window_entry for an HWND, or NULL. */
-static wine_window_entry *get_window_entry(HWND hwnd)
-{
-    void *obj = wine_handle_get((uint32_t)hwnd);
-    if (!obj || wine_handle_get_type((uint32_t)hwnd) != HANDLE_TYPE_HWIN)
-        return NULL;
-    return (wine_window_entry *)obj;
 }
 
 /* ═══════════════════════════════════════════════════════════

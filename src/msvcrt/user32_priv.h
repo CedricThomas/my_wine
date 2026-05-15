@@ -24,4 +24,23 @@ typedef struct {
 /* Global WNDCLASSA table — linear search by strcmp on lpszClassName */
 extern WNDCLASSA class_table[16];
 
+/*
+ * FORCE_HANDLE_RETURN(v, type) — like FORCE_PTR_RETURN but for integer
+ * handle return types (HWND, HDC, HHOOK).  The macro returns void * but
+ * the outer cast to the handle type suppresses the -Wint-conversion warning.
+ */
+#define FORCE_HANDLE_RETURN(v, type) ((type)(uintptr_t)FORCE_PTR_RETURN((void *)(uintptr_t)(v)))
+
+/*
+ * get_window_entry — look up the wine_window_entry for an HWND, or NULL.
+ * Shared by user32_window.c and user32_message.c.
+ */
+static inline wine_window_entry *get_window_entry(HWND hwnd)
+{
+    void *obj = wine_handle_get((uint32_t)hwnd);
+    if (!obj || wine_handle_get_type((uint32_t)hwnd) != HANDLE_TYPE_HWIN)
+        return NULL;
+    return (wine_window_entry *)obj;
+}
+
 #endif /* MY_WINE_USER32_PRIV_H */

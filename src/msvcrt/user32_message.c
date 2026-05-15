@@ -20,24 +20,8 @@
 #include "user32_priv.h"
 #include "../include/render_backend.h"
 
-/*
- * FORCE_HANDLE_RETURN(v, type) — like FORCE_PTR_RETURN but for integer
- * handle return types (HHOOK).  The macro returns void * but the outer
- * cast to the handle type suppresses the -Wint-conversion warning.
- */
-#define FORCE_HANDLE_RETURN(v, type) ((type)(uintptr_t)FORCE_PTR_RETURN((void *)(uintptr_t)(v)))
-
 /* Forward declarations for cross-referenced stubs within this file */
 KERNEL32_STUB LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
-
-/* ── Helper: get the wine_window_entry for an HWND, or NULL ── */
-static wine_window_entry *get_window_entry(HWND hwnd)
-{
-    void *obj = wine_handle_get((uint32_t)hwnd);
-    if (!obj || wine_handle_get_type((uint32_t)hwnd) != HANDLE_TYPE_HWIN)
-        return NULL;
-    return (wine_window_entry *)obj;
-}
 
 /* ── Helper: copy an rb_msg_t into an MSG ──────────────────── */
 static void copy_rb_msg_to_MSG(const rb_msg_t *src, MSG *dst)
