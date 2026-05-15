@@ -46,6 +46,7 @@ typedef enum {
 #define IMAGE_FILE_RELOCS_STRIPPED  0x0001
 #endif
 
+#define IMAGE_SCN_CNT_CODE        0x00000020  /* bit 5 */
 #define IMAGE_SCN_MEM_READ      0x40000000  /* bit 30 */
 #define IMAGE_SCN_MEM_WRITE     0x80000000  /* bit 31 */
 #define IMAGE_SCN_MEM_EXECUTE   0x20000000  /* bit 29 */

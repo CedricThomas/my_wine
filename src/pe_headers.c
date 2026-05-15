@@ -196,9 +196,6 @@ IMAGE_SECTION_HEADER *find_section_by_name(const IMAGE_NT_HEADERS *nt_headers,
  * Returns NULL if no code section found.
  */
 
-#define IMAGE_SCN_CNT_CODE        0x00000020
-#define IMAGE_SCN_MEM_EXECUTE     0x20000000
-
 IMAGE_SECTION_HEADER *find_code_section(const IMAGE_NT_HEADERS *nt_headers,
                                          const IMAGE_SECTION_HEADER *sections)
 {
