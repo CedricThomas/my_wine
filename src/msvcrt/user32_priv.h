@@ -24,9 +24,4 @@ typedef struct {
 /* Global WNDCLASSA table — linear search by strcmp on lpszClassName */
 extern WNDCLASSA class_table[16];
 
-/* SendMessageA special-case helpers (defined in user32_window.c) */
-LRESULT handle_WM_GETTEXT(HWND hwnd, WPARAM wParam, LPARAM lParam);
-LRESULT handle_WM_SETTEXT(HWND hwnd, LPARAM lParam);
-LRESULT handle_WM_GETMINMAXINFO(HWND hwnd, LPARAM lParam);
-
 #endif /* MY_WINE_USER32_PRIV_H */

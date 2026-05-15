@@ -25,6 +25,7 @@ typedef uint32_t    ULONG;
 typedef int32_t     LRESULT;
 typedef uint32_t    WPARAM;
 typedef int32_t     LPARAM;
+typedef int16_t     SHORT;
 
 #define TRUE  1
 #define FALSE 0

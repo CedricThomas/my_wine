@@ -8,6 +8,10 @@
  *
  * All exported functions use KERNEL32_STUB (stdcall on i386, ms_abi on x86_64)
  * to match the calling convention of guest PE binaries.
+ *
+ * NOTE: This file is excluded from the default build. It depends on backend
+ * symbols (rb_event_wait, rb_event_peek, rb_event_push, etc.) that are only
+ * available when the SDL2 backend is linked.
  */
 
 #include <string.h>
@@ -15,6 +19,16 @@
 
 #include "user32_priv.h"
 #include "../include/render_backend.h"
+
+/*
+ * FORCE_HANDLE_RETURN(v, type) — like FORCE_PTR_RETURN but for integer
+ * handle return types (HHOOK).  The macro returns void * but the outer
+ * cast to the handle type suppresses the -Wint-conversion warning.
+ */
+#define FORCE_HANDLE_RETURN(v, type) ((type)(uintptr_t)FORCE_PTR_RETURN((void *)(uintptr_t)(v)))
+
+/* Forward declarations for cross-referenced stubs within this file */
+KERNEL32_STUB LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 
 /* ── Helper: get the wine_window_entry for an HWND, or NULL ── */
 static wine_window_entry *get_window_entry(HWND hwnd)
@@ -96,6 +110,10 @@ BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
         return 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);
+
+    /* WM_QUIT returns 0 from PeekMessageA (matching Windows behavior) */
+    if (lpMsg->message == WM_QUIT)
+        return 0;
 
     /* Always return 1 when a message is available */
     return 1;
@@ -191,7 +209,7 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
     case WM_GETTEXT: {
         if (!entry)
             return 0;
-        char *buf = (char *)lParam;
+        char *buf = (char *)(intptr_t)lParam;
         int max = (int)wParam;
         if (max <= 0)
             return 0;
@@ -203,7 +221,7 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_SETTEXT: {
-        const char *str = (const char *)lParam;
+        const char *str = (const char *)(intptr_t)lParam;
         if (!entry)
             return 0;
         strncpy(entry->title, str ? str : "", sizeof(entry->title) - 1);
@@ -213,7 +231,7 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_GETMINMAXINFO: {
-        MINMAXINFO *info = (MINMAXINFO *)lParam;
+        MINMAXINFO *info = (MINMAXINFO *)(intptr_t)lParam;
         if (info) {
             memset(info, 0, sizeof(*info));
             info->ptReserved.x       = 0;
@@ -277,7 +295,7 @@ HHOOK SetWindowsHookExA(int idHook, WNDPROC lpfn, HINSTANCE hMod, DWORD dwThread
     (void)lpfn;
     (void)hMod;
     (void)dwThreadId;
-    return NULL;
+    return FORCE_HANDLE_RETURN(0, HHOOK);
 }
 
 /* ── 11. UnhookWindowsHookEx ──────────────────────────────── */

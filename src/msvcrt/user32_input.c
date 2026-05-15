@@ -7,6 +7,10 @@
  *
  * All exported functions use KERNEL32_STUB (stdcall on i386, ms_abi on x86_64)
  * to match the calling convention of guest PE binaries.
+ *
+ * NOTE: This file is excluded from the default build. It depends on backend
+ * symbols (rb_cursor_create, rb_window_set_cursor, etc.) that are only
+ * available when the SDL2 backend is linked.
  */
 
 #include <stdio.h>
@@ -14,6 +18,13 @@
 #include <stdint.h>
 
 #include "user32_priv.h"
+
+/*
+ * FORCE_HANDLE_RETURN(v, type) — like FORCE_PTR_RETURN but for integer
+ * handle return types (HCURSOR, HICON).  The macro returns void * but the
+ * outer cast to the handle type suppresses the -Wint-conversion warning.
+ */
+#define FORCE_HANDLE_RETURN(v, type) ((type)(uintptr_t)FORCE_PTR_RETURN((void *)(uintptr_t)(v)))
 
 /* ═══════════════════════════════════════════════════════════
  * 8 exported input functions
@@ -44,19 +55,19 @@ HCURSOR LoadCursorA(HINSTANCE hInstance, const char *lpCursorName)
 {
     (void)hInstance;
     if (!lpCursorName)
-        return FORCE_PTR_RETURN((void *)0);
+        return FORCE_HANDLE_RETURN(0, HCURSOR);
 
     int idc = (int32_t)(uintptr_t)lpCursorName;
     rb_cursor_t cur = rb_cursor_create(idc);
     if (!cur)
-        return FORCE_PTR_RETURN((void *)0);
+        return FORCE_HANDLE_RETURN(0, HCURSOR);
 
     uint64_t handle = wine_handle_alloc(HANDLE_TYPE_HCURSOR, (void *)(uintptr_t)cur);
     if (!handle) {
         rb_cursor_destroy(cur);
-        return FORCE_PTR_RETURN((void *)0);
+        return FORCE_HANDLE_RETURN(0, HCURSOR);
     }
-    return FORCE_PTR_RETURN((void *)handle);
+    return FORCE_HANDLE_RETURN(handle, HCURSOR);
 }
 
 /* ── 3. SetCursor ─────────────────────────────────────────── */
@@ -73,12 +84,8 @@ HCURSOR SetCursor(HCURSOR hCursor)
         cur = (rb_cursor_t)(uintptr_t)wine_handle_get((uint32_t)hCursor);
     }
 
-    /* Find the first active window to set the cursor on.
+    /* Iterate the handle table to find the first HWIN entry.
      * In practice there is typically only one game window. */
-    wine_handle_t *table = wine_handle_get((uint32_t)0);
-    (void)table; /* suppress unused warning; we iterate differently */
-
-    /* Iterate the handle table to find the first HWIN entry. */
     for (uint32_t i = 1; i <= HANDLE_TABLE_SIZE; i++) {
         if (wine_handle_get_type(i) == HANDLE_TYPE_HWIN) {
             wine_window_entry *entry = (wine_window_entry *)wine_handle_get(i);
@@ -86,12 +93,12 @@ HCURSOR SetCursor(HCURSOR hCursor)
                 if (cur) {
                     rb_window_set_cursor(entry->sdl_window, cur);
                 }
-                return FORCE_PTR_RETURN((void *)0); /* no previous cursor tracked */
+                return FORCE_HANDLE_RETURN(0, HCURSOR); /* no previous cursor tracked */
             }
         }
     }
 
-    return FORCE_PTR_RETURN((void *)0);
+    return FORCE_HANDLE_RETURN(0, HCURSOR);
 }
 
 /* ── 4. SetCursorPos ──────────────────────────────────────── */
@@ -138,7 +145,7 @@ HICON LoadIconA(HINSTANCE hInstance, const char *lpIconName)
 {
     (void)hInstance;
     (void)lpIconName;
-    return FORCE_PTR_RETURN((void *)0x12340001);
+    return FORCE_HANDLE_RETURN(0x12340001, HICON);
 }
 
 /* ── 7. wsprintfA ─────────────────────────────────────────── */

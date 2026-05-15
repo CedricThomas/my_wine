@@ -29,7 +29,7 @@ GENERATED_REQUIRED = src/syscall/dispatcher_generated.c
 # ── Source Groups: Wrapper And PE32+ ────────────────────────────
 # Auto-discover .c per source group; objects flatten into build/.
 ROOT_SRC     = $(filter-out src/wrapper_main.c, $(sort $(shell find src/   -maxdepth 1 -name '*.c')))
-STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c src/msvcrt/user32_window.c, \
+STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c src/msvcrt/user32_window.c src/msvcrt/user32_message.c src/msvcrt/user32_input.c, \
 		$(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c')))
 LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c | grep -v pe32_process.c))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
@@ -53,7 +53,7 @@ OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager.
 # Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child),
 # but re-include the CRT infra needed by crt_mingw.c for the 32-bit CRT module path.
-MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c src/msvcrt/user32_window.c, \
+MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c src/msvcrt/user32_window.c src/msvcrt/user32_message.c src/msvcrt/user32_input.c, \
 	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) \
 	src/msvcrt/crt_32_stub.c \
 	src/msvcrt/crt_globals.c \
