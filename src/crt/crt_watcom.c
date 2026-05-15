@@ -39,11 +39,28 @@
 #define WATCOM_BSS_ARGC        0x028   /* _argc */
 #define WATCOM_BSS_INITIALIZED 0x030   /* "initialized" flag — overlaps _acmdln */
 
-/* ── Watcom entry symbols ──────────────────────────────────────── */
+/* ── Watcom entry symbols ────────────────────────────────────────
+ *
+ * Symbol priority order (first match wins):
+ *   1. DOOM95-specific: D_DoomMain, _D_DoomMain
+ *      DOOM95 declares its entry as D_DoomMain (or _D_DoomMain with
+ *      leading underscore). These are tried first so DOOM95 images
+ *      resolve correctly even if generic Watcom symbols also exist.
+ *
+ *   2. Generic Watcom CRT entry: _cstartup, _startup, main
+ *      Standard Watcom CRT uses _cstartup or _startup as the linker
+ *      entry point, which eventually calls main. These are tried as
+ *      fallback for non-DOOM95 Watcom-compiled PEs.
+ *      'main' (without underscore) covers C++ Watcom builds where the
+ *      CRT strips the leading underscore from the C++ entry point.
+ */
 
 static const char *watcom_entry_symbols[] = {
     "D_DoomMain",
     "_D_DoomMain",
+    "_cstartup",
+    "_startup",
+    "main",
     NULL
 };
 
