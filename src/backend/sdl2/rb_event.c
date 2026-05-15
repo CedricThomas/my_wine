@@ -24,7 +24,7 @@ void rb_event_set_active_window(rb_window_t win)
 #define WM_MOVE           0x0003
 #define WM_SIZE           0x0005
 #define WM_CLOSE          0x0010
-#define WM_QUIT           0x001B
+#define WM_QUIT           0x0012
 #define WM_KEYDOWN        0x0100
 #define WM_KEYUP          0x0101
 #define WM_CHAR           0x0102
