@@ -191,15 +191,18 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
     if (mod == NULL || mod->type != CRT_TYPE_WATCOM)
         return 0;
 
-    /* Read 10 bytes from the PE entry point (c7 05 [disp32] [imm32]) */
+    /* Read 15 bytes from the PE entry point:
+     *   c7 05 [disp32] [imm32]  ; mov dword [disp32], imm32  (10 bytes)
+     *   e9 [rel32]              ; jmp crt_init               (5 bytes)
+     * We validate both the mov and the jmp to confirm the Watcom pattern. */
     uint32_t entry_rva = pe_entry_rva(&g_nt_headers);
     const uint8_t *p = pe_rva_to_const_ptr(g_loader.image_base, &g_nt_headers,
-                                           entry_rva, 10);
+                                           entry_rva, 15);
     if (p == NULL)
         return 0;
 
-    /* Verify Watcom CRT entry pattern: mov dword [disp32], imm32 */
-    if (p[0] != 0xc7 || p[1] != 0x05)
+    /* Verify Watcom CRT entry pattern: mov dword [disp32], imm32 ; jmp */
+    if (p[0] != 0xc7 || p[1] != 0x05 || p[10] != 0xe9)
         return 0;
 
     /* Extract imm32 (bytes 6..9) — absolute runtime address of user entry */
@@ -223,7 +226,9 @@ static int extract_entry_from_entry_point(uint32_t *out_rva)
         return 0;
 
     uint32_t code_start = code->VirtualAddress;
+    /* Watcom can set VirtualSize=0; fall back to SizeOfRawData */
     uint32_t code_size  = code->Misc.VirtualSize;
+    if (code_size == 0) code_size = code->SizeOfRawData;
 
     if (rva < code_start || code_size == 0)
         return 0;
@@ -305,36 +310,13 @@ static uint32_t resolve_entry_symbol(const char *path)
         }
     }
 
-    /*
-     * Fallback for stripped PE32: when COFF symbols are absent, try to
-     * extract the user entry function from the CRT startup pattern.
-     * Watcom CRT entry point starts with:
-     *   mov dword [ptr], user_func_addr   (c7 05 XX XX XX XX XX XX XX XX)
-     *   jmp crt_init                       (e9 XX XX XX XX)
-     * The user_func_addr (imm32) is the entry function we need.
-     * We read it from the mapped image (relocations already applied).
-     */
-    if (entry_rva == pe_entry_rva(&g_nt_headers) &&
-        (ptr_sym == 0 || num_sym == 0) &&
-        mod != NULL && mod->type == CRT_TYPE_WATCOM) {
-        uint32_t pe_entry_rva_val = pe_entry_rva(&g_nt_headers);
-        uint8_t *entry_bytes = (uint8_t *)g_loader.image_base + pe_entry_rva_val;
-
-        // Check for Watcom pattern: c7 05 [disp32] [imm32] e9 [rel32]
-        if (entry_bytes[0] == 0xc7 && entry_bytes[1] == 0x05 &&
-            entry_bytes[10] == 0xe9) {
-            uint32_t user_func_va = *(uint32_t *)(entry_bytes + 6);
-            uint32_t user_func_rva = user_func_va - (uint32_t)(uintptr_t)g_loader.image_base;
-            DEBUG_LEVEL(1, "watcom_entry_extract: user_func VA=0x%x -> RVA=0x%x",
-                        user_func_va, user_func_rva);
-            entry_rva = user_func_rva;
-        }
-    }
-
     /* COFF symbols absent — try extracting entry from Watcom CRT startup pattern */
     if (ptr_sym == 0 || num_sym == 0) {
         uint32_t extracted_rva;
         if (extract_entry_from_entry_point(&extracted_rva)) {
+            DEBUG_LEVEL(1, "watcom_entry_extract: user_func VA=0x%x -> RVA=0x%x",
+                        (uint32_t)(uintptr_t)g_loader.image_base + extracted_rva,
+                        extracted_rva);
             entry_rva = extracted_rva;
         }
     }

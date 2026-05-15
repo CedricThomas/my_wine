@@ -409,24 +409,37 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
     }
 #endif
 
-    /* Top of stack (aligned to 16 bytes for Microsoft x64 ABI: rsp%16==8).
-     * Sub 24 BEFORE alignment to ensure the argument frame (16 bytes written
-     * from sp = stack_top - 12) never exceeds the mmap'd region. The frame
-     * extends from stack_top - 12 to stack_top + 4, so we need at least 4
-     * bytes of headroom above stack_top within the committed region.
-     * Without this, page-aligned bases + page-aligned commits can push
-     * the frame past the region boundary under ASLR. */
-    uintptr_t stack_top = (uintptr_t)stack_base + (size_t)commit;
+    /* Top of stack: ensure all stack operations stay within the committed region.
+     *
+     * 32-bit: setup_fs_and_jump() writes a 16-byte argument frame starting at
+     *         (stack_top & ~15) - 4, which extends 12 bytes above the start.
+     *         We need (stack_top & ~15) - 4 + 16 <= base + commit, meaning
+     *         stack_top <= base + commit - 12. With page-aligned base/commit,
+     *         stack_top = ((base+commit - 32) & ~15) ensures headroom.
+     *         Skip the on-stack stack_base storage (overlaps the arg frame).
+     *         Use global g_stack_base instead.
+     *
+     * 64-bit: keep existing ABI formula (rsp%16==8 after call pushes ret addr). */
+    uintptr_t stack_top;
+#if defined(MY_WINE32)
+    stack_top = ((uintptr_t)stack_base + (size_t)commit - 32) & ~(uintptr_t)15;
+#else
+    stack_top = (uintptr_t)stack_base + (size_t)commit;
     stack_top = ((stack_top - 24) & ~(uintptr_t)15) + 8;  /* ABI requires rsp%16==8 */
+#endif
 
     /* Print stack info */
     DEBUG("Stack: base=%p, top=%p, reserve=0x%lx, commit=0x%lx",
            stack_base, (void *)stack_top,
            (unsigned long)reserve, (unsigned long)commit);
 
-    /* Store stack_base just below stack_top (guest pointer size) */
+    /* Store stack_base just below stack_top (guest pointer size).
+     * Skip for 32-bit — overlaps with the argument frame in setup_fs_and_jump().
+     * 32-bit code uses global g_stack_base instead. */
+#if !defined(MY_WINE32)
     uintptr_t sp = (uintptr_t)stack_top - (g_is_32bit_get() ? 4 : 8);
     syscall_safe_guest_write_ptr((void *)sp, 0, stack_base, g_is_32bit_get());
+#endif
     g_stack_base = stack_base;
     g_stack_size = (size_t)commit;
     return (void *)stack_top;
