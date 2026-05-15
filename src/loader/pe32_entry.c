@@ -329,9 +329,19 @@ static uint32_t resolve_entry_symbol(const char *path)
  * This ensures that when _main calls ___main (MinGW), the CRT init
  * returns immediately without running __do_global_ctors, which can
  * crash with inconsistent state in the 32-bit loader.
+ *
+ * Only applies to MinGW CRT. Watcom CRT already patches _initialized
+ * in watcom_patch_refptrs; unknown CRT types are skipped to avoid
+ * double writes.
  */
 static void patch_crt_initialized(const char *path)
 {
+    const crt_module_t *mod = crt_get_active();
+    if (mod == NULL ||
+        crt_module_type(mod) == CRT_TYPE_WATCOM ||
+        crt_module_type(mod) == CRT_TYPE_UNKNOWN)
+        return;
+
     uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
     uint32_t num_sym = pe_number_of_symbols(&g_nt_headers);
 
