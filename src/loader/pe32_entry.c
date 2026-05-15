@@ -305,6 +305,8 @@ static uint32_t resolve_entry_symbol(const char *path)
                 entry_rva = main_rva;
             }
 
+            // Only free symbols — string_table is a pointer into the same
+            // combined malloc'd buffer (see parse_symbol_table_from_file).
             free(symbols);
         }
     }
@@ -337,9 +339,8 @@ static uint32_t resolve_entry_symbol(const char *path)
 static void patch_crt_initialized(const char *path)
 {
     const crt_module_t *mod = crt_get_active();
-    if (mod == NULL ||
-        crt_module_type(mod) == CRT_TYPE_WATCOM ||
-        crt_module_type(mod) == CRT_TYPE_UNKNOWN)
+    crt_type_t type = mod ? crt_module_type(mod) : CRT_TYPE_UNKNOWN;
+    if (type == CRT_TYPE_WATCOM || type == CRT_TYPE_UNKNOWN)
         return;
 
     uint32_t ptr_sym = pe_pointer_to_symbol_table(&g_nt_headers);
@@ -366,6 +367,8 @@ static void patch_crt_initialized(const char *path)
         if (bss)
             init_rva = bss->VirtualAddress + 0x40;
     }
+    // Only free symbols — string_table is a pointer into the same
+    // combined malloc'd buffer (see parse_symbol_table_from_file).
     free(symbols);
 
     if (init_rva == 0) return;
