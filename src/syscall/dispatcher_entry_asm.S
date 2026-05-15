@@ -87,13 +87,10 @@ __wine_dispatcher:
 
     /* ── Switch to UNIX stack ── */
 
-    /* Load unix_stack_ptr_val into RAX, subtract 8 for ABI stack alignment.
-     * System V ABI: before `call`, RSP must be 8 mod 16 so that after the
-     * 8-byte return address is pushed, RSP is 16-byte aligned inside the callee.
-     * unix_stack_ptr_val points to base+128KB (16-byte aligned), so
-     * unix_stack_ptr_val - 8 gives us 8 mod 16. */
+    /* Load unix_stack_ptr_val for ABI stack alignment.
+     * System V ABI: before `call`, RSP must be 16-byte aligned so that after
+     * the 8-byte return address is pushed, RSP is 8 mod 16 inside the callee. */
     mov unix_stack_ptr_val(%rip), %rsp
-    sub $8, %rsp
 
     /* ── Call C dispatcher (RDI already = syscall_nr) ── */
 

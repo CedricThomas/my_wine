@@ -77,6 +77,58 @@ extern char *__p__commode;
 extern char *__p__fmode;
 #endif
 
+/* user32 stub function declarations — minimal forward refs (we only need void* addresses).
+ * Cannot include user32_types.h here: BOOL/ULONG typedefs conflict with ntdll.h in 64-bit. */
+extern void RegisterClassA(void);
+extern void CreateWindowExA(void);
+extern void DestroyWindow(void);
+extern void ShowWindow(void);
+extern void SetWindowPos(void);
+extern void MoveWindow(void);
+extern void SetWindowTextA(void);
+extern void GetWindowRect(void);
+extern void GetClientRect(void);
+extern void GetWindowLongA(void);
+extern void SetWindowLongA(void);
+extern void IsWindow(void);
+extern void EnableWindow(void);
+extern void GetDesktopWindow(void);
+extern void GetActiveWindow(void);
+extern void GetFocus(void);
+extern void SetFocus(void);
+extern void UpdateWindow(void);
+extern void InvalidateRect(void);
+extern void ValidateRect(void);
+extern void BeginPaint(void);
+extern void EndPaint(void);
+extern void MapWindowPoints(void);
+extern void GetSystemMetrics(void);
+extern void AdjustWindowRect(void);
+extern void AdjustWindowRectEx(void);
+extern void GetDC(void);
+extern void ReleaseDC(void);
+extern void GetMessageA(void);
+extern void PeekMessageA(void);
+extern void DispatchMessageA(void);
+extern void TranslateMessage(void);
+extern void PostMessageA(void);
+extern void PostQuitMessage(void);
+extern void SendMessageA(void);
+extern void DefWindowProcA(void);
+extern void CallWindowProcA(void);
+extern void SetWindowsHookExA(void);
+extern void UnhookWindowsHookEx(void);
+extern void CallNextHookEx(void);
+extern void SystemParametersInfoA(void);
+extern void GetAsyncKeyState(void);
+extern void LoadCursorA(void);
+extern void SetCursor(void);
+extern void SetCursorPos(void);
+extern void ClipCursor(void);
+extern void LoadIconA(void);
+extern void wsprintfA(void);
+extern void SetRect(void);
+
 /* Name→address table for NT, kernel32 and msvcrt functions */
 import_entry_t import_table[] = {
     /* ── ntdll syscall handlers ────────────────────────────────────────
@@ -221,6 +273,56 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "__p__fmode", (void*)__p__fmode_func },
     { "msvcrt.dll", "_iob", (void*)__iob_func },
 #endif
+    /* ── user32 stubs ───────────────────────────────────────────────── */
+    { "user32.dll", "RegisterClassA", (void*)RegisterClassA },
+    { "user32.dll", "CreateWindowExA", (void*)CreateWindowExA },
+    { "user32.dll", "DestroyWindow", (void*)DestroyWindow },
+    { "user32.dll", "ShowWindow", (void*)ShowWindow },
+    { "user32.dll", "SetWindowPos", (void*)SetWindowPos },
+    { "user32.dll", "MoveWindow", (void*)MoveWindow },
+    { "user32.dll", "SetWindowTextA", (void*)SetWindowTextA },
+    { "user32.dll", "GetWindowRect", (void*)GetWindowRect },
+    { "user32.dll", "GetClientRect", (void*)GetClientRect },
+    { "user32.dll", "GetWindowLongA", (void*)GetWindowLongA },
+    { "user32.dll", "SetWindowLongA", (void*)SetWindowLongA },
+    { "user32.dll", "IsWindow", (void*)IsWindow },
+    { "user32.dll", "EnableWindow", (void*)EnableWindow },
+    { "user32.dll", "GetDesktopWindow", (void*)GetDesktopWindow },
+    { "user32.dll", "GetActiveWindow", (void*)GetActiveWindow },
+    { "user32.dll", "GetFocus", (void*)GetFocus },
+    { "user32.dll", "SetFocus", (void*)SetFocus },
+    { "user32.dll", "UpdateWindow", (void*)UpdateWindow },
+    { "user32.dll", "InvalidateRect", (void*)InvalidateRect },
+    { "user32.dll", "ValidateRect", (void*)ValidateRect },
+    { "user32.dll", "BeginPaint", (void*)BeginPaint },
+    { "user32.dll", "EndPaint", (void*)EndPaint },
+    { "user32.dll", "MapWindowPoints", (void*)MapWindowPoints },
+    { "user32.dll", "GetSystemMetrics", (void*)GetSystemMetrics },
+    { "user32.dll", "AdjustWindowRect", (void*)AdjustWindowRect },
+    { "user32.dll", "AdjustWindowRectEx", (void*)AdjustWindowRectEx },
+    { "user32.dll", "GetDC", (void*)GetDC },
+    { "user32.dll", "ReleaseDC", (void*)ReleaseDC },
+    { "user32.dll", "GetMessageA", (void*)GetMessageA },
+    { "user32.dll", "PeekMessageA", (void*)PeekMessageA },
+    { "user32.dll", "DispatchMessageA", (void*)DispatchMessageA },
+    { "user32.dll", "TranslateMessage", (void*)TranslateMessage },
+    { "user32.dll", "PostMessageA", (void*)PostMessageA },
+    { "user32.dll", "PostQuitMessage", (void*)PostQuitMessage },
+    { "user32.dll", "SendMessageA", (void*)SendMessageA },
+    { "user32.dll", "DefWindowProcA", (void*)DefWindowProcA },
+    { "user32.dll", "CallWindowProcA", (void*)CallWindowProcA },
+    { "user32.dll", "SetWindowsHookExA", (void*)SetWindowsHookExA },
+    { "user32.dll", "UnhookWindowsHookEx", (void*)UnhookWindowsHookEx },
+    { "user32.dll", "CallNextHookEx", (void*)CallNextHookEx },
+    { "user32.dll", "SystemParametersInfoA", (void*)SystemParametersInfoA },
+    { "user32.dll", "GetAsyncKeyState", (void*)GetAsyncKeyState },
+    { "user32.dll", "LoadCursorA", (void*)LoadCursorA },
+    { "user32.dll", "SetCursor", (void*)SetCursor },
+    { "user32.dll", "SetCursorPos", (void*)SetCursorPos },
+    { "user32.dll", "ClipCursor", (void*)ClipCursor },
+    { "user32.dll", "LoadIconA", (void*)LoadIconA },
+    { "user32.dll", "wsprintfA", (void*)wsprintfA },
+    { "user32.dll", "SetRect", (void*)SetRect },
     { NULL, NULL, NULL }
 };
 

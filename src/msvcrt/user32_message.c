@@ -57,6 +57,12 @@ BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
     if (!lpMsg)
         return FALSE;
 
+    if (g_user32_window_create_attempted && g_user32_live_windows == 0) {
+        memset(lpMsg, 0, sizeof(*lpMsg));
+        lpMsg->message = WM_QUIT;
+        return 0;
+    }
+
     rb_msg_t rb;
     int ret = rb_event_wait(&rb);
     if (ret <= 0)

@@ -53,6 +53,21 @@ static inline int rb_peep_events(SDL_Event *ev, int n, SDL_eventaction action)
 #endif
 }
 
+static uintptr_t rb_sdl_wait_event_call(void *arg)
+{
+    return (uintptr_t)SDL_WaitEvent((SDL_Event *)arg);
+}
+
+static uintptr_t rb_sdl_peep_event_call(void *arg)
+{
+    return (uintptr_t)rb_peep_events((SDL_Event *)arg, 1, SDL_GETEVENT);
+}
+
+static uintptr_t rb_sdl_push_event_call(void *arg)
+{
+    return (uintptr_t)SDL_PushEvent((SDL_Event *)arg);
+}
+
 /* ---- translate_sdl_event ----
  * Returns 1 on successful translation, 0 for unknown/untranslatable events. */
 
@@ -208,7 +223,10 @@ int rb_event_wait(rb_msg_t *out_msg)
 {
     SDL_Event sdl_ev;
 
-    while (SDL_WaitEvent(&sdl_ev)) {
+    for (;;) {
+        int wait_ret = (int)rb_call_on_host_stack(rb_sdl_wait_event_call, &sdl_ev);
+        if (!wait_ret)
+            break;
         if (translate_sdl_event(&sdl_ev, out_msg)) {
             return (out_msg->message == WM_QUIT) ? 0 : 1;
         }
@@ -222,7 +240,9 @@ int rb_event_peek(rb_msg_t *out_msg)
 {
     SDL_Event sdl_ev;
 
-    if (rb_peep_events(&sdl_ev, 1, SDL_GETEVENT) > 0) {
+    int ret = (int)rb_call_on_host_stack(rb_sdl_peep_event_call, &sdl_ev);
+
+    if (ret > 0) {
         if (translate_sdl_event(&sdl_ev, out_msg)) {
             return 1;
         }
@@ -337,6 +357,6 @@ int rb_event_push(rb_msg_t *msg)
         return RB_OK;
     }
 
-    SDL_PushEvent(&sdl_ev);
+    rb_call_on_host_stack(rb_sdl_push_event_call, &sdl_ev);
     return RB_OK;
 }

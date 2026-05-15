@@ -13,13 +13,37 @@ rb_audio_state g_audio;
 rb_audio_buf *g_audio_buffers[32];
 int g_audio_buf_count = 0;
 
+typedef struct {
+    uint32_t flags;
+} rb_sdl_init_args;
+
+static uintptr_t rb_sdl_init_call(void *arg)
+{
+    rb_sdl_init_args *a = arg;
+    return (uintptr_t)SDL_Init(a->flags);
+}
+
+static uintptr_t rb_sdl_quit_call(void *arg)
+{
+    (void)arg;
+    SDL_Quit();
+    return 0;
+}
+
+static uintptr_t rb_sdl_get_display_mode_call(void *arg)
+{
+    SDL_DisplayMode *mode = arg;
+    return (uintptr_t)SDL_GetDisplayMode(0, 0, mode);
+}
+
 int rb_init(void)
 {
     if (g_initialized) {
         return 0;
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) < 0) {
+    rb_sdl_init_args args = { SDL_INIT_VIDEO | SDL_INIT_EVENTS };
+    if ((int)rb_call_on_host_stack(rb_sdl_init_call, &args) < 0) {
         return RB_FAIL;
     }
 
@@ -47,7 +71,7 @@ void rb_shutdown(void)
         rb_audio_close();
     }
 
-    SDL_Quit();
+    rb_call_on_host_stack(rb_sdl_quit_call, NULL);
     g_initialized = 0;
 }
 
@@ -58,7 +82,7 @@ void rb_display_get_size(int *out_w, int *out_h)
     if (!g_initialized)
         return;
     SDL_DisplayMode mode;
-    if (SDL_GetDisplayMode(0, 0, &mode) == 0) {
+    if ((int)rb_call_on_host_stack(rb_sdl_get_display_mode_call, &mode) == 0) {
         if (out_w) *out_w = mode.w;
         if (out_h) *out_h = mode.h;
     }

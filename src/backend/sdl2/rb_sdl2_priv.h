@@ -13,6 +13,10 @@
 #include <SDL2/SDL.h>
 #include "render_backend.h"
 #include "handle_manager.h"
+#include "src/loader/loader_state.h"
+
+extern wine_loader_state_t g_loader __attribute__((weak));
+extern void *unix_stack_ptr_val __attribute__((weak));
 
 /* ---- Handle type constants ---- */
 /* Defined in handle_manager.h; listed here for reference:
@@ -77,6 +81,71 @@ typedef struct rb_audio_state {
 typedef struct rb_cursor {
     SDL_Cursor *cursor;
 } rb_cursor;
+
+/*
+ * Guest-facing USER32 stubs enter the SDL backend with GS pointing at the
+ * emulated TEB. SDL/glibc expect the host GS value, so restore it for host
+ * library calls and put the guest value back before returning to guest code.
+ */
+static inline uintptr_t rb_host_context_enter(void)
+{
+#if defined(__x86_64__)
+    uintptr_t guest_gs;
+    uintptr_t host_gs = (&g_loader != 0) ? loader_get_host_gs_base() : 0;
+
+    if (&g_loader == 0)
+        return 0;
+
+    __asm__ volatile("rdgsbase %0" : "=r"(guest_gs));
+    if (guest_gs != host_gs)
+        __asm__ volatile("wrgsbase %0" :: "r"(host_gs));
+    return guest_gs;
+#else
+    return 0;
+#endif
+}
+
+static inline void rb_host_context_leave(uintptr_t saved_gs)
+{
+#if defined(__x86_64__)
+    if (&g_loader != 0 && saved_gs && saved_gs != loader_get_host_gs_base())
+        __asm__ volatile("wrgsbase %0" :: "r"(saved_gs));
+#else
+    (void)saved_gs;
+#endif
+}
+
+typedef uintptr_t (*rb_host_call_fn)(void *);
+
+static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
+{
+#if defined(__x86_64__)
+    uintptr_t ret;
+    uintptr_t old_rsp;
+    uintptr_t saved_gs = rb_host_context_enter();
+
+    if (&unix_stack_ptr_val == 0 || !unix_stack_ptr_val) {
+        ret = fn(arg);
+        rb_host_context_leave(saved_gs);
+        return ret;
+    }
+
+    uintptr_t new_rsp = (uintptr_t)unix_stack_ptr_val;
+    __asm__ volatile(
+        "mov %%rsp,%[old_rsp]\n\t"
+        "mov %[new_rsp],%%rsp\n\t"
+        "call *%[fn]\n\t"
+        "mov %[old_rsp],%%rsp\n\t"
+        : "=a"(ret), [old_rsp] "=&r"(old_rsp)
+        : [new_rsp] "r"(new_rsp), [fn] "r"(fn), "D"(arg)
+        : "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11", "memory", "cc");
+
+    rb_host_context_leave(saved_gs);
+    return ret;
+#else
+    return fn(arg);
+#endif
+}
 
 /* ---- Global audio state ---- */
 extern rb_audio_state g_audio;

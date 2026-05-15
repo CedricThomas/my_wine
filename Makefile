@@ -7,6 +7,11 @@ LDFLAGS  = -lrt -lpthread -ldl
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null || echo "-I/usr/include/SDL2")
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2")
 
+# 32-bit SDL2 detection — test if -m32 linking actually finds a 32-bit SDL2 lib.
+# Without lib32-sdl2 installed the linker rejects 64-bit .so files.
+SDL2_LIBS_32 := $(shell $(CC) -m32 -x c /dev/null -o /tmp/__sdl2_32_test $(SDL2_LIBS) -lm 2>/dev/null && \
+	echo "$(SDL2_LIBS) -lm" && rm -f /tmp/__sdl2_32_test || echo "")
+
 # Special flags for entry points, loader core, stubs, syscall infra.
 SPECIAL_CFLAGS = $(CFLAGS) -mno-red-zone -fno-stack-protector -fno-exceptions
 
@@ -46,14 +51,15 @@ CRT_OBJS     = $(patsubst src/crt/%.c,$(BUILDDIR)/%.o,$(CRT_SRC))
 # ── Source Groups: SDL2 Backend ─────────────────────────────────
 BACKEND_SRC = $(sort $(shell find src/backend -name '*.c' 2>/dev/null))
 BACKEND_OBJS = $(patsubst src/backend/%.c,$(BUILDDIR)/backend/%.o,$(BACKEND_SRC))
+BACKEND32_OBJS = $(if $(SDL2_LIBS_32),$(patsubst src/backend/%.c,$(BUILDDIR32)/backend/%.o,$(BACKEND_SRC)))
 
-OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(CRT_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o $(BUILDDIR)/clone64.o
+OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(CRT_OBJS) $(BACKEND_OBJS) $(BUILDDIR)/run_guest.o $(BUILDDIR)/dispatcher_entry_asm.o $(BUILDDIR)/clone64.o
 
 # ── Source Groups: PE32 Child ───────────────────────────────────
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager.
 # Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child),
 # but re-include the CRT infra needed by crt_mingw.c for the 32-bit CRT module path.
-MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c src/msvcrt/user32_window.c src/msvcrt/user32_message.c src/msvcrt/user32_input.c, \
+MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c $(if $(SDL2_LIBS_32),,src/msvcrt/user32_window.c src/msvcrt/user32_message.c src/msvcrt/user32_input.c), \
 	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) \
 	src/msvcrt/crt_32_stub.c \
 	src/msvcrt/crt_globals.c \
@@ -101,7 +107,8 @@ MY_WINE32_OBJS = \
 	$(BUILDDIR32)/clone.o \
 	$(MY_WINE32_STUBS_OBJS) \
 	$(MY_WINE32_HEAP_OBJS) \
-	$(MY_WINE32_CRT_OBJS)
+	$(MY_WINE32_CRT_OBJS) \
+	$(BACKEND32_OBJS)
 
 # ── Source Groups: Tests ────────────────────────────────────────
 PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
@@ -162,7 +169,7 @@ all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend
+	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 # ── Generated Files ─────────────────────────────────────────────
 # Dispatcher switch bodies from include/nt_syscalls.def.
@@ -228,13 +235,13 @@ my_wine: $(BUILDDIR)/wrapper_main.o
 # my_wine64 loads PE32+ images directly.
 my_wine64: $(OBJS)
 	@echo "==== Link my_wine64 ===="
-	@$(CC) $(CFLAGS) -o my_wine64 $(OBJS) $(LDFLAGS)
+	@$(CC) $(CFLAGS) -o my_wine64 $(OBJS) $(LDFLAGS) $(SDL2_LIBS) -lm
 
 # ── PE32 Runtime Binary ─────────────────────────────────────────
 # my_wine32 uses pe32_entry.c as main() entry point.
 my_wine32: $(MY_WINE32_OBJS)
 	@echo "==== Link my_wine32 ===="
-	@$(MY_WINE32_CC) -no-pie -o my_wine32 $(MY_WINE32_OBJS) -lpthread
+	@$(MY_WINE32_CC) -no-pie -o my_wine32 $(MY_WINE32_OBJS) -lpthread $(SDL2_LIBS_32)
 
 # ── Test Targets ────────────────────────────────────────────────
 # Test binaries (native ELF) plus the hello_world sample .exe they exercise.
@@ -247,7 +254,7 @@ tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_res
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend
+		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 run-tests: tests
 	@echo "==== Running tests ===="
@@ -287,6 +294,18 @@ $(BUILDDIR)/backend/%.o: %.c | $(BUILDDIR)
 	@mkdir -p $(@D)
 	@echo "  CC-SDL2 $<"
 	@$(CC) $(filter-out -mno-sse,$(CFLAGS)) $(SDL2_CFLAGS) -c $< -o $@
+
+# 32-bit backend compile rule
+$(BUILDDIR32)/backend/%.o: %.c | $(BUILDDIR32)
+	@mkdir -p $(@D)
+	@echo "  CC32-SDL2 $<"
+	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -c $< -o $@
+
+# SDL2 backend test (32-bit)
+TEST_sdl2_backend32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o
+$(BUILDDIR32)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend32_OBJS)
+	@echo "  LD32 $@"
+	@$(MY_WINE32_CC) -no-pie $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS_32)
 
 # ── Samples ─────────────────────────────────────────────────────
 # Cross-compile samples to PE .exe via Docker (mingw-w64).
@@ -332,5 +351,6 @@ re: fclean
 # ── Auto-generated Header Dependencies ──────────────────────────
 -include $(wildcard $(OBJS:.o=.d))
 -include $(wildcard $(BACKEND_OBJS:.o=.d))
+-include $(wildcard $(MY_WINE32_OBJS:.o=.d))
 
 .PHONY: all clean fclean re tests run-tests debug-tests samples run-samples debug-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)

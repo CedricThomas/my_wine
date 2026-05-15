@@ -21,7 +21,11 @@
 #define wine_munmap(a, l) munmap(a, l)
 #endif
 
-#define UNIX_STACK_SIZE (128 * 1024)  /* 128 KB */
+#if defined(MY_WINE32)
+#define UNIX_STACK_SIZE (128 * 1024)  /* fixed low-memory layout for PE32 */
+#else
+#define UNIX_STACK_SIZE (2 * 1024 * 1024)
+#endif
 
 struct guest_regs __wine_guest_regs = {0};
 void *unix_stack_ptr_val = NULL;
@@ -40,7 +44,7 @@ int setup_unix_stack(void)
 #else
     void *base = wine_mmap(NULL, UNIX_STACK_SIZE,
                       PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 #endif
 
     if (base == MAP_FAILED) {

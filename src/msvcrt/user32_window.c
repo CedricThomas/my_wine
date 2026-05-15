@@ -19,6 +19,9 @@
 
 #include "user32_priv.h"
 #include "../include/render_backend.h"
+#include <stdio.h>
+
+extern void rb_event_set_active_window(rb_window_t win);
 
 /* ── Additional user32 constants not in user32_types.h ──────── */
 
@@ -26,6 +29,23 @@
 #define LPCRECT      const RECT*
 #define CW_USEDEFAULT        0x80000000u
 #define HWP_USEDEFAULT       0xFFFFFFFF
+
+/* Lazy backend init — rb_init called once on first user32 call */
+static int g_user32_backend_inited = 0;
+static int g_user32_backend_available = 0;
+static int user32_ensure_backend(void)
+{
+    if (!g_user32_backend_inited) {
+        g_user32_backend_inited = 1;
+        if (rb_init() != 0) {
+            fprintf(stderr, "WARNING: rb_init failed, window operations will fail\n");
+            g_user32_backend_available = 0;
+        } else {
+            g_user32_backend_available = 1;
+        }
+    }
+    return g_user32_backend_available;
+}
 
 /* SWP_ flags for SetWindowPos */
 #define SWP_NOSIZE           0x0001
@@ -57,6 +77,8 @@
  * use multithreading. Add a spinlock if multithreading is needed.
  */
 WNDCLASSA class_table[16];
+int g_user32_live_windows = 0;
+int g_user32_window_create_attempted = 0;
 static int class_count = 0;
 
 /* Helper: find a registered class by name. Returns index >= 0 or -1. */
@@ -120,6 +142,11 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     (void)hInstance;
     (void)lpParam;
 
+    g_user32_window_create_attempted = 1;
+
+    if (!user32_ensure_backend())
+        return FORCE_HANDLE_RETURN(0, HWND);
+
     int cidx = find_class(lpClassName);
     if (cidx < 0)
         return FORCE_HANDLE_RETURN(0, HWND);
@@ -162,6 +189,8 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
         free(entry);
         return FORCE_HANDLE_RETURN(0, HWND);
     }
+    g_user32_live_windows++;
+    rb_event_set_active_window((rb_window_t)handle);
     return FORCE_HANDLE_RETURN(handle, HWND);
 }
 
@@ -181,6 +210,8 @@ BOOL DestroyWindow(HWND hwnd)
     rb_window_destroy(entry->sdl_window);
     wine_handle_free((uint32_t)hwnd);
     free(entry);
+    if (g_user32_live_windows > 0)
+        g_user32_live_windows--;
     return TRUE;
 }
 
