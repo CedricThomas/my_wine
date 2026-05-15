@@ -1,19 +1,19 @@
 # Subplan 1: Foundation
 
-**Goal**: PE32 loader support + 32-bit ELF helper (`my_wine32`) + handle manager + `render_backend.h` header + CRT bootstrap.
+**Goal**: PE32 loader support + 32-bit ELF helper (`my_wine32`) + handle manager + CRT bootstrap.
 
-**Architecture**: Dual-process model. On 64-bit Linux, a 64-bit user-space process **cannot switch to 32-bit compat mode** (`ljmp`/`lcall` to 32-bit CS is blocked by kernel at CPL=3). The only way to execute 32-bit x86 instructions is to run as a native 32-bit ELF process — the kernel handles all GDT, vDSO, and segment setup.
+**Architecture**: Wrapper/backend exec model. On 64-bit Linux, a 64-bit user-space process **cannot switch to 32-bit compat mode** (`ljmp`/`lcall` to 32-bit CS is blocked by kernel at CPL=3). The only way to execute 32-bit x86 instructions is to run as a native 32-bit ELF process — the kernel handles all GDT, vDSO, and segment setup.
 
-**History**: We first attempted a 64→32 mode-switch approach within a single process (~40 commits). It was abandoned when we hit the kernel CPL=3 wall and the return path proved too fragile. **Pivot**: dual-process architecture where `my_wine32` is a standalone 32-bit ELF.
+**History**: We first attempted a 64→32 mode-switch approach within a single process (~40 commits). It was abandoned when we hit the kernel CPL=3 wall and the return path proved too fragile. **Pivot**: wrapper/backend architecture where `my_wine32` is a standalone 32-bit ELF.
 
-- `my_wine` (64-bit ELF): PE32 detection → fork+exec `my_wine32` with `WINE32_PE_PATH` env var
+- `my_wine` wrapper: PE32 detection → `execvp()` `my_wine32` with the PE path as `argv[1]`
 - `my_wine32` (32-bit ELF): independently opens PE, maps at 0x00400000, allocates TEB (0x7FFDE000) + PEB (0x7FFDF000), generates 15-byte 32-bit thunks, installs signal handlers, jumps to PE entry
 - PE32 code runs natively in 32-bit compat mode (CS=0x23)
 - Syscall dispatch: 15-byte thunks → 32-bit dispatcher → `int $0x80` syscalls
 
 **✅ ALL BLOCKERS RESOLVED** (see Gap Categories below)
 
-**Outcome**: `./my_wine DOOM95.EXE` forks `my_wine32` which loads the PE, sets up TEB/PEB, and reaches `D_DoomMain`. PE32 samples running; PE32+ samples running.
+**Outcome**: `./my_wine DOOM95.EXE` execs `my_wine32` which loads the PE, sets up TEB/PEB, and reaches `D_DoomMain`. PE32 samples running; PE32+ samples running.
 
 ---
 
@@ -44,7 +44,7 @@ All gap categories from the original plan have been remediated:
 | 1.4 PE32 TEB/PEB and Image Mapping | ✅ Done | `teb_peb.c` has `ADDR32_LIMIT`, `TEB32_FIXED_ADDR`, `PEB32_FIXED_ADDR`; `image_mapper.c` has 32-bit mapping |
 | 1.5 Watcom CRT Bypass | ✅ Done | `main.c` resolves `D_DoomMain`/`_D_DoomMain`, seeds `GetCommandLineA` |
 | 1.6 Handle Manager | ✅ Done | `include/handle_manager.h` exists; `src/msvcrt/handle_manager.c` implemented (init/alloc/get/free/ref); handle type tags defined, types migrated |
-| 1.7 render_backend.h | ✅ Done | 161 lines, 51 function declarations including cursor/event/audio/timer/joystick/keyboard |
+| 1.7 Doom95 render backend planning | Historical | The old `include/render_backend.h` plan moved out of the current loader tree; the remaining interface notes live under `samples/doom95/docs/reference/`. |
 | 1.8 Test | ✅ Done | PE32 and PE32+ samples built and run; all 7 phases complete |
 
 **Remaining work**: ~0 lines of new implementation. All previously known runtime issues are resolved (see below).
@@ -89,8 +89,8 @@ All gap categories from the original plan have been remediated:
   - 0x50: HKEY, 0x60: HHOOK
 - [x] Migrate existing handle types (files, events, mutexes, threads) to the new handle manager
 
-### 1.7 render_backend.h ✅ DONE
-- [x] Create `include/render_backend.h` with 51 function declarations
+### 1.7 Doom95 render backend planning
+- [x] Capture the planned render backend interface under `samples/doom95/docs/reference/`.
 
 ### 1.8 Test ✅ DONE
 - [x] Run `./my_wine samples/unpacked/doom95/DOOM95.EXE`
@@ -121,7 +121,7 @@ The only remaining work for full DOOM95 execution is unblocking the Watcom CRT b
 **None.** All previously identified blockers have been resolved:
 
 ### BLOCKER A: `fork()` + `exec()` destroys mmap'd memory (Critical) ✅ RESOLVED
-Resolved by having `my_wine32` rebuild everything from scratch: re-map PE from the same file, re-allocate TEB/PEB, re-resolve imports with 32-bit thunks. Communication via env vars (`WINE32_PE_PATH`).
+Resolved by having `my_wine32` rebuild everything from scratch: re-map PE from the same file, re-allocate TEB/PEB, re-resolve imports with 32-bit thunks. The wrapper passes the PE path as `argv[1]`; `WINE32_PE_PATH` remains a compatibility fallback.
 
 ### BLOCKER B: `arch_prctl(ARCH_SET_FS)` in 32-bit mode (Critical) ✅ RESOLVED
 `arch_prctl(ARCH_SET_FS)` returns `EINVAL` in 32-bit compat mode. **Resolution**: `my_wine32` uses `set_thread_area` (syscall 243) to allocate an LDT entry pointing at the TEB, then sets FS to that selector. TEB remains at fixed address (`0x7FFDE000`).
@@ -149,14 +149,13 @@ All three components have `#if defined(__i386__)` code paths:
 | `src/main.c` | ✅ Has Watcom CRT bypass → `D_DoomMain` |
 | `include/handle_manager.h` | ✅ Exists |
 | `src/msvcrt/handle_manager.c` | ✅ Exists (init/alloc/get/free/ref, auto-init) |
-| `include/render_backend.h` | ✅ Exists with full API |
+| `samples/doom95/docs/reference/render_backend.md` | Historical interface notes |
 
 ### New files created during gap remediation (Phases 1-7)
 
 | File | Purpose |
 |------|---------|
-| `src/loader/pe32_entry.c` | 32-bit ELF child entry point (rebuilds PE/TEB/PEB) |
-| `src/loader/pe32_entry.S` | 32-bit `_start` assembly |
+| `src/loader/pe32_entry.c` | 32-bit ELF backend entry point (rebuilds PE/TEB/PEB) |
 | `src/loader/pe32_run_guest.S` | 32-bit guest execution entry |
 | `src/loader/peb_ldr.c` | LDR module list initialization and management |
 | `src/loader/peb_ldr.h` | LDR module list header |
@@ -184,12 +183,11 @@ All three components have `#if defined(__i386__)` code paths:
 | `src/loader/relocations.c` | Relocation processing |
 | `src/loader/relocations.h` | Relocation header |
 | `src/loader/loader_priv.h` | Loader private types and constants |
-| `src/loader/loader_utils.h` | Loader utility functions |
+| `include/syscall_safe_utils.h` | Shared syscall-safe utility functions |
 | `src/loader/teb_peb.h` | TEB/PEB header |
 | `src/loader/image_mapper.h` | Image mapper header |
 | `include/pe_parser.h` | PE parser public API |
-| `include/pe_priv.h` | PE private types |
-| `include/loader/pe32_trampoline.h` | PE32 trampoline definitions |
+| `src/pe_priv.h` | PE private types |
 | `include/syscall/dispatcher.h` | Dispatcher public API |
 | `include/syscall/thunk_gen.h` | Thunk generation header |
 | `src/syscall/abi_wrappers.c` | ABI wrapper implementations |

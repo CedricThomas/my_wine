@@ -254,9 +254,9 @@ static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 }
 
 /**
- * Set up POSIX signal handlers and alternate signal stack.
+ * Install POSIX crash signal handlers and alternate signal stack.
  */
-void setup_signal_handlers(void)
+void install_crash_signal_handlers(void)
 {
     /*
      * Set up the signal stack BEFORE installing handlers.

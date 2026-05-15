@@ -1,8 +1,8 @@
 /*
  * pe32_mmap_heap_backend.c — Minimal malloc/free/realloc for 32-bit builds.
  *
- * Replaces pe32plus_musl_malloc_backend.c (which depends on x86_64-only musl atomics)
- * with a simple mmap-backed allocator. Each allocation is its own mmap region.
+ * PE32-only alternative to the PE32+ musl backend. Each allocation is its own
+ * mmap region.
  * Not a real allocator (no pooling, no fragmentation management) but sufficient
  * for the PE32 child which allocates very few small objects.
  */

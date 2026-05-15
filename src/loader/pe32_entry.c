@@ -1,16 +1,16 @@
 /*
  * pe32_entry.c — 32-bit ELF entry point for my_wine32
  *
- * This is the C entry point for the 32-bit child process in the
- * dual-process PE32 execution model.
+ * This is the C entry point for the 32-bit backend selected by the
+ * my_wine wrapper for PE32 images.
  *
- * The 32-bit child is a STANDALONE process that independently:
- *   1. Reads the PE file path from WINE32_PE_PATH environment variable
+ * The 32-bit backend is a standalone process that independently:
+ *   1. Reads the PE file path from argv[1], with WINE32_PE_PATH as a fallback
  *   2. Opens and maps the PE image at the preferred (or default 0x00400000) base
  *   3. Allocates TEB at fixed address 0x7FFDE000 and PEB at 0x7FFDF000
  *   4. Initializes TEB/PEB (self-references, PEB pointer, image base)
  *   5. Generates 32-bit syscall thunks
- *   6. Sets up POSIX signal handlers
+ *   6. Installs POSIX crash signal handlers
  *   7. Jumps to the PE entry point (or user entry symbol like D_DoomMain)
  *
  * Sets FS→TEB via set_thread_area (syscall 243) because
@@ -71,7 +71,7 @@ void *map_image(const char *path, IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS *out_nt, size_t *out_nt_size);
 
 /* Declarations from crash_handlers.c (linked into my_wine32) */
-extern void setup_signal_handlers(void);
+extern void install_crash_signal_handlers(void);
 extern void seh_crash_handler(void *, void *, void *, void *);
 
 /* Declaration from pe32_run_guest.S */
@@ -82,7 +82,7 @@ extern char _acmdln[];
 extern void pe32_run_guest(uint32_t entry_abs, void *stack_top) __attribute__((noreturn));
 
 /* ── Error messages (null-terminated, written via syscall to stderr) ── */
-static const char err_bad_env[]    = "my_wine32: missing or invalid WINE32_PE_PATH\n";
+static const char err_bad_path[]   = "my_wine32: missing PE path\n";
 static const char err_map[]        = "my_wine32: failed to map PE image\n";
 static const char err_teb[]        = "my_wine32: failed to allocate TEB\n";
 static const char err_peb[]        = "my_wine32: failed to allocate PEB\n";
@@ -324,7 +324,7 @@ static void prepare_dispatch(void)
     }
     (void)thunk_arr;
 
-    setup_signal_handlers();
+    install_crash_signal_handlers();
 }
 
 /* ── setup_fs_and_jump ──────────────────────────────────────── */
@@ -433,7 +433,7 @@ int main(int argc, char **argv)
         pe_path = my_getenv("WINE32_PE_PATH");
     }
     if (!pe_path) {
-        INLINE_SYSCALL_WRITE_ERR(err_bad_env, sizeof(err_bad_env) - 1);
+        INLINE_SYSCALL_WRITE_ERR(err_bad_path, sizeof(err_bad_path) - 1);
         INLINE_SYSCALL_EXIT_GROUP(1);
     }
 

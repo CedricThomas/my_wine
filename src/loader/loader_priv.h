@@ -24,7 +24,7 @@
 #include "import_init.h"        /* init_msvcrt_imports */
 #include "relocations.h"        /* apply_relocations */
 #include "teb_peb.h"            /* g_stack_base, g_stack_size, setup_teb_peb, setup_stack */
-#include "crash_handlers.h"     /* setup_signal_handlers, seh_crash_handler */
+#include "crash_handlers.h"     /* install_crash_signal_handlers, seh_crash_handler */
 #include "guest_setup.h"        /* run_guest_entry, setup_guest_and_run, cleanup_guest */
 #include "gs_base.h"            /* set_gs_base, get_gs_base */
 #include "module_list.h"        /* loaded_module_t, module registry */

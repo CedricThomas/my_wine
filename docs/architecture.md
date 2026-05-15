@@ -82,7 +82,7 @@ my_wine hello.exe
   │                                                   │
   │  10. run_guest_entry()                            │
   │      → setup_guest_and_run() in guest_setup.c:    │
-  │        - setup_signal_handlers() (POSIX + altstack)│
+  │        - install_crash_signal_handlers() (POSIX + altstack)│
   │        - setup_seh_and_thunks() (SEH + 23-byte thunks + unix stack)
   │        - parse_pe_headers() (re-parse from entry) │
   │        - apply_final_patches() (__acrt_iob, .bss mprotect)
@@ -235,7 +235,7 @@ the loading.
                      │ setup_guest_and_run│
                      │ (guest_setup.c)   │
                      │                   │
-                     │ setup_signal_handlers()
+                     │ install_crash_signal_handlers()
                      │ setup_seh_and_thunks()
                      │ finalize_guest_state()
                      │ apply_final_patches()
@@ -605,7 +605,7 @@ during `setup_seh_and_thunks()` and linked to the TEB at
 
 ### POSIX Signal Handlers
 
-`setup_signal_handlers()` installs `crash_handler` for:
+`install_crash_signal_handlers()` installs `crash_handler` for:
 `SIGSEGV`, `SIGILL`, `SIGABRT`, `SIGFPE`, `SIGBUS`, and `SIGTRAP`.
 
 It uses `SA_SIGINFO` with a `siginfo_t`/`ucontext_t` handler that
@@ -634,7 +634,7 @@ This is the final step from `main()`. It simply calls
 
 The orchestrator for the final guest transition:
 
-1. **`setup_signal_handlers()`** — install POSIX signal handlers +
+1. **`install_crash_signal_handlers()`** — install POSIX signal handlers +
    alternate signal stack.
 
 2. **`setup_seh_and_thunks()`** — create static SEH frame, call
@@ -697,7 +697,7 @@ The complete flow inside `setup_guest_and_run()`:
 ```
 setup_guest_and_run(entry_abs, stack_top, teb, guest_argv, guest_envp)
 │
-├── setup_signal_handlers()
+├── install_crash_signal_handlers()
 │   ├── mmap(64KB) → alternate signal stack
 │   ├── sigaltstack()
 │   └── sigaction(SIGSEGV, SIGILL, SIGABRT, SIGFPE, SIGBUS, SIGTRAP)

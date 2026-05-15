@@ -421,7 +421,7 @@ checks bounds against the `.text` section end, and applies the patch.
 main.c::main()
   → load PE, call patch_crt_refptrs()  (refptr patching, in crt_refptrs.c)
   → setup_guest_and_run()  (in guest_setup.c)
-       → setup_signal_handlers()
+       → install_crash_signal_handlers()
        → setup_seh_and_thunks()
        → parse_pe_headers()
        → apply_final_patches()

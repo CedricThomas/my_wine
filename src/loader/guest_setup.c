@@ -46,7 +46,7 @@ extern void run_guest(void (*)(void), void *, void *, char **, char **,
 extern void *__wine_iob_data(void);
 
 /* From crash_handlers.c — installed before we do anything else */
-extern void setup_signal_handlers(void);
+extern void install_crash_signal_handlers(void);
 
 /* SEH crash handler (defined in crash_handlers.c) — wired into SEH frame */
 extern void seh_crash_handler(void *, void *, void *, void *);
@@ -305,7 +305,7 @@ __attribute__((noreturn)) void setup_guest_and_run(
         uint64_t entry_abs, void *image_base, void *stack_top, void *teb,
         char **guest_argv, char **guest_envp)
 {
-    setup_signal_handlers();
+    install_crash_signal_handlers();
     void *seh_frame = setup_seh_and_thunks();
 
     DEBUG("my_wine: jumping to entry 0x%lx via inline asm",

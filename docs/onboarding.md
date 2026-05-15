@@ -75,7 +75,7 @@ High-level directory layout (not the full tree from README):
 | `ordinal_table.c` | Ordinal-based import resolution |
 | `teb_peb.c` | `setup_teb_peb()` — allocates TEB/PEB via mmap; `setup_stack()` — allocates guest stack |
 | `gs_base.c` | `set_gs_base()` — sets GS segment base to TEB via `arch_prctl` |
-| `crash_handlers.c` | `setup_signal_handlers()` — installs SIGSEGV/SIGILL crash handlers; `seh_crash_handler` |
+| `crash_handlers.c` | `install_crash_signal_handlers()` — installs SIGSEGV/SIGILL crash handlers; `seh_crash_handler` |
 | `guest_setup.c` | `setup_guest_and_run()` — signal handlers, SEH chain, thunk generation, `__acrt_iob_func` patching, UNIX stack setup, GS base finalization, jump to guest |
 | `entry.c` | `run_guest_entry()` — thin wrapper that calls `setup_guest_and_run()` from `guest_setup.c` |
 
@@ -113,7 +113,7 @@ The pipeline in `src/main.c` (`main()`) runs its loading pipeline:
 
 `setup_guest_and_run()` performs all the remaining initialization before jumping to guest code — the steps deferred from the main pipeline because they must happen after `setup_stack()` is called from `main.c` (step 7 above):
 
-1. **`setup_signal_handlers()`** (from `crash_handlers.c`) — Installs SIGSEGV and SIGILL crash handlers.
+1. **`install_crash_signal_handlers()`** (from `crash_handlers.c`) — Installs SIGSEGV and SIGILL crash handlers.
 2. **`setup_seh_and_thunks()`** — Creates the static SEH frame, calls `generate_all_thunks()` (from `src/syscall/thunk_gen.c`) to produce all syscall thunks, and calls `setup_unix_stack()` (from `src/syscall/dispatcher_entry.c`) to allocate the 128KB UNIX stack used during syscall dispatch.
 3. **`apply_final_patches()`** — Patches `__acrt_iob_func` (finds the `jmp` thunk in `.text` and replaces with `movabs rax,<addr>; ret` to return `__wine_iob_data` directly); ensures `.bss` and other writable sections have `PROT_WRITE`.
 4. **`finalize_guest_state()`** — Sets GS base to TEB via `arch_prctl` (from `gs_base.c`); wires SEH chain into TEB at `gs:[0x00]`.

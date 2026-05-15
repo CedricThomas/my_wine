@@ -50,3 +50,26 @@ these categories:
 - Names describe current behavior.
 - Search results are easier to interpret.
 - Old names are removed from docs unless historical context is needed.
+
+## Completion Notes
+
+Completed as a conservative cleanup pass:
+
+- Renamed the generic `setup_signal_handlers()` API to
+  `install_crash_signal_handlers()` so the name reflects its crash-handler
+  scope.
+- Removed stale "moved to" commentary from `src/loader/import_resolve.h`.
+- Reworded the PE32 mmap heap backend comment so it is described as the PE32
+  backend, not as a replacement for the PE32+ musl backend.
+- Updated current docs and Doom95 planning notes where old wrapper/backend,
+  removed header, or moved-path names were presented as current state.
+
+No file or folder rename was needed in this pass. Remaining `musl_*` names are
+vendored musl source/stub paths or the PE32+ musl backend and are intentionally
+named.
+
+Validation:
+
+- `make my_wine64`
+- `make my_wine32`
+- `make run-tests`

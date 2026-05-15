@@ -18,8 +18,6 @@ void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS *nt,
                        IMAGE_SECTION_HEADER *sections,
                        void *target_addr);
 
-/* find_dll_path moved to dll_path.h, load_dll moved to dll_loader.h */
-
 /* Resolve imports for a specific loaded module (recursive) */
 int resolve_module_imports(loaded_module_t *mod, int depth);
 
