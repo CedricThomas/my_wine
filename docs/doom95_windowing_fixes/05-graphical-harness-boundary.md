@@ -12,7 +12,7 @@ representative of Doom95.
 - Keep X11/Xvfb as the deterministic graphical test environment.
 - Remove test-only autoquit behavior from backend window creation.
 - If a sample needs automatic exit, drive it through one of:
-  - input script `windowclose`
+  - input script `altf4`
   - posted input event from the harness
   - a sample-side timer
 - Make the harness own all test driver behavior:

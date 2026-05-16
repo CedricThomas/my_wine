@@ -10,6 +10,8 @@
 #ifndef RB_SDL2_PRIV_H
 #define RB_SDL2_PRIV_H
 
+#include <assert.h>
+#include <stdlib.h>
 #include <SDL2/SDL.h>
 #include "render_backend.h"
 #include "handle_manager.h"
@@ -138,6 +140,30 @@ static inline void rb_host_context_leave(uintptr_t saved_gs)
 
 typedef uintptr_t (*rb_host_call_fn)(void *);
 
+static inline int rb_host_context_is_active(void)
+{
+#if defined(__x86_64__)
+    if (&g_loader == 0)
+        return 1;
+
+    uintptr_t current_gs = 0;
+    __asm__ volatile("rdgsbase %0" : "=r"(current_gs));
+    return current_gs == loader_get_host_gs_base();
+#elif defined(__i386__)
+    if (&g_loader == 0)
+        return 1;
+
+    uint16_t host_fs = loader_get_host_fs_selector();
+    uint16_t current_fs = 0;
+    if (host_fs == 0)
+        return 1;
+    __asm__ volatile("mov %%fs, %0" : "=r"(current_fs));
+    return current_fs == host_fs;
+#else
+    return 1;
+#endif
+}
+
 static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
 {
 #if defined(__x86_64__)
@@ -151,7 +177,9 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
         return ret;
     }
 
-    uintptr_t new_rsp = (uintptr_t)unix_stack_ptr_val;
+    uintptr_t new_rsp = (uintptr_t)unix_stack_ptr_val & ~(uintptr_t)15;
+    assert((new_rsp & 15) == 0);
+    assert(rb_host_context_is_active());
     __asm__ volatile(
         "mov %%rsp,%[old_rsp]\n\t"
         "mov %[new_rsp],%%rsp\n\t"
@@ -175,6 +203,8 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
     }
 
     uintptr_t new_esp = ((uintptr_t)unix_stack_ptr_val & ~(uintptr_t)15) - 8;
+    assert((new_esp & 15) == 8);
+    assert(rb_host_context_is_active());
     __asm__ volatile(
         "push %%ebp\n\t"
         "push %%ebx\n\t"
@@ -201,6 +231,55 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
 #else
     return fn(arg);
 #endif
+}
+
+static inline uintptr_t rb_host_malloc_call(void *arg)
+{
+    return (uintptr_t)malloc(*(size_t *)arg);
+}
+
+typedef struct {
+    size_t nmemb;
+    size_t size;
+} rb_host_calloc_args;
+
+static inline uintptr_t rb_host_calloc_call(void *arg)
+{
+    rb_host_calloc_args *a = arg;
+    return (uintptr_t)calloc(a->nmemb, a->size);
+}
+
+static inline uintptr_t rb_host_free_call(void *arg)
+{
+    free(arg);
+    return 0;
+}
+
+static inline uintptr_t rb_host_getenv_call(void *arg)
+{
+    return (uintptr_t)getenv((const char *)arg);
+}
+
+static inline void *rb_host_malloc(size_t size)
+{
+    return (void *)rb_call_on_host_stack(rb_host_malloc_call, &size);
+}
+
+static inline void *rb_host_calloc(size_t nmemb, size_t size)
+{
+    rb_host_calloc_args args = { nmemb, size };
+    return (void *)rb_call_on_host_stack(rb_host_calloc_call, &args);
+}
+
+static inline void rb_host_free(void *ptr)
+{
+    if (ptr)
+        rb_call_on_host_stack(rb_host_free_call, ptr);
+}
+
+static inline const char *rb_host_getenv(const char *name)
+{
+    return (const char *)rb_call_on_host_stack(rb_host_getenv_call, (void *)name);
 }
 
 /* ---- Global audio state ---- */

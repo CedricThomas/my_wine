@@ -74,19 +74,26 @@ static uintptr_t rb_sdl_push_event_call(void *arg)
     return (uintptr_t)SDL_PushEvent((SDL_Event *)arg);
 }
 
-static void repaint_active_window_black(uint32_t window_id)
+static uintptr_t rb_sdl_repaint_window_black_call(void *arg)
 {
+    uint32_t window_id = *(uint32_t *)arg;
     SDL_Window *window = SDL_GetWindowFromID(window_id);
     if (!window)
-        return;
+        return 0;
 
     SDL_Surface *surface = SDL_GetWindowSurface(window);
     if (!surface)
-        return;
+        return 0;
 
     uint32_t color = SDL_MapRGB(surface->format, 0, 0, 0);
     SDL_FillRect(surface, NULL, color);
     SDL_UpdateWindowSurface(window);
+    return 1;
+}
+
+static void repaint_active_window_black(uint32_t window_id)
+{
+    rb_call_on_host_stack(rb_sdl_repaint_window_black_call, &window_id);
 }
 
 /* ---- translate_sdl_event ----

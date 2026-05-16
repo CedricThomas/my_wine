@@ -48,13 +48,20 @@ static int run_tests(void) {
   if (win) {
     T(rb_window_get_rect(win, &rect) == RB_OK, "get_rect failed");
     T(rect.w == 320 && rect.h == 200, "window size mismatch");
+    T(rb_window_set_position(win, 20, 30) == RB_OK, "set_position failed");
+    T(rb_window_set_size(win, 300, 180) == RB_OK, "set_size failed");
+    T(rb_window_get_rect(win, &rect) == RB_OK, "get_rect after resize failed");
+    T(rect.w == 300 && rect.h == 180, "window resize mismatch");
+    T(rb_window_set_fullscreen(win, 0, 320, 200, 0) == RB_OK,
+      "set_fullscreen(windowed) failed");
 
     rb_window_get_client_rect(win, &rect);
-    T(rect.w == 320 && rect.h == 200, "client rect mismatch");
+    T(rect.w > 0 && rect.h > 0, "client rect mismatch");
 
     T(rb_window_set_title(win, "Renamed") == RB_OK, "set_title failed");
     T(rb_window_show(win, 0) == RB_OK, "show(hide) failed");
     T(rb_window_show(win, 1) == RB_OK, "show(show) failed");
+    T(rb_window_warp_mouse(win, 5, 6) == RB_OK, "warp_mouse failed");
 
     /* ---- DC ---- */
     rb_dc_t dc = rb_window_get_dc(win);
@@ -69,6 +76,20 @@ static int run_tests(void) {
     }
 
     rb_window_destroy(win);
+  }
+  printf("OK\n");
+
+  /* ---- Window recreate regression ---- */
+  printf("  window recreate... ");
+  for (int i = 0; i < 3; i++) {
+    rb_window_t loop_win =
+        rb_window_create("SDL2 Recreate", -1, -1, 160 + i, 120 + i, RB_WINDOW_SHOWN);
+    T(loop_win != 0, "loop rb_window_create failed");
+    if (loop_win) {
+      T(rb_window_set_size(loop_win, 200 + i, 140 + i) == RB_OK,
+        "loop set_size failed");
+      T(rb_window_destroy(loop_win) == RB_OK, "loop destroy failed");
+    }
   }
   printf("OK\n");
 

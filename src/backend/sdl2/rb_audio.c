@@ -22,6 +22,40 @@ static inline rb_audio_buf *get_audio_buf(rb_audio_buf_t buf)
     return (rb_audio_buf *)wine_handle_get((uint32_t)buf);
 }
 
+typedef struct {
+    SDL_AudioSpec *want;
+    SDL_AudioSpec *have;
+} rb_sdl_open_audio_args;
+
+static uintptr_t rb_sdl_open_audio_device_call(void *arg)
+{
+    rb_sdl_open_audio_args *a = arg;
+    return (uintptr_t)SDL_OpenAudioDevice(
+        NULL, 0, a->want, a->have,
+        SDL_AUDIO_ALLOW_FREQUENCY_CHANGE |
+        SDL_AUDIO_ALLOW_FORMAT_CHANGE |
+        SDL_AUDIO_ALLOW_CHANNELS_CHANGE
+    );
+}
+
+typedef struct {
+    SDL_AudioDeviceID device;
+    int pause_on;
+} rb_sdl_pause_audio_args;
+
+static uintptr_t rb_sdl_pause_audio_device_call(void *arg)
+{
+    rb_sdl_pause_audio_args *a = arg;
+    SDL_PauseAudioDevice(a->device, a->pause_on);
+    return 0;
+}
+
+static uintptr_t rb_sdl_close_audio_device_call(void *arg)
+{
+    SDL_CloseAudioDevice(*(SDL_AudioDeviceID *)arg);
+    return 0;
+}
+
 /* ========================================================================
  * 1. rb_audio_open — open the SDL audio device
  * ======================================================================== */
@@ -44,12 +78,8 @@ int rb_audio_open(int sample_rate, int channels, int bits_per_sample,
     want.callback = rb_audio_callback;
     want.userdata = NULL;
 
-    SDL_AudioDeviceID device = SDL_OpenAudioDevice(
-        NULL, 0, &want, &have,
-        SDL_AUDIO_ALLOW_FREQUENCY_CHANGE |
-        SDL_AUDIO_ALLOW_FORMAT_CHANGE |
-        SDL_AUDIO_ALLOW_CHANNELS_CHANGE
-    );
+    rb_sdl_open_audio_args open_args = { &want, &have };
+    SDL_AudioDeviceID device = (SDL_AudioDeviceID)rb_call_on_host_stack(rb_sdl_open_audio_device_call, &open_args);
 
     if (device == 0)
         return RB_FAIL;
@@ -61,7 +91,8 @@ int rb_audio_open(int sample_rate, int channels, int bits_per_sample,
     g_audio.bits_per_sample = (have.format == AUDIO_U8) ? 8 : 16;
     g_audio.buffer_size = have.samples;
 
-    SDL_PauseAudioDevice(device, 0); /* start audio */
+    rb_sdl_pause_audio_args pause_args = { device, 0 };
+    rb_call_on_host_stack(rb_sdl_pause_audio_device_call, &pause_args);
     return RB_OK;
 }
 
@@ -80,8 +111,9 @@ void rb_audio_close(void)
             g_audio_buffers[i]->playing = 0;
     }
 
-    SDL_PauseAudioDevice(g_audio.device_id, 1);
-    SDL_CloseAudioDevice(g_audio.device_id);
+    rb_sdl_pause_audio_args pause_args = { g_audio.device_id, 1 };
+    rb_call_on_host_stack(rb_sdl_pause_audio_device_call, &pause_args);
+    rb_call_on_host_stack(rb_sdl_close_audio_device_call, &g_audio.device_id);
 
     g_audio.device_id = 0;
     g_audio.opened = 0;
@@ -98,13 +130,13 @@ rb_audio_buf_t rb_audio_buffer_create(int format, int buffer_size)
         buffer_size = g_audio.buffer_size * (g_audio.bits_per_sample / 8) * g_audio.channels;
     }
 
-    rb_audio_buf *buf = malloc(sizeof(*buf));
+    rb_audio_buf *buf = rb_host_malloc(sizeof(*buf));
     if (!buf)
         return 0;
 
-    buf->data = calloc((size_t)buffer_size, 1);
+    buf->data = rb_host_calloc((size_t)buffer_size, 1);
     if (!buf->data) {
-        free(buf);
+        rb_host_free(buf);
         return 0;
     }
 
@@ -158,8 +190,8 @@ int rb_audio_buffer_destroy(rb_audio_buf_t buf)
         }
     }
 
-    free(b->data);
-    free(b);
+    rb_host_free(b->data);
+    rb_host_free(b);
     wine_handle_free((uint32_t)buf);
     return RB_OK;
 }

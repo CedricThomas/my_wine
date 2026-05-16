@@ -48,6 +48,101 @@ static int rb_surface_pitch_for_bpp(int width, int bpp)
     return width * 4;
 }
 
+typedef struct {
+    uint8_t *buf;
+    int w;
+    int h;
+    int bpp;
+    int sdl_bpp;
+    int pitch;
+    uint32_t rmask;
+    uint32_t gmask;
+    uint32_t bmask;
+    uint32_t amask;
+} rb_sdl_surface_create_args;
+
+static uintptr_t rb_sdl_pixel_format_masks_call(void *arg)
+{
+    rb_sdl_surface_create_args *a = arg;
+    a->sdl_bpp = a->bpp;
+    return (uintptr_t)SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_XRGB1555,
+                                                 &a->sdl_bpp,
+                                                 &a->rmask, &a->gmask,
+                                                 &a->bmask, &a->amask);
+}
+
+static uintptr_t rb_sdl_create_surface_from_call(void *arg)
+{
+    rb_sdl_surface_create_args *a = arg;
+    return (uintptr_t)SDL_CreateRGBSurfaceFrom(a->buf, a->w, a->h, a->bpp, a->pitch,
+                                               a->rmask, a->gmask, a->bmask, a->amask);
+}
+
+typedef struct {
+    SDL_Surface *surface;
+    SDL_Palette *palette;
+} rb_sdl_surface_palette_args;
+
+static uintptr_t rb_sdl_set_surface_palette_call(void *arg)
+{
+    rb_sdl_surface_palette_args *a = arg;
+    return (uintptr_t)SDL_SetSurfacePalette(a->surface, a->palette);
+}
+
+static uintptr_t rb_sdl_free_surface_call(void *arg)
+{
+    SDL_FreeSurface((SDL_Surface *)arg);
+    return 0;
+}
+
+typedef struct {
+    SDL_Surface *dst;
+    SDL_Rect rect;
+    uint32_t color;
+} rb_sdl_fill_rect_args;
+
+static uintptr_t rb_sdl_fill_rect_call(void *arg)
+{
+    rb_sdl_fill_rect_args *a = arg;
+    return (uintptr_t)SDL_FillRect(a->dst, &a->rect, a->color);
+}
+
+typedef struct {
+    SDL_Surface *src;
+    SDL_Surface *dst;
+    SDL_Rect src_rect;
+    SDL_Rect dst_rect;
+} rb_sdl_blt_args;
+
+static uintptr_t rb_sdl_soft_stretch_call(void *arg)
+{
+    rb_sdl_blt_args *a = arg;
+    return (uintptr_t)SDL_SoftStretch(a->src, &a->src_rect, a->dst, &a->dst_rect);
+}
+
+static uintptr_t rb_sdl_blt_surface_call(void *arg)
+{
+    rb_sdl_blt_args *a = arg;
+    return (uintptr_t)SDL_BlitSurface(a->src, &a->src_rect, a->dst, &a->dst_rect);
+}
+
+typedef struct {
+    SDL_Window *window;
+    SDL_Surface *surface;
+} rb_sdl_window_surface_update_args;
+
+static uintptr_t rb_sdl_update_window_surface_call(void *arg)
+{
+    rb_sdl_window_surface_update_args *a = arg;
+    SDL_Surface *ws = SDL_GetWindowSurface(a->window);
+    if (!ws)
+        return 0;
+
+    SDL_BlitSurface(a->surface, NULL, ws, NULL);
+    SDL_UpdateWindowSurface(a->window);
+    return 1;
+}
+
 rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
                                rb_palette_t palette, uint32_t flags)
 {
@@ -62,7 +157,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
 
     int pitch = rb_surface_pitch_for_bpp(w, bpp);
     int buf_size = pitch * h;
-    uint8_t *buf = malloc(buf_size);
+    uint8_t *buf = rb_host_malloc(buf_size);
     if (!buf)
         return 0;
     memset(buf, 0, buf_size);
@@ -71,39 +166,42 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     if (bpp == 15) {
         /* SDL2 requires SDL_PIXELFORMAT_XRGB1555 masks; hardcoding 0x7C00/0x03E0/0x001C fails.
          * Use SDL_PixelFormatEnumToMasks to get the correct masks for this SDL2 build. */
-        int sdl_bpp = 0;
-        if (!SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_XRGB1555, &sdl_bpp, &rmask, &gmask, &bmask, &amask)) {
-            free(buf);
+        rb_sdl_surface_create_args mask_args = { .bpp = 0 };
+        int mask_ret = (int)rb_call_on_host_stack(rb_sdl_pixel_format_masks_call, &mask_args);
+        if (!mask_ret) {
+            rb_host_free(buf);
             return 0;
         }
-        bpp = sdl_bpp;  /* may be 15 or 16 depending on SDL2 version */
+        rmask = mask_args.rmask;
+        gmask = mask_args.gmask;
+        bmask = mask_args.bmask;
+        amask = mask_args.amask;
+        bpp = mask_args.sdl_bpp;  /* may be 15 or 16 depending on SDL2 version */
     } else if (bpp == 16) { rmask = 0xF800; gmask = 0x07E0; bmask = 0x001F; }
     else if (bpp == 32) { rmask = 0xFF000000; gmask = 0x00FF0000; bmask = 0x0000FF00; amask = 0x000000FF; }
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(buf, w, h, bpp, pitch,
-                                                    rmask, gmask, bmask, amask);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_surface_create_args create_args = {
+        .buf = buf, .w = w, .h = h, .bpp = bpp, .pitch = pitch,
+        .rmask = rmask, .gmask = gmask, .bmask = bmask, .amask = amask,
+    };
+    SDL_Surface *surface = (SDL_Surface *)rb_call_on_host_stack(rb_sdl_create_surface_from_call, &create_args);
     if (!surface) {
-        free(buf);
+        rb_host_free(buf);
         return 0;
     }
 
     if (palette) {
         rb_palette *p = get_palette(palette);
         if (p && p->palette) {
-            saved_gs = rb_host_context_enter();
-            SDL_SetSurfacePalette(surface, p->palette);
-            rb_host_context_leave(saved_gs);
+            rb_sdl_surface_palette_args args = { surface, p->palette };
+            rb_call_on_host_stack(rb_sdl_set_surface_palette_call, &args);
         }
     }
 
-    rb_surface *s = malloc(sizeof(*s));
+    rb_surface *s = rb_host_malloc(sizeof(*s));
     if (!s) {
-        saved_gs = rb_host_context_enter();
-        SDL_FreeSurface(surface);
-        rb_host_context_leave(saved_gs);
-        free(buf);
+        rb_call_on_host_stack(rb_sdl_free_surface_call, surface);
+        rb_host_free(buf);
         return 0;
     }
     s->surface = surface;
@@ -157,11 +255,9 @@ int rb_surface_destroy(rb_surface_t surf)
     rb_surface *s = get_surface(surf);
     if (!s) return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_FreeSurface(s->surface);
-    rb_host_context_leave(saved_gs);
-    if (s->own_buf) free(s->own_buf);
-    free(s);
+    rb_call_on_host_stack(rb_sdl_free_surface_call, s->surface);
+    rb_host_free(s->own_buf);
+    rb_host_free(s);
     wine_handle_free((uint32_t)surf);
     return RB_OK;
 }
@@ -207,9 +303,8 @@ int rb_surface_blt(rb_surface_t dst, const rb_rect_t *dst_rect,
         } else {
             dr = (SDL_Rect){0, 0, ds->surface->w, ds->surface->h};
         }
-        uintptr_t saved_gs = rb_host_context_enter();
-        int ret = SDL_FillRect(ds->surface, &dr, color);
-        rb_host_context_leave(saved_gs);
+        rb_sdl_fill_rect_args args = { ds->surface, dr, color };
+        int ret = (int)rb_call_on_host_stack(rb_sdl_fill_rect_call, &args);
         if (ret < 0)
             return RB_FAIL;
         ds->dirty = 1;
@@ -232,16 +327,13 @@ int rb_surface_blt(rb_surface_t dst, const rb_rect_t *dst_rect,
             dr = (SDL_Rect){0, 0, ds->surface->w, ds->surface->h};
         }
 
+        rb_sdl_blt_args args = { ss->surface, ds->surface, sr, dr };
         if (sr.w != dr.w || sr.h != dr.h) {
-            uintptr_t saved_gs = rb_host_context_enter();
-            int ret = SDL_SoftStretch(ss->surface, &sr, ds->surface, &dr);
-            rb_host_context_leave(saved_gs);
+            int ret = (int)rb_call_on_host_stack(rb_sdl_soft_stretch_call, &args);
             if (ret < 0)
                 return RB_FAIL;
         } else {
-            uintptr_t saved_gs = rb_host_context_enter();
-            int ret = SDL_BlitSurface(ss->surface, &sr, ds->surface, &dr);
-            rb_host_context_leave(saved_gs);
+            int ret = (int)rb_call_on_host_stack(rb_sdl_blt_surface_call, &args);
             if (ret < 0)
                 return RB_FAIL;
         }
@@ -260,13 +352,8 @@ int rb_surface_flip(rb_surface_t surf)
     if (s->window) {
         rb_window *wnd = get_window(s->window);
         if (wnd && wnd->window) {
-            uintptr_t saved_gs = rb_host_context_enter();
-            SDL_Surface *ws = SDL_GetWindowSurface(wnd->window);
-            if (ws) {
-                SDL_BlitSurface(s->surface, NULL, ws, NULL);
-                SDL_UpdateWindowSurface(wnd->window);
-            }
-            rb_host_context_leave(saved_gs);
+            rb_sdl_window_surface_update_args args = { wnd->window, s->surface };
+            rb_call_on_host_stack(rb_sdl_update_window_surface_call, &args);
         }
 
         /* Swap with backbuffer: primary becomes backbuffer for next frame */
@@ -318,9 +405,8 @@ int rb_surface_set_palette(rb_surface_t surf, rb_palette_t pal)
     rb_palette *p = get_palette(pal);
     if (!p || !p->palette) return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    int ret = SDL_SetSurfacePalette(s->surface, p->palette);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_surface_palette_args args = { s->surface, p->palette };
+    int ret = (int)rb_call_on_host_stack(rb_sdl_set_surface_palette_call, &args);
     if (ret < 0)
         return RB_FAIL;
     s->palette = pal;

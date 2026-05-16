@@ -46,6 +46,7 @@ Samples are cross-compiled to PE `.exe` via a Docker container (mingw-w64):
 make samples SAMPLE=hello_world                 # build one e2e sample binary
 make run-samples-scenarios SAMPLE=hello_world   # unified console/graphical runner
 make run-samples-scenarios SAMPLE=sdl2_window   # graphical samples run in Docker/Xvfb
+GRAPHICAL_RUNTIME=wine make run-samples-scenarios SAMPLE=sdl2_window  # run graphical sample under real Wine as reference
 ```
 
 You should see `Hello from Windows!` printed to the terminal.
@@ -84,7 +85,14 @@ For example:
 Graphical samples are marked with `type=graphical` in `sample.info`. Add
 `applied_inputs.txt` beside the sample to replay deterministic events after the
 window appears. Supported commands are `sleep MS`, `focus`, `key KEY`,
-`type TEXT`, `click X Y`, `mousemove X Y`, `status LABEL`, and `windowclose`.
+`type TEXT`, `click X Y`, `mousemove X Y`, `status LABEL`, and `altf4`.
+`windowclose` remains accepted as a compatibility alias and is implemented as
+`Alt+F4`.
+Set `GRAPHICAL_RUNTIME=wine` to run the same graphical harness against real
+Wine inside the Docker image for reference behavior; the default remains
+`GRAPHICAL_RUNTIME=my_wine`. The Wine reference path keeps the same window/input
+checks but skips strict geometry assertions, since Wine window-manager sizing
+does not match the loader's SDL window sizing exactly.
 
 ### Dependencies
 

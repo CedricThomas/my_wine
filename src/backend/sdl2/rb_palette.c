@@ -15,18 +15,31 @@ static inline rb_palette *get_palette(rb_palette_t pal)
     return (rb_palette *)wine_handle_get((uint32_t)pal);
 }
 
+typedef struct {
+    SDL_Palette *palette;
+    const SDL_Color *colors;
+    int start;
+    int count;
+} rb_sdl_set_palette_colors_args;
+
+static uintptr_t rb_sdl_set_palette_colors_call(void *arg)
+{
+    rb_sdl_set_palette_colors_args *a = arg;
+    return (uintptr_t)SDL_SetPaletteColors(a->palette, a->colors, a->start, a->count);
+}
+
 rb_palette_t rb_palette_create(int num_colors)
 {
     if (num_colors <= 0)
         return 0;
 
-    SDL_Palette *pal = malloc(sizeof(SDL_Palette));
+    SDL_Palette *pal = rb_host_malloc(sizeof(SDL_Palette));
     if (!pal)
         return 0;
 
-    SDL_Color *colors = calloc(num_colors, sizeof(SDL_Color));
+    SDL_Color *colors = rb_host_calloc((size_t)num_colors, sizeof(SDL_Color));
     if (!colors) {
-        free(pal);
+        rb_host_free(pal);
         return 0;
     }
 
@@ -36,10 +49,10 @@ rb_palette_t rb_palette_create(int num_colors)
     pal->version = 1;
     pal->refcount = 1;
 
-    rb_palette *p = malloc(sizeof(*p));
+    rb_palette *p = rb_host_malloc(sizeof(*p));
     if (!p) {
-        free(colors);
-        free(pal);
+        rb_host_free(colors);
+        rb_host_free(pal);
         return 0;
     }
     p->palette = pal;
@@ -54,9 +67,9 @@ int rb_palette_destroy(rb_palette_t pal)
     if (!p)
         return RB_FAIL;
 
-    free(p->palette->colors);
-    free(p->palette);
-    free(p);
+    rb_host_free(p->palette->colors);
+    rb_host_free(p->palette);
+    rb_host_free(p);
     wine_handle_free((uint32_t)pal);
     return RB_OK;
 }
@@ -77,7 +90,7 @@ int rb_palette_set_colors(rb_palette_t pal,
     if (count == 0)
         return RB_OK;
 
-    SDL_Color *arr = malloc(sizeof(SDL_Color) * count);
+    SDL_Color *arr = rb_host_malloc(sizeof(SDL_Color) * count);
     if (!arr)
         return RB_FAIL;
 
@@ -89,8 +102,9 @@ int rb_palette_set_colors(rb_palette_t pal,
         arr[i].a = SDL_ALPHA_OPAQUE;
     }
 
-    int ret = SDL_SetPaletteColors(p->palette, arr, (int)start, (int)count);
-    free(arr);
+    rb_sdl_set_palette_colors_args args = { p->palette, arr, (int)start, (int)count };
+    int ret = (int)rb_call_on_host_stack(rb_sdl_set_palette_colors_call, &args);
+    rb_host_free(arr);
     return ret == 0 ? RB_OK : RB_FAIL;
 }
 

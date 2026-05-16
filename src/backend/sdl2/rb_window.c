@@ -59,12 +59,140 @@ static uintptr_t rb_sdl_show_raise_pump_call(void *arg)
 static uintptr_t rb_sdl_push_quit_if_autoquit_call(void *arg)
 {
     (void)arg;
-    if (getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
+    if (rb_host_getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
         SDL_Event ev;
         memset(&ev, 0, sizeof(ev));
         ev.type = SDL_QUIT;
         SDL_PushEvent(&ev);
     }
+    return 0;
+}
+
+typedef struct {
+    SDL_Window *window;
+    int show;
+} rb_sdl_window_show_args;
+
+static uintptr_t rb_sdl_window_show_call(void *arg)
+{
+    rb_sdl_window_show_args *a = arg;
+    if (a->show)
+        SDL_ShowWindow(a->window);
+    else
+        SDL_HideWindow(a->window);
+    return 0;
+}
+
+typedef struct {
+    SDL_Window *window;
+    int x;
+    int y;
+} rb_sdl_window_position_args;
+
+static uintptr_t rb_sdl_window_set_position_call(void *arg)
+{
+    rb_sdl_window_position_args *a = arg;
+    SDL_SetWindowPosition(a->window, a->x, a->y);
+    return 0;
+}
+
+typedef struct {
+    SDL_Window *window;
+    int width;
+    int height;
+} rb_sdl_window_size_args;
+
+static uintptr_t rb_sdl_window_set_size_call(void *arg)
+{
+    rb_sdl_window_size_args *a = arg;
+    SDL_SetWindowSize(a->window, a->width, a->height);
+    return 0;
+}
+
+typedef struct {
+    SDL_Window *window;
+    const char *title;
+} rb_sdl_window_title_args;
+
+static uintptr_t rb_sdl_window_set_title_call(void *arg)
+{
+    rb_sdl_window_title_args *a = arg;
+    SDL_SetWindowTitle(a->window, a->title);
+    return 0;
+}
+
+typedef struct {
+    SDL_Window *window;
+    rb_rect_t *rect;
+} rb_sdl_window_rect_args;
+
+static uintptr_t rb_sdl_window_get_rect_call(void *arg)
+{
+    rb_sdl_window_rect_args *a = arg;
+    SDL_GetWindowPosition(a->window, &a->rect->x, &a->rect->y);
+    SDL_GetWindowSize(a->window, &a->rect->w, &a->rect->h);
+    return 0;
+}
+
+static uintptr_t rb_sdl_window_get_client_rect_call(void *arg)
+{
+    rb_sdl_window_rect_args *a = arg;
+    SDL_GetWindowSize(a->window, &a->rect->w, &a->rect->h);
+    return 0;
+}
+
+typedef struct {
+    SDL_Window *old_window;
+    SDL_Window *new_window;
+    int fullscreen;
+    int width;
+    int height;
+} rb_sdl_window_fullscreen_args;
+
+static uintptr_t rb_sdl_window_set_fullscreen_call(void *arg)
+{
+    rb_sdl_window_fullscreen_args *a = arg;
+    const char *title = SDL_GetWindowTitle(a->old_window);
+    uint32_t flags = a->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+
+    a->new_window = SDL_CreateWindow(title,
+                                     SDL_WINDOWPOS_CENTERED,
+                                     SDL_WINDOWPOS_CENTERED,
+                                     a->width, a->height,
+                                     flags);
+    if (!a->new_window)
+        return 0;
+
+    SDL_DestroyWindow(a->old_window);
+    return 1;
+}
+
+static uintptr_t rb_sdl_window_get_surface_call(void *arg)
+{
+    return (uintptr_t)SDL_GetWindowSurface(((rb_window *)arg)->window);
+}
+
+typedef struct {
+    SDL_Cursor *cursor;
+} rb_sdl_cursor_args;
+
+static uintptr_t rb_sdl_set_cursor_call(void *arg)
+{
+    rb_sdl_cursor_args *a = arg;
+    SDL_SetCursor(a->cursor);
+    return 0;
+}
+
+typedef struct {
+    SDL_Window *window;
+    int x;
+    int y;
+} rb_sdl_warp_mouse_args;
+
+static uintptr_t rb_sdl_warp_mouse_call(void *arg)
+{
+    rb_sdl_warp_mouse_args *a = arg;
+    SDL_WarpMouseInWindow(a->window, a->x, a->y);
     return 0;
 }
 
@@ -93,14 +221,11 @@ rb_window_t rb_window_create(const char *title,
     rb_call_on_host_stack(rb_sdl_show_raise_pump_call, sdl_win);
     rb_call_on_host_stack(rb_sdl_push_quit_if_autoquit_call, NULL);
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    rb_window *win = malloc(sizeof(*win));
+    rb_window *win = rb_host_malloc(sizeof(*win));
     if (!win) {
-        SDL_DestroyWindow(sdl_win);
-        rb_host_context_leave(saved_gs);
+        rb_call_on_host_stack(rb_sdl_destroy_window_call, sdl_win);
         return 0;
     }
-    rb_host_context_leave(saved_gs);
     win->window = sdl_win;
     win->primary_surface = 0;
     win->backbuffer = 0;
@@ -119,9 +244,7 @@ int rb_window_destroy(rb_window_t win)
         rb_surface_destroy(w->backbuffer);
 
     rb_call_on_host_stack(rb_sdl_destroy_window_call, w->window);
-    uintptr_t saved_gs = rb_host_context_enter();
-    free(w);
-    rb_host_context_leave(saved_gs);
+    rb_host_free(w);
     wine_handle_free((uint32_t)win);
     return RB_OK;
 }
@@ -132,12 +255,8 @@ int rb_window_show(rb_window_t win, int show)
     if (!w)
         return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    if (show)
-        SDL_ShowWindow(w->window);
-    else
-        SDL_HideWindow(w->window);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_window_show_args args = { w->window, show };
+    rb_call_on_host_stack(rb_sdl_window_show_call, &args);
     return RB_OK;
 }
 
@@ -147,11 +266,12 @@ int rb_window_set_position(rb_window_t win, int x, int y)
     if (!wnd)
         return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_SetWindowPosition(wnd->window,
-                          x == RB_HINT_AUTO ? (int)SDL_WINDOWPOS_CENTERED : x,
-                          y == RB_HINT_AUTO ? (int)SDL_WINDOWPOS_CENTERED : y);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_window_position_args args = {
+        wnd->window,
+        x == RB_HINT_AUTO ? (int)SDL_WINDOWPOS_CENTERED : x,
+        y == RB_HINT_AUTO ? (int)SDL_WINDOWPOS_CENTERED : y
+    };
+    rb_call_on_host_stack(rb_sdl_window_set_position_call, &args);
     return RB_OK;
 }
 
@@ -161,9 +281,8 @@ int rb_window_set_size(rb_window_t win, int width, int height)
     if (!wnd)
         return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_SetWindowSize(wnd->window, width, height);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_window_size_args args = { wnd->window, width, height };
+    rb_call_on_host_stack(rb_sdl_window_set_size_call, &args);
     return RB_OK;
 }
 
@@ -173,9 +292,8 @@ int rb_window_set_title(rb_window_t win, const char *title)
     if (!w)
         return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_SetWindowTitle(w->window, title);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_window_title_args args = { w->window, title };
+    rb_call_on_host_stack(rb_sdl_window_set_title_call, &args);
     return RB_OK;
 }
 
@@ -185,10 +303,8 @@ int rb_window_get_rect(rb_window_t win, rb_rect_t *rect)
     if (!w)
         return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_GetWindowPosition(w->window, &rect->x, &rect->y);
-    SDL_GetWindowSize(w->window, &rect->w, &rect->h);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_window_rect_args args = { w->window, rect };
+    rb_call_on_host_stack(rb_sdl_window_get_rect_call, &args);
     return RB_OK;
 }
 
@@ -200,9 +316,8 @@ int rb_window_get_client_rect(rb_window_t win, rb_rect_t *rect)
 
     rect->x = 0;
     rect->y = 0;
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_GetWindowSize(w->window, &rect->w, &rect->h);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_window_rect_args args = { w->window, rect };
+    rb_call_on_host_stack(rb_sdl_window_get_client_rect_call, &args);
     return RB_OK;
 }
 
@@ -213,24 +328,17 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
     if (!wnd)
         return RB_FAIL;
 
-    SDL_Window *old = wnd->window;
-    uintptr_t saved_gs = rb_host_context_enter();
-    const char *title = SDL_GetWindowTitle(old);
-
-    uint32_t flags = fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
-    SDL_Window *new_win = SDL_CreateWindow(title,
-                                            SDL_WINDOWPOS_CENTERED,
-                                            SDL_WINDOWPOS_CENTERED,
-                                            width, height,
-                                            flags);
-    if (!new_win) {
-        rb_host_context_leave(saved_gs);
+    rb_sdl_window_fullscreen_args args = {
+        .old_window = wnd->window,
+        .new_window = NULL,
+        .fullscreen = fullscreen,
+        .width = width,
+        .height = height,
+    };
+    if (!rb_call_on_host_stack(rb_sdl_window_set_fullscreen_call, &args))
         return RB_FAIL;
-    }
 
-    wnd->window = new_win;
-    SDL_DestroyWindow(old);
-    rb_host_context_leave(saved_gs);
+    wnd->window = args.new_window;
     return RB_OK;
 }
 
@@ -240,9 +348,7 @@ rb_dc_t rb_window_get_dc(rb_window_t win)
     if (!wnd)
         return 0;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_Surface *surface = SDL_GetWindowSurface(wnd->window);
-    rb_host_context_leave(saved_gs);
+    SDL_Surface *surface = (SDL_Surface *)rb_call_on_host_stack(rb_sdl_window_get_surface_call, wnd);
     if (!surface)
         return 0;
 
@@ -269,9 +375,8 @@ int rb_window_set_cursor(rb_window_t win, rb_cursor_t cur)
 
     rb_cursor *c = (rb_cursor *)wine_handle_get((uint32_t)cur);
     if (c && c->cursor) {
-        uintptr_t saved_gs = rb_host_context_enter();
-        SDL_SetCursor(c->cursor);
-        rb_host_context_leave(saved_gs);
+        rb_sdl_cursor_args args = { c->cursor };
+        rb_call_on_host_stack(rb_sdl_set_cursor_call, &args);
     }
     return RB_OK;
 }
@@ -282,8 +387,7 @@ int rb_window_warp_mouse(rb_window_t win, int x, int y)
     if (!wnd)
         return RB_FAIL;
 
-    uintptr_t saved_gs = rb_host_context_enter();
-    SDL_WarpMouseInWindow(wnd->window, x, y);
-    rb_host_context_leave(saved_gs);
+    rb_sdl_warp_mouse_args args = { wnd->window, x, y };
+    rb_call_on_host_stack(rb_sdl_warp_mouse_call, &args);
     return RB_OK;
 }

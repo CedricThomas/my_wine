@@ -12,6 +12,10 @@
 #   scripts/graphical_samples.sh run [NAME]
 #   scripts/graphical_samples.sh inspect NAME
 #
+# Runtime selection:
+#   GRAPHICAL_RUNTIME=my_wine   # default
+#   GRAPHICAL_RUNTIME=wine      # run the same harness against real Wine
+#
 # Optional per-sample input script:
 #   samples/<name>/applied_inputs.txt
 #   One command per line:
@@ -22,7 +26,8 @@
 #     click X Y
 #     mousemove X Y
 #     status LABEL
-#     windowclose
+#     altf4
+#     windowclose   # alias for altf4
 #
 
 set -euo pipefail
@@ -32,14 +37,42 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SAMPLES_DIR="$PROJECT_DIR/samples"
 IMAGE_NAME="my_wine-samples"
 
+graphical_runtime() {
+    printf '%s' "${GRAPHICAL_RUNTIME:-my_wine}"
+}
+
+runtime_launcher() {
+    local arch="${1:-64}"
+    case "$(graphical_runtime)" in
+        my_wine)
+            printf '%s' "/project/my_wine"
+            ;;
+        wine)
+            if [ "$arch" = "32" ]; then
+                printf '%s' "/usr/lib/wine/wine"
+            else
+                printf '%s' "/usr/bin/wine64-stable"
+            fi
+            ;;
+        *)
+            echo "ERR: unsupported GRAPHICAL_RUNTIME='$(graphical_runtime)' (expected my_wine or wine)" >&2
+            return 1
+            ;;
+    esac
+}
+
 is_verbose() {
     [ "${GRAPHICAL_VERBOSE:-0}" = "1" ]
+}
+
+should_validate_geometry() {
+    [ "$(graphical_runtime)" = "my_wine" ]
 }
 
 parse_sample_info() {
     local file="$1"
     local key="$2"
-    grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r'
+    grep "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' || true
 }
 
 discover_graphical_samples() {
@@ -84,7 +117,14 @@ ensure_image() {
     local needs_build=0
     if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
         needs_build=1
-    elif ! docker run --rm "$IMAGE_NAME" bash -lc 'command -v Xvfb >/dev/null && command -v xdotool >/dev/null && ldconfig -p | grep -q libSDL2-2.0.so.0 && test -e /lib/ld-linux.so.2' >/dev/null 2>&1; then
+    elif ! docker run --rm "$IMAGE_NAME" bash -lc '
+        command -v Xvfb >/dev/null &&
+        command -v xdotool >/dev/null &&
+        test -x /usr/bin/wine64-stable &&
+        test -x /usr/lib/wine/wine &&
+        ldconfig -p | grep -q libSDL2-2.0.so.0 &&
+        test -e /lib/ld-linux.so.2
+    ' >/dev/null 2>&1; then
         needs_build=1
     fi
 
@@ -99,6 +139,8 @@ run_in_container() {
     local name="$2"
     ensure_image
     docker run --rm \
+        -e GRAPHICAL_RUNTIME="$(graphical_runtime)" \
+        -e WINEDEBUG="${WINEDEBUG:--all}" \
         -v "$PROJECT_DIR:/project" \
         -w /project \
         "$IMAGE_NAME" \
@@ -288,8 +330,13 @@ apply_graphical_inputs() {
                     print_status "input_${rest:-$line_no}" "$name" "$pid" "$log_file"
                 fi
                 ;;
+            altf4)
+                xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
+                xdotool key --window "$win_id" --clearmodifiers Alt+F4
+                ;;
             windowclose)
-                xdotool windowclose "$win_id"
+                xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
+                xdotool key --window "$win_id" --clearmodifiers Alt+F4
                 ;;
             *)
                 echo "ERR: $inputs_file:$line_no unknown input command '$command'"
@@ -308,13 +355,19 @@ run_container_sample() {
     local src_dir="$SAMPLES_DIR/$name"
     local info="$src_dir/sample.info"
     local exe="$src_dir/${name}.exe"
+    local runtime
+    local launcher
+    runtime="$(graphical_runtime)"
+    launcher="$(runtime_launcher)"
     if [ "$inspect_only" = "1" ]; then
         export GRAPHICAL_VERBOSE=1
     fi
 
-    if [ ! -x "$PROJECT_DIR/my_wine" ]; then
-        echo "ERR: /project/my_wine is missing or not executable. Run 'make my_wine my_wine64 my_wine32' first."
-        return 1
+    if [ "$runtime" = "my_wine" ]; then
+        if [ ! -x "$PROJECT_DIR/my_wine" ]; then
+            echo "ERR: /project/my_wine is missing or not executable. Run 'make my_wine my_wine64 my_wine32' first."
+            return 1
+        fi
     fi
     if [ ! -f "$exe" ]; then
         echo "ERR: $exe is missing. Run 'make samples SAMPLE=$name' first."
@@ -322,20 +375,26 @@ run_container_sample() {
     fi
 
     local expected_exit timeout_sec title expected_w expected_h
+    local arch
     expected_exit="$(parse_sample_info "$info" graphical_exit)"
     expected_exit="${expected_exit:-$(parse_sample_info "$info" exit)}"
     timeout_sec="$(parse_sample_info "$info" timeout)"
     title="$(parse_sample_info "$info" window_title)"
     expected_w="$(parse_sample_info "$info" window_width)"
     expected_h="$(parse_sample_info "$info" window_height)"
+    arch="$(parse_sample_info "$info" arch)"
     expected_exit="${expected_exit:-0}"
     timeout_sec="${timeout_sec:-10}"
     title="${title:-$name}"
+    arch="${arch:-64}"
+    launcher="$(runtime_launcher "$arch")"
 
     export DISPLAY="${DISPLAY:-:99}"
     export SDL_VIDEODRIVER=x11
     export SDL_AUDIODRIVER=dummy
     unset MY_WINE_SAMPLE_AUTOQUIT
+    export WINEDEBUG="${WINEDEBUG:--all}"
+    export GRAPHICAL_RUNTIME_SELECTED="$runtime"
 
     local xvfb_log="/tmp/my_wine_xvfb_${name}.log"
     Xvfb "$DISPLAY" -screen 0 1024x768x24 -nolisten tcp >"$xvfb_log" 2>&1 &
@@ -353,7 +412,7 @@ run_container_sample() {
     setsid bash -c '
         "$1" "$2" >"$3" 2>"$4"
         printf "%s\n" "$?" >"$5"
-    ' _ "$PROJECT_DIR/my_wine" "$exe" "$output_file" "${output_file}.err" "$status_file" &
+    ' _ "$launcher" "$exe" "$output_file" "${output_file}.err" "$status_file" &
     local pid=$!
 
     if ! wait_for_window "$title" "$timeout_sec"; then
@@ -381,15 +440,17 @@ run_container_sample() {
     width="$(printf '%s\n' "$geometry" | awk -F= '$1 == "WIDTH" { print $2 }')"
     height="$(printf '%s\n' "$geometry" | awk -F= '$1 == "HEIGHT" { print $2 }')"
 
-    if [ -n "$expected_w" ] && [ "$width" != "$expected_w" ]; then
-        echo "FAIL  $name (window width=$width, expected=$expected_w)"
-        stop_process "$pid"
-        return 1
-    fi
-    if [ -n "$expected_h" ] && [ "$height" != "$expected_h" ]; then
-        echo "FAIL  $name (window height=$height, expected=$expected_h)"
-        stop_process "$pid"
-        return 1
+    if should_validate_geometry; then
+        if [ -n "$expected_w" ] && [ "$width" != "$expected_w" ]; then
+            echo "FAIL  $name (window width=$width, expected=$expected_w)"
+            stop_process "$pid"
+            return 1
+        fi
+        if [ -n "$expected_h" ] && [ "$height" != "$expected_h" ]; then
+            echo "FAIL  $name (window height=$height, expected=$expected_h)"
+            stop_process "$pid"
+            return 1
+        fi
     fi
 
     if ! apply_graphical_inputs "$name" "$win_id" "$pid" "$output_file"; then
@@ -408,7 +469,11 @@ run_container_sample() {
     fi
 
     if process_is_running "$pid"; then
-        xdotool windowclose "$win_id" >/dev/null 2>&1 || kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+        # Prefer a guest-visible close path over X11 window destruction.
+        if xdotool getwindowname "$win_id" >/dev/null 2>&1; then
+            xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
+            xdotool key --window "$win_id" --clearmodifiers Alt+F4 || true
+        fi
     fi
 
     local deadline=$((SECONDS + timeout_sec))
@@ -423,6 +488,10 @@ run_container_sample() {
         echo "FAIL  $name (close timeout)"
         return 1
     fi
+
+    while [ ! -f "$status_file" ] && [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 0.05
+    done
 
     local ret=0
     if [ -f "$status_file" ]; then

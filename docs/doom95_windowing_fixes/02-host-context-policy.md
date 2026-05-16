@@ -1,5 +1,7 @@
 # Host Context Policy
 
+Status: implemented on 2026-05-16
+
 ## Problem
 
 SDL/glibc calls are inconsistent. Some use `rb_call_on_host_stack()`, while many
@@ -12,16 +14,27 @@ One PE32 bug from the handle-ownership work is now fixed here already: on i386,
 was captured. If `loader_get_host_fs_selector()` returns `0`, enter/leave must both
 act as no-ops for FS switching.
 
-## Fix
+## Implemented
 
-- Define a rule: every call into SDL, X11, glibc allocation/free, or libc API from guest-facing paths must go through a host-context wrapper.
-- Keep pure handle-table operations and simple struct assignments outside the wrapper.
-- Add small wrapper functions for currently direct calls:
-  - window show/hide, move, resize, title, fullscreen, cursor, mouse warp
+- Defined and applied the rule that guest-facing SDL backend paths must reach SDL/glibc/libc through host-context wrappers.
+- Kept handle-table operations, state bookkeeping, and simple struct assignment on the guest side.
+- Hardened `rb_call_on_host_stack()`:
+  - x86_64 now masks `unix_stack_ptr_val` to a 16-byte-aligned host stack before the call.
+  - debug assertions now check expected host-context state before switching stacks.
+  - i386 keeps the required no-op behavior when `loader_get_host_fs_selector()` returns `0`.
+- Added shared host wrappers in `rb_sdl2_priv.h` for `malloc`, `calloc`, `free`, and `getenv`.
+- Reworked direct SDL/libc call sites in guest-facing paths to use host-stack wrappers:
+  - window show/hide, move, resize, title, fullscreen rebuild, cursor, mouse warp, and window-surface fetch
   - surface create/free/blit/stretch/fill/palette/window-surface update
-  - timer, keyboard, joystick, audio calls
-- Make `rb_call_on_host_stack()` preserve alignment explicitly on x86_64. The current path uses `unix_stack_ptr_val` directly; document or enforce alignment.
-- Add debug assertions where possible to catch accidental host calls while guest GS/FS or guest stack is active.
+  - timer, keyboard, joystick, cursor creation/show, and audio open/close
+  - palette allocation and `SDL_SetPaletteColors`
+  - exposed-window repaint path in event handling
+
+## Notes
+
+- This pass covered the guest-facing SDL backend files listed below.
+- It did not add a new standalone regression sample; instead, the repeated window create/resize/destroy/recreate flow was added to `test_sdl2_backend`.
+- `rb_init.c` already used host-stack wrappers for its SDL init/shutdown/display-mode entry points and was not materially changed in this pass.
 
 ## Files
 
@@ -32,9 +45,17 @@ act as no-ops for FS switching.
 - `src/backend/sdl2/rb_audio.c`
 - `src/backend/sdl2/rb_palette.c`
 - `src/backend/sdl2/rb_event.c`
+- `tests/test_sdl2_backend.c`
 
 ## Verification
 
-- Run existing SDL backend tests with `SDL_VIDEODRIVER=dummy`.
-- Run graphical samples under Docker/Xvfb.
-- Add a regression sample that creates, resizes, destroys, and recreates a window repeatedly.
+- `make build/test_sdl2_backend`
+- `SDL_VIDEODRIVER=dummy ./build/test_sdl2_backend`
+- `test_sdl2_backend` now exercises:
+  - window move/resize/title/show/hide/fullscreen(windowed rebuild)/warp
+  - repeated create -> resize -> destroy window flow
+
+## Remaining Follow-Up
+
+- Re-run graphical samples under Docker/Xvfb as part of the broader Doom95 windowing series.
+- If we want a sample-level regression separate from the unit/backend test binary, add a dedicated graphical recreate-window sample later.

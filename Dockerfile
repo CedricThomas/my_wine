@@ -20,6 +20,8 @@ RUN dpkg --add-architecture i386 && \
         libsdl2-2.0-0 \
         libsdl2-2.0-0:i386 \
         procps \
+        wine64 \
+        wine32 \
         x11-apps \
         x11-utils \
         xauth \
