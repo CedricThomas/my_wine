@@ -4,11 +4,22 @@
 
 static inline rb_surface *get_surface(rb_surface_t surf)
 {
+    if (wine_handle_get_type((uint32_t)surf) != HANDLE_TYPE_RB_SURFACE)
+        return NULL;
     return (rb_surface *)wine_handle_get((uint32_t)surf);
+}
+
+static inline rb_window *get_window(rb_window_t win)
+{
+    if (wine_handle_get_type((uint32_t)win) != HANDLE_TYPE_RB_WINDOW)
+        return NULL;
+    return (rb_window *)wine_handle_get((uint32_t)win);
 }
 
 static inline rb_palette *get_palette(rb_palette_t pal)
 {
+    if (wine_handle_get_type((uint32_t)pal) != HANDLE_TYPE_RB_PALETTE)
+        return NULL;
     return (rb_palette *)wine_handle_get((uint32_t)pal);
 }
 
@@ -102,7 +113,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     s->window = 0;
     s->pitch = pitch;
 
-    return (rb_surface_t)wine_handle_alloc(HANDLE_TYPE_DD_SURFACE, s);
+    return (rb_surface_t)wine_handle_alloc(HANDLE_TYPE_RB_SURFACE, s);
 }
 
 rb_surface_t rb_surface_create_flip_chain(rb_window_t win,
@@ -118,7 +129,7 @@ rb_surface_t rb_surface_create_flip_chain(rb_window_t win,
     rb_surface *ps = get_surface(primary);
     if (ps) ps->window = win;
 
-    rb_window *wnd = (rb_window *)wine_handle_get((uint32_t)win);
+    rb_window *wnd = get_window(win);
     if (wnd) {
         /* Clean up any existing backbuffer before creating a new one */
         if (wnd->backbuffer) {
@@ -247,7 +258,7 @@ int rb_surface_flip(rb_surface_t surf)
     if (!s || !s->surface) return RB_FAIL;
 
     if (s->window) {
-        rb_window *wnd = (rb_window *)wine_handle_get((uint32_t)s->window);
+        rb_window *wnd = get_window(s->window);
         if (wnd && wnd->window) {
             uintptr_t saved_gs = rb_host_context_enter();
             SDL_Surface *ws = SDL_GetWindowSurface(wnd->window);

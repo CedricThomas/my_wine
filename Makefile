@@ -148,6 +148,7 @@ TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o 
 	$(BUILDDIR)/debug.o $(PE_OBJS) $(BUILDDIR)/common.o
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $(BUILDDIR)/crt_watcom.o $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_offset_discovery.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/common.o $(BUILDDIR)/debug.o
+TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
@@ -170,7 +171,9 @@ all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test
 	$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
+	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols \
+	$(BUILDDIR)/test_sdl2_backend $(BUILDDIR)/test_user32_handle_ownership \
+	$(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 # ── Generated Files ─────────────────────────────────────────────
 # Dispatcher switch bodies from include/nt_syscalls.def.
@@ -255,7 +258,9 @@ tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_res
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
-		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols $(BUILDDIR)/test_sdl2_backend $(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
+		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols \
+		$(BUILDDIR)/test_sdl2_backend $(BUILDDIR)/test_user32_handle_ownership \
+		$(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 run-tests: tests
 	@echo "==== Running tests ===="
@@ -289,6 +294,10 @@ backend: $(BACKEND_OBJS)
 # SDL2 backend test
 TEST_sdl2_backend_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o
 $(BUILDDIR)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend_OBJS)
+	@echo "  LD $@"
+	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
+
+$(BUILDDIR)/test_user32_handle_ownership: tests/test_user32_handle_ownership.c $(TEST_user32_handle_ownership_OBJS)
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
 

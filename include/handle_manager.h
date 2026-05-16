@@ -42,6 +42,10 @@ static inline void wine_spinlock_unlock(volatile int *lock)
 #define HANDLE_TYPE_HWIN         0x60
 #define HANDLE_TYPE_DD_PALETTE   0x61
 #define HANDLE_TYPE_DD_CLIPPER   0x62
+#define HANDLE_TYPE_RB_WINDOW    0x63
+#define HANDLE_TYPE_RB_SURFACE   0x64
+#define HANDLE_TYPE_RB_PALETTE   0x65
+#define HANDLE_TYPE_RB_CURSOR    0x66
 #define HANDLE_TYPE_HMIDI_STREAM 0x70
 #define HANDLE_TYPE_HMIDI_OUT    0x71
 #define HANDLE_TYPE_HRSRC        0x72

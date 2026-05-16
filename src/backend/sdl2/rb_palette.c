@@ -10,6 +10,8 @@
 
 static inline rb_palette *get_palette(rb_palette_t pal)
 {
+    if (wine_handle_get_type((uint32_t)pal) != HANDLE_TYPE_RB_PALETTE)
+        return NULL;
     return (rb_palette *)wine_handle_get((uint32_t)pal);
 }
 
@@ -43,7 +45,7 @@ rb_palette_t rb_palette_create(int num_colors)
     p->palette = pal;
     p->num_colors = num_colors;
 
-    return (rb_palette_t)wine_handle_alloc(HANDLE_TYPE_DD_PALETTE, p);
+    return (rb_palette_t)wine_handle_alloc(HANDLE_TYPE_RB_PALETTE, p);
 }
 
 int rb_palette_destroy(rb_palette_t pal)

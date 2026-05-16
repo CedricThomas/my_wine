@@ -13,6 +13,8 @@
 
 static inline rb_window *get_window(rb_window_t win)
 {
+    if (wine_handle_get_type((uint32_t)win) != HANDLE_TYPE_RB_WINDOW)
+        return NULL;
     return (rb_window *)wine_handle_get((uint32_t)win);
 }
 
@@ -103,9 +105,7 @@ rb_window_t rb_window_create(const char *title,
     win->primary_surface = 0;
     win->backbuffer = 0;
 
-    rb_window_t handle = (rb_window_t)wine_handle_alloc(HANDLE_TYPE_HWIN, win);
-    rb_event_set_active_window(handle);
-    return handle;
+    return (rb_window_t)wine_handle_alloc(HANDLE_TYPE_RB_WINDOW, win);
 }
 
 int rb_window_destroy(rb_window_t win)
@@ -262,6 +262,9 @@ int rb_window_set_cursor(rb_window_t win, rb_cursor_t cur)
 {
     rb_window *wnd = get_window(win);
     if (!wnd)
+        return RB_FAIL;
+
+    if (wine_handle_get_type((uint32_t)cur) != HANDLE_TYPE_RB_CURSOR)
         return RB_FAIL;
 
     rb_cursor *c = (rb_cursor *)wine_handle_get((uint32_t)cur);

@@ -81,21 +81,17 @@ HCURSOR SetCursor(HCURSOR hCursor)
 {
     rb_cursor_t cur = 0;
     if (hCursor) {
+        if (wine_handle_get_type((uint32_t)hCursor) != HANDLE_TYPE_HCURSOR)
+            return FORCE_HANDLE_RETURN(0, HCURSOR);
         cur = (rb_cursor_t)(uintptr_t)wine_handle_get((uint32_t)hCursor);
     }
 
-    /* Iterate the handle table to find the first HWIN entry.
-     * In practice there is typically only one game window. */
-    for (uint32_t i = 1; i <= HANDLE_TABLE_SIZE; i++) {
-        if (wine_handle_get_type(i) == HANDLE_TYPE_HWIN) {
-            wine_window_entry *entry = (wine_window_entry *)wine_handle_get(i);
-            if (entry && entry->sdl_window) {
-                if (cur) {
-                    rb_window_set_cursor(entry->sdl_window, cur);
-                }
-                return FORCE_HANDLE_RETURN(0, HCURSOR); /* no previous cursor tracked */
-            }
-        }
+    HWND hwnd = user32_get_active_window();
+    wine_window_entry *entry = get_window_entry(hwnd);
+    if (entry && entry->sdl_window) {
+        if (cur)
+            rb_window_set_cursor(entry->sdl_window, cur);
+        return FORCE_HANDLE_RETURN(0, HCURSOR);
     }
 
     return FORCE_HANDLE_RETURN(0, HCURSOR);
@@ -110,15 +106,11 @@ HCURSOR SetCursor(HCURSOR hCursor)
 KERNEL32_STUB
 BOOL SetCursorPos(int Xparam, int Yparam)
 {
-    /* Find the first active window and warp mouse there. */
-    for (uint32_t i = 1; i <= HANDLE_TABLE_SIZE; i++) {
-        if (wine_handle_get_type(i) == HANDLE_TYPE_HWIN) {
-            wine_window_entry *entry = (wine_window_entry *)wine_handle_get(i);
-            if (entry && entry->sdl_window) {
-                rb_window_warp_mouse(entry->sdl_window, Xparam, Yparam);
-                return TRUE;
-            }
-        }
+    HWND hwnd = user32_get_active_window();
+    wine_window_entry *entry = get_window_entry(hwnd);
+    if (entry && entry->sdl_window) {
+        rb_window_warp_mouse(entry->sdl_window, Xparam, Yparam);
+        return TRUE;
     }
     return FALSE;
 }

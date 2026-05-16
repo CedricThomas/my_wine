@@ -11,12 +11,17 @@
 
 /* ---- Active window tracking ---- */
 
-static rb_window_t g_active_window = 0;
+static uintptr_t g_active_window = 0;
 extern int rb_x11_consume_bad_window(void);
 
-void rb_event_set_active_window(rb_window_t win)
+void rb_event_set_active_window(uintptr_t hwnd)
 {
-    g_active_window = win;
+    g_active_window = hwnd;
+}
+
+uintptr_t rb_event_get_active_window(void)
+{
+    return g_active_window;
 }
 
 /* ---- Windows message constants ---- */

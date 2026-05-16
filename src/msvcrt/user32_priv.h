@@ -25,6 +25,8 @@ typedef struct {
 extern WNDCLASSA class_table[16];
 extern int g_user32_live_windows;
 extern int g_user32_window_create_attempted;
+extern HWND g_user32_active_window;
+extern HWND g_user32_focus_window;
 
 /*
  * FORCE_HANDLE_RETURN(v, type) — like FORCE_PTR_RETURN but for integer
@@ -43,6 +45,26 @@ static inline wine_window_entry *get_window_entry(HWND hwnd)
     if (!obj || wine_handle_get_type((uint32_t)hwnd) != HANDLE_TYPE_HWIN)
         return NULL;
     return (wine_window_entry *)obj;
+}
+
+static inline HWND user32_get_active_window(void)
+{
+    return get_window_entry(g_user32_active_window) ? g_user32_active_window : 0;
+}
+
+static inline void user32_set_active_window(HWND hwnd)
+{
+    g_user32_active_window = get_window_entry(hwnd) ? hwnd : 0;
+}
+
+static inline HWND user32_get_focus_window(void)
+{
+    return get_window_entry(g_user32_focus_window) ? g_user32_focus_window : 0;
+}
+
+static inline void user32_set_focus_window(HWND hwnd)
+{
+    g_user32_focus_window = get_window_entry(hwnd) ? hwnd : 0;
 }
 
 #endif /* MY_WINE_USER32_PRIV_H */

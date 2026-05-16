@@ -7,6 +7,11 @@ only restore GS/FS and continue running on the guest stack. That is fragile for
 PE32+ and real games because host libraries expect host stack, host TLS, and
 normal ABI alignment.
 
+One PE32 bug from the handle-ownership work is now fixed here already: on i386,
+`rb_host_context_leave()` must not try to restore guest FS when no host FS selector
+was captured. If `loader_get_host_fs_selector()` returns `0`, enter/leave must both
+act as no-ops for FS switching.
+
 ## Fix
 
 - Define a rule: every call into SDL, X11, glibc allocation/free, or libc API from guest-facing paths must go through a host-context wrapper.

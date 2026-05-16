@@ -71,7 +71,7 @@ typedef struct {
 
 /* ---- Window Procedure ---- */
 
-typedef LRESULT (GUEST_ABI *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+typedef LRESULT (KERNEL32_ABI *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 
 /* ---- Window Class ---- */
 

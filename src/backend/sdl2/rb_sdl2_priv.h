@@ -27,6 +27,10 @@ extern void *unix_stack_ptr_val __attribute__((weak));
  *   HANDLE_TYPE_DD_SURFACE 0x41
  *   HANDLE_TYPE_DD_PALETTE 0x61
  *   HANDLE_TYPE_DS_BUFFER  0x51
+ *   HANDLE_TYPE_RB_WINDOW  0x63
+ *   HANDLE_TYPE_RB_SURFACE 0x64
+ *   HANDLE_TYPE_RB_PALETTE 0x65
+ *   HANDLE_TYPE_RB_CURSOR  0x66
  */
 
 /* ---- Private window state ---- */
@@ -125,7 +129,7 @@ static inline void rb_host_context_leave(uintptr_t saved_gs)
 #elif defined(__i386__)
     uint16_t saved_fs = (uint16_t)saved_gs;
     uint16_t host_fs = (&g_loader != 0) ? loader_get_host_fs_selector() : 0;
-    if (&g_loader != 0 && saved_fs && saved_fs != host_fs)
+    if (&g_loader != 0 && host_fs != 0 && saved_fs && saved_fs != host_fs)
         __asm__ volatile("mov %0, %%fs" :: "r"(saved_fs) : "memory");
 #else
     (void)saved_gs;
@@ -292,6 +296,7 @@ static inline int vk_to_scancode(int vk)
 }
 
 /* ---- Event system helpers ---- */
-void rb_event_set_active_window(rb_window_t win);
+void rb_event_set_active_window(uintptr_t hwnd);
+uintptr_t rb_event_get_active_window(void);
 
 #endif /* RB_SDL2_PRIV_H */

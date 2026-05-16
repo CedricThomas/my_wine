@@ -21,7 +21,7 @@
 #include "../include/render_backend.h"
 #include <stdio.h>
 
-extern void rb_event_set_active_window(rb_window_t win);
+extern void rb_event_set_active_window(uintptr_t hwnd);
 
 /* ── Additional user32 constants not in user32_types.h ──────── */
 
@@ -79,6 +79,8 @@ static int user32_ensure_backend(void)
 WNDCLASSA class_table[16];
 int g_user32_live_windows = 0;
 int g_user32_window_create_attempted = 0;
+HWND g_user32_active_window = 0;
+HWND g_user32_focus_window = 0;
 static int class_count = 0;
 
 /* Helper: find a registered class by name. Returns index >= 0 or -1. */
@@ -190,7 +192,9 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
         return FORCE_HANDLE_RETURN(0, HWND);
     }
     g_user32_live_windows++;
-    rb_event_set_active_window((rb_window_t)handle);
+    user32_set_active_window((HWND)handle);
+    user32_set_focus_window((HWND)handle);
+    rb_event_set_active_window(handle);
     return FORCE_HANDLE_RETURN(handle, HWND);
 }
 
@@ -207,14 +211,22 @@ BOOL DestroyWindow(HWND hwnd)
     if (!entry)
         return FALSE;
 
+#if !defined(__i386__)
     if (entry->wnd_proc) {
         WNDPROC proc = (WNDPROC)entry->wnd_proc;
         proc(hwnd, WM_DESTROY, 0, 0);
     }
+#endif
 
     rb_window_destroy(entry->sdl_window);
     wine_handle_free((uint32_t)hwnd);
     free(entry);
+    if (g_user32_active_window == hwnd) {
+        user32_set_active_window(0);
+        rb_event_set_active_window(0);
+    }
+    if (g_user32_focus_window == hwnd)
+        user32_set_focus_window(0);
     if (g_user32_live_windows > 0)
         g_user32_live_windows--;
     return TRUE;
@@ -435,7 +447,7 @@ HWND GetDesktopWindow(void)
 KERNEL32_STUB
 HWND GetActiveWindow(void)
 {
-    return FORCE_HANDLE_RETURN(1, HWND);
+    return FORCE_HANDLE_RETURN(user32_get_active_window(), HWND);
 }
 
 /* ── 16. GetFocus ──────────────────────────────────────────── */
@@ -443,7 +455,7 @@ HWND GetActiveWindow(void)
 KERNEL32_STUB
 HWND GetFocus(void)
 {
-    return FORCE_HANDLE_RETURN(1, HWND);
+    return FORCE_HANDLE_RETURN(user32_get_focus_window(), HWND);
 }
 
 /* ── 17. SetFocus ──────────────────────────────────────────── */
@@ -451,8 +463,13 @@ HWND GetFocus(void)
 KERNEL32_STUB
 HWND SetFocus(HWND hwnd)
 {
-    (void)hwnd;
-    return FORCE_HANDLE_RETURN(1, HWND);
+    HWND target = get_window_entry(hwnd) ? hwnd : 0;
+    user32_set_focus_window(target);
+    if (target) {
+        user32_set_active_window(target);
+        rb_event_set_active_window((uintptr_t)target);
+    }
+    return FORCE_HANDLE_RETURN(target, HWND);
 }
 
 /* ── 18. UpdateWindow ──────────────────────────────────────── */

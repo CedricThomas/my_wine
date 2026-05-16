@@ -69,20 +69,28 @@ typedef struct {
 static uintptr_t rb_sdl_init_call(void *arg)
 {
     rb_sdl_init_args *a = arg;
+    const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
+    int try_x11_fallback = 0;
+    int try_dummy_fallback = 0;
+
+    if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
+        try_x11_fallback = 1;
+    if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
+        try_dummy_fallback = 1;
+
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
     rb_install_x11_error_handler();
     int ret = SDL_Init(a->flags);
     rb_install_x11_error_handler();
-    if (ret < 0 && getenv("DISPLAY") && !getenv("SDL_VIDEODRIVER") &&
-        !getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
+    if (ret < 0 && getenv("DISPLAY") && try_x11_fallback) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "x11", 1);
         ret = SDL_Init(a->flags);
         rb_install_x11_error_handler();
     }
-    if (ret < 0 && !getenv("SDL_VIDEODRIVER") &&
+    if (ret < 0 && try_dummy_fallback &&
         getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "dummy", 1);
@@ -92,6 +100,35 @@ static uintptr_t rb_sdl_init_call(void *arg)
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
     return (uintptr_t)ret;
+}
+
+typedef struct {
+    char active_video_driver[64];
+    char active_audio_driver[64];
+} rb_sdl_backend_info;
+
+static uintptr_t rb_sdl_get_backend_info_call(void *arg)
+{
+    rb_sdl_backend_info *info = arg;
+    const char *video = SDL_GetCurrentVideoDriver();
+    const char *audio = SDL_GetCurrentAudioDriver();
+
+    if (!info)
+        return 0;
+
+    if (video) {
+        snprintf(info->active_video_driver, sizeof(info->active_video_driver), "%s", video);
+    } else {
+        info->active_video_driver[0] = '\0';
+    }
+
+    if (audio) {
+        snprintf(info->active_audio_driver, sizeof(info->active_audio_driver), "%s", audio);
+    } else {
+        info->active_audio_driver[0] = '\0';
+    }
+
+    return 0;
 }
 
 static uintptr_t rb_sdl_quit_call(void *arg)
@@ -109,15 +146,33 @@ static uintptr_t rb_sdl_get_display_mode_call(void *arg)
 
 int rb_init(void)
 {
+    const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
+    const char *requested_audio_driver = getenv("SDL_AUDIODRIVER");
+
     if (g_initialized) {
         return 0;
     }
 
     rb_sdl_init_args args = { SDL_INIT_VIDEO | SDL_INIT_EVENTS };
     if ((int)rb_call_on_host_stack(rb_sdl_init_call, &args) < 0) {
+        fprintf(stderr,
+                "WARNING: SDL backends requested video=%s audio=%s active video=%s audio=%s\n",
+                requested_video_driver ? requested_video_driver : "auto",
+                requested_audio_driver ? requested_audio_driver : "auto",
+                "unavailable", "unknown");
         fprintf(stderr, "WARNING: SDL_Init failed: %s\n", SDL_GetError());
         return RB_FAIL;
     }
+
+    rb_sdl_backend_info backend_info;
+    memset(&backend_info, 0, sizeof(backend_info));
+    rb_call_on_host_stack(rb_sdl_get_backend_info_call, &backend_info);
+    fprintf(stderr,
+            "WARNING: SDL backends requested video=%s audio=%s active video=%s audio=%s\n",
+            requested_video_driver ? requested_video_driver : "auto",
+            requested_audio_driver ? requested_audio_driver : "auto",
+            backend_info.active_video_driver[0] ? backend_info.active_video_driver : "unknown",
+            backend_info.active_audio_driver[0] ? backend_info.active_audio_driver : "unknown");
 
     g_audio.device_id = 0;
     g_audio.opened = 0;

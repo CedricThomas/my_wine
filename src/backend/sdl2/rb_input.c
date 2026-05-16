@@ -101,6 +101,8 @@ int16_t rb_keyboard_get_async_state(int vk)
 
 static inline rb_cursor *get_cursor(rb_cursor_t cur)
 {
+    if (wine_handle_get_type((uint32_t)cur) != HANDLE_TYPE_RB_CURSOR)
+        return NULL;
     return (rb_cursor *)wine_handle_get((uint32_t)cur);
 }
 
@@ -129,7 +131,7 @@ rb_cursor_t rb_cursor_create(int idc)
         return 0;
     }
     c->cursor = cursor;
-    return (rb_cursor_t)wine_handle_alloc(HANDLE_TYPE_HCURSOR, c);
+    return (rb_cursor_t)wine_handle_alloc(HANDLE_TYPE_RB_CURSOR, c);
 }
 
 int rb_cursor_destroy(rb_cursor_t cur)
