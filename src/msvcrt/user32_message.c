@@ -26,6 +26,45 @@ KERNEL32_STUB BOOL DestroyWindow(HWND hwnd);
 
 static int g_quit_pending = 0;
 static int g_quit_exit_code = 0;
+#define USER32_TRANSLATED_QUEUE_CAPACITY 64
+
+static rb_msg_t g_translated_queue[USER32_TRANSLATED_QUEUE_CAPACITY];
+static size_t g_translated_queue_head = 0;
+static size_t g_translated_queue_count = 0;
+
+static int translated_queue_push(const rb_msg_t *msg)
+{
+    size_t tail;
+
+    if (!msg || g_translated_queue_count >= USER32_TRANSLATED_QUEUE_CAPACITY)
+        return 0;
+
+    tail = (g_translated_queue_head + g_translated_queue_count) %
+           USER32_TRANSLATED_QUEUE_CAPACITY;
+    g_translated_queue[tail] = *msg;
+    g_translated_queue_count++;
+    return 1;
+}
+
+static int translated_queue_peek(rb_msg_t *msg)
+{
+    if (!msg || g_translated_queue_count == 0)
+        return 0;
+
+    *msg = g_translated_queue[g_translated_queue_head];
+    return 1;
+}
+
+static int translated_queue_pop(rb_msg_t *msg)
+{
+    if (!translated_queue_peek(msg))
+        return 0;
+
+    g_translated_queue_head = (g_translated_queue_head + 1) %
+                              USER32_TRANSLATED_QUEUE_CAPACITY;
+    g_translated_queue_count--;
+    return 1;
+}
 
 /* ── Helper: copy an rb_msg_t into an MSG ──────────────────── */
 static void copy_rb_msg_to_MSG(const rb_msg_t *src, MSG *dst)
@@ -37,6 +76,37 @@ static void copy_rb_msg_to_MSG(const rb_msg_t *src, MSG *dst)
     dst->time    = src->time;
     dst->pt.x    = src->pt_x;
     dst->pt.y    = src->pt_y;
+}
+
+static int fetch_translated_message(int blocking, int remove, rb_msg_t *msg)
+{
+    int ret;
+
+    if (!msg)
+        return 0;
+
+    if (remove) {
+        if (translated_queue_pop(msg))
+            return 1;
+    } else if (translated_queue_peek(msg)) {
+        return 1;
+    }
+
+    memset(msg, 0, sizeof(*msg));
+    if (blocking) {
+        ret = rb_event_wait(msg);
+        if (ret < 0 || msg->message == 0)
+            return 0;
+        return 1;
+    }
+
+    ret = rb_event_peek(msg);
+    if (ret <= 0 || msg->message == 0)
+        return 0;
+    if (!translated_queue_push(msg))
+        return 0;
+
+    return remove ? translated_queue_pop(msg) : translated_queue_peek(msg);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -76,8 +146,7 @@ BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
     }
 
     rb_msg_t rb;
-    int ret = rb_event_wait(&rb);
-    if (ret <= 0)
+    if (!fetch_translated_message(1, 1, &rb))
         return 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);
@@ -101,14 +170,13 @@ BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
     (void)hWnd;
     (void)wMsgFilterMin;
     (void)wMsgFilterMax;
-    (void)wRemoveMsg;
 
     if (!lpMsg)
         return FALSE;
 
     rb_msg_t rb;
-    int ret = rb_event_peek(&rb);
-    if (ret <= 0)
+    int remove = (wRemoveMsg & 0x0001) != 0;
+    if (!fetch_translated_message(0, remove, &rb))
         return 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);

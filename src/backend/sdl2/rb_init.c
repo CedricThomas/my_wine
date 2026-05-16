@@ -11,21 +11,9 @@
 #include <string.h>
 #include <dlfcn.h>
 
-typedef struct _XDisplay Display;
-typedef unsigned long XID;
-typedef struct {
-    int type;
-    Display *display;
-    XID resourceid;
-    unsigned long serial;
-    unsigned char error_code;
-    unsigned char request_code;
-    unsigned char minor_code;
-} XErrorEvent;
-
 static int g_initialized = 0;
 static int (*g_prev_x_error_handler)(Display *, XErrorEvent *) = NULL;
-static int g_x11_bad_window_pending = 0;
+static uintptr_t g_x11_bad_window_pending = 0;
 
 #define RB_X11_BAD_WINDOW 3
 
@@ -35,8 +23,11 @@ int g_audio_buf_count = 0;
 
 static int rb_x11_error_handler(Display *display, XErrorEvent *event)
 {
+    (void)display;
     if (event && event->error_code == RB_X11_BAD_WINDOW) {
-        __atomic_store_n(&g_x11_bad_window_pending, 1, __ATOMIC_RELEASE);
+        __atomic_store_n(&g_x11_bad_window_pending,
+                         (uintptr_t)event->resourceid,
+                         __ATOMIC_RELEASE);
         return 0;
     }
 
@@ -46,7 +37,7 @@ static int rb_x11_error_handler(Display *display, XErrorEvent *event)
     return 0;
 }
 
-int rb_x11_consume_bad_window(void)
+uintptr_t rb_x11_consume_bad_window(void)
 {
     return __atomic_exchange_n(&g_x11_bad_window_pending, 0, __ATOMIC_ACQ_REL);
 }

@@ -1,5 +1,16 @@
 # Event Routing
 
+## Status
+
+Implemented on 2026-05-16.
+
+This replaced the global SDL event target assumption with per-window routing.
+Backend window state now records SDL/native window ids, USER32 binds each guest
+`HWND` to that backend window, SDL events resolve through that binding, and the
+X11 `BadWindow` fallback now closes only the guest window that owned the native
+X11 resource. `PeekMessageA(PM_NOREMOVE)` also now uses an internal translated
+message queue, so peeking no longer consumes the translated message.
+
 ## Problem
 
 SDL events are assigned to a single global active window. This is not enough for
@@ -7,29 +18,54 @@ dialogs, hidden helper windows, recreated windows, or stale SDL events after a
 destroy. The current X11 `BadWindow` fallback also records only a global pending
 close, so it can close the wrong HWND.
 
-## Fix
+## Implemented
 
 - Store the SDL window id in backend window state.
-- Maintain a mapping from SDL window id to guest HWND.
-- Update the mapping when:
-  - a window is created
-  - a window is destroyed
-  - focus changes
-- Translate SDL window events using the SDL window id instead of `g_active_window`.
-- Keep `g_active_window` only as a fallback for keyboard events that arrive without a window id.
-- If an X11 `BadWindow` fallback is still needed for Xvfb/xdotool, bind it to the native/SDL window that triggered it, not a global bit.
-- Implement `PM_NOREMOVE` for `PeekMessageA` using an internal translated-message queue. SDL peeking alone is not enough because some SDL events are consumed while translating.
+- Store the native/X11 window id in backend window state when SDL exposes one.
+- Maintain a backend route table from SDL window id and native window id to guest
+  `HWND`.
+- Bind and refresh that route when:
+  - a USER32 window is created
+  - a USER32 window is destroyed
+  - an SDL-backed window is recreated during fullscreen transitions
+- Translate SDL mouse/window/text/keyboard events using the SDL window id first.
+- Keep `g_active_window` only as a fallback for keyboard/text events that arrive
+  without a window id.
+- Update the active fallback when SDL focus changes.
+- Route the X11 `BadWindow` fallback through the native window id that triggered
+  the error instead of a process-global close bit.
+- Implement `PeekMessageA(PM_NOREMOVE)` using a translated-message queue so the
+  same translated message can be peeked multiple times before removal.
+- Preserve `HWND` targeting when USER32 posts synthetic input/window messages by
+  pushing SDL events with the bound SDL window id.
 
 ## Files
 
 - `src/backend/sdl2/rb_event.c`
 - `src/backend/sdl2/rb_window.c`
 - `src/backend/sdl2/rb_sdl2_priv.h`
+- `src/backend/sdl2/rb_init.c`
 - `src/msvcrt/user32_message.c`
 - `src/msvcrt/user32_window.c`
+- `tests/test_user32_message_dispatch.c`
 
 ## Verification
 
-- Add a two-window sample and close the second window first.
-- Verify messages target the correct HWND.
-- Add a `PeekMessageA(PM_NOREMOVE)` regression that peeks the same message twice before removal.
+- `make build/test_user32_handle_ownership build/test_user32_message_dispatch build/test_sdl2_backend`
+- `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./build/test_user32_handle_ownership`
+- `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./build/test_user32_message_dispatch`
+- `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./build/test_sdl2_backend`
+
+`test_user32_message_dispatch` now covers:
+
+- posting a message to the second of two windows and verifying the translated
+  `MSG.hwnd` still points at that second window
+- peeking the same translated message twice with `PM_NOREMOVE`
+- removing that same message with `PM_REMOVE`
+- closing the second window first without affecting the first window's earlier
+  destroy path
+
+## Remaining Follow-Up
+
+- Add a graphical two-window sample that drives real SDL close/focus events
+  through the same routing path outside the dummy driver.

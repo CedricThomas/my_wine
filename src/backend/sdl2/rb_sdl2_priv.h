@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_syswm.h>
 #include "render_backend.h"
 #include "handle_manager.h"
 #include "src/loader/loader_state.h"
@@ -38,6 +39,9 @@ extern void *unix_stack_ptr_val __attribute__((weak));
 /* ---- Private window state ---- */
 typedef struct rb_window {
     SDL_Window *window;
+    uint32_t sdl_window_id;
+    uintptr_t native_window_id;
+    uintptr_t guest_hwnd;
     rb_surface_t primary_surface; /* flip-chain primary surface handle */
     rb_surface_t backbuffer;      /* flip-chain backbuffer handle (owned by window) */
 } rb_window;
@@ -377,5 +381,9 @@ static inline int vk_to_scancode(int vk)
 /* ---- Event system helpers ---- */
 void rb_event_set_active_window(uintptr_t hwnd);
 uintptr_t rb_event_get_active_window(void);
+int rb_event_bind_window(uintptr_t hwnd, rb_window_t win);
+void rb_event_unbind_window(uintptr_t hwnd);
+uint32_t rb_event_get_sdl_window_id(uintptr_t hwnd);
+uintptr_t rb_x11_consume_bad_window(void);
 
 #endif /* RB_SDL2_PRIV_H */

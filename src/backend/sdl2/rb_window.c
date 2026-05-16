@@ -27,10 +27,35 @@ typedef struct {
     uint32_t flags;
 } rb_sdl_create_window_args;
 
+typedef struct {
+    SDL_Window *window;
+    uint32_t window_id;
+    uintptr_t native_window_id;
+} rb_sdl_window_ids_args;
+
 static uintptr_t rb_sdl_create_window_call(void *arg)
 {
     rb_sdl_create_window_args *a = arg;
     return (uintptr_t)SDL_CreateWindow(a->title, a->x, a->y, a->w, a->h, a->flags);
+}
+
+static uintptr_t rb_sdl_window_get_ids_call(void *arg)
+{
+    rb_sdl_window_ids_args *a = arg;
+    SDL_SysWMinfo info;
+
+    a->window_id = 0;
+    a->native_window_id = 0;
+    if (!a->window)
+        return 0;
+
+    a->window_id = SDL_GetWindowID(a->window);
+    SDL_VERSION(&info.version);
+    if (SDL_GetWindowWMInfo(a->window, &info) &&
+        info.subsystem == SDL_SYSWM_X11) {
+        a->native_window_id = (uintptr_t)info.info.x11.window;
+    }
+    return 1;
 }
 
 static uintptr_t rb_sdl_destroy_window_call(void *arg)
@@ -196,6 +221,24 @@ static uintptr_t rb_sdl_warp_mouse_call(void *arg)
     return 0;
 }
 
+static int rb_window_refresh_ids(rb_window *wnd)
+{
+    rb_sdl_window_ids_args args;
+
+    if (!wnd || !wnd->window)
+        return RB_FAIL;
+
+    args.window = wnd->window;
+    args.window_id = 0;
+    args.native_window_id = 0;
+    if (!rb_call_on_host_stack(rb_sdl_window_get_ids_call, &args))
+        return RB_FAIL;
+
+    wnd->sdl_window_id = args.window_id;
+    wnd->native_window_id = args.native_window_id;
+    return args.window_id ? RB_OK : RB_FAIL;
+}
+
 /* ---- 13 window lifecycle functions ---- */
 
 rb_window_t rb_window_create(const char *title,
@@ -227,8 +270,16 @@ rb_window_t rb_window_create(const char *title,
         return 0;
     }
     win->window = sdl_win;
+    win->sdl_window_id = 0;
+    win->native_window_id = 0;
+    win->guest_hwnd = 0;
     win->primary_surface = 0;
     win->backbuffer = 0;
+    if (rb_window_refresh_ids(win) != RB_OK) {
+        rb_call_on_host_stack(rb_sdl_destroy_window_call, sdl_win);
+        rb_host_free(win);
+        return 0;
+    }
 
     return (rb_window_t)wine_handle_alloc(HANDLE_TYPE_RB_WINDOW, win);
 }
@@ -243,6 +294,8 @@ int rb_window_destroy(rb_window_t win)
     if (w->backbuffer)
         rb_surface_destroy(w->backbuffer);
 
+    if (w->guest_hwnd)
+        rb_event_unbind_window(w->guest_hwnd);
     rb_call_on_host_stack(rb_sdl_destroy_window_call, w->window);
     rb_host_free(w);
     wine_handle_free((uint32_t)win);
@@ -339,7 +392,21 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
         return RB_FAIL;
 
     wnd->window = args.new_window;
+    if (rb_window_refresh_ids(wnd) != RB_OK)
+        return RB_FAIL;
+    if (wnd->guest_hwnd)
+        rb_event_bind_window(wnd->guest_hwnd, win);
     return RB_OK;
+}
+
+int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd)
+{
+    rb_window *wnd = get_window(win);
+    if (!wnd)
+        return RB_FAIL;
+
+    wnd->guest_hwnd = hwnd;
+    return rb_event_bind_window(hwnd, win);
 }
 
 rb_dc_t rb_window_get_dc(rb_window_t win)

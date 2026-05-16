@@ -16,6 +16,10 @@ KERNEL32_ABI LRESULT CallWindowProcA(WNDPROC lpPrevWndFunc, HWND hWnd,
                                      UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_ABI LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_ABI HWND GetActiveWindow(void);
+KERNEL32_ABI BOOL PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+KERNEL32_ABI BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
+                               UINT wMsgFilterMax, UINT wRemoveMsg);
+KERNEL32_ABI BOOL IsWindow(HWND hwnd);
 
 static int g_failures = 0;
 static int g_close_messages = 0;
@@ -35,6 +39,8 @@ static int g_callproc_messages = 0;
 #define TEST_CALLPROC_MESSAGE 0x0402
 #define TEST_SEND_RESULT      0x1234
 #define TEST_CALLPROC_RESULT  0x5678
+#define PM_NOREMOVE           0x0000
+#define PM_REMOVE             0x0001
 
 static LRESULT KERNEL32_ABI test_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -68,9 +74,13 @@ int main(void)
     HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "dispatch",
                                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                                 0, 0, 320, 200, 0, 0, 0, NULL);
+    HWND hwnd2 = CreateWindowExA(0, wc.lpszClassName, "dispatch-2",
+                                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                 10, 10, 320, 200, 0, 0, 0, NULL);
     T(hwnd != 0, "CreateWindowExA failed");
+    T(hwnd2 != 0, "CreateWindowExA second window failed");
 
-    if (hwnd) {
+    if (hwnd && hwnd2) {
         T(SendMessageA(hwnd, TEST_SEND_MESSAGE, 0, 0) == TEST_SEND_RESULT,
           "SendMessageA did not return wndproc result");
         T(g_send_messages == 1, "SendMessageA did not reach wndproc");
@@ -90,7 +100,40 @@ int main(void)
         T(GetActiveWindow() == 0, "WM_CLOSE default path did not destroy the window");
 
         T(DestroyWindow(hwnd) == FALSE, "DestroyWindow should fail after WM_CLOSE destroyed the hwnd");
+
+        T(PostMessageA(hwnd2, WM_LBUTTONDOWN, 0, 0) == TRUE,
+          "PostMessageA failed for second window");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == TRUE,
+          "PeekMessageA(PM_NOREMOVE) did not find posted message");
+        T(msg.hwnd == hwnd2, "First PM_NOREMOVE returned wrong hwnd");
+        T(msg.message == WM_LBUTTONDOWN, "First PM_NOREMOVE returned wrong message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == TRUE,
+          "Second PeekMessageA(PM_NOREMOVE) did not find queued message");
+        T(msg.hwnd == hwnd2, "Second PM_NOREMOVE returned wrong hwnd");
+        T(msg.message == WM_LBUTTONDOWN, "Second PM_NOREMOVE returned wrong message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_REMOVE) == TRUE,
+          "PeekMessageA(PM_REMOVE) did not remove queued message");
+        T(msg.hwnd == hwnd2, "PM_REMOVE returned wrong hwnd");
+        T(msg.message == WM_LBUTTONDOWN, "PM_REMOVE returned wrong message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,
+          "Queue should be empty after PM_REMOVE");
+
+        msg.hwnd = hwnd2;
+        msg.message = WM_CLOSE;
+        T(DispatchMessageA(&msg) == 0, "DispatchMessageA did not close second window");
+        T(IsWindow(hwnd2) == FALSE, "Second window should be destroyed by WM_CLOSE");
     }
+
+    if (hwnd2 && IsWindow(hwnd2))
+        T(DestroyWindow(hwnd2) == TRUE, "DestroyWindow on second window failed");
 
     if (g_failures == 0)
         printf("PASS: user32 message dispatch\n");

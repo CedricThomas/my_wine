@@ -22,6 +22,7 @@
 #include <stdio.h>
 
 extern void rb_event_set_active_window(uintptr_t hwnd);
+extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
 
 /* ── Additional user32 constants not in user32_types.h ──────── */
 
@@ -193,6 +194,13 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
         return FORCE_HANDLE_RETURN(0, HWND);
     }
     g_user32_live_windows++;
+    if (rb_window_attach_guest_hwnd(rb_win, handle) != RB_OK) {
+        g_user32_live_windows--;
+        wine_handle_free((uint32_t)handle);
+        rb_window_destroy(rb_win);
+        free(entry);
+        return FORCE_HANDLE_RETURN(0, HWND);
+    }
     user32_set_active_window((HWND)handle);
     user32_set_focus_window((HWND)handle);
     rb_event_set_active_window(handle);
