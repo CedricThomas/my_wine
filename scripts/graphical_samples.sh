@@ -177,6 +177,40 @@ wait_for_window() {
     return 1
 }
 
+process_state() {
+    local pid="$1"
+    ps -o stat= -p "$pid" 2>/dev/null | awk 'NR == 1 { print substr($1, 1, 1) }'
+}
+
+process_is_running() {
+    local pid="$1"
+    local state
+    state="$(process_state "$pid")"
+    [ -n "$state" ] && [ "$state" != "Z" ]
+}
+
+stop_process() {
+    local pid="$1"
+    local timeout_sec="${2:-2}"
+    local deadline=$((SECONDS + timeout_sec))
+
+    if process_is_running "$pid"; then
+        kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+    fi
+
+    while process_is_running "$pid" && [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 0.1
+    done
+
+    if process_is_running "$pid"; then
+        kill -KILL -- "-$pid" >/dev/null 2>&1 || kill -KILL "$pid" >/dev/null 2>&1 || true
+        deadline=$((SECONDS + 2))
+        while process_is_running "$pid" && [ "$SECONDS" -lt "$deadline" ]; do
+            sleep 0.1
+        done
+    fi
+}
+
 apply_graphical_inputs() {
     local name="$1"
     local win_id="$2"
@@ -313,15 +347,20 @@ run_container_sample() {
     : >"$output_file"
     : >"${output_file}.err"
 
-    "$PROJECT_DIR/my_wine" "$exe" >"$output_file" 2>"${output_file}.err" &
+    local status_file="/tmp/my_wine_graphical_${name}.status"
+    rm -f "$status_file"
+
+    setsid bash -c '
+        "$1" "$2" >"$3" 2>"$4"
+        printf "%s\n" "$?" >"$5"
+    ' _ "$PROJECT_DIR/my_wine" "$exe" "$output_file" "${output_file}.err" "$status_file" &
     local pid=$!
 
     if ! wait_for_window "$title" "$timeout_sec"; then
         if is_verbose; then
             print_status "no_window" "$name" "$pid" "$output_file"
         fi
-        kill "$pid" >/dev/null 2>&1 || true
-        wait "$pid" >/dev/null 2>&1 || true
+        stop_process "$pid"
         local reason
         reason="$(failure_reason "$output_file")"
         if [ -n "$reason" ]; then
@@ -344,14 +383,12 @@ run_container_sample() {
 
     if [ -n "$expected_w" ] && [ "$width" != "$expected_w" ]; then
         echo "FAIL  $name (window width=$width, expected=$expected_w)"
-        kill "$pid" >/dev/null 2>&1 || true
-        wait "$pid" >/dev/null 2>&1 || true
+        stop_process "$pid"
         return 1
     fi
     if [ -n "$expected_h" ] && [ "$height" != "$expected_h" ]; then
         echo "FAIL  $name (window height=$height, expected=$expected_h)"
-        kill "$pid" >/dev/null 2>&1 || true
-        wait "$pid" >/dev/null 2>&1 || true
+        stop_process "$pid"
         return 1
     fi
 
@@ -359,39 +396,44 @@ run_container_sample() {
         if is_verbose; then
             print_status "input_failed" "$name" "$pid" "$output_file"
         fi
-        kill "$pid" >/dev/null 2>&1 || true
-        wait "$pid" >/dev/null 2>&1 || true
+        stop_process "$pid"
         echo "FAIL  $name (input script failed)"
         return 1
     fi
 
     if [ "$inspect_only" = "1" ]; then
-        kill "$pid" >/dev/null 2>&1 || true
-        wait "$pid" >/dev/null 2>&1 || true
+        stop_process "$pid"
         echo "INSPECT  $name complete"
         return 0
     fi
 
-    if kill -0 "$pid" >/dev/null 2>&1; then
-        xdotool windowclose "$win_id" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+    if process_is_running "$pid"; then
+        xdotool windowclose "$win_id" >/dev/null 2>&1 || kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
     fi
 
     local deadline=$((SECONDS + timeout_sec))
-    while kill -0 "$pid" >/dev/null 2>&1 && [ "$SECONDS" -lt "$deadline" ]; do
+    while process_is_running "$pid" && [ "$SECONDS" -lt "$deadline" ]; do
         sleep 0.2
     done
-    if kill -0 "$pid" >/dev/null 2>&1; then
+    if process_is_running "$pid"; then
         if is_verbose; then
             print_status "close_timeout" "$name" "$pid" "$output_file"
         fi
-        kill "$pid" >/dev/null 2>&1 || true
-        wait "$pid" >/dev/null 2>&1 || true
+        stop_process "$pid"
         echo "FAIL  $name (close timeout)"
         return 1
     fi
 
     local ret=0
-    wait "$pid" || ret=$?
+    if [ -f "$status_file" ]; then
+        ret="$(cat "$status_file" 2>/dev/null || echo 1)"
+    else
+        if is_verbose; then
+            print_status "missing_exit_status" "$name" "$pid" "$output_file"
+        fi
+        echo "FAIL  $name (missing exit status)"
+        return 1
+    fi
     if [ "$ret" -ne "$expected_exit" ]; then
         if is_verbose; then
             print_status "bad_exit" "$name" "$pid" "$output_file"
