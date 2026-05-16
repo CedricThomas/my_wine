@@ -9,12 +9,58 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dlfcn.h>
+
+typedef struct _XDisplay Display;
+typedef unsigned long XID;
+typedef struct {
+    int type;
+    Display *display;
+    XID resourceid;
+    unsigned long serial;
+    unsigned char error_code;
+    unsigned char request_code;
+    unsigned char minor_code;
+} XErrorEvent;
 
 static int g_initialized = 0;
+static int (*g_prev_x_error_handler)(Display *, XErrorEvent *) = NULL;
+static int g_x11_bad_window_pending = 0;
+
+#define RB_X11_BAD_WINDOW 3
 
 rb_audio_state g_audio;
 rb_audio_buf *g_audio_buffers[32];
 int g_audio_buf_count = 0;
+
+static int rb_x11_error_handler(Display *display, XErrorEvent *event)
+{
+    if (event && event->error_code == RB_X11_BAD_WINDOW) {
+        __atomic_store_n(&g_x11_bad_window_pending, 1, __ATOMIC_RELEASE);
+        return 0;
+    }
+
+    if (g_prev_x_error_handler)
+        return g_prev_x_error_handler(display, event);
+
+    return 0;
+}
+
+int rb_x11_consume_bad_window(void)
+{
+    return __atomic_exchange_n(&g_x11_bad_window_pending, 0, __ATOMIC_ACQ_REL);
+}
+
+static void rb_install_x11_error_handler(void)
+{
+    typedef int (*x_error_handler_fn)(Display *, XErrorEvent *);
+    typedef x_error_handler_fn (*xset_error_handler_fn)(x_error_handler_fn);
+    xset_error_handler_fn set_error_handler =
+        (xset_error_handler_fn)dlsym(RTLD_DEFAULT, "XSetErrorHandler");
+
+    if (set_error_handler)
+        g_prev_x_error_handler = set_error_handler(rb_x11_error_handler);
+}
 
 typedef struct {
     uint32_t flags;
@@ -26,18 +72,22 @@ static uintptr_t rb_sdl_init_call(void *arg)
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
+    rb_install_x11_error_handler();
     int ret = SDL_Init(a->flags);
+    rb_install_x11_error_handler();
     if (ret < 0 && getenv("DISPLAY") && !getenv("SDL_VIDEODRIVER") &&
         !getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "x11", 1);
         ret = SDL_Init(a->flags);
+        rb_install_x11_error_handler();
     }
     if (ret < 0 && !getenv("SDL_VIDEODRIVER") &&
         getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "dummy", 1);
         ret = SDL_Init(a->flags);
+        rb_install_x11_error_handler();
     }
     signal(SIGINT, SIG_DFL);
     signal(SIGTERM, SIG_DFL);

@@ -12,6 +12,7 @@
 /* ---- Active window tracking ---- */
 
 static rb_window_t g_active_window = 0;
+extern int rb_x11_consume_bad_window(void);
 
 void rb_event_set_active_window(rb_window_t win)
 {
@@ -55,7 +56,7 @@ static inline int rb_peep_events(SDL_Event *ev, int n, SDL_eventaction action)
 
 static uintptr_t rb_sdl_wait_event_call(void *arg)
 {
-    return (uintptr_t)SDL_WaitEvent((SDL_Event *)arg);
+    return (uintptr_t)SDL_WaitEventTimeout((SDL_Event *)arg, 100);
 }
 
 static uintptr_t rb_sdl_peep_event_call(void *arg)
@@ -174,7 +175,7 @@ static int translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
             return 0;
 
         case SDL_WINDOWEVENT_CLOSE:
-            msg->message = WM_QUIT;
+            msg->message = WM_CLOSE;
             msg->wParam  = 0;
             msg->lParam  = 0;
             msg->time    = (uint32_t)sdl->window.timestamp;
@@ -219,21 +220,33 @@ int rb_event_wait(rb_msg_t *out_msg)
     SDL_Event sdl_ev;
 
     for (;;) {
-        int wait_ret = (int)rb_call_on_host_stack(rb_sdl_wait_event_call, &sdl_ev);
-        if (!wait_ret)
-            break;
-        if (translate_sdl_event(&sdl_ev, out_msg)) {
-            return (out_msg->message == WM_QUIT) ? 0 : 1;
+        if (rb_x11_consume_bad_window()) {
+            memset(out_msg, 0, sizeof(*out_msg));
+            out_msg->hwnd = g_active_window;
+            out_msg->message = WM_CLOSE;
+            return 1;
         }
-        /* Unknown event — discard and keep waiting */
-    }
 
-    return -1; /* SDL error */
+        int wait_ret = (int)rb_call_on_host_stack(rb_sdl_wait_event_call, &sdl_ev);
+        if (wait_ret) {
+            if (translate_sdl_event(&sdl_ev, out_msg)) {
+                return (out_msg->message == WM_QUIT) ? 0 : 1;
+            }
+            /* Unknown event — discard and keep waiting */
+        }
+    }
 }
 
 int rb_event_peek(rb_msg_t *out_msg)
 {
     SDL_Event sdl_ev;
+
+    if (rb_x11_consume_bad_window()) {
+        memset(out_msg, 0, sizeof(*out_msg));
+        out_msg->hwnd = g_active_window;
+        out_msg->message = WM_CLOSE;
+        return 1;
+    }
 
     int ret = (int)rb_call_on_host_stack(rb_sdl_peep_event_call, &sdl_ev);
 

@@ -149,6 +149,11 @@ LRESULT DispatchMessageA(const MSG *lpMsg)
     return DefWindowProcA(lpMsg->hwnd, lpMsg->message,
                           lpMsg->wParam, lpMsg->lParam);
 #else
+    if (lpMsg->message == WM_CLOSE) {
+        return DefWindowProcA(lpMsg->hwnd, lpMsg->message,
+                              lpMsg->wParam, lpMsg->lParam);
+    }
+
     wine_window_entry *entry = get_window_entry(lpMsg->hwnd);
     if (entry && entry->wnd_proc) {
         WNDPROC proc = (WNDPROC)entry->wnd_proc;

@@ -31,6 +31,12 @@ static uintptr_t rb_sdl_create_window_call(void *arg)
     return (uintptr_t)SDL_CreateWindow(a->title, a->x, a->y, a->w, a->h, a->flags);
 }
 
+static uintptr_t rb_sdl_destroy_window_call(void *arg)
+{
+    SDL_DestroyWindow((SDL_Window *)arg);
+    return 0;
+}
+
 static uintptr_t rb_sdl_show_raise_pump_call(void *arg)
 {
     SDL_Window *window = arg;
@@ -112,8 +118,8 @@ int rb_window_destroy(rb_window_t win)
     if (w->backbuffer)
         rb_surface_destroy(w->backbuffer);
 
+    rb_call_on_host_stack(rb_sdl_destroy_window_call, w->window);
     uintptr_t saved_gs = rb_host_context_enter();
-    SDL_DestroyWindow(w->window);
     free(w);
     rb_host_context_leave(saved_gs);
     wine_handle_free((uint32_t)win);
