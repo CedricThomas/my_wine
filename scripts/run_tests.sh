@@ -126,6 +126,12 @@ run_test test_entry_symbols
 # test_sdl2_backend
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy run_test test_sdl2_backend
 
+# test_user32_handle_ownership
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy run_test test_user32_handle_ownership
+
+# test_user32_message_dispatch
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy run_test test_user32_message_dispatch
+
 # --- Summary ---
 TOTAL=$((PASS + FAIL + SKIP))
 echo ""

@@ -162,6 +162,7 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
 
     entry->wnd_proc = wc->lpfnWndProc;
     entry->style = dwStyle;
+    entry->destroy_in_progress = false;
     strncpy(entry->title, lpWindowName ? lpWindowName : "", sizeof(entry->title) - 1);
     entry->title[sizeof(entry->title) - 1] = '\0';
 
@@ -211,12 +212,13 @@ BOOL DestroyWindow(HWND hwnd)
     if (!entry)
         return FALSE;
 
-#if !defined(__i386__)
+    if (entry->destroy_in_progress)
+        return TRUE;
+
+    entry->destroy_in_progress = true;
     if (entry->wnd_proc) {
-        WNDPROC proc = (WNDPROC)entry->wnd_proc;
-        proc(hwnd, WM_DESTROY, 0, 0);
+        user32_call_wndproc((WNDPROC)entry->wnd_proc, hwnd, WM_DESTROY, 0, 0);
     }
-#endif
 
     rb_window_destroy(entry->sdl_window);
     wine_handle_free((uint32_t)hwnd);

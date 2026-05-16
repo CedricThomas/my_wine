@@ -145,23 +145,13 @@ LRESULT DispatchMessageA(const MSG *lpMsg)
     if (!lpMsg)
         return 0;
 
-#if defined(__i386__)
-    return DefWindowProcA(lpMsg->hwnd, lpMsg->message,
-                          lpMsg->wParam, lpMsg->lParam);
-#else
-    if (lpMsg->message == WM_CLOSE) {
-        return DefWindowProcA(lpMsg->hwnd, lpMsg->message,
-                              lpMsg->wParam, lpMsg->lParam);
-    }
-
     wine_window_entry *entry = get_window_entry(lpMsg->hwnd);
     if (entry && entry->wnd_proc) {
-        WNDPROC proc = (WNDPROC)entry->wnd_proc;
-        return proc(lpMsg->hwnd, lpMsg->message, lpMsg->wParam, lpMsg->lParam);
+        return user32_call_wndproc((WNDPROC)entry->wnd_proc, lpMsg->hwnd,
+                                   lpMsg->message, lpMsg->wParam, lpMsg->lParam);
     }
     return DefWindowProcA(lpMsg->hwnd, lpMsg->message,
                           lpMsg->wParam, lpMsg->lParam);
-#endif
 }
 
 /* ── 5. PostMessageA ──────────────────────────────────────── */
@@ -265,8 +255,8 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
     default:
         if (entry && entry->wnd_proc) {
-            WNDPROC proc = (WNDPROC)entry->wnd_proc;
-            return proc(hWnd, Msg, wParam, lParam);
+            return user32_call_wndproc((WNDPROC)entry->wnd_proc, hWnd, Msg,
+                                       wParam, lParam);
         }
         return DefWindowProcA(hWnd, Msg, wParam, lParam);
     }
@@ -295,9 +285,7 @@ KERNEL32_STUB
 LRESULT CallWindowProcA(WNDPROC lpPrevWndFunc, HWND hWnd,
                         UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-    if (!lpPrevWndFunc)
-        return 0;
-    return lpPrevWndFunc(hWnd, Msg, wParam, lParam);
+    return user32_call_wndproc(lpPrevWndFunc, hWnd, Msg, wParam, lParam);
 }
 
 /* ── 10. SetWindowsHookExA ────────────────────────────────── */

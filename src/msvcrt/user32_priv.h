@@ -19,6 +19,7 @@ typedef struct {
     char          title[128];
     uint32_t      style;
     rb_rect_t     client_rect;
+    bool          destroy_in_progress;
 } wine_window_entry;
 
 /* Global WNDCLASSA table — linear search by strcmp on lpszClassName */
@@ -65,6 +66,14 @@ static inline HWND user32_get_focus_window(void)
 static inline void user32_set_focus_window(HWND hwnd)
 {
     g_user32_focus_window = get_window_entry(hwnd) ? hwnd : 0;
+}
+
+static inline LRESULT user32_call_wndproc(WNDPROC proc, HWND hwnd, UINT msg,
+                                          WPARAM wParam, LPARAM lParam)
+{
+    if (!proc)
+        return 0;
+    return proc(hwnd, msg, wParam, lParam);
 }
 
 #endif /* MY_WINE_USER32_PRIV_H */
