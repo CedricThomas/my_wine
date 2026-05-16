@@ -86,8 +86,8 @@ Graphical samples are marked with `type=graphical` in `sample.info`. Add
 `applied_inputs.txt` beside the sample to replay deterministic events after the
 window appears. Supported commands are `sleep MS`, `focus`, `key KEY`,
 `type TEXT`, `click X Y`, `mousemove X Y`, `status LABEL`, and `altf4`.
-`windowclose` remains accepted as a compatibility alias and is implemented as
-`Alt+F4`.
+`altf4` replays the keyboard shortcut and remains the harness default for
+scripted shutdown.
 Set `GRAPHICAL_RUNTIME=wine` to run the same graphical harness against real
 Wine inside the Docker image for reference behavior; the default remains
 `GRAPHICAL_RUNTIME=my_wine`. The Wine reference path keeps the same window/input

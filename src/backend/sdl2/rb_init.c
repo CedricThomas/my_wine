@@ -62,12 +62,9 @@ static uintptr_t rb_sdl_init_call(void *arg)
     rb_sdl_init_args *a = arg;
     const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
     int try_x11_fallback = 0;
-    int try_dummy_fallback = 0;
 
     if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
         try_x11_fallback = 1;
-    if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
-        try_dummy_fallback = 1;
 
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     signal(SIGINT, SIG_DFL);
@@ -78,13 +75,6 @@ static uintptr_t rb_sdl_init_call(void *arg)
     if (ret < 0 && getenv("DISPLAY") && try_x11_fallback) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "x11", 1);
-        ret = SDL_Init(a->flags);
-        rb_install_x11_error_handler();
-    }
-    if (ret < 0 && try_dummy_fallback &&
-        getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
-        SDL_Quit();
-        setenv("SDL_VIDEODRIVER", "dummy", 1);
         ret = SDL_Init(a->flags);
         rb_install_x11_error_handler();
     }

@@ -27,7 +27,6 @@
 #     mousemove X Y
 #     status LABEL
 #     altf4
-#     windowclose   # alias for altf4
 #
 
 set -euo pipefail
@@ -334,10 +333,6 @@ apply_graphical_inputs() {
                 xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
                 xdotool key --window "$win_id" --clearmodifiers Alt+F4
                 ;;
-            windowclose)
-                xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
-                xdotool key --window "$win_id" --clearmodifiers Alt+F4
-                ;;
             *)
                 echo "ERR: $inputs_file:$line_no unknown input command '$command'"
                 return 1
@@ -392,7 +387,6 @@ run_container_sample() {
     export DISPLAY="${DISPLAY:-:99}"
     export SDL_VIDEODRIVER=x11
     export SDL_AUDIODRIVER=dummy
-    unset MY_WINE_SAMPLE_AUTOQUIT
     export WINEDEBUG="${WINEDEBUG:--all}"
     export GRAPHICAL_RUNTIME_SELECTED="$runtime"
 
@@ -469,7 +463,8 @@ run_container_sample() {
     fi
 
     if process_is_running "$pid"; then
-        # Prefer a guest-visible close path over X11 window destruction.
+        # Prefer the guest-visible keyboard close path here. Do not reintroduce
+        # a separate window-manager close command without fresh reference proof.
         if xdotool getwindowname "$win_id" >/dev/null 2>&1; then
             xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
             xdotool key --window "$win_id" --clearmodifiers Alt+F4 || true

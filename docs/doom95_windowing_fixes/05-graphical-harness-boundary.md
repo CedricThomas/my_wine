@@ -2,44 +2,54 @@
 
 ## Status
 
-Not yet implemented as of 2026-05-16.
+Implemented on 2026-05-16.
 
-## Current Evidence
-
-- `bash scripts/run_samples.sh sdl2_window` currently times out with
-  `FAIL  sdl2_window (close timeout)`.
-- The same close-timeout behavior also occurs with the new two-window graphical
-  samples under both PE32+ and PE32.
-- The harness currently treats `windowclose` as an alias for `altf4`, and its
-  default shutdown path after scripted input is also `Alt+F4`.
-
-## Working Hypothesis
-
-This section is informed by the current behavior, but it is not fully proven
-yet.
-
-The most likely issue is that the graphical harness is relying on a keyboard
-shortcut as if it were a deterministic window-manager close request. Under Xvfb
-that assumption appears weak: sending `Alt+F4` to the target window is not
-currently producing a reliable guest-visible close path, even for the existing
-single-window sample. That suggests the timeout is more likely a harness-boundary
-problem than a new regression in the multi-window event-routing work.
+The harness now owns graphical test-driver behavior explicitly. Test-only
+`MY_WINE_SAMPLE_AUTOQUIT` handling has been removed from the SDL runtime path,
+and direct `scripts/samples.sh run <graphical-sample>` invocations dispatch to
+the Xvfb graphical harness instead of depending on backend-only autoquit logic.
+The default scripted shutdown path remains `altf4`, because a Wine reference
+run behaves more like a guest-visible close under `Alt+F4` than under a raw
+X11/window-manager close request. `windowclose` has been removed from the
+harness interface for future work.
 
 ## Problem
 
-The backend contains behavior intended only for tests, such as
-`MY_WINE_SAMPLE_AUTOQUIT`. There is also pressure to compensate in runtime code
-for Xvfb/xdotool-specific close behavior. That makes the production path less
-representative of Doom95.
+The backend had behavior intended only for samples and tests:
 
-## Fix
+- `MY_WINE_SAMPLE_AUTOQUIT` could inject `SDL_QUIT` during window creation.
+- SDL initialization could fall back to the dummy video driver only when that
+  test-only env var was set.
+- The graphical harness mixed close-path experiments into its public input
+  language instead of keeping one documented default close path.
+
+That mixed test-driver policy into production runtime code and made the harness
+depend on keyboard-shortcut semantics when it really needed an explicit close
+request boundary.
+
+## Implemented
+
+- Removed test-only `MY_WINE_SAMPLE_AUTOQUIT` behavior from:
+  - `src/backend/sdl2/rb_window.c`
+  - `src/backend/sdl2/rb_init.c`
+- Kept graphical test environment policy in the harness:
+  - `scripts/graphical_samples.sh` still selects X11/Xvfb and dummy audio.
+- Re-validated the default scripted shutdown path against `GRAPHICAL_RUNTIME=wine`;
+  `Alt+F4` still behaves more like the expected guest-visible close path there.
+- Removed `windowclose` from the public harness command set so future work does
+  not treat raw X11/window-manager close as an endorsed scripted action.
+- Changed `scripts/samples.sh run <graphical-sample>` to build the sample and
+  then dispatch to `scripts/graphical_samples.sh`, so direct sample runs no
+  longer depend on backend-only autoquit hooks.
+
+## Boundary Rules
 
 - Keep X11/Xvfb as the deterministic graphical test environment.
-- Remove test-only autoquit behavior from backend window creation.
+- Keep test-driver policy in scripts, not in the SDL runtime/backend path.
 - If a sample needs automatic exit, drive it through one of:
   - input script `altf4`
   - posted input event from the harness
-  - a sample-side timer
+  - a sample-side timer inside the sample itself
 - Make the harness own all test driver behavior:
   - video driver selection
   - audio driver selection
@@ -50,7 +60,10 @@ representative of Doom95.
   manager close request in Xvfb. If the harness needs a guaranteed close action,
   it should drive that explicitly instead of depending on keyboard-shortcut
   semantics.
-- Treat X11 `BadWindow` as a harness compatibility issue only if it occurs from the harness close action. Prefer fixing message and destroy lifecycle first.
+- Do not reintroduce raw X11/window-manager close as a public harness action
+  without fresh Wine-reference evidence.
+- Treat X11 `BadWindow` as a harness compatibility issue only if it occurs from
+  the harness close action. Prefer fixing message and destroy lifecycle first.
 
 ## Files
 
@@ -63,15 +76,22 @@ representative of Doom95.
 
 ## Verification
 
+- `bash scripts/samples.sh run sdl2_window`
 - `bash scripts/run_samples.sh sdl2_window`
 - `bash scripts/run_samples.sh sdl2_window_32`
-- Manual graphical inspect still opens a real visible window under Xvfb.
+- `bash scripts/run_samples.sh sdl2_two_window`
+- `bash scripts/run_samples.sh sdl2_two_window_32`
+- `bash scripts/graphical_samples.sh inspect sdl2_window`
 
-## Notes
+## Residual Runtime Issues
 
-- The observations above justify prioritizing this doc next, but they do not by
-  themselves prove that `Alt+F4` is the only failure mode.
-- A proper implementation should separate:
-  - observed failures in the current harness
-  - confirmed backend/runtime bugs
-  - unverified assumptions about Xvfb or xdotool behavior
+- The boundary cleanup above is implemented, but current `my_wine` graphical
+  samples still do not all exit cleanly under Xvfb.
+- As of 2026-05-16:
+  - `sdl2_window` and `sdl2_two_window` still hit harness close timeouts under
+    `my_wine`.
+  - `sdl2_window_32` and `sdl2_two_window_32` still crash before the harness
+    sees a window.
+- Those failures should be treated as separate runtime/sample bugs. They are
+  not a reason to restore backend-only autoquit hooks or to reintroduce a raw
+  X11/window-manager close command into the public harness interface.

@@ -81,18 +81,6 @@ static uintptr_t rb_sdl_show_raise_pump_call(void *arg)
     return 0;
 }
 
-static uintptr_t rb_sdl_push_quit_if_autoquit_call(void *arg)
-{
-    (void)arg;
-    if (rb_host_getenv("MY_WINE_SAMPLE_AUTOQUIT")) {
-        SDL_Event ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.type = SDL_QUIT;
-        SDL_PushEvent(&ev);
-    }
-    return 0;
-}
-
 typedef struct {
     SDL_Window *window;
     int show;
@@ -262,7 +250,6 @@ rb_window_t rb_window_create(const char *title,
     if (!sdl_win)
         return 0;
     rb_call_on_host_stack(rb_sdl_show_raise_pump_call, sdl_win);
-    rb_call_on_host_stack(rb_sdl_push_quit_if_autoquit_call, NULL);
 
     rb_window *win = rb_host_malloc(sizeof(*win));
     if (!win) {
