@@ -21,10 +21,11 @@ typedef uint32_t    UINT;
 typedef int32_t     INT;
 typedef int32_t     LONG;
 typedef uint32_t    ULONG;
+typedef uintptr_t   ULONG_PTR;
 
-typedef int32_t     LRESULT;
-typedef uint32_t    WPARAM;
-typedef int32_t     LPARAM;
+typedef intptr_t    LRESULT;
+typedef uintptr_t   WPARAM;
+typedef intptr_t    LPARAM;
 typedef int16_t     SHORT;
 
 #define TRUE  1
@@ -76,7 +77,7 @@ typedef LRESULT (KERNEL32_ABI *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 /* ---- Window Class ---- */
 
 typedef struct {
-    uint16_t   style;
+    UINT       style;
     WNDPROC    lpfnWndProc;
     int32_t    cbClsExtra;
     int32_t    cbWndExtra;
@@ -87,6 +88,21 @@ typedef struct {
     const char *lpszMenuName;
     const char *lpszClassName;
 } WNDCLASSA;
+
+typedef struct {
+    void       *lpCreateParams;
+    HINSTANCE   hInstance;
+    HMENU       hMenu;
+    HWND        hwndParent;
+    int         cy;
+    int         cx;
+    int         y;
+    int         x;
+    LONG        style;
+    const char *lpszName;
+    const char *lpszClass;
+    DWORD       dwExStyle;
+} CREATESTRUCTA;
 
 /* ---- Paint Struct ---- */
 
@@ -113,6 +129,7 @@ typedef struct {
  */
 
 #define WM_CREATE              0x0001
+#define WM_NCCREATE            0x0081
 #define WM_DESTROY             0x0002
 #define WM_MOVE                0x0003
 #define WM_SIZE                0x0005

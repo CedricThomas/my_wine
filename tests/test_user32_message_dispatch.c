@@ -17,15 +17,18 @@ KERNEL32_ABI LRESULT CallWindowProcA(WNDPROC lpPrevWndFunc, HWND hWnd,
 KERNEL32_ABI LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_ABI HWND GetActiveWindow(void);
 KERNEL32_ABI BOOL PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+KERNEL32_ABI void PostQuitMessage(int nExitCode);
 KERNEL32_ABI BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
                                UINT wMsgFilterMax, UINT wRemoveMsg);
 KERNEL32_ABI BOOL IsWindow(HWND hwnd);
 
 static int g_failures = 0;
+static int g_create_messages = 0;
 static int g_close_messages = 0;
 static int g_destroy_messages = 0;
 static int g_send_messages = 0;
 static int g_callproc_messages = 0;
+static int g_create_payload = 0;
 
 #define T(cond, msg)                                                           \
     do {                                                                       \
@@ -45,6 +48,13 @@ static int g_callproc_messages = 0;
 static LRESULT KERNEL32_ABI test_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
+    case WM_CREATE: {
+        CREATESTRUCTA *cs = (CREATESTRUCTA *)(intptr_t)lParam;
+        g_create_messages++;
+        if (cs && cs->lpCreateParams)
+            g_create_payload = *(int *)cs->lpCreateParams;
+        return 0;
+    }
     case WM_CLOSE:
         g_close_messages++;
         return DefWindowProcA(hwnd, msg, wParam, lParam);
@@ -65,6 +75,7 @@ static LRESULT KERNEL32_ABI test_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 int main(void)
 {
     WNDCLASSA wc;
+    int create_payload = 77;
     memset(&wc, 0, sizeof(wc));
     wc.lpszClassName = "MessageDispatchTest";
     wc.lpfnWndProc = test_wndproc;
@@ -73,7 +84,7 @@ int main(void)
 
     HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "dispatch",
                                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                                0, 0, 320, 200, 0, 0, 0, NULL);
+                                0, 0, 320, 200, 0, 0, 0, &create_payload);
     HWND hwnd2 = CreateWindowExA(0, wc.lpszClassName, "dispatch-2",
                                  WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                                  10, 10, 320, 200, 0, 0, 0, NULL);
@@ -81,6 +92,9 @@ int main(void)
     T(hwnd2 != 0, "CreateWindowExA second window failed");
 
     if (hwnd && hwnd2) {
+        T(g_create_messages == 2, "CreateWindowExA did not emit exactly one WM_CREATE per window");
+        T(g_create_payload == create_payload, "WM_CREATE did not receive lpCreateParams payload");
+
         T(SendMessageA(hwnd, TEST_SEND_MESSAGE, 0, 0) == TEST_SEND_RESULT,
           "SendMessageA did not return wndproc result");
         T(g_send_messages == 1, "SendMessageA did not reach wndproc");
@@ -97,7 +111,7 @@ int main(void)
         T(DispatchMessageA(&msg) == 0, "DispatchMessageA did not return WM_CLOSE result");
         T(g_close_messages == 1, "DispatchMessageA did not reach wndproc for WM_CLOSE");
         T(g_destroy_messages == 1, "WM_CLOSE default path did not send exactly one WM_DESTROY");
-        T(GetActiveWindow() == 0, "WM_CLOSE default path did not destroy the window");
+        T(GetActiveWindow() == hwnd2, "WM_CLOSE default path did not preserve the remaining active window");
 
         T(DestroyWindow(hwnd) == FALSE, "DestroyWindow should fail after WM_CLOSE destroyed the hwnd");
 
@@ -125,6 +139,23 @@ int main(void)
         memset(&msg, 0, sizeof(msg));
         T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,
           "Queue should be empty after PM_REMOVE");
+
+        PostQuitMessage(77);
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == TRUE,
+          "PeekMessageA(PM_NOREMOVE) did not expose WM_QUIT");
+        T(msg.message == WM_QUIT, "PeekMessageA(PM_NOREMOVE) returned wrong quit message");
+        T(msg.wParam == 77, "PeekMessageA(PM_NOREMOVE) returned wrong quit code");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_REMOVE) == TRUE,
+          "PeekMessageA(PM_REMOVE) did not consume WM_QUIT");
+        T(msg.message == WM_QUIT, "PeekMessageA(PM_REMOVE) returned wrong quit message");
+        T(msg.wParam == 77, "PeekMessageA(PM_REMOVE) returned wrong quit code");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,
+          "Quit queue should be empty after WM_QUIT removal");
 
         msg.hwnd = hwnd2;
         msg.message = WM_CLOSE;

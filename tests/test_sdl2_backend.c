@@ -11,6 +11,7 @@
 
 #include "render_backend.h"
 #include "src/backend/sdl2/rb_sdl2_priv.h"
+#include "user32_types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +30,16 @@ static rb_window *lookup_window_state(rb_window_t win) {
   if (wine_handle_get_type((uint32_t)win) != HANDLE_TYPE_RB_WINDOW)
     return NULL;
   return (rb_window *)wine_handle_get((uint32_t)win);
+}
+
+extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
+
+static void drain_event_queue(void) {
+  rb_msg_t msg;
+  for (int i = 0; i < 32; i++) {
+    if (rb_event_peek(&msg) <= 0)
+      break;
+  }
 }
 
 static void fill_surface(rb_surface_t surf, uint8_t value) {
@@ -263,6 +274,52 @@ static int run_tests(void) {
   printf("  event... ");
   rb_msg_t msg;
   rb_event_peek(&msg);
+  printf("OK\n");
+
+  /* ---- SDL window-event translation ---- */
+  printf("  window events... ");
+  rb_window_t event_win =
+      rb_window_create("SDL2 Event Test", -1, -1, 96, 72, RB_WINDOW_SHOWN);
+  T(event_win != 0, "event test window create failed");
+  if (event_win) {
+    const uintptr_t guest_hwnd = 0x1234;
+    T(rb_window_attach_guest_hwnd(event_win, guest_hwnd) == RB_OK,
+      "guest HWND attach failed");
+    drain_event_queue();
+
+    SDL_Event event;
+    memset(&event, 0, sizeof(event));
+    event.type = SDL_WINDOWEVENT;
+    event.window.windowID = lookup_window_state(event_win)->sdl_window_id;
+
+    event.window.event = SDL_WINDOWEVENT_EXPOSED;
+    T(rb_event_translate_sdl_event(&event, &msg) == 1,
+      "SDL expose did not translate");
+    T(msg.hwnd == guest_hwnd && msg.message == WM_PAINT,
+      "SDL expose did not translate to WM_PAINT");
+
+    event.window.event = SDL_WINDOWEVENT_RESIZED;
+    event.window.data1 = 320;
+    event.window.data2 = 200;
+    T(rb_event_translate_sdl_event(&event, &msg) == 1,
+      "SDL resize did not translate");
+    T(msg.hwnd == guest_hwnd && msg.message == WM_SIZE,
+      "SDL resize did not translate to WM_SIZE");
+    T((msg.lParam & 0xFFFF) == 320 && ((msg.lParam >> 16) & 0xFFFF) == 200,
+      "WM_SIZE dimensions were packed incorrectly");
+
+    event.window.event = SDL_WINDOWEVENT_MOVED;
+    event.window.data1 = 21;
+    event.window.data2 = 34;
+    T(rb_event_translate_sdl_event(&event, &msg) == 1,
+      "SDL move did not translate");
+    T(msg.hwnd == guest_hwnd && msg.message == WM_MOVE,
+      "SDL move did not translate to WM_MOVE");
+    T((msg.lParam & 0xFFFF) == 21 && ((msg.lParam >> 16) & 0xFFFF) == 34,
+      "WM_MOVE coordinates were packed incorrectly");
+
+    T(rb_window_destroy(event_win) == RB_OK, "event test window destroy failed");
+  }
   printf("OK\n");
 
   /* ---- Audio (may fail headless) ---- */

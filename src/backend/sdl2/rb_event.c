@@ -143,6 +143,7 @@ static uintptr_t rb_event_resolve_hwnd_from_native_window(uintptr_t native_windo
 #define WM_CREATE         0x0001
 #define WM_MOVE           0x0003
 #define WM_SIZE           0x0005
+#define WM_PAINT          0x000F
 #define WM_CLOSE          0x0010
 #define WM_QUIT           0x0012
 #define WM_KEYDOWN        0x0100
@@ -229,28 +230,6 @@ static uintptr_t rb_sdl_peep_event_call(void *arg)
 static uintptr_t rb_sdl_push_event_call(void *arg)
 {
     return (uintptr_t)SDL_PushEvent((SDL_Event *)arg);
-}
-
-static uintptr_t rb_sdl_repaint_window_black_call(void *arg)
-{
-    uint32_t window_id = *(uint32_t *)arg;
-    SDL_Window *window = SDL_GetWindowFromID(window_id);
-    if (!window)
-        return 0;
-
-    SDL_Surface *surface = SDL_GetWindowSurface(window);
-    if (!surface)
-        return 0;
-
-    uint32_t color = SDL_MapRGB(surface->format, 0, 0, 0);
-    SDL_FillRect(surface, NULL, color);
-    SDL_UpdateWindowSurface(window);
-    return 1;
-}
-
-static void repaint_active_window_black(uint32_t window_id)
-{
-    rb_call_on_host_stack(rb_sdl_repaint_window_black_call, &window_id);
 }
 
 static void rb_event_begin_shutdown(void)
@@ -419,7 +398,7 @@ static uintptr_t rb_event_get_window_hwnd(SDL_Event *sdl)
 /* ---- translate_sdl_event ----
  * Returns 1 on successful translation, 0 for unknown/untranslatable events. */
 
-static int translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
+int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
 {
     uintptr_t event_hwnd = rb_event_get_window_hwnd(sdl);
 
@@ -557,13 +536,28 @@ static int translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
             return 0;
         switch (sdl->window.event) {
         case SDL_WINDOWEVENT_EXPOSED:
+            msg->message = WM_PAINT;
+            msg->wParam = 0;
+            msg->lParam = 0;
+            msg->time = (uint32_t)sdl->window.timestamp;
+            break;
+
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_RESIZED:
-            repaint_active_window_black(sdl->window.windowID);
-            return 0;
+            msg->message = WM_SIZE;
+            msg->wParam = 0;
+            msg->lParam = (int32_t)((sdl->window.data1 & 0xFFFF) |
+                                    ((sdl->window.data2 & 0xFFFF) << 16));
+            msg->time = (uint32_t)sdl->window.timestamp;
+            break;
 
         case SDL_WINDOWEVENT_MOVED:
-            return 0;
+            msg->message = WM_MOVE;
+            msg->wParam = 0;
+            msg->lParam = (int32_t)((sdl->window.data1 & 0xFFFF) |
+                                    ((sdl->window.data2 & 0xFFFF) << 16));
+            msg->time = (uint32_t)sdl->window.timestamp;
+            break;
 
         case SDL_WINDOWEVENT_CLOSE:
             msg->message = WM_CLOSE;
@@ -651,7 +645,7 @@ int rb_event_wait(rb_msg_t *out_msg)
 
         int wait_ret = (int)rb_call_on_host_stack(rb_sdl_wait_event_call, &sdl_ev);
         if (wait_ret) {
-            if (translate_sdl_event(&sdl_ev, out_msg)) {
+            if (rb_event_translate_sdl_event(&sdl_ev, out_msg)) {
                 return (out_msg->message == WM_QUIT) ? 0 : 1;
             }
             /* Unknown event — discard and keep waiting */
@@ -674,7 +668,7 @@ int rb_event_peek(rb_msg_t *out_msg)
     int ret = (int)rb_call_on_host_stack(rb_sdl_peep_event_call, &sdl_ev);
 
     if (ret > 0) {
-        if (translate_sdl_event(&sdl_ev, out_msg)) {
+        if (rb_event_translate_sdl_event(&sdl_ev, out_msg)) {
             return 1;
         }
         /* Event was consumed but untranslatable — report empty */
@@ -758,16 +752,22 @@ int rb_event_push(rb_msg_t *msg)
         sdl_ev.window.type      = SDL_WINDOWEVENT;
         sdl_ev.window.windowID  = rb_event_get_sdl_window_id(msg->hwnd);
         sdl_ev.window.event     = SDL_WINDOWEVENT_RESIZED;
-        sdl_ev.window.data1     = msg->wParam;
-        sdl_ev.window.data2     = (uint32_t)msg->lParam;
+        sdl_ev.window.data1     = (int16_t)(msg->lParam & 0xFFFF);
+        sdl_ev.window.data2     = (int16_t)((msg->lParam >> 16) & 0xFFFF);
         break;
 
     case WM_MOVE:
         sdl_ev.window.type      = SDL_WINDOWEVENT;
         sdl_ev.window.windowID  = rb_event_get_sdl_window_id(msg->hwnd);
         sdl_ev.window.event     = SDL_WINDOWEVENT_MOVED;
-        sdl_ev.window.data1     = msg->wParam;
-        sdl_ev.window.data2     = (uint32_t)msg->lParam;
+        sdl_ev.window.data1     = (int16_t)(msg->lParam & 0xFFFF);
+        sdl_ev.window.data2     = (int16_t)((msg->lParam >> 16) & 0xFFFF);
+        break;
+
+    case WM_PAINT:
+        sdl_ev.window.type      = SDL_WINDOWEVENT;
+        sdl_ev.window.windowID  = rb_event_get_sdl_window_id(msg->hwnd);
+        sdl_ev.window.event     = SDL_WINDOWEVENT_EXPOSED;
         break;
 
     case WM_CLOSE:

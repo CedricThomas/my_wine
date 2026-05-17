@@ -116,6 +116,8 @@ int main(void)
         }
 
         T(DestroyWindow(hwnd) == TRUE, "DestroyWindow failed");
+        T(GetActiveWindow() == hwnd2, "GetActiveWindow did not fall back to the remaining window");
+        T(GetFocus() == hwnd2, "GetFocus did not fall back to the remaining window");
         T(DestroyWindow(hwnd2) == TRUE, "DestroyWindow on second window failed");
         T(g_destroy_messages == 2, "WndProc did not receive exactly one WM_DESTROY per window");
         T(GetActiveWindow() == 0, "GetActiveWindow was not cleared on destroy");

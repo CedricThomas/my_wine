@@ -93,6 +93,8 @@ typedef struct rb_cursor {
     SDL_Cursor *cursor;
 } rb_cursor;
 
+int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg);
+
 /*
  * Guest-facing USER32 stubs enter the SDL backend with GS (64-bit) / FS (32-bit)
  * pointing at the emulated TEB.  SDL/glibc expect the host selector, so restore

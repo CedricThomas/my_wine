@@ -113,6 +113,29 @@ static int translated_queue_pop(rb_msg_t *msg)
                      &g_translated_queue_head, &g_translated_queue_count, msg);
 }
 
+static int user32_synthesize_quit_message(int remove, rb_msg_t *msg)
+{
+    if (!msg)
+        return 0;
+
+    if (g_user32_window_create_attempted && g_user32_live_windows == 0) {
+        user32_memset(msg, 0, sizeof(*msg));
+        msg->message = WM_QUIT;
+        return 1;
+    }
+
+    if (g_quit_pending) {
+        user32_memset(msg, 0, sizeof(*msg));
+        msg->message = WM_QUIT;
+        msg->wParam = (WPARAM)g_quit_exit_code;
+        if (remove)
+            g_quit_pending = 0;
+        return 1;
+    }
+
+    return 0;
+}
+
 /* ── Helper: copy an rb_msg_t into an MSG ──────────────────── */
 static void copy_rb_msg_to_MSG(const rb_msg_t *src, MSG *dst)
 {
@@ -185,21 +208,12 @@ BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
     if (!lpMsg)
         return FALSE;
 
-    if (g_user32_window_create_attempted && g_user32_live_windows == 0) {
-        user32_memset(lpMsg, 0, sizeof(*lpMsg));
-        lpMsg->message = WM_QUIT;
-        return 0;
-    }
-
-    if (g_quit_pending) {
-        g_quit_pending = 0;
-        user32_memset(lpMsg, 0, sizeof(*lpMsg));
-        lpMsg->message = WM_QUIT;
-        lpMsg->wParam = (WPARAM)g_quit_exit_code;
-        return 0;
-    }
-
     rb_msg_t rb;
+    if (user32_synthesize_quit_message(1, &rb)) {
+        copy_rb_msg_to_MSG(&rb, lpMsg);
+        return 0;
+    }
+
     if (!fetch_translated_message(1, 1, &rb))
         return 0;
 
@@ -229,15 +243,16 @@ BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
         return FALSE;
 
     rb_msg_t rb;
+    if (user32_synthesize_quit_message((wRemoveMsg & 0x0001) != 0, &rb)) {
+        copy_rb_msg_to_MSG(&rb, lpMsg);
+        return TRUE;
+    }
+
     int remove = (wRemoveMsg & 0x0001) != 0;
     if (!fetch_translated_message(0, remove, &rb))
         return 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);
-
-    /* WM_QUIT returns 0 from PeekMessageA (matching Windows behavior) */
-    if (lpMsg->message == WM_QUIT)
-        return 0;
 
     /* Always return 1 when a message is available */
     return 1;

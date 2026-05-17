@@ -142,6 +142,32 @@ static user32_class_entry *get_class_entry(int idx)
     return &g_class_registry[idx];
 }
 
+static HWND user32_find_replacement_window(HWND exclude)
+{
+    uint32_t handle;
+
+    for (handle = 1; handle <= HANDLE_TABLE_SIZE; handle++) {
+        if ((HWND)(uintptr_t)handle == exclude)
+            continue;
+        if (wine_handle_get_type(handle) == HANDLE_TYPE_HWIN &&
+            wine_handle_get(handle) != NULL)
+            return (HWND)(uintptr_t)handle;
+    }
+
+    return 0;
+}
+
+static void user32_update_window_ownership_after_destroy(HWND destroyed_hwnd)
+{
+    HWND replacement = user32_find_replacement_window(destroyed_hwnd);
+
+    if (g_user32_active_window == destroyed_hwnd)
+        g_user32_active_window = replacement;
+    if (g_user32_focus_window == destroyed_hwnd)
+        g_user32_focus_window = replacement;
+    rb_event_set_active_window((uintptr_t)user32_get_active_window());
+}
+
 static int ensure_class_capacity(int needed_count)
 {
     user32_class_entry *new_registry;
@@ -235,11 +261,10 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
                      HWND hWndParent, HMENU hMenu,
                      HINSTANCE hInstance, void *lpParam)
 {
+    CREATESTRUCTA create_struct;
+    LRESULT create_result;
+
     (void)dwExStyle;
-    (void)hWndParent;
-    (void)hMenu;
-    (void)hInstance;
-    (void)lpParam;
 
     g_user32_window_create_attempted = 1;
 
@@ -261,10 +286,10 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     wine_window_entry *entry = user32_alloc(sizeof(*entry));
     if (!entry)
         return FORCE_HANDLE_RETURN(0, HWND);
+    user32_memset(entry, 0, sizeof(*entry));
 
     entry->wnd_proc = wc->lpfnWndProc;
     entry->style = dwStyle;
-    entry->destroy_in_progress = false;
     user32_strncpy(entry->title, lpWindowName ? lpWindowName : "", sizeof(entry->title) - 1);
     entry->title[sizeof(entry->title) - 1] = '\0';
 
@@ -302,6 +327,35 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
         user32_free(entry);
         return FORCE_HANDLE_RETURN(0, HWND);
     }
+
+    user32_memset(&create_struct, 0, sizeof(create_struct));
+    create_struct.lpCreateParams = lpParam;
+    create_struct.hInstance = hInstance;
+    create_struct.hMenu = hMenu;
+    create_struct.hwndParent = hWndParent;
+    create_struct.cy = ph;
+    create_struct.cx = pw;
+    create_struct.y = py;
+    create_struct.x = px;
+    create_struct.style = (LONG)dwStyle;
+    create_struct.lpszName = lpWindowName;
+    create_struct.lpszClass = wc->lpszClassName;
+    create_struct.dwExStyle = dwExStyle;
+
+    create_result = 0;
+    if (entry->wnd_proc) {
+        create_result = user32_call_wndproc((WNDPROC)entry->wnd_proc,
+                                            (HWND)handle, WM_CREATE, 0,
+                                            (LPARAM)(intptr_t)&create_struct);
+    }
+    if (create_result == (LRESULT)-1) {
+        g_user32_live_windows--;
+        wine_handle_free((uint32_t)handle);
+        rb_window_destroy(rb_win);
+        user32_free(entry);
+        return FORCE_HANDLE_RETURN(0, HWND);
+    }
+
     user32_set_active_window((HWND)handle);
     user32_set_focus_window((HWND)handle);
     rb_event_set_active_window(handle);
@@ -334,11 +388,9 @@ BOOL DestroyWindow(HWND hwnd)
     rb_window_destroy(entry->sdl_window);
     wine_handle_free((uint32_t)hwnd);
     user32_free(entry);
-    user32_set_active_window(0);
-    rb_event_set_active_window(0);
-    user32_set_focus_window(0);
     if (g_user32_live_windows > 0)
         g_user32_live_windows--;
+    user32_update_window_ownership_after_destroy(hwnd);
     DEBUG_WRITE_ERR("user32: DestroyWindow end\n",
                     sizeof("user32: DestroyWindow end\n") - 1);
     return TRUE;

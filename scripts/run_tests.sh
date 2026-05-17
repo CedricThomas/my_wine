@@ -59,6 +59,27 @@ run_test() {
 	fi
 }
 
+run_test_env() {
+	local name="$1"
+	shift
+	local output
+	output=$(env "$@" timeout 5 ./"$BUILDDIR"/"$name" 2>&1 | tr -d '\0') || true
+
+	if echo "$output" | grep -Eq "Failed: 0|PASS:"; then
+		PASS=$((PASS + 1))
+		if [ "$DEBUG" = "1" ]; then
+			echo "$output"
+		fi
+		echo "PASS  $name"
+	else
+		FAIL=$((FAIL + 1))
+		if [ "$DEBUG" = "1" ]; then
+			echo "$output"
+		fi
+		echo "FAIL  $name"
+	fi
+}
+
 # Run test_teb_peb which may crash due to FSGSBASE unavailability.
 # Distinguish: no output (crash) → SKIP, Failed: 0 → PASS, Failed: N→ FAIL.
 run_test_teb_peb() {
@@ -124,13 +145,13 @@ run_test test_syscall_safe_utils
 run_test test_entry_symbols
 
 # test_sdl2_backend
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy run_test test_sdl2_backend
+run_test_env test_sdl2_backend SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
 
 # test_user32_handle_ownership
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy run_test test_user32_handle_ownership
+run_test_env test_user32_handle_ownership SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
 
 # test_user32_message_dispatch
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy run_test test_user32_message_dispatch
+run_test_env test_user32_message_dispatch SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
 
 # --- Summary ---
 TOTAL=$((PASS + FAIL + SKIP))

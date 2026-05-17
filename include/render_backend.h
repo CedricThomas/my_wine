@@ -97,8 +97,8 @@ int rb_window_warp_mouse(rb_window_t win, int x, int y);
 typedef struct {
     uintptr_t hwnd;
     uint32_t  message;   /* WM_* constant */
-    uint32_t  wParam;
-    int32_t   lParam;
+    uintptr_t wParam;
+    intptr_t  lParam;
     uint32_t  time;
     int32_t   pt_x, pt_y;
 } rb_msg_t;
