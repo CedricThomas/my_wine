@@ -1,7 +1,4 @@
 type=graphical
-exit=0
-graphical_exit=0
-timeout=10
 window_title=CloseWindow Sample
 window_width=320
 window_height=200

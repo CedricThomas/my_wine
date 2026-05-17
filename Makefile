@@ -340,10 +340,7 @@ SAMPLE ?=
 samples:
 	@bash scripts/samples.sh build $(SAMPLE)
 
-inspect-graphical-samples-scenarios: all
-	@bash scripts/graphical_samples.sh inspect $(SAMPLE)
-
-run-samples-scenarios: all
+run-samples-scenarios: my_wine my_wine64 my_wine32
 	@bash scripts/run_samples.sh $(SAMPLE)
 graphical-samples:
 	@bash scripts/graphical_samples.sh build $(SAMPLE)
@@ -375,4 +372,4 @@ re: fclean
 -include $(wildcard $(BACKEND_OBJS:.o=.d))
 -include $(wildcard $(MY_WINE32_OBJS:.o=.d))
 
-.PHONY: all clean fclean re tests run-tests debug-tests inspect-graphical-samples-scenarios samples run-samples-scenarios graphical-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples-scenarios graphical-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)
