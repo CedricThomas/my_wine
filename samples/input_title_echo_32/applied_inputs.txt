@@ -1,0 +1,14 @@
+# Verify key events by observing deterministic window title updates.
+focus
+sleep 100
+key w
+key i
+key n
+key e
+expect_title Input Echo 32: WINE
+key BackSpace
+expect_title Input Echo 32: WIN
+key 3
+key 2
+expect_title Input Echo 32: WIN32
+altf4

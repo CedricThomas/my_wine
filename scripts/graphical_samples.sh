@@ -12,7 +12,7 @@
 #   scripts/graphical_samples.sh run [NAME]
 # Per-sample input script: samples/<name>/applied_inputs.txt
 #   One command per line: sleep MS, focus, key KEY, type TEXT,
-#   click X Y, mousemove X Y, altf4, sigint, closewindow
+#   click X Y, mousemove X Y, expect_title TEXT, altf4, sigint, closewindow
 
 set -euo pipefail
 
@@ -220,6 +220,23 @@ stop_graphical_session() {
     GRAPHICAL_XVFB_PID=""
 }
 
+wait_for_window_title() {
+    local win_id="$1"
+    local expected="$2"
+    local timeout_sec="${3:-2}"
+    local deadline current_title
+
+    deadline=$((SECONDS + timeout_sec))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        current_title="$(xdotool getwindowname "$win_id" 2>/dev/null || true)"
+        [ "$current_title" = "$expected" ] && return 0
+        sleep 0.1
+    done
+
+    current_title="$(xdotool getwindowname "$win_id" 2>/dev/null || true)"
+    [ "$current_title" = "$expected" ]
+}
+
 # ── Input script ────────────────────────────────────────────────────
 
 apply_graphical_inputs() {
@@ -277,6 +294,13 @@ apply_graphical_inputs() {
                     { echo "ERR: $inputs_file:$line_no ${command} expects: ${command} X Y"; return 1; }
                 xdotool mousemove --window "$win_id" "$x" "$y"
                 [ "$command" = "click" ] && xdotool click 1
+                ;;
+            expect_title)
+                [ -n "$rest" ] || { echo "ERR: $inputs_file:$line_no expect_title expects window text"; return 1; }
+                if ! wait_for_window_title "$win_id" "$rest" 2; then
+                    echo "ERR: $inputs_file:$line_no expected title '$rest', got '$(xdotool getwindowname "$win_id" 2>/dev/null || true)'"
+                    return 1
+                fi
                 ;;
             status) ;;
             altf4)
