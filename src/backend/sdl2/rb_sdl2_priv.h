@@ -227,7 +227,7 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
         "pop %%ebp\n\t"
         : "=a"(ret), [old_esp] "=&r"(old_esp)
         : [new_esp] "r"(new_esp), [fn] "r"(fn), [arg] "r"(arg)
-        : "memory", "cc"
+        : "ecx", "edx", "memory", "cc"
     );
 
     rb_host_context_leave(saved_fs);
@@ -378,6 +378,18 @@ static inline int vk_to_scancode(int vk)
     return g_vk_to_scancode[idx] ? g_vk_to_scancode[idx] : -1;
 }
 
+static inline int scancode_to_vk(SDL_Scancode scancode)
+{
+    int vk;
+
+    for (vk = 0; vk < 256; vk++) {
+        if (g_vk_to_scancode[vk] == (int)scancode)
+            return vk;
+    }
+
+    return -1;
+}
+
 /* ---- Event system helpers ---- */
 void rb_event_set_active_window(uintptr_t hwnd);
 uintptr_t rb_event_get_active_window(void);
@@ -385,5 +397,6 @@ int rb_event_bind_window(uintptr_t hwnd, rb_window_t win);
 void rb_event_unbind_window(uintptr_t hwnd);
 uint32_t rb_event_get_sdl_window_id(uintptr_t hwnd);
 uintptr_t rb_x11_consume_bad_window(void);
+int rb_runtime_consume_shutdown_request(void);
 
 #endif /* RB_SDL2_PRIV_H */

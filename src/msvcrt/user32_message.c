@@ -14,10 +14,10 @@
  * available when the SDL2 backend is linked.
  */
 
-#include <string.h>
 #include <stdint.h>
 
 #include "user32_priv.h"
+#include "include/debug.h"
 #include "../include/render_backend.h"
 
 /* Forward declarations for cross-referenced stubs within this file */
@@ -27,43 +27,90 @@ KERNEL32_STUB BOOL DestroyWindow(HWND hwnd);
 static int g_quit_pending = 0;
 static int g_quit_exit_code = 0;
 #define USER32_TRANSLATED_QUEUE_CAPACITY 64
+#define USER32_POSTED_QUEUE_CAPACITY 64
 
 static rb_msg_t g_translated_queue[USER32_TRANSLATED_QUEUE_CAPACITY];
 static size_t g_translated_queue_head = 0;
 static size_t g_translated_queue_count = 0;
+static rb_msg_t g_posted_queue[USER32_POSTED_QUEUE_CAPACITY];
+static size_t g_posted_queue_head = 0;
+static size_t g_posted_queue_count = 0;
 
-static int translated_queue_push(const rb_msg_t *msg)
+static int queue_push(rb_msg_t *queue, size_t capacity,
+                      size_t *head, size_t *count,
+                      const rb_msg_t *msg)
 {
     size_t tail;
 
-    if (!msg || g_translated_queue_count >= USER32_TRANSLATED_QUEUE_CAPACITY)
+    if (!queue || !head || !count || !msg || *count >= capacity)
         return 0;
 
-    tail = (g_translated_queue_head + g_translated_queue_count) %
-           USER32_TRANSLATED_QUEUE_CAPACITY;
-    g_translated_queue[tail] = *msg;
-    g_translated_queue_count++;
+    tail = (*head + *count) % capacity;
+    queue[tail] = *msg;
+    (*count)++;
     return 1;
+}
+
+static int queue_peek(const rb_msg_t *queue, size_t capacity,
+                      size_t head, size_t count,
+                      rb_msg_t *msg)
+{
+    (void)capacity;
+
+    if (!queue || !msg || count == 0)
+        return 0;
+
+    *msg = queue[head];
+    return 1;
+}
+
+static int queue_pop(const rb_msg_t *queue, size_t capacity,
+                     size_t *head, size_t *count,
+                     rb_msg_t *msg)
+{
+    if (!queue || !head || !count ||
+        !queue_peek(queue, capacity, *head, *count, msg))
+        return 0;
+
+    *head = (*head + 1) % capacity;
+    (*count)--;
+    return 1;
+}
+
+static int posted_queue_push(const rb_msg_t *msg)
+{
+    return queue_push(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
+                      &g_posted_queue_head, &g_posted_queue_count, msg);
+}
+
+static int posted_queue_peek(rb_msg_t *msg)
+{
+    return queue_peek(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
+                      g_posted_queue_head, g_posted_queue_count, msg);
+}
+
+static int posted_queue_pop(rb_msg_t *msg)
+{
+    return queue_pop(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
+                     &g_posted_queue_head, &g_posted_queue_count, msg);
+}
+
+static int translated_queue_push(const rb_msg_t *msg)
+{
+    return queue_push(g_translated_queue, USER32_TRANSLATED_QUEUE_CAPACITY,
+                      &g_translated_queue_head, &g_translated_queue_count, msg);
 }
 
 static int translated_queue_peek(rb_msg_t *msg)
 {
-    if (!msg || g_translated_queue_count == 0)
-        return 0;
-
-    *msg = g_translated_queue[g_translated_queue_head];
-    return 1;
+    return queue_peek(g_translated_queue, USER32_TRANSLATED_QUEUE_CAPACITY,
+                      g_translated_queue_head, g_translated_queue_count, msg);
 }
 
 static int translated_queue_pop(rb_msg_t *msg)
 {
-    if (!translated_queue_peek(msg))
-        return 0;
-
-    g_translated_queue_head = (g_translated_queue_head + 1) %
-                              USER32_TRANSLATED_QUEUE_CAPACITY;
-    g_translated_queue_count--;
-    return 1;
+    return queue_pop(g_translated_queue, USER32_TRANSLATED_QUEUE_CAPACITY,
+                     &g_translated_queue_head, &g_translated_queue_count, msg);
 }
 
 /* ── Helper: copy an rb_msg_t into an MSG ──────────────────── */
@@ -86,13 +133,20 @@ static int fetch_translated_message(int blocking, int remove, rb_msg_t *msg)
         return 0;
 
     if (remove) {
+        if (posted_queue_pop(msg))
+            return 1;
+    } else if (posted_queue_peek(msg)) {
+        return 1;
+    }
+
+    if (remove) {
         if (translated_queue_pop(msg))
             return 1;
     } else if (translated_queue_peek(msg)) {
         return 1;
     }
 
-    memset(msg, 0, sizeof(*msg));
+    user32_memset(msg, 0, sizeof(*msg));
     if (blocking) {
         ret = rb_event_wait(msg);
         if (ret < 0 || msg->message == 0)
@@ -132,14 +186,14 @@ BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
         return FALSE;
 
     if (g_user32_window_create_attempted && g_user32_live_windows == 0) {
-        memset(lpMsg, 0, sizeof(*lpMsg));
+        user32_memset(lpMsg, 0, sizeof(*lpMsg));
         lpMsg->message = WM_QUIT;
         return 0;
     }
 
     if (g_quit_pending) {
         g_quit_pending = 0;
-        memset(lpMsg, 0, sizeof(*lpMsg));
+        user32_memset(lpMsg, 0, sizeof(*lpMsg));
         lpMsg->message = WM_QUIT;
         lpMsg->wParam = (WPARAM)g_quit_exit_code;
         return 0;
@@ -213,6 +267,12 @@ LRESULT DispatchMessageA(const MSG *lpMsg)
     if (!lpMsg)
         return 0;
 
+    if (lpMsg->message == WM_CLOSE || lpMsg->message == WM_DESTROY ||
+        lpMsg->message == WM_QUIT || lpMsg->message == WM_SYSCOMMAND) {
+        DEBUG_WRITE_ERR("user32: DispatchMessageA close-path\n",
+                        sizeof("user32: DispatchMessageA close-path\n") - 1);
+    }
+
     wine_window_entry *entry = get_window_entry(lpMsg->hwnd);
     if (entry && entry->wnd_proc) {
         return user32_call_wndproc((WNDPROC)entry->wnd_proc, lpMsg->hwnd,
@@ -232,14 +292,13 @@ KERNEL32_STUB
 BOOL PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
     rb_msg_t rb;
-    memset(&rb, 0, sizeof(rb));
+    user32_memset(&rb, 0, sizeof(rb));
     rb.hwnd    = (uintptr_t)hWnd;
     rb.message = Msg;
     rb.wParam  = wParam;
     rb.lParam  = lParam;
 
-    rb_event_push(&rb);
-    return TRUE;
+    return posted_queue_push(&rb) ? TRUE : FALSE;
 }
 
 /* ── 6. PostQuitMessage ───────────────────────────────────── */
@@ -251,15 +310,8 @@ void PostQuitMessage(int nExitCode)
 {
     g_quit_pending = 1;
     g_quit_exit_code = nExitCode;
-
-    rb_msg_t rb;
-    memset(&rb, 0, sizeof(rb));
-    rb.hwnd    = 0;
-    rb.message = WM_QUIT;
-    rb.wParam  = (uint32_t)nExitCode;
-    rb.lParam  = 0;
-
-    rb_event_push(&rb);
+    DEBUG_WRITE_ERR("user32: PostQuitMessage\n",
+                    sizeof("user32: PostQuitMessage\n") - 1);
 }
 
 /* ── 7. SendMessageA ──────────────────────────────────────── */
@@ -288,16 +340,16 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
             return 0;
         if (!buf)
             return 0;
-        strncpy(buf, entry->title, max);
+        user32_strncpy(buf, entry->title, (size_t)max);
         buf[max - 1] = '\0';
-        return (LRESULT)strlen(buf);
+        return (LRESULT)user32_strlen(buf);
     }
 
     case WM_SETTEXT: {
         const char *str = (const char *)(intptr_t)lParam;
         if (!entry)
             return 0;
-        strncpy(entry->title, str ? str : "", sizeof(entry->title) - 1);
+        user32_strncpy(entry->title, str ? str : "", sizeof(entry->title) - 1);
         entry->title[sizeof(entry->title) - 1] = '\0';
         rb_window_set_title(entry->sdl_window, entry->title);
         return (LRESULT)TRUE;
@@ -306,7 +358,7 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
     case WM_GETMINMAXINFO: {
         MINMAXINFO *info = (MINMAXINFO *)(intptr_t)lParam;
         if (info) {
-            memset(info, 0, sizeof(*info));
+            user32_memset(info, 0, sizeof(*info));
             info->ptReserved.x       = 0;
             info->ptReserved.y       = 0;
             info->ptMaxSize.x        = 800;
@@ -337,10 +389,25 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 KERNEL32_STUB
 LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
-    (void)wParam;
-    (void)lParam;
+    const WPARAM sc_mask = 0xFFF0u;
+    const WPARAM sc_close = 0xF060u;
+    const LPARAM alt_context = (LPARAM)(1u << 29);
+
     if (Msg == WM_CLOSE) {
+        DEBUG_WRITE_ERR("user32: DefWindowProcA WM_CLOSE\n",
+                        sizeof("user32: DefWindowProcA WM_CLOSE\n") - 1);
         DestroyWindow(hWnd);
+        return 0;
+    }
+    if (Msg == WM_SYSCOMMAND && (wParam & sc_mask) == sc_close) {
+        DEBUG_WRITE_ERR("user32: DefWindowProcA SC_CLOSE\n",
+                        sizeof("user32: DefWindowProcA SC_CLOSE\n") - 1);
+        DestroyWindow(hWnd);
+        return 0;
+    }
+    if (Msg == WM_SYSKEYDOWN && wParam == VK_F4 &&
+        (lParam & alt_context) != 0) {
+        return DefWindowProcA(hWnd, WM_SYSCOMMAND, sc_close, lParam);
     }
     return 0;
 }

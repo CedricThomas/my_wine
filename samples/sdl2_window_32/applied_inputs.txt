@@ -4,4 +4,4 @@
 status initial
 focus
 sleep 100
-altf4
+sigint

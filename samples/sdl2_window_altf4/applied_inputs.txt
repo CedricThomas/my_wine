@@ -1,7 +1,7 @@
 # Replayed by scripts/graphical_samples.sh after the window is visible.
 # Commands: sleep MS, focus, key KEY, type TEXT, click X Y, mousemove X Y,
-# status LABEL, altf4.
+# status LABEL, altf4, sigint, closewindow.
 status initial
 focus
 sleep 100
-sigint
+altf4

@@ -6,12 +6,14 @@
  */
 
 #include "rb_sdl2_priv.h"
+#include "include/debug.h"
 #include <stdlib.h>
 #include <string.h>
 
 /* ---- Active window tracking ---- */
 
 static uintptr_t g_active_window = 0;
+static int g_alt_key_down = 0;
 #define RB_MAX_WINDOW_ROUTES 64
 
 typedef struct {
@@ -157,8 +159,51 @@ static uintptr_t rb_event_resolve_hwnd_from_native_window(uintptr_t native_windo
 #define WM_RBUTTONUP      0x0205
 #define WM_RBUTTONDBLCLK  0x0206
 
+#define VK_BACK           0x08
+#define VK_TAB            0x09
+#define VK_RETURN         0x0D
+#define VK_SHIFT          0x10
+#define VK_CONTROL        0x11
+#define VK_MENU           0x12
+#define VK_ESCAPE         0x1B
+#define VK_SPACE          0x20
+#define VK_PRIOR          0x21
+#define VK_NEXT           0x22
+#define VK_END            0x23
+#define VK_HOME           0x24
+#define VK_LEFT           0x25
+#define VK_UP             0x26
+#define VK_RIGHT          0x27
+#define VK_DOWN           0x28
+#define VK_INSERT         0x2D
+#define VK_DELETE         0x2E
+#define VK_F1             0x70
+#define VK_F2             0x71
+#define VK_F3             0x72
+#define VK_F4             0x73
+#define VK_F5             0x74
+#define VK_F6             0x75
+#define VK_F7             0x76
+#define VK_F8             0x77
+#define VK_F9             0x78
+#define VK_F10            0x79
+#define VK_F11            0x7A
+#define VK_F12            0x7B
+#define VK_LSHIFT         0xA0
+#define VK_RSHIFT         0xA1
+#define VK_LCONTROL       0xA2
+#define VK_RCONTROL       0xA3
+#define VK_LMENU          0xA4
+#define VK_RMENU          0xA5
+
 #define SC_MINIMIZE       0xF020
+#define SC_CLOSE          0xF060
 #define SC_RESTORE        0xF120
+
+static uintptr_t g_shutdown_hwnds[RB_MAX_WINDOW_ROUTES];
+static size_t g_shutdown_hwnd_count = 0;
+static size_t g_shutdown_hwnd_head = 0;
+static int g_shutdown_force_quit_pending = 0;
 
 /* ---- SDL 2.0.18+ compatibility: 5-arg SDL_PeepEvents ---- */
 
@@ -208,6 +253,135 @@ static void repaint_active_window_black(uint32_t window_id)
     rb_call_on_host_stack(rb_sdl_repaint_window_black_call, &window_id);
 }
 
+static void rb_event_begin_shutdown(void)
+{
+    size_t count = 0;
+    int idx;
+
+    g_shutdown_hwnd_head = 0;
+    g_shutdown_hwnd_count = 0;
+    g_shutdown_force_quit_pending = 1;
+
+    if (g_active_window != 0 &&
+        rb_event_find_route_by_hwnd(g_active_window) >= 0) {
+        g_shutdown_hwnds[count++] = g_active_window;
+    }
+
+    for (idx = 0; idx < RB_MAX_WINDOW_ROUTES; idx++) {
+        uintptr_t hwnd = g_window_routes[idx].hwnd;
+
+        if (hwnd == 0 || hwnd == g_active_window)
+            continue;
+        g_shutdown_hwnds[count++] = hwnd;
+    }
+
+    g_shutdown_hwnd_count = count;
+    DEBUG_LEVEL(1, "rb_event: begin shutdown queued=%lu active=0x%lx",
+                (unsigned long)g_shutdown_hwnd_count,
+                (unsigned long)g_active_window);
+}
+
+static int rb_event_translate_shutdown(rb_msg_t *out_msg)
+{
+    while (g_shutdown_hwnd_head < g_shutdown_hwnd_count) {
+        uintptr_t hwnd = g_shutdown_hwnds[g_shutdown_hwnd_head++];
+
+        if (hwnd == 0 || rb_event_find_route_by_hwnd(hwnd) < 0)
+            continue;
+
+        memset(out_msg, 0, sizeof(*out_msg));
+        out_msg->hwnd = hwnd;
+        out_msg->message = WM_CLOSE;
+        DEBUG_LEVEL(1, "rb_event: shutdown emit WM_CLOSE hwnd=0x%lx",
+                    (unsigned long)hwnd);
+        return 1;
+    }
+
+    if (g_shutdown_force_quit_pending) {
+        memset(out_msg, 0, sizeof(*out_msg));
+        out_msg->message = WM_QUIT;
+        g_shutdown_force_quit_pending = 0;
+        DEBUG_LEVEL(1, "rb_event: shutdown emit WM_QUIT");
+        return 1;
+    }
+
+    return 0;
+}
+
+static int rb_keycode_to_vk(SDL_Keycode sym, SDL_Scancode scancode)
+{
+    if (sym >= SDLK_a && sym <= SDLK_z)
+        return 'A' + (int)(sym - SDLK_a);
+    if (sym >= SDLK_0 && sym <= SDLK_9)
+        return '0' + (int)(sym - SDLK_0);
+
+    switch (sym) {
+    case SDLK_BACKSPACE: return VK_BACK;
+    case SDLK_TAB: return VK_TAB;
+    case SDLK_RETURN: return VK_RETURN;
+    case SDLK_ESCAPE: return VK_ESCAPE;
+    case SDLK_SPACE: return VK_SPACE;
+    case SDLK_PAGEUP: return VK_PRIOR;
+    case SDLK_PAGEDOWN: return VK_NEXT;
+    case SDLK_END: return VK_END;
+    case SDLK_HOME: return VK_HOME;
+    case SDLK_LEFT: return VK_LEFT;
+    case SDLK_UP: return VK_UP;
+    case SDLK_RIGHT: return VK_RIGHT;
+    case SDLK_DOWN: return VK_DOWN;
+    case SDLK_INSERT: return VK_INSERT;
+    case SDLK_DELETE: return VK_DELETE;
+    case SDLK_F1: return VK_F1;
+    case SDLK_F2: return VK_F2;
+    case SDLK_F3: return VK_F3;
+    case SDLK_F4: return VK_F4;
+    case SDLK_F5: return VK_F5;
+    case SDLK_F6: return VK_F6;
+    case SDLK_F7: return VK_F7;
+    case SDLK_F8: return VK_F8;
+    case SDLK_F9: return VK_F9;
+    case SDLK_F10: return VK_F10;
+    case SDLK_F11: return VK_F11;
+    case SDLK_F12: return VK_F12;
+    case SDLK_LSHIFT: return VK_LSHIFT;
+    case SDLK_RSHIFT: return VK_RSHIFT;
+    case SDLK_LCTRL: return VK_LCONTROL;
+    case SDLK_RCTRL: return VK_RCONTROL;
+    case SDLK_LALT: return VK_LMENU;
+    case SDLK_RALT: return VK_RMENU;
+    default:
+        break;
+    }
+
+    return scancode_to_vk(scancode);
+}
+
+static int rb_is_system_key_event(const SDL_KeyboardEvent *key)
+{
+    SDL_Keycode sym = key->keysym.sym;
+
+    if (sym == SDLK_LALT || sym == SDLK_RALT)
+        return 1;
+    if (g_alt_key_down)
+        return 1;
+
+    return (key->keysym.mod & KMOD_ALT) != 0;
+}
+
+static uint32_t rb_build_key_lparam(const SDL_KeyboardEvent *key, int is_keyup)
+{
+    uint32_t lparam = 1u | ((uint32_t)key->keysym.scancode << 16);
+
+    if (rb_is_system_key_event(key))
+        lparam |= (1u << 29);
+    if (key->repeat || is_keyup)
+        lparam |= (1u << 30);
+    if (is_keyup)
+        lparam |= (1u << 31);
+
+    return lparam;
+}
+
 static uintptr_t rb_event_get_window_hwnd(SDL_Event *sdl)
 {
     uint32_t window_id = 0;
@@ -254,29 +428,58 @@ static int translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
 
     switch (sdl->type) {
     case SDL_KEYDOWN:
+    {
+        int vk;
         if (!msg->hwnd)
             msg->hwnd = g_active_window;
         if (!msg->hwnd)
             return 0;
-        msg->message = WM_KEYDOWN;
-        msg->wParam  = (uint32_t)sdl->key.keysym.sym;
-        msg->lParam  = (sdl->key.keysym.scancode << 16);
-        if (sdl->key.repeat) {
-            msg->lParam |= (1 << 30); /* repeated */
+        if (sdl->key.keysym.sym == SDLK_LALT || sdl->key.keysym.sym == SDLK_RALT)
+            g_alt_key_down = 1;
+        vk = rb_keycode_to_vk(sdl->key.keysym.sym, sdl->key.keysym.scancode);
+        if (vk < 0)
+            return 0;
+        if (rb_is_system_key_event(&sdl->key) && vk == VK_F4) {
+            msg->message = WM_CLOSE;
+            msg->wParam = 0;
+            msg->lParam = 0;
+            msg->time = (uint32_t)sdl->key.timestamp;
+            DEBUG_WRITE_ERR("rb_event: Alt+F4 -> WM_CLOSE\n",
+                            sizeof("rb_event: Alt+F4 -> WM_CLOSE\n") - 1);
+            DEBUG_LEVEL(1, "rb_event: Alt+F4 -> WM_CLOSE hwnd=0x%lx",
+                        (unsigned long)msg->hwnd);
+            break;
         }
+        msg->message = rb_is_system_key_event(&sdl->key) ? WM_SYSKEYDOWN : WM_KEYDOWN;
+        msg->wParam  = (uint32_t)vk;
+        msg->lParam  = rb_build_key_lparam(&sdl->key, 0);
         msg->time = (uint32_t)sdl->key.timestamp;
         break;
+    }
 
     case SDL_KEYUP:
+    {
+        int vk;
         if (!msg->hwnd)
             msg->hwnd = g_active_window;
         if (!msg->hwnd)
             return 0;
-        msg->message = WM_KEYUP;
-        msg->wParam  = (uint32_t)sdl->key.keysym.sym;
-        msg->lParam  = (sdl->key.keysym.scancode << 16) | (1 << 31); /* released */
+        vk = rb_keycode_to_vk(sdl->key.keysym.sym, sdl->key.keysym.scancode);
+        if (vk < 0)
+            return 0;
+        if (rb_is_system_key_event(&sdl->key) && vk == VK_F4) {
+            if (sdl->key.keysym.sym == SDLK_LALT || sdl->key.keysym.sym == SDLK_RALT)
+                g_alt_key_down = 0;
+            return 0;
+        }
+        msg->message = rb_is_system_key_event(&sdl->key) ? WM_SYSKEYUP : WM_KEYUP;
+        msg->wParam  = (uint32_t)vk;
+        msg->lParam  = rb_build_key_lparam(&sdl->key, 1);
         msg->time    = (uint32_t)sdl->key.timestamp;
+        if (sdl->key.keysym.sym == SDLK_LALT || sdl->key.keysym.sym == SDLK_RALT)
+            g_alt_key_down = 0;
         break;
+    }
 
     case SDL_MOUSEMOTION:
         if (!msg->hwnd)
@@ -347,6 +550,7 @@ static int translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
         if (sdl->window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
             event_hwnd && g_active_window == event_hwnd) {
             g_active_window = 0;
+            g_alt_key_down = 0;
             return 0;
         }
         if (!msg->hwnd)
@@ -366,6 +570,12 @@ static int translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
             msg->wParam  = 0;
             msg->lParam  = 0;
             msg->time    = (uint32_t)sdl->window.timestamp;
+            DEBUG_WRITE_ERR("rb_event: SDL_WINDOWEVENT_CLOSE -> WM_CLOSE\n",
+                            sizeof("rb_event: SDL_WINDOWEVENT_CLOSE -> WM_CLOSE\n") - 1);
+            DEBUG_LEVEL(1,
+                        "rb_event: SDL_WINDOWEVENT_CLOSE -> WM_CLOSE hwnd=0x%lx window_id=%u",
+                        (unsigned long)msg->hwnd,
+                        (unsigned)sdl->window.windowID);
             break;
 
         case SDL_WINDOWEVENT_MINIMIZED:
@@ -419,6 +629,9 @@ static int rb_event_translate_bad_window(rb_msg_t *out_msg)
     memset(out_msg, 0, sizeof(*out_msg));
     out_msg->hwnd = hwnd;
     out_msg->message = WM_CLOSE;
+    DEBUG_LEVEL(1, "rb_event: bad X11 window 0x%lx -> WM_CLOSE hwnd=0x%lx",
+                (unsigned long)native_window_id,
+                (unsigned long)hwnd);
     return 1;
 }
 
@@ -429,6 +642,10 @@ int rb_event_wait(rb_msg_t *out_msg)
     SDL_Event sdl_ev;
 
     for (;;) {
+        if (rb_runtime_consume_shutdown_request())
+            rb_event_begin_shutdown();
+        if (rb_event_translate_shutdown(out_msg))
+            return 1;
         if (rb_event_translate_bad_window(out_msg))
             return 1;
 
@@ -446,6 +663,10 @@ int rb_event_peek(rb_msg_t *out_msg)
 {
     SDL_Event sdl_ev;
 
+    if (rb_runtime_consume_shutdown_request())
+        rb_event_begin_shutdown();
+    if (rb_event_translate_shutdown(out_msg))
+        return 1;
     if (rb_event_translate_bad_window(out_msg)) {
         return 1;
     }

@@ -14,6 +14,10 @@
 static int g_initialized = 0;
 static int (*g_prev_x_error_handler)(Display *, XErrorEvent *) = NULL;
 static uintptr_t g_x11_bad_window_pending = 0;
+static volatile sig_atomic_t g_shutdown_requested = 0;
+static struct sigaction g_prev_sigint_action;
+static struct sigaction g_prev_sigterm_action;
+static int g_signal_handlers_installed = 0;
 
 #define RB_X11_BAD_WINDOW 3
 
@@ -53,6 +57,37 @@ static void rb_install_x11_error_handler(void)
         g_prev_x_error_handler = set_error_handler(rb_x11_error_handler);
 }
 
+static void rb_shutdown_signal_handler(int signum)
+{
+    (void)signum;
+    g_shutdown_requested = 1;
+}
+
+static void rb_install_signal_handlers(void)
+{
+    struct sigaction sa;
+
+    if (g_signal_handlers_installed)
+        return;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = rb_shutdown_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, &g_prev_sigint_action);
+    sigaction(SIGTERM, &sa, &g_prev_sigterm_action);
+    g_signal_handlers_installed = 1;
+}
+
+static void rb_restore_signal_handlers(void)
+{
+    if (!g_signal_handlers_installed)
+        return;
+
+    sigaction(SIGINT, &g_prev_sigint_action, NULL);
+    sigaction(SIGTERM, &g_prev_sigterm_action, NULL);
+    g_signal_handlers_installed = 0;
+}
+
 typedef struct {
     uint32_t flags;
 } rb_sdl_init_args;
@@ -67,8 +102,6 @@ static uintptr_t rb_sdl_init_call(void *arg)
         try_x11_fallback = 1;
 
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
-    signal(SIGINT, SIG_DFL);
-    signal(SIGTERM, SIG_DFL);
     rb_install_x11_error_handler();
     int ret = SDL_Init(a->flags);
     rb_install_x11_error_handler();
@@ -78,8 +111,6 @@ static uintptr_t rb_sdl_init_call(void *arg)
         ret = SDL_Init(a->flags);
         rb_install_x11_error_handler();
     }
-    signal(SIGINT, SIG_DFL);
-    signal(SIGTERM, SIG_DFL);
     return (uintptr_t)ret;
 }
 
@@ -164,6 +195,8 @@ int rb_init(void)
 
     g_audio_buf_count = 0;
     memset(g_audio_buffers, 0, sizeof(g_audio_buffers));
+    g_shutdown_requested = 0;
+    rb_install_signal_handlers();
 
     g_initialized = 1;
     return RB_OK;
@@ -180,7 +213,17 @@ void rb_shutdown(void)
     }
 
     rb_call_on_host_stack(rb_sdl_quit_call, NULL);
+    rb_restore_signal_handlers();
     g_initialized = 0;
+}
+
+int rb_runtime_consume_shutdown_request(void)
+{
+    if (!g_shutdown_requested)
+        return 0;
+
+    g_shutdown_requested = 0;
+    return 1;
 }
 
 void rb_display_get_size(int *out_w, int *out_h)

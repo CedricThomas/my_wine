@@ -22,6 +22,8 @@ RUN dpkg --add-architecture i386 && \
         procps \
         wine64 \
         wine32 \
+        openbox \
+        wmctrl \
         x11-apps \
         x11-utils \
         xauth \

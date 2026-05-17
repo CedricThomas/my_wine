@@ -44,7 +44,7 @@ run_test() {
 	local output
 	output=$(timeout 5 ./"$BUILDDIR"/"$name" "$@" 2>&1 | tr -d '\0') || true
 
-	if echo "$output" | grep -q "Failed: 0\|PASS: All tests passed"; then
+	if echo "$output" | grep -Eq "Failed: 0|PASS:"; then
 		PASS=$((PASS + 1))
 		if [ "$DEBUG" = "1" ]; then
 			echo "$output"

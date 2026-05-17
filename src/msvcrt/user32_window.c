@@ -14,15 +14,44 @@
  */
 
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
 
 #include "user32_priv.h"
+#include "include/debug.h"
 #include "../include/render_backend.h"
 #include <stdio.h>
+#ifdef MY_WINE32
+#include "include/kernel32.h"
+#endif
 
 extern void rb_event_set_active_window(uintptr_t hwnd);
 extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
+
+static void *user32_alloc(size_t size)
+{
+#ifdef MY_WINE32
+    void *heap = GetProcessHeap();
+    if (!heap)
+        return NULL;
+    return HeapAlloc(heap, 0, size);
+#else
+    return malloc(size);
+#endif
+}
+
+static void user32_free(void *ptr)
+{
+#ifdef MY_WINE32
+    void *heap = GetProcessHeap();
+    if (!ptr)
+        return;
+    if (!heap)
+        return;
+    HeapFree(heap, 0, ptr);
+#else
+    free(ptr);
+#endif
+}
 
 /* ── Additional user32 constants not in user32_types.h ──────── */
 
@@ -90,7 +119,7 @@ static int find_class(const char *name)
     int i;
     for (i = 0; i < class_count; i++) {
         if (class_table[i].lpszClassName &&
-            strcmp(class_table[i].lpszClassName, name) == 0) {
+            user32_strcmp(class_table[i].lpszClassName, name) == 0) {
             return i;
         }
     }
@@ -122,7 +151,7 @@ ATOM RegisterClassA(const WNDCLASSA *lpWndClass)
         return (ATOM)(idx + 1);
 
     class_count++;
-    memcpy(&class_table[class_count - 1], lpWndClass, sizeof(WNDCLASSA));
+    user32_memcpy(&class_table[class_count - 1], lpWndClass, sizeof(WNDCLASSA));
     return (ATOM)class_count;
 }
 
@@ -157,14 +186,14 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     const WNDCLASSA *wc = &class_table[cidx];
 
     /* Allocate our wrapper entry */
-    wine_window_entry *entry = malloc(sizeof(*entry));
+    wine_window_entry *entry = user32_alloc(sizeof(*entry));
     if (!entry)
         return FORCE_HANDLE_RETURN(0, HWND);
 
     entry->wnd_proc = wc->lpfnWndProc;
     entry->style = dwStyle;
     entry->destroy_in_progress = false;
-    strncpy(entry->title, lpWindowName ? lpWindowName : "", sizeof(entry->title) - 1);
+    user32_strncpy(entry->title, lpWindowName ? lpWindowName : "", sizeof(entry->title) - 1);
     entry->title[sizeof(entry->title) - 1] = '\0';
 
     /* Resolve CW_USEDEFAULT → centered; -1 for rb to pick auto */
@@ -180,7 +209,7 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
 
     rb_window_t rb_win = rb_window_create(entry->title, px, py, pw, ph, rb_flags);
     if (!rb_win) {
-        free(entry);
+        user32_free(entry);
         return FORCE_HANDLE_RETURN(0, HWND);
     }
 
@@ -190,7 +219,7 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     uint64_t handle = wine_handle_alloc(HANDLE_TYPE_HWIN, entry);
     if (!handle) {
         rb_window_destroy(rb_win);
-        free(entry);
+        user32_free(entry);
         return FORCE_HANDLE_RETURN(0, HWND);
     }
     g_user32_live_windows++;
@@ -198,7 +227,7 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
         g_user32_live_windows--;
         wine_handle_free((uint32_t)handle);
         rb_window_destroy(rb_win);
-        free(entry);
+        user32_free(entry);
         return FORCE_HANDLE_RETURN(0, HWND);
     }
     user32_set_active_window((HWND)handle);
@@ -224,21 +253,22 @@ BOOL DestroyWindow(HWND hwnd)
         return TRUE;
 
     entry->destroy_in_progress = true;
+    DEBUG_WRITE_ERR("user32: DestroyWindow begin\n",
+                    sizeof("user32: DestroyWindow begin\n") - 1);
     if (entry->wnd_proc) {
         user32_call_wndproc((WNDPROC)entry->wnd_proc, hwnd, WM_DESTROY, 0, 0);
     }
 
     rb_window_destroy(entry->sdl_window);
     wine_handle_free((uint32_t)hwnd);
-    free(entry);
-    if (g_user32_active_window == hwnd) {
-        user32_set_active_window(0);
-        rb_event_set_active_window(0);
-    }
-    if (g_user32_focus_window == hwnd)
-        user32_set_focus_window(0);
+    user32_free(entry);
+    user32_set_active_window(0);
+    rb_event_set_active_window(0);
+    user32_set_focus_window(0);
     if (g_user32_live_windows > 0)
         g_user32_live_windows--;
+    DEBUG_WRITE_ERR("user32: DestroyWindow end\n",
+                    sizeof("user32: DestroyWindow end\n") - 1);
     return TRUE;
 }
 
@@ -321,7 +351,7 @@ BOOL SetWindowTextA(HWND hwnd, const char *lpString)
     if (!entry)
         return FALSE;
 
-    strncpy(entry->title, lpString ? lpString : "", sizeof(entry->title) - 1);
+    user32_strncpy(entry->title, lpString ? lpString : "", sizeof(entry->title) - 1);
     entry->title[sizeof(entry->title) - 1] = '\0';
     rb_window_set_title(entry->sdl_window, entry->title);
     return TRUE;

@@ -76,4 +76,84 @@ static inline LRESULT user32_call_wndproc(WNDPROC proc, HWND hwnd, UINT msg,
     return proc(hwnd, msg, wParam, lParam);
 }
 
+static inline size_t user32_strlen(const char *s)
+{
+    size_t len = 0;
+
+    if (!s)
+        return 0;
+
+    while (s[len] != '\0')
+        len++;
+    return len;
+}
+
+static inline int user32_strcmp(const char *a, const char *b)
+{
+    size_t i = 0;
+
+    if (a == b)
+        return 0;
+    if (!a)
+        return -1;
+    if (!b)
+        return 1;
+
+    while (a[i] != '\0' && b[i] != '\0') {
+        if ((unsigned char)a[i] != (unsigned char)b[i])
+            return (unsigned char)a[i] - (unsigned char)b[i];
+        i++;
+    }
+
+    return (unsigned char)a[i] - (unsigned char)b[i];
+}
+
+static inline void *user32_memcpy(void *dst, const void *src, size_t n)
+{
+    size_t i;
+    unsigned char *d = dst;
+    const unsigned char *s = src;
+
+    if (!dst || !src)
+        return dst;
+
+    for (i = 0; i < n; i++)
+        d[i] = s[i];
+    return dst;
+}
+
+static inline void *user32_memset(void *dst, int value, size_t n)
+{
+    size_t i;
+    unsigned char *d = dst;
+
+    if (!dst)
+        return dst;
+
+    for (i = 0; i < n; i++)
+        d[i] = (unsigned char)value;
+    return dst;
+}
+
+static inline char *user32_strncpy(char *dst, const char *src, size_t n)
+{
+    size_t i = 0;
+
+    if (!dst || n == 0)
+        return dst;
+
+    if (!src)
+        src = "";
+
+    while (i < n && src[i] != '\0') {
+        dst[i] = src[i];
+        i++;
+    }
+    while (i < n) {
+        dst[i] = '\0';
+        i++;
+    }
+    return dst;
+}
+
 #endif /* MY_WINE_USER32_PRIV_H */

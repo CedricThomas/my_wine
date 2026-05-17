@@ -30,7 +30,7 @@ real PE such as Doom95 instead of only passing the current smoke samples.
 - `test_sdl2_backend` now includes repeated window create/resize/destroy coverage under `SDL_VIDEODRIVER=dummy`.
 - SDL event routing now binds SDL/native window ids to guest `HWND`s instead of assuming one global active window target.
 - `PeekMessageA(PM_NOREMOVE)` now peeks from an internal translated-message queue, and `test_user32_message_dispatch` covers two-window routing plus repeated peeks before removal.
-- Graphical sample shutdown now stays in the harness boundary: test-only autoquit hooks were removed from the SDL runtime, direct `scripts/samples.sh run <graphical>` dispatches to the Xvfb harness, `altf4` remains the documented scripted close path after a Wine reference check, and `windowclose` was removed from the public harness interface.
+- Graphical sample shutdown now stays in the harness boundary: test-only autoquit hooks were removed from the SDL runtime, direct `scripts/samples.sh run <graphical>` dispatches to the Xvfb harness, `altf4` remains the documented scripted close path after a Wine reference check, and WM-driven `closewindow` remains an experimental harness path rather than a trusted public reference.
 - The remaining graphical sample close-timeout and PE32 crash failures are separate runtime issues; they should be fixed without restoring backend-only test behavior.
 - The PE32 `sdl2_window_32` graphical scenario was re-verified in Docker/Xvfb after fixing the exposed 32-bit callback and FS-restore regressions.
 

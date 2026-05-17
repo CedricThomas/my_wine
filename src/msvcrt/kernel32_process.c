@@ -8,6 +8,8 @@
 KERNEL32_STUB
 void ExitProcess(uint32_t uExitCode)
 {
+    DEBUG_WRITE_ERR("kernel32: ExitProcess\n",
+                    sizeof("kernel32: ExitProcess\n") - 1);
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(NT_SYSCALL_TERMINATE_PROCESS);
     if (thunk == NULL) {

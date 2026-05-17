@@ -6,6 +6,7 @@
  */
 
 #include "rb_sdl2_priv.h"
+#include "include/debug.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -276,6 +277,9 @@ int rb_window_destroy(rb_window_t win)
     rb_window *w = get_window(win);
     if (!w)
         return RB_FAIL;
+
+    DEBUG_WRITE_ERR("rb_window: destroy\n",
+                    sizeof("rb_window: destroy\n") - 1);
 
     /* Clean up flip-chain backbuffer owned by this window */
     if (w->backbuffer)

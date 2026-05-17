@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# graphical_samples.sh — Run graphical sample scenarios under Xvfb.
+# graphical_samples.sh — Run graphical sample scenarios under Xvfb + a WM.
 #
 # Samples are end-to-end scenario checks. Native binaries under tests/ remain
-# unit-style tests; graphical samples add a real X11 display inside Docker so
-# xdotool/xwininfo can inspect and drive windows deterministically.
+# unit-style tests; graphical samples add a real X11 display plus a lightweight
+# window manager inside Docker so xdotool/xwininfo can inspect and drive
+# windows deterministically.
 #
 # Usage:
 #   scripts/graphical_samples.sh list
@@ -27,7 +28,13 @@
 #     mousemove X Y
 #     status LABEL
 #     altf4
+#     sigint
+#     closewindow
 #
+# Notes:
+#   - title matches under a real WM may include both the guest client window and
+#     the WM decoration/frame. For closewindow, prefer the candidate that belongs
+#     to the launched process group and advertises WM_DELETE_WINDOW.
 
 set -euo pipefail
 
@@ -62,6 +69,10 @@ runtime_launcher() {
 
 is_verbose() {
     [ "${GRAPHICAL_VERBOSE:-0}" = "1" ]
+}
+
+graphical_window_manager() {
+    printf '%s' "${GRAPHICAL_WINDOW_MANAGER:-openbox}"
 }
 
 should_validate_geometry() {
@@ -118,7 +129,9 @@ ensure_image() {
         needs_build=1
     elif ! docker run --rm "$IMAGE_NAME" bash -lc '
         command -v Xvfb >/dev/null &&
+        command -v openbox >/dev/null &&
         command -v xdotool >/dev/null &&
+        command -v wmctrl >/dev/null &&
         test -x /usr/bin/wine64-stable &&
         test -x /usr/lib/wine/wine &&
         ldconfig -p | grep -q libSDL2-2.0.so.0 &&
@@ -139,6 +152,9 @@ run_in_container() {
     ensure_image
     docker run --rm \
         -e GRAPHICAL_RUNTIME="$(graphical_runtime)" \
+        -e GRAPHICAL_VERBOSE="${GRAPHICAL_VERBOSE:-0}" \
+        -e GRAPHICAL_WINDOW_MANAGER="$(graphical_window_manager)" \
+        -e MY_WINE_DEBUG_LEVEL="${MY_WINE_DEBUG_LEVEL:-}" \
         -e WINEDEBUG="${WINEDEBUG:--all}" \
         -v "$PROJECT_DIR:/project" \
         -w /project \
@@ -168,6 +184,7 @@ print_status() {
             echo "process=exited"
         fi
         echo "pid=$pid"
+        print_process_snapshot "$label" "$pid"
     fi
     if command -v xdotool >/dev/null 2>&1; then
         local ids
@@ -205,13 +222,128 @@ failure_reason() {
     fi
 }
 
-wait_for_window() {
-    local title="$1"
+wait_for_wm_ready() {
+    local wm="$1"
     local timeout_sec="$2"
     local deadline=$((SECONDS + timeout_sec))
+
     while [ "$SECONDS" -lt "$deadline" ]; do
-        if xdotool search --name "$title" >/dev/null 2>&1; then
-            return 0
+        case "$wm" in
+            openbox)
+                if xprop -root _NET_SUPPORTING_WM_CHECK >/dev/null 2>&1; then
+                    return 0
+                fi
+                ;;
+            *)
+                if xprop -root >/dev/null 2>&1; then
+                    return 0
+                fi
+                ;;
+        esac
+        sleep 0.2
+    done
+    return 1
+}
+
+window_pid() {
+    local win_id="$1"
+    xdotool getwindowpid "$win_id" 2>/dev/null || true
+}
+
+window_has_delete_protocol() {
+    local win_id="$1"
+    xprop -id "$win_id" WM_PROTOCOLS 2>/dev/null | grep -q "WM_DELETE_WINDOW"
+}
+
+pid_in_process_group() {
+    local pgid="$1"
+    local candidate_pid="$2"
+
+    if [ -z "$pgid" ] || [ -z "$candidate_pid" ]; then
+        return 1
+    fi
+
+    ps -o pgid= -p "$candidate_pid" 2>/dev/null |
+        awk -v target="$pgid" 'NR == 1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); exit($0 == target ? 0 : 1) }'
+}
+
+select_window_id() {
+    local ids="$1"
+    local title="${2:-}"
+    local pid="${3:-}"
+    local pgid=""
+    local best_id=""
+    local best_score=-1
+    local id=""
+
+    [ -n "$ids" ] || return 1
+
+    if [ -n "$pid" ]; then
+        pgid="$(process_group_id "$pid")"
+    fi
+
+    while IFS= read -r id; do
+        local score=0
+        local candidate_title=""
+        local candidate_pid=""
+
+        [ -n "$id" ] || continue
+        candidate_title="$(xdotool getwindowname "$id" 2>/dev/null || true)"
+        candidate_pid="$(window_pid "$id")"
+
+        if [ "$candidate_title" = "$title" ]; then
+            score=$((score + 8))
+        fi
+        if [ -n "$pid" ] && [ "$candidate_pid" = "$pid" ]; then
+            score=$((score + 16))
+        elif pid_in_process_group "$pgid" "$candidate_pid"; then
+            score=$((score + 12))
+        fi
+        if window_has_delete_protocol "$id"; then
+            score=$((score + 4))
+        fi
+
+        if [ "$score" -gt "$best_score" ]; then
+            best_id="$id"
+            best_score="$score"
+        fi
+    done <<< "$ids"
+
+    [ -n "$best_id" ] || return 1
+    printf '%s\n' "$best_id"
+}
+
+resolve_window_id() {
+    local title="$1"
+    local pid="${2:-}"
+    local ids=""
+
+    ids="$(xdotool search --all --onlyvisible --name "$title" 2>/dev/null || true)"
+    if [ -z "$ids" ]; then
+        ids="$(xdotool search --all --name "$title" 2>/dev/null || true)"
+    fi
+    select_window_id "$ids" "$title" "$pid"
+}
+
+wait_for_window_id() {
+    local title="$1"
+    local timeout_sec="$2"
+    local pid="${3:-}"
+    local deadline=$((SECONDS + timeout_sec))
+    local ids=""
+    local win_id=""
+
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        ids="$(xdotool search --all --onlyvisible --name "$title" 2>/dev/null || true)"
+        if [ -z "$ids" ]; then
+            ids="$(xdotool search --all --name "$title" 2>/dev/null || true)"
+        fi
+        if [ -n "$ids" ]; then
+            win_id="$(select_window_id "$ids" "$title" "$pid" || true)"
+            if [ -n "$win_id" ]; then
+                printf '%s\n' "$win_id"
+                return 0
+            fi
         fi
         sleep 0.2
     done
@@ -230,13 +362,81 @@ process_is_running() {
     [ -n "$state" ] && [ "$state" != "Z" ]
 }
 
+process_group_id() {
+    local pid="$1"
+    ps -o pgid= -p "$pid" 2>/dev/null |
+        awk 'NR == 1 { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); print }'
+}
+
+print_process_snapshot() {
+    local label="$1"
+    local pid="$2"
+    local pgid
+    pgid="$(process_group_id "$pid")"
+
+    echo "PROCESS_SNAPSHOT_BEGIN $label"
+    echo "tracked_pid=$pid"
+    echo "tracked_state=$(process_state "$pid")"
+    echo "tracked_pgid=${pgid:-unknown}"
+    if [ -n "$pgid" ]; then
+        echo "ps_group<<EOF"
+        ps -eo pid,ppid,pgid,sid,stat,comm,args --sort=pid 2>/dev/null |
+            awk -v target="$pgid" 'NR == 1 || $3 == target { print }'
+        echo "EOF"
+    else
+        echo "ps_pid<<EOF"
+        ps -o pid,ppid,pgid,sid,stat,comm,args -p "$pid" 2>/dev/null || true
+        echo "EOF"
+    fi
+    echo "PROCESS_SNAPSHOT_END $label"
+}
+
+print_window_candidates() {
+    local label="$1"
+    local title="$2"
+    local pid="${3:-}"
+    local ids=""
+    local pgid=""
+    local id=""
+
+    ids="$(xdotool search --all --onlyvisible --name "$title" 2>/dev/null || true)"
+    [ -n "$ids" ] || return 0
+    pgid="$(process_group_id "$pid")"
+
+    echo "WINDOW_CANDIDATES_BEGIN $label"
+    while IFS= read -r id; do
+        local name=""
+        local candidate_pid=""
+        local flags=""
+
+        [ -n "$id" ] || continue
+        name="$(xdotool getwindowname "$id" 2>/dev/null || true)"
+        candidate_pid="$(window_pid "$id")"
+        if [ -n "$pgid" ] && pid_in_process_group "$pgid" "$candidate_pid"; then
+            flags="pgid_match"
+        fi
+        if window_has_delete_protocol "$id"; then
+            flags="${flags:+$flags,}delete_protocol"
+        fi
+        echo "candidate id=$id pid=${candidate_pid:-unknown} flags=${flags:-none} title=$(printf '%s' "$name" | tr '\n' ' ')"
+    done <<< "$ids"
+    echo "WINDOW_CANDIDATES_END $label"
+}
+
 stop_process() {
     local pid="$1"
     local timeout_sec="${2:-2}"
     local deadline=$((SECONDS + timeout_sec))
+    local pgid=""
+
+    pgid="$(process_group_id "$pid")"
 
     if process_is_running "$pid"; then
-        kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+        if [ -n "$pgid" ]; then
+            kill -- "-$pgid" >/dev/null 2>&1 || true
+        else
+            kill "$pid" >/dev/null 2>&1 || true
+        fi
     fi
 
     while process_is_running "$pid" && [ "$SECONDS" -lt "$deadline" ]; do
@@ -244,12 +444,63 @@ stop_process() {
     done
 
     if process_is_running "$pid"; then
-        kill -KILL -- "-$pid" >/dev/null 2>&1 || kill -KILL "$pid" >/dev/null 2>&1 || true
+        if [ -n "$pgid" ]; then
+            kill -KILL -- "-$pgid" >/dev/null 2>&1 || true
+        else
+            kill -KILL "$pid" >/dev/null 2>&1 || true
+        fi
         deadline=$((SECONDS + 2))
         while process_is_running "$pid" && [ "$SECONDS" -lt "$deadline" ]; do
             sleep 0.1
         done
     fi
+
+    wait "$pid" 2>/dev/null || true
+}
+
+graphical_run_retry_count() {
+    local retries="${GRAPHICAL_SAMPLE_RETRIES:-2}"
+
+    if ! [[ "$retries" =~ ^[1-9][0-9]*$ ]]; then
+        retries=2
+    fi
+    printf '%s\n' "$retries"
+}
+
+run_graphical_sample_with_retries() {
+    local name="$1"
+    local max_attempts
+    local attempt=1
+
+    max_attempts="$(graphical_run_retry_count)"
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if run_in_container run-container "$name"; then
+            return 0
+        fi
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            echo "RETRY $name (attempt $((attempt + 1))/$max_attempts)"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
+window_manager_close() {
+    local win_id="$1"
+    wmctrl -i -c "$win_id"
+}
+
+send_altf4() {
+    local win_id="$1"
+
+    # Avoid xdotool's window-targeted key path here: once Alt+F4 starts closing
+    # the window, the later synthetic key events can race a destroyed X11 id and
+    # emit BadWindow. Focus first, then send through the active window instead.
+    if xdotool getwindowname "$win_id" >/dev/null 2>&1; then
+        xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
+    fi
+    xdotool key --clearmodifiers Alt+F4 >/dev/null 2>&1 || true
 }
 
 apply_graphical_inputs() {
@@ -258,6 +509,10 @@ apply_graphical_inputs() {
     local pid="$3"
     local log_file="$4"
     local inputs_file="$SAMPLES_DIR/$name/applied_inputs.txt"
+    GRAPHICAL_INPUT_USED_SIGINT=0
+    GRAPHICAL_INPUT_REQUESTED_CLOSE=0
+    GRAPHICAL_INPUT_WAITED=0
+    GRAPHICAL_INPUT_WAIT_STATUS=0
 
     [ -f "$inputs_file" ] || return 0
 
@@ -330,8 +585,28 @@ apply_graphical_inputs() {
                 fi
                 ;;
             altf4)
-                xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
-                xdotool key --window "$win_id" --clearmodifiers Alt+F4
+                GRAPHICAL_INPUT_REQUESTED_CLOSE=1
+                send_altf4 "$win_id"
+                ;;
+            closewindow)
+                GRAPHICAL_INPUT_REQUESTED_CLOSE=1
+                window_manager_close "$win_id" || true
+                ;;
+            sigint)
+                GRAPHICAL_INPUT_USED_SIGINT=1
+                GRAPHICAL_INPUT_REQUESTED_CLOSE=1
+                GRAPHICAL_INPUT_WAIT_STATUS=130
+                kill -INT "$pid" >/dev/null 2>&1 || true
+                local sigint_deadline=$((SECONDS + 2))
+                while process_is_running "$pid" && [ "$SECONDS" -lt "$sigint_deadline" ]; do
+                    sleep 0.1
+                done
+                if process_is_running "$pid"; then
+                    kill -KILL "$pid" >/dev/null 2>&1 || true
+                    GRAPHICAL_INPUT_WAIT_STATUS=137
+                fi
+                wait "$pid" 2>/dev/null || true
+                GRAPHICAL_INPUT_WAITED=1
                 ;;
             *)
                 echo "ERR: $inputs_file:$line_no unknown input command '$command'"
@@ -389,27 +664,52 @@ run_container_sample() {
     export SDL_AUDIODRIVER=dummy
     export WINEDEBUG="${WINEDEBUG:--all}"
     export GRAPHICAL_RUNTIME_SELECTED="$runtime"
+    export GRAPHICAL_WINDOW_MANAGER_SELECTED="$(graphical_window_manager)"
 
     local xvfb_log="/tmp/my_wine_xvfb_${name}.log"
     Xvfb "$DISPLAY" -screen 0 1024x768x24 -nolisten tcp >"$xvfb_log" 2>&1 &
     local xvfb_pid=$!
-    trap 'kill "$xvfb_pid" >/dev/null 2>&1 || true' RETURN
+    local wm_log="/tmp/my_wine_wm_${name}.log"
+    local wm_pid=""
+    trap '
+        if [ -n "${wm_pid:-}" ]; then
+            kill "$wm_pid" >/dev/null 2>&1 || true
+        fi
+        kill "$xvfb_pid" >/dev/null 2>&1 || true
+    ' RETURN
     sleep 0.4
+
+    case "$GRAPHICAL_WINDOW_MANAGER_SELECTED" in
+        openbox)
+            openbox >"$wm_log" 2>&1 &
+            wm_pid=$!
+            ;;
+        *)
+            echo "ERR: unsupported GRAPHICAL_WINDOW_MANAGER='$GRAPHICAL_WINDOW_MANAGER_SELECTED'"
+            return 1
+            ;;
+    esac
+
+    if ! wait_for_wm_ready "$GRAPHICAL_WINDOW_MANAGER_SELECTED" 5; then
+        echo "ERR: window manager '$GRAPHICAL_WINDOW_MANAGER_SELECTED' did not become ready"
+        if is_verbose && [ -f "$wm_log" ]; then
+            echo "WM_LOG_BEGIN"
+            tail -n 80 "$wm_log" 2>/dev/null || true
+            echo "WM_LOG_END"
+        fi
+        return 1
+    fi
 
     local output_file="/tmp/my_wine_graphical_${name}.out"
     : >"$output_file"
     : >"${output_file}.err"
 
-    local status_file="/tmp/my_wine_graphical_${name}.status"
-    rm -f "$status_file"
-
-    setsid bash -c '
-        "$1" "$2" >"$3" 2>"$4"
-        printf "%s\n" "$?" >"$5"
-    ' _ "$launcher" "$exe" "$output_file" "${output_file}.err" "$status_file" &
+    setsid bash -c 'trap - INT TERM; exec "$1" "$2"' _ "$launcher" "$exe" >"$output_file" 2>"${output_file}.err" &
     local pid=$!
 
-    if ! wait_for_window "$title" "$timeout_sec"; then
+    local win_id
+    win_id="$(wait_for_window_id "$title" "$timeout_sec" "$pid" || true)"
+    if [ -z "$win_id" ]; then
         if is_verbose; then
             print_status "no_window" "$name" "$pid" "$output_file"
         fi
@@ -426,10 +726,21 @@ run_container_sample() {
 
     if is_verbose; then
         print_status "window_ready" "$name" "$pid" "$output_file"
+        print_window_candidates "window_ready" "$title" "$pid"
     fi
 
-    local win_id geometry width height
-    win_id="$(xdotool search --name "$title" 2>/dev/null | head -1)"
+    local geometry width height
+    if ! xdotool getwindowgeometry --shell "$win_id" >/dev/null 2>&1; then
+        win_id="$(resolve_window_id "$title" "$pid" || true)"
+    fi
+    if [ -z "$win_id" ]; then
+        if is_verbose; then
+            print_window_candidates "window_unresolved" "$title" "$pid"
+        fi
+        stop_process "$pid"
+        echo "FAIL  $name (could not resolve target window)"
+        return 1
+    fi
     geometry="$(xdotool getwindowgeometry --shell "$win_id" 2>/dev/null || true)"
     width="$(printf '%s\n' "$geometry" | awk -F= '$1 == "WIDTH" { print $2 }')"
     height="$(printf '%s\n' "$geometry" | awk -F= '$1 == "HEIGHT" { print $2 }')"
@@ -462,12 +773,11 @@ run_container_sample() {
         return 0
     fi
 
-    if process_is_running "$pid"; then
+    if process_is_running "$pid" && [ "${GRAPHICAL_INPUT_REQUESTED_CLOSE:-0}" != "1" ]; then
         # Prefer the guest-visible keyboard close path here. Do not reintroduce
         # a separate window-manager close command without fresh reference proof.
         if xdotool getwindowname "$win_id" >/dev/null 2>&1; then
-            xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
-            xdotool key --window "$win_id" --clearmodifiers Alt+F4 || true
+            send_altf4 "$win_id"
         fi
     fi
 
@@ -484,19 +794,24 @@ run_container_sample() {
         return 1
     fi
 
-    while [ ! -f "$status_file" ] && [ "$SECONDS" -lt "$deadline" ]; do
-        sleep 0.05
-    done
-
     local ret=0
-    if [ -f "$status_file" ]; then
-        ret="$(cat "$status_file" 2>/dev/null || echo 1)"
+    if [ "$GRAPHICAL_INPUT_WAITED" = "1" ]; then
+        ret="$GRAPHICAL_INPUT_WAIT_STATUS"
+    elif wait "$pid"; then
+        ret=0
     else
+        ret=$?
+    fi
+    if [ "$ret" -eq 127 ]; then
         if is_verbose; then
             print_status "missing_exit_status" "$name" "$pid" "$output_file"
         fi
         echo "FAIL  $name (missing exit status)"
         return 1
+    fi
+    if [ "$GRAPHICAL_INPUT_USED_SIGINT" = "1" ] && { [ "$ret" -eq 0 ] || [ "$ret" -eq 130 ] || [ "$ret" -eq 137 ]; }; then
+        echo "PASS  $name"
+        return 0
     fi
     if [ "$ret" -ne "$expected_exit" ]; then
         if is_verbose; then
@@ -546,7 +861,7 @@ case "$mode" in
                 continue
             fi
             "$SCRIPT_DIR/samples.sh" build "$name"
-            if run_in_container run-container "$name"; then
+            if run_graphical_sample_with_retries "$name"; then
                 pass=$((pass + 1))
             else
                 fail=$((fail + 1))

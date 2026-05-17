@@ -10,8 +10,9 @@ and direct `scripts/samples.sh run <graphical-sample>` invocations dispatch to
 the Xvfb graphical harness instead of depending on backend-only autoquit logic.
 The default scripted shutdown path remains `altf4`, because a Wine reference
 run behaves more like a guest-visible close under `Alt+F4` than under a raw
-X11/window-manager close request. `windowclose` has been removed from the
-harness interface for future work.
+X11/window-manager close request. WM-driven `closewindow` remains an
+experimental harness action for follow-up investigation, not a trusted default
+or public reference path.
 
 ## Problem
 
@@ -36,8 +37,8 @@ request boundary.
   - `scripts/graphical_samples.sh` still selects X11/Xvfb and dummy audio.
 - Re-validated the default scripted shutdown path against `GRAPHICAL_RUNTIME=wine`;
   `Alt+F4` still behaves more like the expected guest-visible close path there.
-- Removed `windowclose` from the public harness command set so future work does
-  not treat raw X11/window-manager close as an endorsed scripted action.
+- Kept `windowclose` out of the trusted/default shutdown path so future work
+  does not treat raw X11/window-manager close as an endorsed scripted action.
 - Changed `scripts/samples.sh run <graphical-sample>` to build the sample and
   then dispatch to `scripts/graphical_samples.sh`, so direct sample runs no
   longer depend on backend-only autoquit hooks.
@@ -60,8 +61,8 @@ request boundary.
   manager close request in Xvfb. If the harness needs a guaranteed close action,
   it should drive that explicitly instead of depending on keyboard-shortcut
   semantics.
-- Do not reintroduce raw X11/window-manager close as a public harness action
-  without fresh Wine-reference evidence.
+- Do not promote raw X11/window-manager close into the trusted/default harness
+  path without fresh Wine-reference evidence.
 - Treat X11 `BadWindow` as a harness compatibility issue only if it occurs from
   the harness close action. Prefer fixing message and destroy lifecycle first.
 
@@ -93,5 +94,5 @@ request boundary.
   - `sdl2_window_32` and `sdl2_two_window_32` still crash before the harness
     sees a window.
 - Those failures should be treated as separate runtime/sample bugs. They are
-  not a reason to restore backend-only autoquit hooks or to reintroduce a raw
-  X11/window-manager close command into the public harness interface.
+  not a reason to restore backend-only autoquit hooks or to promote raw
+  X11/window-manager close into the trusted/default harness path.

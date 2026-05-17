@@ -2,14 +2,12 @@
 
 static HWND g_primary = NULL;
 static HWND g_secondary = NULL;
-static int g_exit_code = 0;
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
     case WM_CLOSE:
         if (hwnd == g_primary && g_secondary != NULL) {
-            g_exit_code = 2;
             DestroyWindow(g_secondary);
             return DefWindowProcA(hwnd, msg, wParam, lParam);
         }
@@ -23,14 +21,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY:
         if (hwnd == g_secondary) {
             g_secondary = NULL;
-            if (g_exit_code == 0 && g_primary != NULL)
-                DestroyWindow(g_primary);
             return 0;
         }
 
         if (hwnd == g_primary) {
             g_primary = NULL;
-            PostQuitMessage(g_exit_code);
+            PostQuitMessage(0);
             return 0;
         }
         return 0;
