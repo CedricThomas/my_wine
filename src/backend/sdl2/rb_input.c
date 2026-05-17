@@ -215,23 +215,29 @@ rb_cursor_t rb_cursor_create(int idc)
     SDL_SystemCursor type = SDL_SYSTEM_CURSOR_ARROW;
 
     switch (idc) {
-        case 0: type = SDL_SYSTEM_CURSOR_ARROW;    break;  /* IDC_ARROW  */
-        case 1: type = SDL_SYSTEM_CURSOR_CROSSHAIR; break;  /* IDC_CROSS  */
-        case 2: type = SDL_SYSTEM_CURSOR_ARROW;     break;  /* IDC_UPARROW — no SDL_SYSTEM_CURSOR_UP */
-        case 3: type = SDL_SYSTEM_CURSOR_WAIT;      break;  /* IDC_WAIT   */
-        case 4: type = SDL_SYSTEM_CURSOR_IBEAM;     break;  /* IDC_IBEAM  */
-        case 5: type = SDL_SYSTEM_CURSOR_SIZEALL;   break;  /* IDC_SIZE   */
-        case 6: type = SDL_SYSTEM_CURSOR_HAND;      break;  /* IDC_ICON   */
-        default: type = SDL_SYSTEM_CURSOR_ARROW;    break;
+        case 32512: type = SDL_SYSTEM_CURSOR_ARROW;     break;  /* IDC_ARROW */
+        case 32513: type = SDL_SYSTEM_CURSOR_IBEAM;     break;  /* IDC_IBEAM */
+        case 32514: type = SDL_SYSTEM_CURSOR_WAIT;      break;  /* IDC_WAIT */
+        case 32515: type = SDL_SYSTEM_CURSOR_CROSSHAIR; break;  /* IDC_CROSS */
+        case 32516: type = SDL_SYSTEM_CURSOR_ARROW;     break;  /* IDC_UPARROW */
+        case 32640: type = SDL_SYSTEM_CURSOR_SIZEALL;   break;  /* IDC_SIZE */
+        case 32641: type = SDL_SYSTEM_CURSOR_HAND;      break;  /* IDC_ICON */
+        case 32642: type = SDL_SYSTEM_CURSOR_SIZENWSE;  break;  /* IDC_SIZENWSE */
+        case 32643: type = SDL_SYSTEM_CURSOR_SIZENS;    break;  /* IDC_SIZENS */
+        case 32644: type = SDL_SYSTEM_CURSOR_SIZENESW;  break;  /* IDC_SIZENESW */
+        case 32645: type = SDL_SYSTEM_CURSOR_SIZEWE;    break;  /* IDC_SIZEWE */
+        case 32646: type = SDL_SYSTEM_CURSOR_SIZEALL;   break;  /* IDC_SIZEALL */
+        case 32648: type = SDL_SYSTEM_CURSOR_NO;        break;  /* IDC_NO */
+        case 32649: type = SDL_SYSTEM_CURSOR_HAND;      break;  /* IDC_HAND */
+        default: type = SDL_SYSTEM_CURSOR_ARROW;        break;
     }
 
     SDL_Cursor *cursor = (SDL_Cursor *)rb_call_on_host_stack(rb_sdl_create_system_cursor_call, &type);
-    if (!cursor)
-        return 0;
 
     rb_cursor *c = rb_host_malloc(sizeof(*c));
     if (!c) {
-        rb_call_on_host_stack(rb_sdl_free_cursor_call, cursor);
+        if (cursor)
+            rb_call_on_host_stack(rb_sdl_free_cursor_call, cursor);
         return 0;
     }
     c->cursor = cursor;
@@ -244,7 +250,8 @@ int rb_cursor_destroy(rb_cursor_t cur)
     if (!c)
         return RB_FAIL;
 
-    rb_call_on_host_stack(rb_sdl_free_cursor_call, c->cursor);
+    if (c->cursor)
+        rb_call_on_host_stack(rb_sdl_free_cursor_call, c->cursor);
     rb_host_free(c);
     wine_handle_free((uint32_t)cur);
     return RB_OK;

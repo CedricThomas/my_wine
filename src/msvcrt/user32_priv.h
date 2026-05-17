@@ -22,8 +22,6 @@ typedef struct {
     bool          destroy_in_progress;
 } wine_window_entry;
 
-/* Global WNDCLASSA table — linear search by strcmp on lpszClassName */
-extern WNDCLASSA class_table[16];
 extern int g_user32_live_windows;
 extern int g_user32_window_create_attempted;
 extern HWND g_user32_active_window;

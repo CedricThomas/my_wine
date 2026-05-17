@@ -148,7 +148,7 @@ TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o 
 	$(BUILDDIR)/debug.o $(PE_OBJS) $(BUILDDIR)/common.o
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $(BUILDDIR)/crt_watcom.o $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_offset_discovery.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/common.o $(BUILDDIR)/debug.o
-TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/debug.o
+TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
 TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/debug.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────

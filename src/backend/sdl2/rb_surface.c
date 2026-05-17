@@ -89,6 +89,23 @@ static uintptr_t rb_sdl_set_surface_palette_call(void *arg)
     return (uintptr_t)SDL_SetSurfacePalette(a->surface, a->palette);
 }
 
+static void rb_surface_apply_palette(rb_surface *surface_state)
+{
+    rb_palette *palette_state;
+    rb_sdl_surface_palette_args args;
+
+    if (!surface_state || !surface_state->surface || !surface_state->palette)
+        return;
+
+    palette_state = get_palette(surface_state->palette);
+    if (!palette_state || !palette_state->palette)
+        return;
+
+    args.surface = surface_state->surface;
+    args.palette = palette_state->palette;
+    rb_call_on_host_stack(rb_sdl_set_surface_palette_call, &args);
+}
+
 static uintptr_t rb_sdl_free_surface_call(void *arg)
 {
     SDL_FreeSurface((SDL_Surface *)arg);
@@ -146,8 +163,6 @@ static uintptr_t rb_sdl_update_window_surface_call(void *arg)
 rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
                                rb_palette_t palette, uint32_t flags)
 {
-    (void)flags;
-
     if (w <= 0 || h <= 0)
         return 0;
 
@@ -210,6 +225,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     s->dirty = 0;
     s->window = 0;
     s->pitch = pitch;
+    s->flags = flags;
 
     return (rb_surface_t)wine_handle_alloc(HANDLE_TYPE_RB_SURFACE, s);
 }
@@ -225,12 +241,30 @@ rb_surface_t rb_surface_create_flip_chain(rb_window_t win,
     if (!primary) return 0;
 
     rb_surface *ps = get_surface(primary);
-    if (ps) ps->window = win;
+    if (ps) {
+        ps->window = win;
+        ps->flags |= RB_SURFACE_PRIMARY | RB_SURFACE_FLIP;
+        ps->flags &= ~RB_SURFACE_BACK;
+    }
 
     rb_window *wnd = get_window(win);
     if (wnd) {
-        /* Clean up any existing backbuffer before creating a new one */
+        if (wnd->primary_surface && wnd->primary_surface != primary) {
+            rb_surface *old_primary = get_surface(wnd->primary_surface);
+            if (old_primary) {
+                old_primary->window = 0;
+                old_primary->flags &= ~(RB_SURFACE_PRIMARY | RB_SURFACE_FLIP | RB_SURFACE_BACK);
+            }
+            wnd->primary_surface = 0;
+        }
+
+        /* Clean up any existing backbuffer before creating a new one. */
         if (wnd->backbuffer) {
+            rb_surface *old_backbuffer = get_surface(wnd->backbuffer);
+            if (old_backbuffer) {
+                old_backbuffer->window = 0;
+                old_backbuffer->flags &= ~(RB_SURFACE_PRIMARY | RB_SURFACE_FLIP | RB_SURFACE_BACK);
+            }
             rb_surface_destroy(wnd->backbuffer);
             wnd->backbuffer = 0;
         }
@@ -241,7 +275,11 @@ rb_surface_t rb_surface_create_flip_chain(rb_window_t win,
                                                       RB_SURFACE_BACK);
             if (backbuf) {
                 rb_surface *bs = get_surface(backbuf);
-                if (bs) bs->window = win;
+                if (bs) {
+                    bs->window = win;
+                    bs->flags |= RB_SURFACE_BACK;
+                    bs->flags &= ~(RB_SURFACE_PRIMARY | RB_SURFACE_FLIP);
+                }
                 wnd->backbuffer = backbuf;  /* window owns the backbuffer handle */
             }
         }
@@ -253,7 +291,29 @@ rb_surface_t rb_surface_create_flip_chain(rb_window_t win,
 int rb_surface_destroy(rb_surface_t surf)
 {
     rb_surface *s = get_surface(surf);
+    rb_window *wnd = NULL;
     if (!s) return RB_FAIL;
+
+    if (s->window)
+        wnd = get_window(s->window);
+
+    if (wnd) {
+        if (wnd->primary_surface == surf) {
+            rb_surface_t backbuffer = wnd->backbuffer;
+            wnd->primary_surface = 0;
+            wnd->backbuffer = 0;
+            if (backbuffer && backbuffer != surf) {
+                rb_surface *bs = get_surface(backbuffer);
+                if (bs) {
+                    bs->window = 0;
+                    bs->flags &= ~(RB_SURFACE_PRIMARY | RB_SURFACE_FLIP | RB_SURFACE_BACK);
+                }
+                rb_surface_destroy(backbuffer);
+            }
+        } else if (wnd->backbuffer == surf) {
+            wnd->backbuffer = 0;
+        }
+    }
 
     rb_call_on_host_stack(rb_sdl_free_surface_call, s->surface);
     rb_host_free(s->own_buf);
@@ -347,30 +407,55 @@ int rb_surface_blt(rb_surface_t dst, const rb_rect_t *dst_rect,
 int rb_surface_flip(rb_surface_t surf)
 {
     rb_surface *s = get_surface(surf);
+    rb_window *wnd;
+    rb_surface *primary;
+    rb_surface *backbuffer;
     if (!s || !s->surface) return RB_FAIL;
 
-    if (s->window) {
-        rb_window *wnd = get_window(s->window);
-        if (wnd && wnd->window) {
-            rb_sdl_window_surface_update_args args = { wnd->window, s->surface };
-            rb_call_on_host_stack(rb_sdl_update_window_surface_call, &args);
+    if (!s->window) {
+        s->dirty = 0;
+        return RB_OK;
+    }
+
+    wnd = get_window(s->window);
+    if (!wnd || !wnd->window) {
+        s->dirty = 0;
+        return RB_OK;
+    }
+
+    primary = get_surface(wnd->primary_surface);
+    if (!primary || wnd->primary_surface != surf)
+        return RB_FAIL;
+
+    backbuffer = get_surface(wnd->backbuffer);
+    if (backbuffer && backbuffer->surface) {
+        rb_sdl_window_surface_update_args args = { wnd->window, backbuffer->surface };
+        rb_call_on_host_stack(rb_sdl_update_window_surface_call, &args);
+
+        {
+            uint8_t *tmp_pixels = primary->surface->pixels;
+            uint8_t *tmp_buf = primary->own_buf;
+            rb_palette_t tmp_palette = primary->palette;
+
+            primary->surface->pixels = backbuffer->surface->pixels;
+            backbuffer->surface->pixels = tmp_pixels;
+
+            primary->own_buf = backbuffer->own_buf;
+            backbuffer->own_buf = tmp_buf;
+
+            primary->palette = backbuffer->palette;
+            backbuffer->palette = tmp_palette;
         }
 
-        /* Swap with backbuffer: primary becomes backbuffer for next frame */
-        if (wnd->backbuffer) {
-            rb_surface *bs = get_surface(wnd->backbuffer);
-            if (bs && bs->surface && bs->surface->pixels) {
-                uint8_t *tmp = s->surface->pixels;
-                s->surface->pixels = bs->surface->pixels;
-                bs->surface->pixels = tmp;
-                /* Also swap own_buf pointers */
-                uint8_t *tmp_buf = s->own_buf;
-                s->own_buf = bs->own_buf;
-                bs->own_buf = tmp_buf;
-            }
-        }
+        rb_surface_apply_palette(primary);
+        rb_surface_apply_palette(backbuffer);
+        backbuffer->dirty = 0;
+    } else {
+        rb_sdl_window_surface_update_args args = { wnd->window, primary->surface };
+        rb_call_on_host_stack(rb_sdl_update_window_surface_call, &args);
     }
-    s->dirty = 0;
+
+    primary->dirty = 0;
     return RB_OK;
 }
 

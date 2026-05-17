@@ -54,6 +54,7 @@ typedef struct rb_surface {
     int dirty;              /* flag: surface contents changed, needs update */
     rb_window_t window;     /* which window this surface is bound to */
     int pitch;              /* row stride in bytes */
+    uint32_t flags;         /* RB_SURFACE_* creation flags / flip-chain role */
 } rb_surface;
 
 /* ---- Private palette state ---- */

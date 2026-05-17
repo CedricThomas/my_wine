@@ -10,6 +10,7 @@
  */
 
 #include "render_backend.h"
+#include "src/backend/sdl2/rb_sdl2_priv.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,41 @@ static int failed = 0;
       failed++;                                                                \
     }                                                                          \
   } while (0)
+
+static rb_window *lookup_window_state(rb_window_t win) {
+  if (wine_handle_get_type((uint32_t)win) != HANDLE_TYPE_RB_WINDOW)
+    return NULL;
+  return (rb_window *)wine_handle_get((uint32_t)win);
+}
+
+static void fill_surface(rb_surface_t surf, uint8_t value) {
+  int w, h, pitch;
+  rb_pixel_format_t fmt;
+  uint8_t *data = NULL;
+  int lock_pitch = 0;
+
+  if (rb_surface_get_desc(surf, &w, &h, &fmt, &pitch) != RB_OK)
+    return;
+  if (rb_surface_lock(surf, NULL, &data, &lock_pitch) != RB_OK || !data)
+    return;
+
+  for (int y = 0; y < h; y++) {
+    memset(data + y * lock_pitch, value, (size_t)pitch);
+  }
+  rb_surface_unlock(surf);
+}
+
+static uint8_t first_byte(rb_surface_t surf) {
+  uint8_t *data = NULL;
+  int pitch = 0;
+  uint8_t value = 0;
+
+  if (rb_surface_lock(surf, NULL, &data, &pitch) != RB_OK || !data)
+    return 0;
+  value = data[0];
+  rb_surface_unlock(surf);
+  return value;
+}
 
 static int run_tests(void) {
   /* ---- Init ---- */
@@ -68,7 +104,7 @@ static int run_tests(void) {
     T(rb_window_release_dc(win, dc) >= 0, "release_dc failed");
 
     /* ---- Cursor ---- */
-    rb_cursor_t cur = rb_cursor_create(0); /* IDC_ARROW */
+    rb_cursor_t cur = rb_cursor_create(32512); /* IDC_ARROW */
     if (cur) {
       T(rb_window_set_cursor(win, cur) == RB_OK, "set_cursor failed");
       T(rb_cursor_show(0) == RB_OK, "cursor_show failed");
@@ -136,6 +172,52 @@ static int run_tests(void) {
       }
     }
     T(rb_surface_unlock(surf) == RB_OK, "unlock failed");
+  }
+  printf("OK\n");
+
+  /* ---- Flip chain ---- */
+  printf("  flip chain... ");
+  rb_window_t flip_win =
+      rb_window_create("SDL2 Flip Test", -1, -1, 64, 48, RB_WINDOW_SHOWN);
+  T(flip_win != 0, "flip test window create failed");
+  if (flip_win) {
+    rb_surface_t primary =
+        rb_surface_create_flip_chain(flip_win, 64, 48, RB_FORMAT_8BIT, pal, 1);
+    rb_window *flip_state = lookup_window_state(flip_win);
+    rb_surface_t backbuffer = flip_state ? flip_state->backbuffer : 0;
+
+    T(primary != 0, "flip chain primary create failed");
+    T(backbuffer != 0, "flip chain backbuffer missing");
+
+    if (primary && backbuffer) {
+      fill_surface(primary, 0x11);
+      fill_surface(backbuffer, 0x77);
+      T(rb_surface_flip(primary) == RB_OK, "first flip failed");
+      T(first_byte(primary) == 0x77, "first flip did not rotate backbuffer to front");
+      T(first_byte(backbuffer) == 0x11, "first flip did not rotate old front to back");
+
+      fill_surface(backbuffer, 0xCC);
+      T(rb_surface_flip(primary) == RB_OK, "second flip failed");
+      T(first_byte(primary) == 0xCC, "second flip did not present updated backbuffer");
+      T(first_byte(backbuffer) == 0x77, "second flip did not preserve rotation");
+
+      T(rb_surface_destroy(primary) == RB_OK, "destroying primary flip surface failed");
+      T(rb_window_destroy(flip_win) == RB_OK, "destroying window after primary failed");
+    } else if (flip_win) {
+      rb_window_destroy(flip_win);
+    }
+
+    rb_window_t flip_win2 =
+        rb_window_create("SDL2 Flip Test 2", -1, -1, 64, 48, RB_WINDOW_SHOWN);
+    T(flip_win2 != 0, "second flip test window create failed");
+    if (flip_win2) {
+      rb_surface_t primary2 =
+          rb_surface_create_flip_chain(flip_win2, 64, 48, RB_FORMAT_8BIT, pal, 1);
+      T(primary2 != 0, "second flip chain primary create failed");
+      T(rb_window_destroy(flip_win2) == RB_OK, "destroying flip window failed");
+      if (primary2)
+        T(rb_surface_destroy(primary2) == RB_OK, "destroying primary after window failed");
+    }
   }
   printf("OK\n");
 

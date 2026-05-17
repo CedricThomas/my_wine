@@ -87,7 +87,7 @@ rb_dc_t rb_window_get_dc(rb_window_t win);
 int rb_window_release_dc(rb_window_t win, rb_dc_t dc);
 
 /* ---- Cursor ---- */
-rb_cursor_t rb_cursor_create(int idc);  /* IDC_ARROW=0, IDC_CROSS=1, etc. */
+rb_cursor_t rb_cursor_create(int idc);  /* Win32 IDC_* numeric ID (for example 32512=IDC_ARROW). */
 int rb_cursor_destroy(rb_cursor_t cur);
 int rb_window_set_cursor(rb_window_t win, rb_cursor_t cur);
 int rb_cursor_show(int show);

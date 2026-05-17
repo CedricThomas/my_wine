@@ -281,9 +281,27 @@ int rb_window_destroy(rb_window_t win)
     DEBUG_WRITE_ERR("rb_window: destroy\n",
                     sizeof("rb_window: destroy\n") - 1);
 
-    /* Clean up flip-chain backbuffer owned by this window */
-    if (w->backbuffer)
+    if (w->primary_surface) {
+        rb_surface *primary = NULL;
+
+        if (wine_handle_get_type((uint32_t)w->primary_surface) == HANDLE_TYPE_RB_SURFACE)
+            primary = (rb_surface *)wine_handle_get((uint32_t)w->primary_surface);
+        if (primary)
+            primary->window = 0;
+        w->primary_surface = 0;
+    }
+
+    /* Clean up flip-chain backbuffer owned by this window. */
+    if (w->backbuffer) {
+        rb_surface *backbuffer = NULL;
+
+        if (wine_handle_get_type((uint32_t)w->backbuffer) == HANDLE_TYPE_RB_SURFACE)
+            backbuffer = (rb_surface *)wine_handle_get((uint32_t)w->backbuffer);
+        if (backbuffer)
+            backbuffer->window = 0;
         rb_surface_destroy(w->backbuffer);
+        w->backbuffer = 0;
+    }
 
     if (w->guest_hwnd)
         rb_event_unbind_window(w->guest_hwnd);
