@@ -44,6 +44,9 @@ rb_window_t rb_window_create(const char *title,
                              uint32_t flags);
 int rb_window_destroy(rb_window_t win);
 int rb_window_show(rb_window_t win, int show);  /* show: 1=show, 0=hide */
+int rb_window_minimize(rb_window_t win);
+int rb_window_maximize(rb_window_t win);
+int rb_window_restore(rb_window_t win);
 int rb_window_set_position(rb_window_t win, int x, int y);
 int rb_window_set_size(rb_window_t win, int w, int h);
 int rb_window_set_title(rb_window_t win, const char *title);

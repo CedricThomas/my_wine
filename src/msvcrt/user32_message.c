@@ -63,6 +63,17 @@ static int translated_queue_push(const rb_msg_t *msg)
                       &g_translated_queue_head, &g_translated_queue_count, msg);
 }
 
+static int message_target_alive(const rb_msg_t *msg)
+{
+    if (!msg)
+        return 0;
+
+    if (msg->message == WM_QUIT || msg->hwnd == 0)
+        return 1;
+
+    return get_window_entry((HWND)msg->hwnd) != NULL;
+}
+
 static int message_matches_filter(const rb_msg_t *msg, HWND hwnd_filter,
                                   UINT min_filter, UINT max_filter)
 {
@@ -106,6 +117,33 @@ static int user32_synthesize_quit_message(int remove, HWND hwnd_filter,
     }
 
     return 0;
+}
+
+static void user32_fill_minmaxinfo(wine_window_entry *entry, MINMAXINFO *info)
+{
+    int display_w = 0;
+    int display_h = 0;
+    rb_rect_t rect;
+
+    if (!info)
+        return;
+
+    user32_memset(info, 0, sizeof(*info));
+    rb_display_get_size(&display_w, &display_h);
+
+    info->ptMaxSize.x = display_w;
+    info->ptMaxSize.y = display_h;
+    info->ptMaxTrackSize.x = display_w;
+    info->ptMaxTrackSize.y = display_h;
+    info->ptMinTrackSize.x = 64;
+    info->ptMinTrackSize.y = 64;
+
+    if (entry && rb_window_get_client_rect(entry->sdl_window, &rect) == RB_OK) {
+        if (rect.w > 0)
+            info->ptMinTrackSize.x = rect.w;
+        if (rect.h > 0)
+            info->ptMinTrackSize.y = rect.h;
+    }
 }
 
 /* ── Helper: copy an rb_msg_t into an MSG ──────────────────── */
@@ -158,10 +196,41 @@ static int queue_take_at(rb_msg_t *queue, size_t capacity,
     return 1;
 }
 
+static void queue_discard_dead_targets(rb_msg_t *queue, size_t capacity,
+                                       size_t *head, size_t *count)
+{
+    size_t old_count;
+    size_t old_head;
+    size_t write_count;
+    size_t i;
+
+    if (!queue || !head || !count || *count == 0)
+        return;
+
+    old_head = *head;
+    old_count = *count;
+    write_count = 0;
+
+    for (i = 0; i < old_count; i++) {
+        rb_msg_t msg = queue[(old_head + i) % capacity];
+
+        if (!message_target_alive(&msg))
+            continue;
+
+        queue[(old_head + write_count) % capacity] = msg;
+        write_count++;
+    }
+
+    *count = write_count;
+}
+
 static int posted_queue_take_matching(int remove, HWND hwnd_filter,
                                       UINT min_filter, UINT max_filter,
                                       rb_msg_t *msg)
 {
+    queue_discard_dead_targets(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
+                               &g_posted_queue_head, &g_posted_queue_count);
+
     int match_idx = queue_find_matching(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
                                         g_posted_queue_head, g_posted_queue_count,
                                         hwnd_filter, min_filter, max_filter);
@@ -174,6 +243,9 @@ static int translated_queue_take_matching(int remove, HWND hwnd_filter,
                                           UINT min_filter, UINT max_filter,
                                           rb_msg_t *msg)
 {
+    queue_discard_dead_targets(g_translated_queue, USER32_TRANSLATED_QUEUE_CAPACITY,
+                               &g_translated_queue_head, &g_translated_queue_count);
+
     int match_idx = queue_find_matching(g_translated_queue,
                                         USER32_TRANSLATED_QUEUE_CAPACITY,
                                         g_translated_queue_head,
@@ -213,7 +285,14 @@ static int fetch_translated_message(int blocking, int remove,
                 return 0;
         }
 
+        if (!message_target_alive(&incoming))
+            continue;
+
         if (message_matches_filter(&incoming, hwnd_filter, min_filter, max_filter)) {
+            if (!remove) {
+                if (!translated_queue_push(&incoming))
+                    return 0;
+            }
             *msg = incoming;
             return 1;
         }
@@ -345,6 +424,10 @@ KERNEL32_STUB
 BOOL PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
     rb_msg_t rb;
+
+    if (hWnd != 0 && get_window_entry(hWnd) == NULL)
+        return FALSE;
+
     user32_memset(&rb, 0, sizeof(rb));
     rb.hwnd    = (uintptr_t)hWnd;
     rb.message = Msg;
@@ -410,19 +493,7 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
     case WM_GETMINMAXINFO: {
         MINMAXINFO *info = (MINMAXINFO *)(intptr_t)lParam;
-        if (info) {
-            user32_memset(info, 0, sizeof(*info));
-            info->ptReserved.x       = 0;
-            info->ptReserved.y       = 0;
-            info->ptMaxSize.x        = 800;
-            info->ptMaxSize.y        = 600;
-            info->ptMaxPosition.x    = 0;
-            info->ptMaxPosition.y    = 0;
-            info->ptMinTrackSize.x   = 100;
-            info->ptMinTrackSize.y   = 100;
-            info->ptMaxTrackSize.x   = 4096;
-            info->ptMaxTrackSize.y   = 4096;
-        }
+        user32_fill_minmaxinfo(entry, info);
         return 0;
     }
 
@@ -437,7 +508,12 @@ LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 /* ── 8. DefWindowProcA ────────────────────────────────────── */
 /*
- * Default window procedure: returns 0 for all messages.
+ * Default window procedure:
+ *   WM_NCCREATE  — returns TRUE (per Win32 spec, required for window creation).
+ *   WM_CLOSE     — calls DestroyWindow, returns 0.
+ *   WM_SYSCOMMAND/SC_CLOSE — calls DestroyWindow, returns 0.
+ *   WM_SYSKEYDOWN/Alt+F4   — forwards as WM_SYSCOMMAND SC_CLOSE.
+ *   All other messages — returns 0.
  */
 KERNEL32_STUB
 LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
@@ -446,6 +522,9 @@ LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
     const WPARAM sc_close = 0xF060u;
     const LPARAM alt_context = (LPARAM)(1u << 29);
 
+    if (Msg == WM_NCCREATE) {
+        return TRUE;
+    }
     if (Msg == WM_CLOSE) {
         DEBUG_WRITE_ERR("user32: DefWindowProcA WM_CLOSE\n",
                         sizeof("user32: DefWindowProcA WM_CLOSE\n") - 1);

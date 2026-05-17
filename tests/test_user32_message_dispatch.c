@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "render_backend.h"
 #include "user32_types.h"
 
 KERNEL32_ABI ATOM RegisterClassA(const WNDCLASSA *lpWndClass);
@@ -27,8 +28,13 @@ KERNEL32_ABI BOOL IsWindow(HWND hwnd);
 
 static int g_failures = 0;
 static int g_create_messages = 0;
+static int g_nccreate_messages = 0;
 static int g_close_messages = 0;
 static int g_destroy_messages = 0;
+static int g_ncdestroy_messages = 0;
+static int g_focus_messages = 0;
+static int g_killfocus_messages = 0;
+static int g_activate_messages = 0;
 static int g_send_messages = 0;
 static int g_callproc_messages = 0;
 static int g_create_payload = 0;
@@ -51,6 +57,9 @@ static int g_create_payload = 0;
 static LRESULT KERNEL32_ABI test_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
+    case WM_NCCREATE:
+        g_nccreate_messages++;
+        return TRUE;
     case WM_CREATE: {
         CREATESTRUCTA *cs = (CREATESTRUCTA *)(intptr_t)lParam;
         g_create_messages++;
@@ -58,11 +67,23 @@ static LRESULT KERNEL32_ABI test_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             g_create_payload = *(int *)cs->lpCreateParams;
         return 0;
     }
+    case WM_ACTIVATE:
+        g_activate_messages++;
+        return 0;
+    case WM_SETFOCUS:
+        g_focus_messages++;
+        return 0;
+    case WM_KILLFOCUS:
+        g_killfocus_messages++;
+        return 0;
     case WM_CLOSE:
         g_close_messages++;
         return DefWindowProcA(hwnd, msg, wParam, lParam);
     case WM_DESTROY:
         g_destroy_messages++;
+        return 0;
+    case WM_NCDESTROY:
+        g_ncdestroy_messages++;
         return 0;
     case TEST_SEND_MESSAGE:
         g_send_messages++;
@@ -95,8 +116,11 @@ int main(void)
     T(hwnd2 != 0, "CreateWindowExA second window failed");
 
     if (hwnd && hwnd2) {
+        T(g_nccreate_messages == 2, "CreateWindowExA did not emit exactly one WM_NCCREATE per window");
         T(g_create_messages == 2, "CreateWindowExA did not emit exactly one WM_CREATE per window");
         T(g_create_payload == create_payload, "WM_CREATE did not receive lpCreateParams payload");
+        T(g_focus_messages >= 2, "CreateWindowExA should activate/focus created windows");
+        T(g_activate_messages >= 2, "CreateWindowExA should emit activation on created windows");
 
         T(SendMessageA(hwnd, TEST_SEND_MESSAGE, 0, 0) == TEST_SEND_RESULT,
           "SendMessageA did not return wndproc result");
@@ -120,14 +144,46 @@ int main(void)
         T(DispatchMessageA(&msg) == 0, "DispatchMessageA did not return WM_CLOSE result");
         T(g_close_messages == 1, "DispatchMessageA did not reach wndproc for WM_CLOSE");
         T(g_destroy_messages == 1, "WM_CLOSE default path did not send exactly one WM_DESTROY");
+        T(g_ncdestroy_messages == 1, "WM_CLOSE default path did not send exactly one WM_NCDESTROY");
         T(GetActiveWindow() == hwnd2, "WM_CLOSE default path did not preserve the remaining active window");
 
         T(DestroyWindow(hwnd) == FALSE, "DestroyWindow should fail after WM_CLOSE destroyed the hwnd");
 
-        T(PostMessageA(hwnd, TEST_SEND_MESSAGE, 1, 11) == TRUE,
-          "PostMessageA failed for first window");
+        T(PostMessageA(hwnd, TEST_SEND_MESSAGE, 1, 11) == FALSE,
+          "PostMessageA should fail for a destroyed hwnd");
         T(PostMessageA(hwnd2, WM_LBUTTONDOWN, 0, 0) == TRUE,
-          "PostMessageA failed for second window");
+          "PostMessageA failed for second window mouse message");
+        T(PostMessageA(hwnd2, TEST_SEND_MESSAGE, 1, 11) == TRUE,
+          "PostMessageA failed for second window custom message");
+        T(PostMessageA((HWND)0xDEAD, TEST_SEND_MESSAGE, 0, 0) == FALSE,
+          "PostMessageA should fail for an invalid hwnd");
+
+        rb_msg_t backend_msg;
+        memset(&backend_msg, 0, sizeof(backend_msg));
+        backend_msg.hwnd = hwnd2;
+        backend_msg.message = WM_MOUSEMOVE;
+        backend_msg.pt_x = 7;
+        backend_msg.pt_y = 9;
+        T(rb_event_push(&backend_msg) == RB_OK,
+          "rb_event_push failed for backend regression message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, hwnd2, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE) == TRUE,
+          "PeekMessageA(PM_NOREMOVE) did not expose backend-queued message");
+        T(msg.hwnd == hwnd2, "PeekMessageA(PM_NOREMOVE) returned wrong backend hwnd");
+        T(msg.message == WM_MOUSEMOVE, "PeekMessageA(PM_NOREMOVE) returned wrong backend message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, hwnd2, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE) == TRUE,
+          "PeekMessageA(PM_NOREMOVE) should not consume backend-queued message");
+        T(msg.hwnd == hwnd2, "second PM_NOREMOVE returned wrong backend hwnd");
+        T(msg.message == WM_MOUSEMOVE, "second PM_NOREMOVE returned wrong backend message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, hwnd2, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_REMOVE) == TRUE,
+          "PeekMessageA(PM_REMOVE) did not consume backend-queued message");
+        T(msg.hwnd == hwnd2, "PM_REMOVE returned wrong backend hwnd");
+        T(msg.message == WM_MOUSEMOVE, "PM_REMOVE returned wrong backend message");
 
         memset(&msg, 0, sizeof(msg));
         T(PeekMessageA(&msg, hwnd2, 0, 0, PM_NOREMOVE) == TRUE,
@@ -144,13 +200,13 @@ int main(void)
         memset(&msg, 0, sizeof(msg));
         T(PeekMessageA(&msg, 0, TEST_SEND_MESSAGE, TEST_SEND_MESSAGE, PM_NOREMOVE) == TRUE,
           "PeekMessageA(range filter) did not find the matching message");
-        T(msg.hwnd == hwnd, "PeekMessageA(range filter) returned wrong hwnd");
+        T(msg.hwnd == hwnd2, "PeekMessageA(range filter) returned wrong hwnd");
         T(msg.message == TEST_SEND_MESSAGE, "PeekMessageA(range filter) returned wrong message");
 
         memset(&msg, 0, sizeof(msg));
-        T(GetMessageA(&msg, hwnd, 0, 0) == TRUE,
+        T(GetMessageA(&msg, hwnd2, 0, 0) == TRUE,
           "GetMessageA(hwnd filter) did not return the queued hwnd message");
-        T(msg.hwnd == hwnd, "GetMessageA(hwnd filter) returned wrong hwnd");
+        T(msg.hwnd == hwnd2, "GetMessageA(hwnd filter) returned wrong hwnd");
         T(msg.message == TEST_SEND_MESSAGE, "GetMessageA(hwnd filter) returned wrong message");
 
         memset(&msg, 0, sizeof(msg));
@@ -178,6 +234,7 @@ int main(void)
         msg.message = WM_CLOSE;
         T(DispatchMessageA(&msg) == 0, "DispatchMessageA did not close second window");
         T(IsWindow(hwnd2) == FALSE, "Second window should be destroyed by WM_CLOSE");
+        T(g_ncdestroy_messages == 2, "Destroying both windows should send WM_NCDESTROY twice");
 
         memset(&msg, 0, sizeof(msg));
         T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,

@@ -131,6 +131,7 @@ typedef struct {
 
 #define WM_CREATE              0x0001
 #define WM_NCCREATE            0x0081
+#define WM_NCDESTROY           0x0082
 #define WM_DESTROY             0x0002
 #define WM_MOVE                0x0003
 #define WM_SIZE                0x0005

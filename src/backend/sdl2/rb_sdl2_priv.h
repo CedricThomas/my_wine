@@ -42,6 +42,9 @@ typedef struct rb_window {
     uint32_t sdl_window_id;
     uintptr_t native_window_id;
     uintptr_t guest_hwnd;
+    int is_visible;
+    int is_minimized;
+    int is_maximized;
     rb_surface_t primary_surface; /* flip-chain primary surface handle */
     rb_surface_t backbuffer;      /* flip-chain backbuffer handle (owned by window) */
 } rb_window;

@@ -14,15 +14,88 @@
 
 static uintptr_t g_active_window = 0;
 static int g_alt_key_down = 0;
-#define RB_MAX_WINDOW_ROUTES 64
 
 typedef struct {
     uintptr_t hwnd;
+    rb_window_t backend_win;
     uint32_t sdl_window_id;
     uintptr_t native_window_id;
 } rb_window_route;
 
-static rb_window_route g_window_routes[RB_MAX_WINDOW_ROUTES];
+static rb_window_route *g_window_routes = NULL;
+static size_t g_window_route_capacity = 0;
+static rb_msg_t *g_synthetic_queue = NULL;
+static size_t g_synthetic_queue_capacity = 0;
+static size_t g_synthetic_queue_count = 0;
+
+static int rb_event_ensure_route_capacity(size_t needed)
+{
+    size_t new_capacity;
+    rb_window_route *new_routes;
+
+    if (needed <= g_window_route_capacity)
+        return RB_OK;
+
+    new_capacity = g_window_route_capacity ? g_window_route_capacity * 2 : 16;
+    while (new_capacity < needed)
+        new_capacity *= 2;
+
+    new_routes = realloc(g_window_routes, new_capacity * sizeof(*new_routes));
+    if (!new_routes)
+        return RB_FAIL;
+
+    memset(new_routes + g_window_route_capacity, 0,
+           (new_capacity - g_window_route_capacity) * sizeof(*new_routes));
+    g_window_routes = new_routes;
+    g_window_route_capacity = new_capacity;
+    return RB_OK;
+}
+
+static int rb_event_ensure_synthetic_capacity(size_t needed)
+{
+    size_t new_capacity;
+    rb_msg_t *new_queue;
+
+    if (needed <= g_synthetic_queue_capacity)
+        return RB_OK;
+
+    new_capacity = g_synthetic_queue_capacity ? g_synthetic_queue_capacity * 2 : 8;
+    while (new_capacity < needed)
+        new_capacity *= 2;
+
+    new_queue = realloc(g_synthetic_queue, new_capacity * sizeof(*new_queue));
+    if (!new_queue)
+        return RB_FAIL;
+
+    g_synthetic_queue = new_queue;
+    g_synthetic_queue_capacity = new_capacity;
+    return RB_OK;
+}
+
+static int rb_event_push_synthetic(const rb_msg_t *msg)
+{
+    if (!msg)
+        return RB_FAIL;
+    if (rb_event_ensure_synthetic_capacity(g_synthetic_queue_count + 1) != RB_OK)
+        return RB_FAIL;
+
+    g_synthetic_queue[g_synthetic_queue_count++] = *msg;
+    return RB_OK;
+}
+
+static int rb_event_pop_synthetic(rb_msg_t *msg)
+{
+    size_t i;
+
+    if (!msg || g_synthetic_queue_count == 0)
+        return 0;
+
+    *msg = g_synthetic_queue[0];
+    for (i = 1; i < g_synthetic_queue_count; i++)
+        g_synthetic_queue[i - 1] = g_synthetic_queue[i];
+    g_synthetic_queue_count--;
+    return 1;
+}
 
 void rb_event_set_active_window(uintptr_t hwnd)
 {
@@ -43,48 +116,52 @@ static rb_window *rb_event_get_backend_window(rb_window_t win)
 
 static int rb_event_find_route_by_hwnd(uintptr_t hwnd)
 {
-    int i;
-    for (i = 0; i < RB_MAX_WINDOW_ROUTES; i++) {
+    size_t i;
+    for (i = 0; i < g_window_route_capacity; i++) {
         if (g_window_routes[i].hwnd == hwnd)
-            return i;
+            return (int)i;
     }
     return -1;
 }
 
 static int rb_event_find_route_by_sdl_window(uint32_t window_id)
 {
-    int i;
+    size_t i;
     if (!window_id)
         return -1;
 
-    for (i = 0; i < RB_MAX_WINDOW_ROUTES; i++) {
+    for (i = 0; i < g_window_route_capacity; i++) {
         if (g_window_routes[i].hwnd != 0 &&
             g_window_routes[i].sdl_window_id == window_id)
-            return i;
+            return (int)i;
     }
     return -1;
 }
 
 static int rb_event_find_route_by_native_window(uintptr_t native_window_id)
 {
-    int i;
+    size_t i;
     if (!native_window_id)
         return -1;
 
-    for (i = 0; i < RB_MAX_WINDOW_ROUTES; i++) {
+    for (i = 0; i < g_window_route_capacity; i++) {
         if (g_window_routes[i].hwnd != 0 &&
             g_window_routes[i].native_window_id == native_window_id)
-            return i;
+            return (int)i;
     }
     return -1;
 }
 
 static int rb_event_alloc_route_slot(void)
 {
-    int i;
-    for (i = 0; i < RB_MAX_WINDOW_ROUTES; i++) {
+    size_t i;
+
+    if (rb_event_ensure_route_capacity(g_window_route_capacity + 1) != RB_OK)
+        return -1;
+
+    for (i = 0; i < g_window_route_capacity; i++) {
         if (g_window_routes[i].hwnd == 0)
-            return i;
+            return (int)i;
     }
     return -1;
 }
@@ -104,6 +181,7 @@ int rb_event_bind_window(uintptr_t hwnd, rb_window_t win)
         return RB_FAIL;
 
     g_window_routes[idx].hwnd = hwnd;
+    g_window_routes[idx].backend_win = win;
     g_window_routes[idx].sdl_window_id = wnd->sdl_window_id;
     g_window_routes[idx].native_window_id = wnd->native_window_id;
     return RB_OK;
@@ -138,11 +216,23 @@ static uintptr_t rb_event_resolve_hwnd_from_native_window(uintptr_t native_windo
     return idx >= 0 ? g_window_routes[idx].hwnd : 0;
 }
 
+static rb_window *rb_event_resolve_backend_window(uintptr_t hwnd)
+{
+    int idx = rb_event_find_route_by_hwnd(hwnd);
+
+    if (idx < 0)
+        return NULL;
+    return rb_event_get_backend_window(g_window_routes[idx].backend_win);
+}
+
 /* ---- Windows message constants ---- */
 
 #define WM_CREATE         0x0001
 #define WM_MOVE           0x0003
 #define WM_SIZE           0x0005
+#define WM_ACTIVATE       0x0006
+#define WM_SETFOCUS       0x0007
+#define WM_KILLFOCUS      0x0008
 #define WM_PAINT          0x000F
 #define WM_CLOSE          0x0010
 #define WM_QUIT           0x0012
@@ -200,11 +290,35 @@ static uintptr_t rb_event_resolve_hwnd_from_native_window(uintptr_t native_windo
 #define SC_MINIMIZE       0xF020
 #define SC_CLOSE          0xF060
 #define SC_RESTORE        0xF120
+#define WA_INACTIVE       0
+#define WA_ACTIVE         1
 
-static uintptr_t g_shutdown_hwnds[RB_MAX_WINDOW_ROUTES];
+static uintptr_t *g_shutdown_hwnds = NULL;
+static size_t g_shutdown_hwnd_capacity = 0;
 static size_t g_shutdown_hwnd_count = 0;
 static size_t g_shutdown_hwnd_head = 0;
 static int g_shutdown_force_quit_pending = 0;
+
+static int rb_event_ensure_shutdown_capacity(size_t needed)
+{
+    size_t new_capacity;
+    uintptr_t *new_hwnds;
+
+    if (needed <= g_shutdown_hwnd_capacity)
+        return RB_OK;
+
+    new_capacity = g_shutdown_hwnd_capacity ? g_shutdown_hwnd_capacity * 2 : 16;
+    while (new_capacity < needed)
+        new_capacity *= 2;
+
+    new_hwnds = realloc(g_shutdown_hwnds, new_capacity * sizeof(*new_hwnds));
+    if (!new_hwnds)
+        return RB_FAIL;
+
+    g_shutdown_hwnds = new_hwnds;
+    g_shutdown_hwnd_capacity = new_capacity;
+    return RB_OK;
+}
 
 /* ---- SDL 2.0.18+ compatibility: 5-arg SDL_PeepEvents ---- */
 
@@ -227,26 +341,24 @@ static uintptr_t rb_sdl_peep_event_call(void *arg)
     return (uintptr_t)rb_peep_events((SDL_Event *)arg, 1, SDL_GETEVENT);
 }
 
-static uintptr_t rb_sdl_push_event_call(void *arg)
-{
-    return (uintptr_t)SDL_PushEvent((SDL_Event *)arg);
-}
-
 static void rb_event_begin_shutdown(void)
 {
     size_t count = 0;
-    int idx;
+    size_t idx;
 
     g_shutdown_hwnd_head = 0;
     g_shutdown_hwnd_count = 0;
     g_shutdown_force_quit_pending = 1;
+
+    if (rb_event_ensure_shutdown_capacity(g_window_route_capacity + 1) != RB_OK)
+        return;
 
     if (g_active_window != 0 &&
         rb_event_find_route_by_hwnd(g_active_window) >= 0) {
         g_shutdown_hwnds[count++] = g_active_window;
     }
 
-    for (idx = 0; idx < RB_MAX_WINDOW_ROUTES; idx++) {
+    for (idx = 0; idx < g_window_route_capacity; idx++) {
         uintptr_t hwnd = g_window_routes[idx].hwnd;
 
         if (hwnd == 0 || hwnd == g_active_window)
@@ -285,6 +397,25 @@ static int rb_event_translate_shutdown(rb_msg_t *out_msg)
     }
 
     return 0;
+}
+
+static void rb_event_queue_focus_messages(uintptr_t hwnd, int gained)
+{
+    rb_msg_t msg;
+
+    if (!hwnd)
+        return;
+
+    memset(&msg, 0, sizeof(msg));
+    msg.hwnd = hwnd;
+    msg.message = WM_ACTIVATE;
+    msg.wParam = gained ? WA_ACTIVE : WA_INACTIVE;
+    rb_event_push_synthetic(&msg);
+
+    memset(&msg, 0, sizeof(msg));
+    msg.hwnd = hwnd;
+    msg.message = gained ? WM_SETFOCUS : WM_KILLFOCUS;
+    rb_event_push_synthetic(&msg);
 }
 
 static int rb_keycode_to_vk(SDL_Keycode sym, SDL_Scancode scancode)
@@ -485,7 +616,7 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
         }
         msg->pt_x   = sdl->button.x;
         msg->pt_y   = sdl->button.y;
-        msg->wParam = 0;
+        msg->wParam = (uintptr_t)(SDL_GetMouseState(NULL, NULL) & 0xFFFFu);
         msg->lParam = (sdl->button.x | (sdl->button.y << 16));
         msg->time   = (uint32_t)sdl->button.timestamp;
         break;
@@ -504,7 +635,7 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
         }
         msg->pt_x   = sdl->button.x;
         msg->pt_y   = sdl->button.y;
-        msg->wParam = 0;
+        msg->wParam = (uintptr_t)(SDL_GetMouseState(NULL, NULL) & 0xFFFFu);
         msg->lParam = (sdl->button.x | (sdl->button.y << 16)) | (1 << 31);
         msg->time   = (uint32_t)sdl->button.timestamp;
         break;
@@ -512,25 +643,27 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
     case SDL_MOUSEWHEEL:
         if (!msg->hwnd)
             return 0;
-        /* Map wheel to WM_MOUSEWHEEL (0x020A) */
         msg->message = 0x020A;
-        msg->wParam  = sdl->wheel.y * 120; /* 120 = WHEEL_DELTA */
-        msg->pt_x    = sdl->wheel.x;
-        msg->pt_y    = sdl->wheel.y;
-        msg->lParam  = (sdl->wheel.x | (sdl->wheel.y << 16));
+        msg->wParam  = (((uintptr_t)((uint16_t)((int16_t)(sdl->wheel.y * 120)))) << 16) |
+                       (uintptr_t)(SDL_GetMouseState(NULL, NULL) & 0xFFFFu);
+        msg->pt_x    = 0;
+        msg->pt_y    = 0;
+        msg->lParam  = 0;
         msg->time    = (uint32_t)sdl->wheel.timestamp;
         break;
 
     case SDL_WINDOWEVENT:
         if (sdl->window.event == SDL_WINDOWEVENT_FOCUS_GAINED && event_hwnd) {
             g_active_window = event_hwnd;
-            return 0;
+            rb_event_queue_focus_messages(event_hwnd, 1);
+            return rb_event_pop_synthetic(msg);
         }
         if (sdl->window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
             event_hwnd && g_active_window == event_hwnd) {
+            rb_event_queue_focus_messages(event_hwnd, 0);
             g_active_window = 0;
             g_alt_key_down = 0;
-            return 0;
+            return rb_event_pop_synthetic(msg);
         }
         if (!msg->hwnd)
             return 0;
@@ -573,9 +706,36 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
             break;
 
         case SDL_WINDOWEVENT_MINIMIZED:
+            if (event_hwnd) {
+                rb_window *wnd = rb_event_resolve_backend_window(event_hwnd);
+                if (wnd) {
+                    wnd->is_visible = 1;
+                    wnd->is_minimized = 1;
+                    wnd->is_maximized = 0;
+                }
+            }
             return 0;
 
         case SDL_WINDOWEVENT_RESTORED:
+            if (event_hwnd) {
+                rb_window *wnd = rb_event_resolve_backend_window(event_hwnd);
+                if (wnd) {
+                    wnd->is_visible = 1;
+                    wnd->is_minimized = 0;
+                    wnd->is_maximized = 0;
+                }
+            }
+            return 0;
+
+        case SDL_WINDOWEVENT_MAXIMIZED:
+            if (event_hwnd) {
+                rb_window *wnd = rb_event_resolve_backend_window(event_hwnd);
+                if (wnd) {
+                    wnd->is_visible = 1;
+                    wnd->is_minimized = 0;
+                    wnd->is_maximized = 1;
+                }
+            }
             return 0;
 
         default:
@@ -636,6 +796,8 @@ int rb_event_wait(rb_msg_t *out_msg)
     SDL_Event sdl_ev;
 
     for (;;) {
+        if (rb_event_pop_synthetic(out_msg))
+            return (out_msg->message == WM_QUIT) ? 0 : 1;
         if (rb_runtime_consume_shutdown_request())
             rb_event_begin_shutdown();
         if (rb_event_translate_shutdown(out_msg))
@@ -657,6 +819,8 @@ int rb_event_peek(rb_msg_t *out_msg)
 {
     SDL_Event sdl_ev;
 
+    if (rb_event_pop_synthetic(out_msg))
+        return 1;
     if (rb_runtime_consume_shutdown_request())
         rb_event_begin_shutdown();
     if (rb_event_translate_shutdown(out_msg))
@@ -680,114 +844,5 @@ int rb_event_peek(rb_msg_t *out_msg)
 
 int rb_event_push(rb_msg_t *msg)
 {
-    SDL_Event sdl_ev;
-    memset(&sdl_ev, 0, sizeof(sdl_ev));
-
-    switch (msg->message) {
-    case WM_QUIT:
-        sdl_ev.type = SDL_QUIT;
-        break;
-
-    case WM_KEYDOWN:
-        sdl_ev.key.type         = SDL_KEYDOWN;
-        sdl_ev.key.windowID     = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.key.state        = SDL_PRESSED;
-        sdl_ev.key.keysym.sym   = (SDL_Keycode)msg->wParam;
-        sdl_ev.key.keysym.scancode = (SDL_Scancode)(msg->lParam >> 16);
-        break;
-
-    case WM_KEYUP:
-        sdl_ev.key.type         = SDL_KEYUP;
-        sdl_ev.key.windowID     = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.key.state        = SDL_RELEASED;
-        sdl_ev.key.keysym.sym   = (SDL_Keycode)msg->wParam;
-        sdl_ev.key.keysym.scancode = (SDL_Scancode)(msg->lParam >> 16);
-        break;
-
-    case WM_LBUTTONDOWN:
-        sdl_ev.button.type     = SDL_MOUSEBUTTONDOWN;
-        sdl_ev.button.windowID = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.button.button   = SDL_BUTTON_LEFT;
-        sdl_ev.button.state    = SDL_PRESSED;
-        sdl_ev.button.x        = msg->pt_x;
-        sdl_ev.button.y        = msg->pt_y;
-        break;
-
-    case WM_LBUTTONUP:
-        sdl_ev.button.type     = SDL_MOUSEBUTTONUP;
-        sdl_ev.button.windowID = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.button.button   = SDL_BUTTON_LEFT;
-        sdl_ev.button.state    = SDL_RELEASED;
-        sdl_ev.button.x        = msg->pt_x;
-        sdl_ev.button.y        = msg->pt_y;
-        break;
-
-    case WM_RBUTTONDOWN:
-        sdl_ev.button.type     = SDL_MOUSEBUTTONDOWN;
-        sdl_ev.button.windowID = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.button.button   = SDL_BUTTON_RIGHT;
-        sdl_ev.button.state    = SDL_PRESSED;
-        sdl_ev.button.x        = msg->pt_x;
-        sdl_ev.button.y        = msg->pt_y;
-        break;
-
-    case WM_RBUTTONUP:
-        sdl_ev.button.type     = SDL_MOUSEBUTTONUP;
-        sdl_ev.button.windowID = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.button.button   = SDL_BUTTON_RIGHT;
-        sdl_ev.button.state    = SDL_RELEASED;
-        sdl_ev.button.x        = msg->pt_x;
-        sdl_ev.button.y        = msg->pt_y;
-        break;
-
-    case WM_MOUSEMOVE:
-        sdl_ev.motion.type     = SDL_MOUSEMOTION;
-        sdl_ev.motion.windowID = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.motion.state    = msg->wParam;
-        sdl_ev.motion.x        = msg->pt_x;
-        sdl_ev.motion.y        = msg->pt_y;
-        break;
-
-    case WM_SIZE:
-        sdl_ev.window.type      = SDL_WINDOWEVENT;
-        sdl_ev.window.windowID  = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.window.event     = SDL_WINDOWEVENT_RESIZED;
-        sdl_ev.window.data1     = (int16_t)(msg->lParam & 0xFFFF);
-        sdl_ev.window.data2     = (int16_t)((msg->lParam >> 16) & 0xFFFF);
-        break;
-
-    case WM_MOVE:
-        sdl_ev.window.type      = SDL_WINDOWEVENT;
-        sdl_ev.window.windowID  = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.window.event     = SDL_WINDOWEVENT_MOVED;
-        sdl_ev.window.data1     = (int16_t)(msg->lParam & 0xFFFF);
-        sdl_ev.window.data2     = (int16_t)((msg->lParam >> 16) & 0xFFFF);
-        break;
-
-    case WM_PAINT:
-        sdl_ev.window.type      = SDL_WINDOWEVENT;
-        sdl_ev.window.windowID  = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.window.event     = SDL_WINDOWEVENT_EXPOSED;
-        break;
-
-    case WM_CLOSE:
-        sdl_ev.window.type      = SDL_WINDOWEVENT;
-        sdl_ev.window.windowID  = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.window.event     = SDL_WINDOWEVENT_CLOSE;
-        break;
-
-    case WM_CHAR:
-        sdl_ev.text.type        = SDL_TEXTINPUT;
-        sdl_ev.text.windowID    = rb_event_get_sdl_window_id(msg->hwnd);
-        sdl_ev.text.text[0]     = (char)msg->wParam;
-        sdl_ev.text.text[1]     = '\0';
-        break;
-
-    default:
-        /* Unhandled message type — no-op push */
-        return RB_OK;
-    }
-
-    rb_call_on_host_stack(rb_sdl_push_event_call, &sdl_ev);
-    return RB_OK;
+    return rb_event_push_synthetic(msg);
 }

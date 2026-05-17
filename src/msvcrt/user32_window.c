@@ -26,6 +26,7 @@
 
 extern void rb_event_set_active_window(uintptr_t hwnd);
 extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
+KERNEL32_STUB BOOL AdjustWindowRectEx(RECT *lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle);
 
 static void *user32_alloc(size_t size)
 {
@@ -113,6 +114,7 @@ static int user32_ensure_backend(void)
 #define HWND_BOTTOM          ((void *)1)
 #define HWND_TOPMOST         ((void *)-1)
 #define HWND_NOTOPMOST       ((void *)-2)
+#define USER32_DESKTOP_HWND  ((HWND)(uintptr_t)0x7fffff00u)
 
 /* ── Class table (linear search by strcmp) ─────────────────── */
 
@@ -166,6 +168,44 @@ static void user32_update_window_ownership_after_destroy(HWND destroyed_hwnd)
     if (g_user32_focus_window == destroyed_hwnd)
         g_user32_focus_window = replacement;
     rb_event_set_active_window((uintptr_t)user32_get_active_window());
+}
+
+static void user32_send_focus_transition(HWND previous, HWND target)
+{
+    wine_window_entry *prev_entry = get_window_entry(previous);
+    wine_window_entry *target_entry = get_window_entry(target);
+
+    if (previous == target)
+        return;
+
+    if (prev_entry && prev_entry->wnd_proc) {
+        user32_call_wndproc((WNDPROC)prev_entry->wnd_proc, previous,
+                            WM_ACTIVATE, WA_INACTIVE, (LPARAM)(uintptr_t)target);
+        user32_call_wndproc((WNDPROC)prev_entry->wnd_proc, previous,
+                            WM_KILLFOCUS, (WPARAM)(uintptr_t)target, 0);
+    }
+
+    if (target_entry && target_entry->wnd_proc) {
+        user32_call_wndproc((WNDPROC)target_entry->wnd_proc, target,
+                            WM_ACTIVATE, WA_ACTIVE, (LPARAM)(uintptr_t)previous);
+        user32_call_wndproc((WNDPROC)target_entry->wnd_proc, target,
+                            WM_SETFOCUS, (WPARAM)(uintptr_t)previous, 0);
+    }
+}
+
+static void user32_set_foreground_focus(HWND target, int send_messages)
+{
+    HWND previous_focus = user32_get_focus_window();
+    HWND previous_active = user32_get_active_window();
+
+    user32_set_focus_window(target);
+    user32_set_active_window(target);
+    rb_event_set_active_window((uintptr_t)target);
+
+    if (send_messages) {
+        HWND previous = previous_focus ? previous_focus : previous_active;
+        user32_send_focus_transition(previous, target);
+    }
 }
 
 static int ensure_class_capacity(int needed_count)
@@ -410,6 +450,20 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     create_struct.lpszClass = wc->lpszClassName;
     create_struct.dwExStyle = dwExStyle;
 
+    create_result = TRUE;
+    if (entry->wnd_proc) {
+        create_result = user32_call_wndproc((WNDPROC)entry->wnd_proc,
+                                            (HWND)handle, WM_NCCREATE, 0,
+                                            (LPARAM)(intptr_t)&create_struct);
+    }
+    if (!create_result) {
+        g_user32_live_windows--;
+        wine_handle_free((uint32_t)handle);
+        rb_window_destroy(rb_win);
+        user32_free(entry);
+        return FORCE_HANDLE_RETURN(0, HWND);
+    }
+
     create_result = 0;
     if (entry->wnd_proc) {
         create_result = user32_call_wndproc((WNDPROC)entry->wnd_proc,
@@ -424,9 +478,7 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
         return FORCE_HANDLE_RETURN(0, HWND);
     }
 
-    user32_set_active_window((HWND)handle);
-    user32_set_focus_window((HWND)handle);
-    rb_event_set_active_window(handle);
+    user32_set_foreground_focus((HWND)handle, 1);
     return FORCE_HANDLE_RETURN(handle, HWND);
 }
 
@@ -451,6 +503,7 @@ BOOL DestroyWindow(HWND hwnd)
                     sizeof("user32: DestroyWindow begin\n") - 1);
     if (entry->wnd_proc) {
         user32_call_wndproc((WNDPROC)entry->wnd_proc, hwnd, WM_DESTROY, 0, 0);
+        user32_call_wndproc((WNDPROC)entry->wnd_proc, hwnd, WM_NCDESTROY, 0, 0);
     }
 
     rb_window_destroy(entry->sdl_window);
@@ -475,22 +528,34 @@ BOOL ShowWindow(HWND hwnd, int nCmdShow)
     if (!entry)
         return FALSE;
 
-    int show = 0;
     switch (nCmdShow) {
-    case SW_HIDE:          show = 0; break;
+    case SW_HIDE:
+        rb_window_show(entry->sdl_window, 0);
+        return TRUE;
     case SW_SHOWNORMAL:
     case SW_SHOW:
-    case SW_RESTORE:
     case SW_SHOWNA:
-    case SW_SHOWDEFAULT:   show = 1; break;
+    case SW_SHOWDEFAULT:
+        rb_window_show(entry->sdl_window, 1);
+        user32_set_foreground_focus(hwnd, 1);
+        return TRUE;
+    case SW_RESTORE:
+        rb_window_restore(entry->sdl_window);
+        user32_set_foreground_focus(hwnd, 1);
+        return TRUE;
     case SW_SHOWMINIMIZED:
-    case SW_MINIMIZE:      show = 0; break;
-    case SW_SHOWMAXIMIZED: show = 1; break;
-    default:               show = 1; break;
+    case SW_MINIMIZE:
+        rb_window_minimize(entry->sdl_window);
+        return TRUE;
+    case SW_SHOWMAXIMIZED:
+        rb_window_maximize(entry->sdl_window);
+        user32_set_foreground_focus(hwnd, 1);
+        return TRUE;
+    default:
+        rb_window_show(entry->sdl_window, 1);
+        user32_set_foreground_focus(hwnd, 1);
+        return TRUE;
     }
-
-    rb_window_show(entry->sdl_window, show);
-    return TRUE;
 }
 
 /* ── 5. SetWindowPos ───────────────────────────────────────── */
@@ -511,6 +576,12 @@ BOOL SetWindowPos(HWND hwnd, HWND hWndInsertAfter,
         rb_window_set_position(entry->sdl_window, x, y);
     if (!(uFlags & SWP_NOSIZE))
         rb_window_set_size(entry->sdl_window, cx, cy);
+    if (uFlags & SWP_HIDEWINDOW)
+        rb_window_show(entry->sdl_window, 0);
+    if (uFlags & SWP_SHOWWINDOW)
+        rb_window_show(entry->sdl_window, 1);
+    if (!(uFlags & SWP_NOACTIVATE) && !(uFlags & SWP_HIDEWINDOW))
+        user32_set_foreground_focus(hwnd, 1);
     return TRUE;
 }
 
@@ -671,7 +742,7 @@ BOOL EnableWindow(HWND hwnd, BOOL bEnable)
 KERNEL32_STUB
 HWND GetDesktopWindow(void)
 {
-    return FORCE_HANDLE_RETURN(1, HWND);
+    return FORCE_HANDLE_RETURN(USER32_DESKTOP_HWND, HWND);
 }
 
 /* ── 15. GetActiveWindow ───────────────────────────────────── */
@@ -698,11 +769,7 @@ HWND SetFocus(HWND hwnd)
     HWND prev = user32_get_focus_window();
     HWND target = get_window_entry(hwnd) ? hwnd : 0;
 
-    user32_set_focus_window(target);
-    if (target) {
-        user32_set_active_window(target);
-        rb_event_set_active_window((uintptr_t)target);
-    }
+    user32_set_foreground_focus(target, 1);
     return FORCE_HANDLE_RETURN(prev, HWND);
 }
 
@@ -811,9 +878,28 @@ BOOL EndPaint(HWND hwnd, const PAINTSTRUCT *lpPaint)
 KERNEL32_STUB
 int MapWindowPoints(HWND hWndFrom, HWND hWndTo, POINT *lpPoints, UINT cPoints)
 {
-    (void)hWndFrom;
-    (void)hWndTo;
-    (void)lpPoints;
+    RECT from_rect;
+    RECT to_rect;
+    int dx = 0;
+    int dy = 0;
+    UINT i;
+
+    if (!lpPoints && cPoints != 0)
+        return 0;
+
+    if (hWndFrom && GetWindowRect(hWndFrom, &from_rect)) {
+        dx += from_rect.left;
+        dy += from_rect.top;
+    }
+    if (hWndTo && GetWindowRect(hWndTo, &to_rect)) {
+        dx -= to_rect.left;
+        dy -= to_rect.top;
+    }
+
+    for (i = 0; i < cPoints; i++) {
+        lpPoints[i].x += dx;
+        lpPoints[i].y += dy;
+    }
     return (int)cPoints;
 }
 
@@ -828,17 +914,19 @@ int MapWindowPoints(HWND hWndFrom, HWND hWndTo, POINT *lpPoints, UINT cPoints)
 KERNEL32_STUB
 int GetSystemMetrics(int nIndex)
 {
+    int w = 0, h = 0;
+
+    rb_display_get_size(&w, &h);
     switch (nIndex) {
-    case SM_CXSCREEN: {
-        int w = 0, h = 0;
-        rb_display_get_size(&w, &h);
+    case SM_CXSCREEN:
+    case SM_CXFULLSCREEN:
         return w;
-    }
-    case SM_CYSCREEN: {
-        int w = 0, h = 0;
-        rb_display_get_size(&w, &h);
+    case SM_CYSCREEN:
+    case SM_CYFULLSCREEN:
         return h;
-    }
+    case SM_CXBORDER:
+    case SM_CYBORDER:
+        return 1;
     default:
         return 0;
     }
@@ -851,23 +939,51 @@ int GetSystemMetrics(int nIndex)
 KERNEL32_STUB
 BOOL AdjustWindowRect(LPRECT lpRect, DWORD dwStyle, BOOL bMenu)
 {
-    (void)lpRect;
-    (void)dwStyle;
-    (void)bMenu;
-    return TRUE;
+    return AdjustWindowRectEx(lpRect, dwStyle, bMenu, 0);
 }
 
-/* ── 26. AdjustWindowRectEx ────────────────────────────────── */
-/*
- * Stub: *lpRect unchanged, returns TRUE.
- */
-KERNEL32_STUB
+static void user32_adjust_window_rect_impl(LPRECT lpRect, DWORD dwStyle,
+                                           BOOL bMenu, DWORD dwExStyle)
+{
+    int left = 0;
+    int right = 0;
+    int top = 0;
+    int bottom = 0;
+
+    if (!lpRect)
+        return;
+
+    if (dwStyle & WS_CAPTION)
+        top += 24;
+    if (dwStyle & WS_THICKFRAME) {
+        left += 4;
+        right += 4;
+        top += 4;
+        bottom += 4;
+    } else if (dwStyle & (WS_BORDER | WS_SYSMENU)) {
+        left += 1;
+        right += 1;
+        top += 1;
+        bottom += 1;
+    }
+    if (bMenu)
+        top += 20;
+    if (dwExStyle & WS_EX_WINDOWEDGE) {
+        left += 2;
+        right += 2;
+        top += 2;
+        bottom += 2;
+    }
+
+    lpRect->left -= left;
+    lpRect->top -= top;
+    lpRect->right += right;
+    lpRect->bottom += bottom;
+}
+
 BOOL AdjustWindowRectEx(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle)
 {
-    (void)lpRect;
-    (void)dwStyle;
-    (void)bMenu;
-    (void)dwExStyle;
+    user32_adjust_window_rect_impl(lpRect, dwStyle, bMenu, dwExStyle);
     return TRUE;
 }
 

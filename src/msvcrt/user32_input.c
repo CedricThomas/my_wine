@@ -26,6 +26,10 @@
  */
 #define FORCE_HANDLE_RETURN(v, type) ((type)(uintptr_t)FORCE_PTR_RETURN((void *)(uintptr_t)(v)))
 
+static HCURSOR g_user32_current_cursor = 0;
+static RECT g_user32_clip_rect = { 0, 0, 0, 0 };
+static int g_user32_clip_rect_enabled = 0;
+
 /* ═══════════════════════════════════════════════════════════
  * 8 exported input functions
  * ═══════════════════════════════════════════════════════════ */
@@ -79,6 +83,7 @@ HCURSOR LoadCursorA(HINSTANCE hInstance, const char *lpCursorName)
 KERNEL32_STUB
 HCURSOR SetCursor(HCURSOR hCursor)
 {
+    HCURSOR previous = g_user32_current_cursor;
     rb_cursor_t cur = 0;
     if (hCursor) {
         if (wine_handle_get_type((uint32_t)hCursor) != HANDLE_TYPE_HCURSOR)
@@ -91,10 +96,12 @@ HCURSOR SetCursor(HCURSOR hCursor)
     if (entry && entry->sdl_window) {
         if (cur)
             rb_window_set_cursor(entry->sdl_window, cur);
-        return FORCE_HANDLE_RETURN(0, HCURSOR);
+        g_user32_current_cursor = hCursor;
+        return FORCE_HANDLE_RETURN(previous, HCURSOR);
     }
 
-    return FORCE_HANDLE_RETURN(0, HCURSOR);
+    g_user32_current_cursor = hCursor;
+    return FORCE_HANDLE_RETURN(previous, HCURSOR);
 }
 
 /* ── 4. SetCursorPos ──────────────────────────────────────── */
@@ -106,10 +113,27 @@ HCURSOR SetCursor(HCURSOR hCursor)
 KERNEL32_STUB
 BOOL SetCursorPos(int Xparam, int Yparam)
 {
+    rb_rect_t rect;
+    int client_x = Xparam;
+    int client_y = Yparam;
     HWND hwnd = user32_get_active_window();
     wine_window_entry *entry = get_window_entry(hwnd);
+    if (g_user32_clip_rect_enabled) {
+        if (client_x < g_user32_clip_rect.left)
+            client_x = g_user32_clip_rect.left;
+        if (client_x > g_user32_clip_rect.right)
+            client_x = g_user32_clip_rect.right;
+        if (client_y < g_user32_clip_rect.top)
+            client_y = g_user32_clip_rect.top;
+        if (client_y > g_user32_clip_rect.bottom)
+            client_y = g_user32_clip_rect.bottom;
+    }
     if (entry && entry->sdl_window) {
-        rb_window_warp_mouse(entry->sdl_window, Xparam, Yparam);
+        if (rb_window_get_rect(entry->sdl_window, &rect) == RB_OK) {
+            client_x -= rect.x;
+            client_y -= rect.y;
+        }
+        rb_window_warp_mouse(entry->sdl_window, client_x, client_y);
         return TRUE;
     }
     return FALSE;
@@ -122,7 +146,13 @@ BOOL SetCursorPos(int Xparam, int Yparam)
 KERNEL32_STUB
 BOOL ClipCursor(const RECT *lpRect)
 {
-    (void)lpRect;
+    if (!lpRect) {
+        g_user32_clip_rect_enabled = 0;
+        return TRUE;
+    }
+
+    g_user32_clip_rect = *lpRect;
+    g_user32_clip_rect_enabled = 1;
     return TRUE;
 }
 

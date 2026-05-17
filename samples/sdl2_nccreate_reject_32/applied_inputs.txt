@@ -1,0 +1,4 @@
+status initial
+focus
+sleep 100
+sigint

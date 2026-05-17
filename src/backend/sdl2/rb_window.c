@@ -82,6 +82,13 @@ static uintptr_t rb_sdl_show_raise_pump_call(void *arg)
     return 0;
 }
 
+static uintptr_t rb_sdl_pump_events_call(void *arg)
+{
+    (void)arg;
+    SDL_PumpEvents();
+    return 0;
+}
+
 typedef struct {
     SDL_Window *window;
     int show;
@@ -94,6 +101,24 @@ static uintptr_t rb_sdl_window_show_call(void *arg)
         SDL_ShowWindow(a->window);
     else
         SDL_HideWindow(a->window);
+    return 0;
+}
+
+static uintptr_t rb_sdl_window_minimize_call(void *arg)
+{
+    SDL_MinimizeWindow(((rb_sdl_window_show_args *)arg)->window);
+    return 0;
+}
+
+static uintptr_t rb_sdl_window_maximize_call(void *arg)
+{
+    SDL_MaximizeWindow(((rb_sdl_window_show_args *)arg)->window);
+    return 0;
+}
+
+static uintptr_t rb_sdl_window_restore_call(void *arg)
+{
+    SDL_RestoreWindow(((rb_sdl_window_show_args *)arg)->window);
     return 0;
 }
 
@@ -242,6 +267,8 @@ rb_window_t rb_window_create(const char *title,
         sdl_flags |= SDL_WINDOW_RESIZABLE;
     if (flags & RB_WINDOW_SHOWN)
         sdl_flags |= SDL_WINDOW_SHOWN;
+    else
+        sdl_flags |= SDL_WINDOW_HIDDEN;
 
     int xpos = (x == RB_HINT_AUTO || x == -1) ? (int)SDL_WINDOWPOS_CENTERED : x;
     int ypos = (y == RB_HINT_AUTO || y == -1) ? (int)SDL_WINDOWPOS_CENTERED : y;
@@ -250,7 +277,10 @@ rb_window_t rb_window_create(const char *title,
     SDL_Window *sdl_win = (SDL_Window *)rb_call_on_host_stack(rb_sdl_create_window_call, &args);
     if (!sdl_win)
         return 0;
-    rb_call_on_host_stack(rb_sdl_show_raise_pump_call, sdl_win);
+    if (flags & RB_WINDOW_SHOWN)
+        rb_call_on_host_stack(rb_sdl_show_raise_pump_call, sdl_win);
+    else
+        rb_call_on_host_stack(rb_sdl_pump_events_call, NULL);
 
     rb_window *win = rb_host_malloc(sizeof(*win));
     if (!win) {
@@ -261,6 +291,9 @@ rb_window_t rb_window_create(const char *title,
     win->sdl_window_id = 0;
     win->native_window_id = 0;
     win->guest_hwnd = 0;
+    win->is_visible = (flags & RB_WINDOW_SHOWN) != 0;
+    win->is_minimized = 0;
+    win->is_maximized = 0;
     win->primary_surface = 0;
     win->backbuffer = 0;
     if (rb_window_refresh_ids(win) != RB_OK) {
@@ -319,6 +352,53 @@ int rb_window_show(rb_window_t win, int show)
 
     rb_sdl_window_show_args args = { w->window, show };
     rb_call_on_host_stack(rb_sdl_window_show_call, &args);
+    w->is_visible = show != 0;
+    if (!show) {
+        w->is_minimized = 0;
+        w->is_maximized = 0;
+    }
+    return RB_OK;
+}
+
+int rb_window_minimize(rb_window_t win)
+{
+    rb_window *w = get_window(win);
+    if (!w)
+        return RB_FAIL;
+
+    rb_sdl_window_show_args args = { w->window, 0 };
+    rb_call_on_host_stack(rb_sdl_window_minimize_call, &args);
+    w->is_visible = 1;
+    w->is_minimized = 1;
+    w->is_maximized = 0;
+    return RB_OK;
+}
+
+int rb_window_maximize(rb_window_t win)
+{
+    rb_window *w = get_window(win);
+    if (!w)
+        return RB_FAIL;
+
+    rb_sdl_window_show_args args = { w->window, 1 };
+    rb_call_on_host_stack(rb_sdl_window_maximize_call, &args);
+    w->is_visible = 1;
+    w->is_minimized = 0;
+    w->is_maximized = 1;
+    return RB_OK;
+}
+
+int rb_window_restore(rb_window_t win)
+{
+    rb_window *w = get_window(win);
+    if (!w)
+        return RB_FAIL;
+
+    rb_sdl_window_show_args args = { w->window, 1 };
+    rb_call_on_host_stack(rb_sdl_window_restore_call, &args);
+    w->is_visible = 1;
+    w->is_minimized = 0;
+    w->is_maximized = 0;
     return RB_OK;
 }
 

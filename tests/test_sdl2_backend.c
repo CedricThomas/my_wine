@@ -32,6 +32,13 @@ static rb_window *lookup_window_state(rb_window_t win) {
   return (rb_window *)wine_handle_get((uint32_t)win);
 }
 
+static uint32_t window_flags(rb_window_t win) {
+  rb_window *state = lookup_window_state(win);
+  if (!state || !state->window)
+    return 0;
+  return SDL_GetWindowFlags(state->window);
+}
+
 extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
 
 static void drain_event_queue(void) {
@@ -137,6 +144,25 @@ static int run_tests(void) {
         "loop set_size failed");
       T(rb_window_destroy(loop_win) == RB_OK, "loop destroy failed");
     }
+  }
+  printf("OK\n");
+
+  /* ---- Hidden window regression ---- */
+  printf("  hidden window... ");
+  rb_window_t hidden_win =
+      rb_window_create("SDL2 Hidden Test", -1, -1, 96, 72, 0);
+  T(hidden_win != 0, "hidden rb_window_create failed");
+  if (hidden_win) {
+    T((window_flags(hidden_win) & SDL_WINDOW_SHOWN) == 0,
+      "hidden rb_window_create showed the window unexpectedly");
+    T(rb_window_show(hidden_win, 1) == RB_OK, "hidden window show failed");
+    T((window_flags(hidden_win) & SDL_WINDOW_SHOWN) != 0,
+      "rb_window_show did not reveal hidden window");
+    T(rb_window_minimize(hidden_win) == RB_OK, "hidden window minimize failed");
+    T(rb_window_restore(hidden_win) == RB_OK, "hidden window restore failed");
+    T(rb_window_maximize(hidden_win) == RB_OK, "hidden window maximize failed");
+    T(rb_window_restore(hidden_win) == RB_OK, "hidden window second restore failed");
+    T(rb_window_destroy(hidden_win) == RB_OK, "hidden window destroy failed");
   }
   printf("OK\n");
 

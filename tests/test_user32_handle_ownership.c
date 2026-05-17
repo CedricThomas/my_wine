@@ -23,6 +23,12 @@ KERNEL32_ABI LONG_PTR SetWindowLongPtrA(HWND hwnd, int nIndex, LONG_PTR dwNewLon
 KERNEL32_ABI HDC BeginPaint(HWND hwnd, PAINTSTRUCT *lpPaint);
 KERNEL32_ABI BOOL EndPaint(HWND hwnd, const PAINTSTRUCT *lpPaint);
 KERNEL32_ABI HCURSOR LoadCursorA(HINSTANCE hInstance, const char *lpCursorName);
+KERNEL32_ABI HWND GetDesktopWindow(void);
+KERNEL32_ABI HCURSOR SetCursor(HCURSOR hCursor);
+KERNEL32_ABI BOOL SetCursorPos(int x, int y);
+KERNEL32_ABI BOOL ClipCursor(const RECT *lpRect);
+KERNEL32_ABI int GetSystemMetrics(int nIndex);
+KERNEL32_ABI LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 
 static int g_failures = 0;
 static int g_destroy_messages = 0;
@@ -40,6 +46,8 @@ static LRESULT KERNEL32_ABI test_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     (void)hwnd;
     (void)wParam;
     (void)lParam;
+    if (msg == WM_NCCREATE)
+        return TRUE;
     if (msg == WM_DESTROY)
         g_destroy_messages++;
     return 0;
@@ -55,6 +63,7 @@ int main(void)
 
     T(RegisterClassA(&wc) != 0, "RegisterClassA failed");
     T(RegisterClassA(&wc) == 1, "duplicate RegisterClassA should return existing atom");
+    T(GetDesktopWindow() != 1, "GetDesktopWindow should not alias stdout handle slot");
 
     for (int i = 0; i < 20; i++) {
         snprintf(dynamic_name, sizeof(dynamic_name), "DynamicClass%02d", i);
@@ -114,6 +123,19 @@ int main(void)
           "SetWindowLongPtrA(GWLP_USERDATA) returned wrong previous value");
         T(GetWindowLongPtrA(hwnd, GWLP_USERDATA) == (((LONG_PTR)1 << 34) | 0x55AA),
           "GetWindowLongPtrA(GWLP_USERDATA) did not preserve pointer-width value");
+        T(GetSystemMetrics(SM_CXSCREEN) > 0, "GetSystemMetrics(SM_CXSCREEN) should be non-zero");
+        T(GetSystemMetrics(SM_CYSCREEN) > 0, "GetSystemMetrics(SM_CYSCREEN) should be non-zero");
+        T(GetSystemMetrics(SM_CXBORDER) == 1, "GetSystemMetrics(SM_CXBORDER) should be 1");
+        T(GetSystemMetrics(SM_CYBORDER) == 1, "GetSystemMetrics(SM_CYBORDER) should be 1");
+        T(GetSystemMetrics(SM_CXFULLSCREEN) > 0, "GetSystemMetrics(SM_CXFULLSCREEN) should be non-zero");
+        T(GetSystemMetrics(SM_CYFULLSCREEN) > 0, "GetSystemMetrics(SM_CYFULLSCREEN) should be non-zero");
+
+        MINMAXINFO info;
+        memset(&info, 0, sizeof(info));
+        T(SendMessageA(hwnd, WM_GETMINMAXINFO, 0, (LPARAM)(intptr_t)&info) == 0,
+          "SendMessageA(WM_GETMINMAXINFO) failed");
+        T(info.ptMinTrackSize.x == 320 && info.ptMinTrackSize.y == 200,
+          "WM_GETMINMAXINFO did not derive min track size from current client size");
 
         PAINTSTRUCT ps;
         memset(&ps, 0, sizeof(ps));
@@ -138,6 +160,33 @@ int main(void)
                       "rb_cursor_destroy failed for LoadCursorA result");
                 wine_handle_free((uint32_t)cursor);
             }
+        }
+
+        HCURSOR cursor1 = LoadCursorA(0, IDC_ARROW);
+        HCURSOR cursor2 = LoadCursorA(0, IDC_HAND);
+        T(cursor1 != 0 && cursor2 != 0, "LoadCursorA should return cursors for SetCursor test");
+        if (cursor1 && cursor2) {
+            T(SetCursor(cursor1) == 0, "first SetCursor should return NULL");
+            T(SetCursor(cursor2) == cursor1, "second SetCursor should return previous cursor");
+        }
+
+        RECT clip = { 10, 20, 40, 60 };
+        T(ClipCursor(&clip) == TRUE, "ClipCursor should accept a clipping rect");
+        T(SetCursorPos(25, 30) == TRUE, "SetCursorPos should succeed for the active window");
+
+        if (cursor1) {
+            rb_cursor_t backend_cursor = (rb_cursor_t)(uintptr_t)wine_handle_get((uint32_t)cursor1);
+            if (backend_cursor)
+                T(rb_cursor_destroy(backend_cursor) == RB_OK,
+                  "rb_cursor_destroy failed for first cursor");
+            wine_handle_free((uint32_t)cursor1);
+        }
+        if (cursor2) {
+            rb_cursor_t backend_cursor = (rb_cursor_t)(uintptr_t)wine_handle_get((uint32_t)cursor2);
+            if (backend_cursor)
+                T(rb_cursor_destroy(backend_cursor) == RB_OK,
+                  "rb_cursor_destroy failed for second cursor");
+            wine_handle_free((uint32_t)cursor2);
         }
 
         T(DestroyWindow(hwnd) == TRUE, "DestroyWindow failed");
