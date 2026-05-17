@@ -22,6 +22,7 @@ typedef int32_t     INT;
 typedef int32_t     LONG;
 typedef uint32_t    ULONG;
 typedef uintptr_t   ULONG_PTR;
+typedef intptr_t    LONG_PTR;
 
 typedef intptr_t    LRESULT;
 typedef uintptr_t   WPARAM;
@@ -249,6 +250,12 @@ typedef struct {
 #define GWL_EXSTYLE    (-20)
 #define GWL_USERDATA   (-21)
 #define GWL_ID         (-12)
+
+#define GWLP_WNDPROC   GWL_WNDPROC
+#define GWLP_HINSTANCE GWL_HINSTANCE
+#define GWLP_HWNDPARENT GWL_HWNDPARENT
+#define GWLP_USERDATA  GWL_USERDATA
+#define GWLP_ID        GWL_ID
 
 /*
  * ── System Command IDs (SC_*) ────────────────────────────────

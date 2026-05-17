@@ -39,6 +39,9 @@ U32W int32_t GetClientRect(uintptr_t hwnd, void *lpRect) { (void)hwnd; (void)lpR
 U32W int32_t GetWindowLongA(uintptr_t hwnd, int nIndex) { (void)hwnd; (void)nIndex; return 0; }
 U32W int32_t SetWindowLongA(uintptr_t hwnd, int nIndex, int32_t dwNewLong)
 { (void)hwnd; (void)nIndex; (void)dwNewLong; return 0; }
+U32W intptr_t GetWindowLongPtrA(uintptr_t hwnd, int nIndex) { (void)hwnd; (void)nIndex; return 0; }
+U32W intptr_t SetWindowLongPtrA(uintptr_t hwnd, int nIndex, intptr_t dwNewLong)
+{ (void)hwnd; (void)nIndex; (void)dwNewLong; return 0; }
 U32W int32_t IsWindow(uintptr_t hwnd) { (void)hwnd; return 0; }
 U32W int32_t EnableWindow(uintptr_t hwnd, int32_t bEnable) { (void)hwnd; (void)bEnable; return 1; }
 U32W uintptr_t GetDesktopWindow(void) { return 1; }

@@ -16,8 +16,15 @@
 typedef struct {
     rb_window_t  sdl_window;
     void         *wnd_proc;
+    const char   *class_name;
     char          title[128];
     uint32_t      style;
+    uint32_t      ex_style;
+    uintptr_t     user_data;
+    HINSTANCE     hinstance;
+    HWND          parent;
+    HMENU         menu;
+    ATOM          class_atom;
     rb_rect_t     client_rect;
     bool          destroy_in_progress;
 } wine_window_entry;

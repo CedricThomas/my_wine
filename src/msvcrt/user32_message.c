@@ -51,48 +51,10 @@ static int queue_push(rb_msg_t *queue, size_t capacity,
     return 1;
 }
 
-static int queue_peek(const rb_msg_t *queue, size_t capacity,
-                      size_t head, size_t count,
-                      rb_msg_t *msg)
-{
-    (void)capacity;
-
-    if (!queue || !msg || count == 0)
-        return 0;
-
-    *msg = queue[head];
-    return 1;
-}
-
-static int queue_pop(const rb_msg_t *queue, size_t capacity,
-                     size_t *head, size_t *count,
-                     rb_msg_t *msg)
-{
-    if (!queue || !head || !count ||
-        !queue_peek(queue, capacity, *head, *count, msg))
-        return 0;
-
-    *head = (*head + 1) % capacity;
-    (*count)--;
-    return 1;
-}
-
 static int posted_queue_push(const rb_msg_t *msg)
 {
     return queue_push(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
                       &g_posted_queue_head, &g_posted_queue_count, msg);
-}
-
-static int posted_queue_peek(rb_msg_t *msg)
-{
-    return queue_peek(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
-                      g_posted_queue_head, g_posted_queue_count, msg);
-}
-
-static int posted_queue_pop(rb_msg_t *msg)
-{
-    return queue_pop(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
-                     &g_posted_queue_head, &g_posted_queue_count, msg);
 }
 
 static int translated_queue_push(const rb_msg_t *msg)
@@ -101,33 +63,43 @@ static int translated_queue_push(const rb_msg_t *msg)
                       &g_translated_queue_head, &g_translated_queue_count, msg);
 }
 
-static int translated_queue_peek(rb_msg_t *msg)
+static int message_matches_filter(const rb_msg_t *msg, HWND hwnd_filter,
+                                  UINT min_filter, UINT max_filter)
 {
-    return queue_peek(g_translated_queue, USER32_TRANSLATED_QUEUE_CAPACITY,
-                      g_translated_queue_head, g_translated_queue_count, msg);
-}
+    UINT message;
 
-static int translated_queue_pop(rb_msg_t *msg)
-{
-    return queue_pop(g_translated_queue, USER32_TRANSLATED_QUEUE_CAPACITY,
-                     &g_translated_queue_head, &g_translated_queue_count, msg);
-}
-
-static int user32_synthesize_quit_message(int remove, rb_msg_t *msg)
-{
     if (!msg)
         return 0;
 
-    if (g_user32_window_create_attempted && g_user32_live_windows == 0) {
-        user32_memset(msg, 0, sizeof(*msg));
-        msg->message = WM_QUIT;
+    message = msg->message;
+    if (message == WM_QUIT)
         return 1;
-    }
+
+    if (hwnd_filter != 0 && msg->hwnd != (uintptr_t)hwnd_filter)
+        return 0;
+
+    if (min_filter == 0 && max_filter == 0)
+        return 1;
+
+    if (max_filter == 0)
+        return message >= min_filter;
+
+    return message >= min_filter && message <= max_filter;
+}
+
+static int user32_synthesize_quit_message(int remove, HWND hwnd_filter,
+                                          UINT min_filter, UINT max_filter,
+                                          rb_msg_t *msg)
+{
+    if (!msg)
+        return 0;
 
     if (g_quit_pending) {
         user32_memset(msg, 0, sizeof(*msg));
         msg->message = WM_QUIT;
         msg->wParam = (WPARAM)g_quit_exit_code;
+        if (!message_matches_filter(msg, hwnd_filter, min_filter, max_filter))
+            return 0;
         if (remove)
             g_quit_pending = 0;
         return 1;
@@ -148,42 +120,107 @@ static void copy_rb_msg_to_MSG(const rb_msg_t *src, MSG *dst)
     dst->pt.y    = src->pt_y;
 }
 
-static int fetch_translated_message(int blocking, int remove, rb_msg_t *msg)
+static int queue_find_matching(const rb_msg_t *queue, size_t capacity,
+                               size_t head, size_t count,
+                               HWND hwnd_filter, UINT min_filter, UINT max_filter)
 {
+    size_t i;
+
+    for (i = 0; i < count; i++) {
+        size_t idx = (head + i) % capacity;
+        if (message_matches_filter(&queue[idx], hwnd_filter, min_filter, max_filter))
+            return (int)idx;
+    }
+
+    return -1;
+}
+
+static int queue_take_at(rb_msg_t *queue, size_t capacity,
+                         size_t *head, size_t *count,
+                         int match_idx, int remove, rb_msg_t *msg)
+{
+    size_t idx;
+    size_t i;
+
+    if (!queue || !head || !count || !msg || *count == 0 || match_idx < 0)
+        return 0;
+
+    idx = (size_t)match_idx;
+    *msg = queue[idx];
+    if (!remove)
+        return 1;
+
+    for (i = idx; i != ((*head + *count - 1) % capacity); i = (i + 1) % capacity) {
+        size_t next = (i + 1) % capacity;
+        queue[i] = queue[next];
+    }
+    (*count)--;
+    return 1;
+}
+
+static int posted_queue_take_matching(int remove, HWND hwnd_filter,
+                                      UINT min_filter, UINT max_filter,
+                                      rb_msg_t *msg)
+{
+    int match_idx = queue_find_matching(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
+                                        g_posted_queue_head, g_posted_queue_count,
+                                        hwnd_filter, min_filter, max_filter);
+    return queue_take_at(g_posted_queue, USER32_POSTED_QUEUE_CAPACITY,
+                         &g_posted_queue_head, &g_posted_queue_count,
+                         match_idx, remove, msg);
+}
+
+static int translated_queue_take_matching(int remove, HWND hwnd_filter,
+                                          UINT min_filter, UINT max_filter,
+                                          rb_msg_t *msg)
+{
+    int match_idx = queue_find_matching(g_translated_queue,
+                                        USER32_TRANSLATED_QUEUE_CAPACITY,
+                                        g_translated_queue_head,
+                                        g_translated_queue_count,
+                                        hwnd_filter, min_filter, max_filter);
+    return queue_take_at(g_translated_queue, USER32_TRANSLATED_QUEUE_CAPACITY,
+                         &g_translated_queue_head, &g_translated_queue_count,
+                         match_idx, remove, msg);
+}
+
+static int fetch_translated_message(int blocking, int remove,
+                                    HWND hwnd_filter,
+                                    UINT min_filter, UINT max_filter,
+                                    rb_msg_t *msg)
+{
+    rb_msg_t incoming;
     int ret;
 
     if (!msg)
         return 0;
 
-    if (remove) {
-        if (posted_queue_pop(msg))
-            return 1;
-    } else if (posted_queue_peek(msg)) {
+    if (posted_queue_take_matching(remove, hwnd_filter, min_filter, max_filter, msg))
         return 1;
-    }
 
-    if (remove) {
-        if (translated_queue_pop(msg))
-            return 1;
-    } else if (translated_queue_peek(msg)) {
+    if (translated_queue_take_matching(remove, hwnd_filter, min_filter, max_filter, msg))
         return 1;
-    }
 
-    user32_memset(msg, 0, sizeof(*msg));
-    if (blocking) {
-        ret = rb_event_wait(msg);
-        if (ret < 0 || msg->message == 0)
+    for (;;) {
+        user32_memset(&incoming, 0, sizeof(incoming));
+        if (blocking) {
+            ret = rb_event_wait(&incoming);
+            if (ret < 0 || incoming.message == 0)
+                return 0;
+        } else {
+            ret = rb_event_peek(&incoming);
+            if (ret <= 0 || incoming.message == 0)
+                return 0;
+        }
+
+        if (message_matches_filter(&incoming, hwnd_filter, min_filter, max_filter)) {
+            *msg = incoming;
+            return 1;
+        }
+
+        if (!translated_queue_push(&incoming))
             return 0;
-        return 1;
     }
-
-    ret = rb_event_peek(msg);
-    if (ret <= 0 || msg->message == 0)
-        return 0;
-    if (!translated_queue_push(msg))
-        return 0;
-
-    return remove ? translated_queue_pop(msg) : translated_queue_peek(msg);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -209,12 +246,12 @@ BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
         return FALSE;
 
     rb_msg_t rb;
-    if (user32_synthesize_quit_message(1, &rb)) {
+    if (user32_synthesize_quit_message(1, hWnd, wMsgFilterMin, wMsgFilterMax, &rb)) {
         copy_rb_msg_to_MSG(&rb, lpMsg);
         return 0;
     }
 
-    if (!fetch_translated_message(1, 1, &rb))
+    if (!fetch_translated_message(1, 1, hWnd, wMsgFilterMin, wMsgFilterMax, &rb))
         return 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);
@@ -243,13 +280,14 @@ BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
         return FALSE;
 
     rb_msg_t rb;
-    if (user32_synthesize_quit_message((wRemoveMsg & 0x0001) != 0, &rb)) {
+    if (user32_synthesize_quit_message((wRemoveMsg & 0x0001) != 0,
+                                       hWnd, wMsgFilterMin, wMsgFilterMax, &rb)) {
         copy_rb_msg_to_MSG(&rb, lpMsg);
         return TRUE;
     }
 
     int remove = (wRemoveMsg & 0x0001) != 0;
-    if (!fetch_translated_message(0, remove, &rb))
+    if (!fetch_translated_message(0, remove, hWnd, wMsgFilterMin, wMsgFilterMax, &rb))
         return 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);

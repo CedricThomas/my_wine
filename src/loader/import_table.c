@@ -90,6 +90,8 @@ extern void GetWindowRect(void);
 extern void GetClientRect(void);
 extern void GetWindowLongA(void);
 extern void SetWindowLongA(void);
+extern void GetWindowLongPtrA(void);
+extern void SetWindowLongPtrA(void);
 extern void IsWindow(void);
 extern void EnableWindow(void);
 extern void GetDesktopWindow(void);
@@ -285,6 +287,8 @@ import_entry_t import_table[] = {
     { "user32.dll", "GetClientRect", (void*)GetClientRect },
     { "user32.dll", "GetWindowLongA", (void*)GetWindowLongA },
     { "user32.dll", "SetWindowLongA", (void*)SetWindowLongA },
+    { "user32.dll", "GetWindowLongPtrA", (void*)GetWindowLongPtrA },
+    { "user32.dll", "SetWindowLongPtrA", (void*)SetWindowLongPtrA },
     { "user32.dll", "IsWindow", (void*)IsWindow },
     { "user32.dll", "EnableWindow", (void*)EnableWindow },
     { "user32.dll", "GetDesktopWindow", (void*)GetDesktopWindow },
@@ -334,6 +338,8 @@ import_entry_t import_table[] = {
     { "user32.DLL", "GetClientRect", (void*)GetClientRect },
     { "user32.DLL", "GetWindowLongA", (void*)GetWindowLongA },
     { "user32.DLL", "SetWindowLongA", (void*)SetWindowLongA },
+    { "user32.DLL", "GetWindowLongPtrA", (void*)GetWindowLongPtrA },
+    { "user32.DLL", "SetWindowLongPtrA", (void*)SetWindowLongPtrA },
     { "user32.DLL", "IsWindow", (void*)IsWindow },
     { "user32.DLL", "EnableWindow", (void*)EnableWindow },
     { "user32.DLL", "GetDesktopWindow", (void*)GetDesktopWindow },

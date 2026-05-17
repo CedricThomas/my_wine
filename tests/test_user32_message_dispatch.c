@@ -16,10 +16,13 @@ KERNEL32_ABI LRESULT CallWindowProcA(WNDPROC lpPrevWndFunc, HWND hWnd,
                                      UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_ABI LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_ABI HWND GetActiveWindow(void);
+KERNEL32_ABI LONG_PTR GetWindowLongPtrA(HWND hwnd, int nIndex);
+KERNEL32_ABI LONG_PTR SetWindowLongPtrA(HWND hwnd, int nIndex, LONG_PTR dwNewLong);
 KERNEL32_ABI BOOL PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_ABI void PostQuitMessage(int nExitCode);
 KERNEL32_ABI BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
                                UINT wMsgFilterMax, UINT wRemoveMsg);
+KERNEL32_ABI BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax);
 KERNEL32_ABI BOOL IsWindow(HWND hwnd);
 
 static int g_failures = 0;
@@ -102,6 +105,12 @@ int main(void)
         T(CallWindowProcA(test_wndproc, hwnd, TEST_CALLPROC_MESSAGE, 0, 0) == TEST_CALLPROC_RESULT,
           "CallWindowProcA did not return wndproc result");
         T(g_callproc_messages == 1, "CallWindowProcA did not reach wndproc");
+        T(GetWindowLongPtrA(hwnd, GWLP_WNDPROC) == (LONG_PTR)(intptr_t)test_wndproc,
+          "GetWindowLongPtrA did not preserve the full wndproc pointer");
+        T(SetWindowLongPtrA(hwnd, GWLP_USERDATA, ((LONG_PTR)1 << 33) | 0x1234) == 0,
+          "SetWindowLongPtrA should return previous userdata");
+        T(GetWindowLongPtrA(hwnd, GWLP_USERDATA) == (((LONG_PTR)1 << 33) | 0x1234),
+          "GetWindowLongPtrA did not preserve pointer-width userdata");
 
         MSG msg;
         memset(&msg, 0, sizeof(msg));
@@ -115,26 +124,34 @@ int main(void)
 
         T(DestroyWindow(hwnd) == FALSE, "DestroyWindow should fail after WM_CLOSE destroyed the hwnd");
 
+        T(PostMessageA(hwnd, TEST_SEND_MESSAGE, 1, 11) == TRUE,
+          "PostMessageA failed for first window");
         T(PostMessageA(hwnd2, WM_LBUTTONDOWN, 0, 0) == TRUE,
           "PostMessageA failed for second window");
 
         memset(&msg, 0, sizeof(msg));
-        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == TRUE,
-          "PeekMessageA(PM_NOREMOVE) did not find posted message");
-        T(msg.hwnd == hwnd2, "First PM_NOREMOVE returned wrong hwnd");
-        T(msg.message == WM_LBUTTONDOWN, "First PM_NOREMOVE returned wrong message");
+        T(PeekMessageA(&msg, hwnd2, 0, 0, PM_NOREMOVE) == TRUE,
+          "PeekMessageA(hwnd filter) did not find the matching window message");
+        T(msg.hwnd == hwnd2, "PeekMessageA(hwnd filter) returned wrong hwnd");
+        T(msg.message == WM_LBUTTONDOWN, "PeekMessageA(hwnd filter) returned wrong message");
 
         memset(&msg, 0, sizeof(msg));
-        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == TRUE,
-          "Second PeekMessageA(PM_NOREMOVE) did not find queued message");
-        T(msg.hwnd == hwnd2, "Second PM_NOREMOVE returned wrong hwnd");
-        T(msg.message == WM_LBUTTONDOWN, "Second PM_NOREMOVE returned wrong message");
+        T(PeekMessageA(&msg, hwnd2, 0, 0, PM_REMOVE) == TRUE,
+          "PeekMessageA(hwnd filter, PM_REMOVE) did not remove the matching message");
+        T(msg.hwnd == hwnd2, "PeekMessageA(hwnd filter, PM_REMOVE) returned wrong hwnd");
+        T(msg.message == WM_LBUTTONDOWN, "PeekMessageA(hwnd filter, PM_REMOVE) returned wrong message");
 
         memset(&msg, 0, sizeof(msg));
-        T(PeekMessageA(&msg, 0, 0, 0, PM_REMOVE) == TRUE,
-          "PeekMessageA(PM_REMOVE) did not remove queued message");
-        T(msg.hwnd == hwnd2, "PM_REMOVE returned wrong hwnd");
-        T(msg.message == WM_LBUTTONDOWN, "PM_REMOVE returned wrong message");
+        T(PeekMessageA(&msg, 0, TEST_SEND_MESSAGE, TEST_SEND_MESSAGE, PM_NOREMOVE) == TRUE,
+          "PeekMessageA(range filter) did not find the matching message");
+        T(msg.hwnd == hwnd, "PeekMessageA(range filter) returned wrong hwnd");
+        T(msg.message == TEST_SEND_MESSAGE, "PeekMessageA(range filter) returned wrong message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(GetMessageA(&msg, hwnd, 0, 0) == TRUE,
+          "GetMessageA(hwnd filter) did not return the queued hwnd message");
+        T(msg.hwnd == hwnd, "GetMessageA(hwnd filter) returned wrong hwnd");
+        T(msg.message == TEST_SEND_MESSAGE, "GetMessageA(hwnd filter) returned wrong message");
 
         memset(&msg, 0, sizeof(msg));
         T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,
@@ -161,6 +178,17 @@ int main(void)
         msg.message = WM_CLOSE;
         T(DispatchMessageA(&msg) == 0, "DispatchMessageA did not close second window");
         T(IsWindow(hwnd2) == FALSE, "Second window should be destroyed by WM_CLOSE");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,
+          "Destroying the last window should not synthesize WM_QUIT");
+
+        HWND hwnd3 = CreateWindowExA(0, wc.lpszClassName, "dispatch-3",
+                                     WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                     20, 20, 320, 200, 0, 0, 0, NULL);
+        T(hwnd3 != 0, "CreateWindowExA should still work after all prior windows were destroyed");
+        if (hwnd3)
+            T(DestroyWindow(hwnd3) == TRUE, "DestroyWindow on recreated window failed");
     }
 
     if (hwnd2 && IsWindow(hwnd2))

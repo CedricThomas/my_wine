@@ -16,6 +16,10 @@ KERNEL32_ABI BOOL DestroyWindow(HWND hwnd);
 KERNEL32_ABI HWND GetActiveWindow(void);
 KERNEL32_ABI HWND GetFocus(void);
 KERNEL32_ABI HWND SetFocus(HWND hwnd);
+KERNEL32_ABI LONG GetWindowLongA(HWND hwnd, int nIndex);
+KERNEL32_ABI LONG SetWindowLongA(HWND hwnd, int nIndex, LONG dwNewLong);
+KERNEL32_ABI LONG_PTR GetWindowLongPtrA(HWND hwnd, int nIndex);
+KERNEL32_ABI LONG_PTR SetWindowLongPtrA(HWND hwnd, int nIndex, LONG_PTR dwNewLong);
 KERNEL32_ABI HDC BeginPaint(HWND hwnd, PAINTSTRUCT *lpPaint);
 KERNEL32_ABI BOOL EndPaint(HWND hwnd, const PAINTSTRUCT *lpPaint);
 KERNEL32_ABI HCURSOR LoadCursorA(HINSTANCE hInstance, const char *lpCursorName);
@@ -60,9 +64,9 @@ int main(void)
         dynamic_name[sizeof(dynamic_name) - 1] = '\0';
     }
 
-    HWND hwnd = CreateWindowExA(0, "HandleOwnershipTest", "ownership",
+    HWND hwnd = CreateWindowExA(WS_EX_APPWINDOW, "HandleOwnershipTest", "ownership",
                                 WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                                0, 0, 320, 200, 0, 0, 0, NULL);
+                                0, 0, 320, 200, (HWND)0x1111, (HMENU)0x2222, (HINSTANCE)0x3333, NULL);
     HWND hwnd2 = CreateWindowExA(0, "DynamicClass19", "ownership-2",
                                  WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                                  10, 10, 320, 200, 0, 0, 0, NULL);
@@ -89,6 +93,27 @@ int main(void)
         T(GetFocus() == hwnd, "GetFocus did not change to hwnd");
         T(SetFocus(hwnd2) == hwnd, "SetFocus should return first window on transition");
         T(GetFocus() == hwnd2, "GetFocus did not change to hwnd2");
+
+        T(GetWindowLongA(hwnd, GWL_STYLE) == (LONG)(WS_OVERLAPPEDWINDOW | WS_VISIBLE),
+          "GetWindowLongA(GWL_STYLE) returned wrong style");
+        T(GetWindowLongA(hwnd, GWL_EXSTYLE) == (LONG)WS_EX_APPWINDOW,
+          "GetWindowLongA(GWL_EXSTYLE) returned wrong exstyle");
+        T(GetWindowLongPtrA(hwnd, GWLP_HINSTANCE) == (LONG_PTR)(uintptr_t)0x3333,
+          "GetWindowLongPtrA(GWLP_HINSTANCE) returned wrong instance");
+        T(GetWindowLongPtrA(hwnd, GWLP_HWNDPARENT) == (LONG_PTR)(uintptr_t)0x1111,
+          "GetWindowLongPtrA(GWLP_HWNDPARENT) returned wrong parent");
+        T(GetWindowLongPtrA(hwnd, GWLP_ID) == (LONG_PTR)(uintptr_t)0x2222,
+          "GetWindowLongPtrA(GWLP_ID) returned wrong menu/id");
+        T(GetWindowLongPtrA(hwnd, GWLP_WNDPROC) == (LONG_PTR)(intptr_t)test_wndproc,
+          "GetWindowLongPtrA(GWLP_WNDPROC) did not preserve wndproc pointer");
+        T(SetWindowLongA(hwnd, GWL_EXSTYLE, WS_EX_TOOLWINDOW) == (LONG)WS_EX_APPWINDOW,
+          "SetWindowLongA(GWL_EXSTYLE) returned wrong previous value");
+        T(GetWindowLongA(hwnd, GWL_EXSTYLE) == (LONG)WS_EX_TOOLWINDOW,
+          "SetWindowLongA(GWL_EXSTYLE) did not update exstyle");
+        T(SetWindowLongPtrA(hwnd, GWLP_USERDATA, ((LONG_PTR)1 << 34) | 0x55AA) == 0,
+          "SetWindowLongPtrA(GWLP_USERDATA) returned wrong previous value");
+        T(GetWindowLongPtrA(hwnd, GWLP_USERDATA) == (((LONG_PTR)1 << 34) | 0x55AA),
+          "GetWindowLongPtrA(GWLP_USERDATA) did not preserve pointer-width value");
 
         PAINTSTRUCT ps;
         memset(&ps, 0, sizeof(ps));
