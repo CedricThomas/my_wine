@@ -9,7 +9,7 @@
 ## Tasks
 
 ### 3.1 user32_types.h
-- [ ] Create `include/user32_types.h` with:
+- [x] Create `include/user32_types.h` with:
   - `HWND` (handle manager ID, type 0x01)
   - `HDC` (handle manager ID, type 0x02)
   - `HCURSOR` (handle manager ID, type 0x06)
@@ -25,76 +25,80 @@
   - `GWL_WNDPROC`(-4) for `GetWindowLongA`/`SetWindowLongA`
 
 ### 3.2 user32_window.c (27 functions)
-- [ ] `RegisterClassA` → store `WNDCLASSA` + `WNDPROC` in internal hash (keyed by class name)
-- [ ] `CreateWindowExA` → `rb_window_create()` + allocate `HWND` from handle manager + store style/params in `window_entry`
-- [ ] `DestroyWindow` → `rb_window_destroy()` + free `HWND`
-- [ ] `ShowWindow` → map `nCmdShow` to `rb_window_show()` / `SDL_ShowWindow()` / `SDL_HideWindow()` / `SDL_RestoreWindow()`
-- [ ] `SetWindowPos` → `rb_window_set_position()` + `rb_window_set_size()`
-- [ ] `MoveWindow` → same as `SetWindowPos`
-- [ ] `SetWindowTextA` → `rb_window_set_title()`
-- [ ] `GetWindowRect` → `rb_window_get_rect()` → fill `RECT`
-- [ ] `GetClientRect` → `rb_window_get_client_rect()` → fill `RECT` with `(0,0,w,h)`
-- [ ] `GetWindowLongA` / `SetWindowLongA` → internal `window_entry` field access (handle `GWL_WNDPROC` for subclassing)
-- [ ] `IsWindow` → return `TRUE` if `HWND` exists in window table
-- [ ] `EnableWindow` → `return TRUE`
-- [ ] `GetDesktopWindow` → return sentinel `HWND`
-- [ ] `GetActiveWindow` → return current main `HWND`
-- [ ] `GetFocus` → return current main `HWND`
-- [ ] `SetFocus` → return previous `HWND`
-- [ ] `UpdateWindow` → `return TRUE`
-- [ ] `InvalidateRect` → `return TRUE`
-- [ ] `ValidateRect` → `return TRUE`
-- [ ] `BeginPaint` → return mock `HDC` (same as `GetDC`)
-- [ ] `EndPaint` → `return TRUE`
-- [ ] `MapWindowPoints` → identity transform; return `nCount`
-- [ ] `GetSystemMetrics` → map index to `rb_window_get_client_rect()` or hardcoded value:
+- [x] `RegisterClassA` → store `WNDCLASSA` + `WNDPROC` in internal hash (keyed by class name)
+- [x] `CreateWindowExA` → `rb_window_create()` + allocate `HWND` from handle manager + store style/params in `window_entry`
+- [x] `DestroyWindow` → `rb_window_destroy()` + free `HWND`
+- [x] `ShowWindow` → map `nCmdShow` to `rb_window_show()` / `SDL_ShowWindow()` / `SDL_HideWindow()` / `SDL_RestoreWindow()`
+- [x] `SetWindowPos` → `rb_window_set_position()` + `rb_window_set_size()`
+- [x] `MoveWindow` → same as `SetWindowPos`
+- [x] `SetWindowTextA` → `rb_window_set_title()`
+- [x] `GetWindowRect` → `rb_window_get_rect()` → fill `RECT`
+- [x] `GetClientRect` → `rb_window_get_client_rect()` → fill `RECT` with `(0,0,w,h)`
+- [x] `GetWindowLongA` / `SetWindowLongA` → internal `window_entry` field access (handle `GWL_WNDPROC` for subclassing)
+- [x] `IsWindow` → return `TRUE` if `HWND` exists in window table
+- [x] `EnableWindow` → `return TRUE`
+- [x] `GetDesktopWindow` → return sentinel `HWND`
+- [x] `GetActiveWindow` → return current main `HWND`
+- [x] `GetFocus` → return current main `HWND`
+- [x] `SetFocus` → return previous `HWND`
+- [x] `UpdateWindow` → `return TRUE`
+- [x] `InvalidateRect` → `return TRUE`
+- [x] `ValidateRect` → `return TRUE`
+- [x] `BeginPaint` → return mock `HDC` (same as `GetDC`)
+- [x] `EndPaint` → `return TRUE`
+- [x] `MapWindowPoints` → identity transform; return `nCount`
+- [x] `GetSystemMetrics` → map index to `rb_window_get_client_rect()` or hardcoded value:
   - `SM_CXSCREEN`(0) → display width, `SM_CYSCREEN`(1) → display height
   - `SM_CXBORDER`(2) → 1, `SM_CYBORDER`(3) → 1
   - `SM_CXFULLSCREEN`(16) → display width, `SM_CYFULLSCREEN`(17) → display height
   - All others → 0
-- [ ] `AdjustWindowRect` / `AdjustWindowRectEx` → `*rect = rect_original; return TRUE`
-- [ ] `GetDC` → `rb_window_get_dc()` (via handle manager)
-- [ ] `ReleaseDC` → `rb_window_release_dc()` → `return 1`
+- [x] `AdjustWindowRect` / `AdjustWindowRectEx` → `*rect = rect_original; return TRUE`
+- [x] `GetDC` → `rb_window_get_dc()` (via handle manager)
+- [x] `ReleaseDC` → `rb_window_release_dc()` → `return 1`
 
 ### 3.3 user32_message.c (13 functions)
-- [ ] `GetMessageA` → `rb_event_wait()` → blocking wait, returns 0 on `WM_QUIT`
-- [ ] `PeekMessageA` → `rb_event_peek()` → non-blocking peek
-- [ ] `DispatchMessageA` → call `WNDPROC` stored for target `HWND`
-- [ ] `PostMessageA` → `rb_event_push()` → translate `MSG` to `SDL_Event` and push
-- [ ] `PostQuitMessage` → `rb_event_push()` with `WM_QUIT`
-- [ ] `SendMessageA` → direct `WNDPROC` call; special cases:
+- [x] `GetMessageA` → `rb_event_wait()` → blocking wait, returns 0 on `WM_QUIT`
+- [x] `PeekMessageA` → `rb_event_peek()` → non-blocking peek
+- [x] `DispatchMessageA` → call `WNDPROC` stored for target `HWND`
+- [x] `PostMessageA` → `rb_event_push()` → translate `MSG` to `SDL_Event` and push
+- [x] `PostQuitMessage` → `rb_event_push()` with `WM_QUIT`
+- [x] `SendMessageA` → direct `WNDPROC` call; special cases:
   - `WM_GETTEXT` → copy window title to buffer
   - `WM_SETTEXT` → `rb_window_set_title()`
   - `WM_GETMINMAXINFO` → fill struct with current size
-- [ ] `DefWindowProcA` → `return 0`
-- [ ] `CallWindowProcA` → direct function pointer call
-- [ ] `SetWindowsHookExA` → `return NULL` (no hook chain)
-- [ ] `UnhookWindowsHookEx` → `return TRUE`
-- [ ] `CallNextHookEx` → `return 0`
-- [ ] `SystemParametersInfoA` → `return TRUE`
+- [x] `DefWindowProcA` → `return 0`
+- [x] `CallWindowProcA` → direct function pointer call
+- [x] `SetWindowsHookExA` → `return NULL` (no hook chain)
+- [x] `UnhookWindowsHookEx` → `return TRUE`
+- [x] `CallNextHookEx` → `return 0`
+- [x] `SystemParametersInfoA` → `return TRUE`
 
 ### 3.4 user32_input.c (8 functions)
-- [ ] `GetAsyncKeyState` → `rb_keyboard_get_async_state()` + full VK→Scancode table (~200 entries)
-- [ ] `LoadCursorA` → `rb_cursor_create()` (map `IDC_ARROW`→0, `IDC_CROSS`→1, `IDC_HAND`→9, `IDC_IBEAM`→2)
-- [ ] `SetCursor` → `rb_window_set_cursor()`
-- [ ] `SetCursorPos` → `rb_window_warp_mouse()`
-- [ ] `ClipCursor` → `return TRUE`
-- [ ] `LoadIconA` → return sentinel `HICON`
-- [ ] `wsprintfA` → `vsprintf()` wrapper
-- [ ] `SetRect` → `r->left=x; r->top=y; r->right=x2; r->bottom=y2;`
+- [x] `GetAsyncKeyState` → `rb_keyboard_get_async_state()` + full VK→Scancode table (~200 entries)
+- [x] `LoadCursorA` → `rb_cursor_create()` (map `IDC_ARROW`→0, `IDC_CROSS`→1, `IDC_HAND`→9, `IDC_IBEAM`→2)
+- [x] `SetCursor` → `rb_window_set_cursor()`
+- [x] `SetCursorPos` → `rb_window_warp_mouse()`
+- [x] `ClipCursor` → `return TRUE`
+- [x] `LoadIconA` → return sentinel `HICON`
+- [x] `wsprintfA` → `vsprintf()` wrapper
+- [x] `SetRect` → `r->left=x; r->top=y; r->right=x2; r->bottom=y2;`
 
 ### 3.5 import_table.c
-- [ ] Add all 48 user32.dll function entries to `import_table.c`
-- [ ] Format: `{ "user32.dll", "FunctionName", (void*)stub_FunctionName }`
-- [ ] Also add `user32.DLL` entries (case-insensitive matching in resolver)
+- [x] Add all 48 user32.dll function entries to `import_table.c`
+- [x] Format: `{ "user32.dll", "FunctionName", (void*)stub_FunctionName }`
+- [x] Also add `user32.DLL` entries (case-insensitive matching in resolver)
 
 ### 3.6 Test
-- [ ] Compile a test PE that:
+- [x] Compile a test PE that:
   1. Calls `RegisterClassA` with a custom `WNDPROC`
   2. Calls `CreateWindowExA(0, "TestClass", "Test", WS_VISIBLE, 0, 0, 320, 200, 0, 0, hInst, 0)`
   3. Enters `while (GetMessage(&msg, 0, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }`
   4. `WNDPROC` handles `WM_DESTROY` → `PostQuitMessage(0)`
-- [ ] Expected: SDL2 window appears with title "Test" at 320x200. Clicking close button → window closes → loop exits → process terminates cleanly.
+- [x] Expected: SDL2 window appears with title "Test" at 320x200. Clicking close button → window closes → loop exits → process terminates cleanly.
+
+Verification uses the existing graphical PE samples:
+- `samples/sdl2_window/` — minimal `RegisterClassA` + `CreateWindowExA` + `GetMessageA` loop
+- `samples/sdl2_window_closewindow/` — same loop with harness-driven close-button verification
 
 ---
 
