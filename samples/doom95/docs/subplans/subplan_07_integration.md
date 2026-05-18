@@ -59,3 +59,4 @@ are real requirements, not guesses.
 - file size is `775117` bytes
 - the resource directory is present and `objdump` reports dialog resources with
   IDs `104`, `130`, and `131`, which matches the older dialog notes
+  

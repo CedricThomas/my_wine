@@ -19,6 +19,7 @@
 #include "include/msvcrt.h"
 #include "include/common.h"
 #include "include/ddraw_types.h"
+#include "include/dsound_types.h"
 
 #include "loader_priv.h"
 #include "src/pe_priv.h"
@@ -45,6 +46,10 @@ extern int _m_vfprintf(void *, const char *, void *);
 extern int _m_fputc(int, void *);
 extern struct lconv *_m_localeconv(void);
 extern char *_m_strerror(int);
+extern int _m_atoi(const char *);
+extern char *_m_strchr(const char *, int);
+extern char *_m_setlocale(int, const char *);
+extern int __mb_cur_max;
 extern void _m_abort(void);
 extern void _m_exit(int);
 extern void *_m_malloc(size_t);
@@ -132,6 +137,7 @@ extern void LoadIconA(void);
 extern void wsprintfA(void);
 extern void SetRect(void);
 extern HRESULT KERNEL32_STUB DirectDrawCreate(const GUID *, LPDIRECTDRAW *, void *);
+extern HRESULT KERNEL32_STUB DirectSoundCreate(const GUID *, LPDIRECTSOUND *, void *);
 
 /* Name→address table for NT, kernel32 and msvcrt functions */
 import_entry_t import_table[] = {
@@ -171,6 +177,7 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "GetProcAddress", (void*)GetProcAddress },
     { "kernel32.dll", "LoadLibraryA", (void*)LoadLibraryA },
     { "kernel32.dll", "GetModuleHandleA", (void*)GetModuleHandleA },
+    { "kernel32.dll", "GetModuleHandleW", (void*)GetModuleHandleW },
     { "kernel32.dll", "GetCommandLineA", (void*)GetCommandLineA },
     { "kernel32.dll", "GetEnvironmentStringsA", (void*)GetEnvironmentStringsA },
     /* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
@@ -218,6 +225,7 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "__C_specific_handler", (void*)__C_specific_handler },
     /* CRT startup + stdlib — available in both 64-bit and 32-bit builds */
     { "msvcrt.dll", "__getmainargs", (void*)__getmainargs },
+    { "msvcrt.dll", "__mb_cur_max", (void*)&__mb_cur_max },
     { "msvcrt.dll", "__iob_func", (void*)__iob_func },
     { "msvcrt.dll", "__acrt_iob_func", (void*)__acrt_iob_func },
     { "msvcrt.dll", "__lconv_init", (void*)__lconv_init },
@@ -242,6 +250,7 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "_lock", (void*)_lock },
     { "msvcrt.dll", "_unlock", (void*)_unlock },
     { "msvcrt.dll", "abort", (void*)_m_abort },
+    { "msvcrt.dll", "atoi", (void*)_m_atoi },
     { "msvcrt.dll", "exit", (void*)_m_exit },
     { "msvcrt.dll", "malloc", (void*)_m_malloc },
     { "msvcrt.dll", "free", (void*)_m_free },
@@ -255,6 +264,8 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "strncmp", (void*)_m_strncmp },
     { "msvcrt.dll", "wcslen", (void*)_m_wcslen },
     { "msvcrt.dll", "signal", (void*)_m_signal },
+    { "msvcrt.dll", "setlocale", (void*)_m_setlocale },
+    { "msvcrt.dll", "strchr", (void*)_m_strchr },
     { "msvcrt.dll", "fprintf", (void*)_m_fprintf },
     { "msvcrt.dll", "fwrite", (void*)_m_fwrite },
     { "msvcrt.dll", "vfprintf", (void*)_m_vfprintf },
@@ -330,6 +341,7 @@ import_entry_t import_table[] = {
     { "user32.dll", "wsprintfA", (void*)wsprintfA },
     { "user32.dll", "SetRect", (void*)SetRect },
     { "ddraw.dll", "DirectDrawCreate", (void*)DirectDrawCreate },
+    { "dsound.dll", "DirectSoundCreate", (void*)DirectSoundCreate },
     { "user32.DLL", "RegisterClassA", (void*)RegisterClassA },
     { "user32.DLL", "CreateWindowExA", (void*)CreateWindowExA },
     { "user32.DLL", "DestroyWindow", (void*)DestroyWindow },
@@ -382,6 +394,7 @@ import_entry_t import_table[] = {
     { "user32.DLL", "wsprintfA", (void*)wsprintfA },
     { "user32.DLL", "SetRect", (void*)SetRect },
     { "ddraw.DLL", "DirectDrawCreate", (void*)DirectDrawCreate },
+    { "dsound.DLL", "DirectSoundCreate", (void*)DirectSoundCreate },
     { NULL, NULL, NULL }
 };
 

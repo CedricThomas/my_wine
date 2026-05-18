@@ -97,6 +97,7 @@ extern void *__msvcrt_fputc;
 extern void *__msvcrt_localeconv;
 extern void *__msvcrt_strerror;
 extern void *__msvcrt_wcslen;
+extern int __mb_cur_max;
 
 /* ── Refptr patching (defined in crt_refptrs.c) ─────────── */
 

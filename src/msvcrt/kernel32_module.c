@@ -102,6 +102,26 @@ void *_GetModuleHandleA(const char *lpModuleName)
     return GetModuleHandleA(lpModuleName);
 }
 
+KERNEL32_STUB
+void *GetModuleHandleW(const uint16_t *lpModuleName)
+{
+    char narrow[260];
+    size_t i = 0;
+
+    if (lpModuleName == NULL)
+        return GetModuleHandleA(NULL);
+
+    while (lpModuleName[i] != 0 && i + 1 < sizeof(narrow)) {
+        uint16_t ch = lpModuleName[i];
+        if (ch > 0x7f)
+            return FORCE_PTR_RETURN(NULL);
+        narrow[i] = (char)ch;
+        i++;
+    }
+    narrow[i] = '\0';
+    return GetModuleHandleA(narrow);
+}
+
 /* ── FreeLibraryA ──────────────────────────────────────────────── */
 
 KERNEL32_STUB

@@ -39,6 +39,18 @@ sample_type() {
     [ -f "$info" ] && parse_sample_info "$info" "type"
 }
 
+is_skipped_sample() {
+    local info="$SAMPLES_DIR/$1/sample.info"
+    local skip=""
+    [ -f "$info" ] && skip="$(parse_sample_info "$info" "skip")"
+    [ "$skip" = "true" ] || [ "$skip" = "1" ] || [ "$skip" = "yes" ]
+}
+
+skip_reason() {
+    local info="$SAMPLES_DIR/$1/sample.info"
+    [ -f "$info" ] && parse_sample_info "$info" "skip_reason" || echo "skipped"
+}
+
 discover_samples() {
     local name
     if [ "$#" -gt 0 ]; then
@@ -262,6 +274,11 @@ run_sample() {
     local exe="$src_dir/${name}.exe"
     local info="$src_dir/sample.info"
 
+    if is_skipped_sample "$name"; then
+        echo "  SKIP  $name ($(skip_reason "$name"))"
+        return 2
+    fi
+
     # Skip samples with no .c in the main dir
     if ! find "$src_dir" -maxdepth 1 -name '*.c' 2>/dev/null | head -1 | grep -q .; then
         echo "  SKIP  $name (no .c in main dir sample)"
@@ -277,13 +294,16 @@ run_sample() {
         return 1
     fi
 
-    local expected_exit=0 timeout_sec=5
+    local expected_exit=0 timeout_sec=5 runtime_env
+    local -a env_args=()
     if [ -f "$info" ]; then
         local e t
         e=$(parse_sample_info "$info" "exit")
         t=$(parse_sample_info "$info" "timeout")
         [ -n "$e" ] && expected_exit="$e"
         [ -n "$t" ] && timeout_sec="$t"
+        runtime_env=$(parse_sample_info "$info" "runtime_env")
+        [ -n "$runtime_env" ] && read -r -a env_args <<< "$runtime_env"
     fi
 
     local output_file ret_file
@@ -295,7 +315,7 @@ run_sample() {
     # Suppresses bash signal diagnostic messages (e.g. "Segmentation fault").
     (
         set +e
-        timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null
+        env "${env_args[@]}" timeout "$timeout_sec" "$MY_WINE" "$exe" >"$output_file" 2>/dev/null
         echo $? >"$ret_file"
         exit 0
     ) 2>/dev/null

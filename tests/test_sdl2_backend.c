@@ -352,7 +352,12 @@ static int run_tests(void) {
   printf("  audio... ");
   int audio_ok = rb_audio_open(22050, 2, 16, 4096);
   if (audio_ok == RB_OK) {
-    rb_audio_buf_t buf = rb_audio_buffer_create(0, 4096);
+    rb_audio_format_t fmt = {
+      .sample_rate = 22050,
+      .channels = 2,
+      .bits_per_sample = 16,
+    };
+    rb_audio_buf_t buf = rb_audio_buffer_create(&fmt, 4096);
     if (buf) {
       uint8_t *buf_data;
       uint32_t buf_len;

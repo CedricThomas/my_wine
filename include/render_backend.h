@@ -111,10 +111,16 @@ int rb_event_peek(rb_msg_t *out_msg);   /* Non-blocking. 1=available, 0=empty. *
 int rb_event_push(rb_msg_t *msg);       /* Push message into queue. */
 
 /* ---- Audio ---- */
+typedef struct {
+    uint32_t sample_rate;
+    uint16_t channels;
+    uint16_t bits_per_sample;
+} rb_audio_format_t;
+
 int rb_audio_open(int sample_rate, int channels, int bits_per_sample,
                   int buffer_size);
 void rb_audio_close(void);
-rb_audio_buf_t rb_audio_buffer_create(int format, int buffer_size);
+rb_audio_buf_t rb_audio_buffer_create(const rb_audio_format_t *format, int buffer_size);
 int rb_audio_buffer_destroy(rb_audio_buf_t buf);
 int rb_audio_buffer_lock(rb_audio_buf_t buf,
                          uint32_t offset, uint32_t bytes,
@@ -126,6 +132,9 @@ int rb_audio_buffer_stop(rb_audio_buf_t buf);
 int rb_audio_buffer_set_volume(rb_audio_buf_t buf, int volume);  /* -10000..0 */
 int rb_audio_buffer_set_pan(rb_audio_buf_t buf, int pan);         /* -10000..10000 */
 int rb_audio_buffer_set_frequency(rb_audio_buf_t buf, uint32_t freq);
+int rb_audio_buffer_set_position(rb_audio_buf_t buf, uint32_t byte_offset);
+int rb_audio_buffer_get_position(rb_audio_buf_t buf, uint32_t *out_byte_offset);
+int rb_audio_buffer_is_playing(rb_audio_buf_t buf);
 
 /* ---- Timer ---- */
 uint32_t rb_timer_get_ticks(void);

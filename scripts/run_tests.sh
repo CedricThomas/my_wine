@@ -144,6 +144,9 @@ run_test test_syscall_safe_utils
 # test_entry_symbols
 run_test test_entry_symbols
 
+# test_dsound
+run_test_env test_dsound SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+
 # test_sdl2_backend
 run_test_env test_sdl2_backend SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
 

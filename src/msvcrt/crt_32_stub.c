@@ -122,7 +122,7 @@ WINE_STUB
 void _amsg_exit(int msg)
 {
     (void)msg;
-    INLINE_SYSCALL_EXIT(1);
+    INLINE_SYSCALL_EXIT_GROUP(1);
 }
 #else
 WINE_STUB
@@ -138,7 +138,7 @@ void _amsg_exit(int msg)
 WINE_STUB
 void _cexit(void)
 {
-    INLINE_SYSCALL_EXIT(0);
+    INLINE_SYSCALL_EXIT_GROUP(0);
 }
 #else
 WINE_STUB
@@ -181,6 +181,7 @@ int ___lc_codepage_func(void) { return 65001; }
 /* ___mb_cur_max_func — max bytes per char */
 WINE_STUB
 int ___mb_cur_max_func(void) { return 1; }
+int __mb_cur_max = 1;
 
 /* ── Stdlib stubs (needed by MinGW CRT) ─────────────────────── */
 
@@ -282,12 +283,61 @@ int _m_strncasecmp(const char *a, const char *b, size_t n) {
 WINE_STUB
 int _m_memcmp(const void *a, const void *b, size_t n) { return __builtin_memcmp(a, b, n); }
 
+WINE_STUB
+int _m_atoi(const char *s)
+{
+    int sign = 1;
+    int value = 0;
+
+    if (!s)
+        return 0;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
+        s++;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+    while (*s >= '0' && *s <= '9') {
+        value = value * 10 + (*s - '0');
+        s++;
+    }
+    return value * sign;
+}
+
+WINE_STUB
+char *_m_strchr(const char *s, int c)
+{
+    unsigned char needle = (unsigned char)c;
+
+    if (!s)
+        return NULL;
+    while (*s) {
+        if ((unsigned char)*s == needle)
+            return (char *)s;
+        s++;
+    }
+    if (needle == 0)
+        return (char *)s;
+    return NULL;
+}
+
+WINE_STUB
+char *_m_setlocale(int category, const char *locale)
+{
+    static char c_locale[] = "C";
+    (void)category;
+    (void)locale;
+    return c_locale;
+}
+
 /* abort / exit */
 #ifdef MY_WINE32
 WINE_STUB
-void _m_abort(void) { INLINE_SYSCALL_EXIT(1); }
+void _m_abort(void) { INLINE_SYSCALL_EXIT_GROUP(1); }
 WINE_STUB
-void _m_exit(int code) { INLINE_SYSCALL_EXIT(code); }
+void _m_exit(int code) { INLINE_SYSCALL_EXIT_GROUP(code); }
 #else
 WINE_STUB
 void _m_abort(void) { abort(); }

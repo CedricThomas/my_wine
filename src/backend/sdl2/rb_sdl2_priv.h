@@ -68,14 +68,19 @@ typedef struct rb_palette {
 
 /* ---- Private audio buffer state ---- */
 typedef struct rb_audio_buf {
+    struct rb_audio_buf *next;
     uint8_t *data;
     int buffer_size;
-    int format;           /* AUDIO_S16SYS, etc. */
+    int sample_rate;
+    int channels;
+    int bits_per_sample;
+    int bytes_per_frame;
     int playing;          /* 0 = stopped, 1 = playing */
     int loop;             /* 0 = no loop, 1 = loop */
     int volume;           /* -10000..0 */
     int pan;              /* -10000..10000 */
     uint32_t frequency;
+    uint64_t cursor_fp;
     float gain;           /* 0.0..1.0, derived from volume */
     float pan_left;       /* 0.0..1.0 */
     float pan_right;      /* 0.0..1.0 */
@@ -89,6 +94,8 @@ typedef struct rb_audio_state {
     int channels;
     int bits_per_sample;
     int buffer_size;
+    rb_audio_buf *buffers;
+    int buffer_count;
 } rb_audio_state;
 
 /* ---- Private cursor state ---- */
@@ -294,8 +301,6 @@ static inline const char *rb_host_getenv(const char *name)
 
 /* ---- Global audio state ---- */
 extern rb_audio_state g_audio;
-extern rb_audio_buf *g_audio_buffers[32];
-extern int g_audio_buf_count;
 
 /* ---- Audio callback (registered with SDL) ---- */
 void rb_audio_callback(void *userdata, uint8_t *stream, int len);
@@ -404,5 +409,6 @@ void rb_event_unbind_window(uintptr_t hwnd);
 uint32_t rb_event_get_sdl_window_id(uintptr_t hwnd);
 uintptr_t rb_x11_consume_bad_window(void);
 int rb_runtime_consume_shutdown_request(void);
+int rb_runtime_shutdown_requested(void);
 
 #endif /* RB_SDL2_PRIV_H */

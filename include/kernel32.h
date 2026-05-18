@@ -52,6 +52,9 @@ void *GetModuleHandleA(const char *lpModuleName);
 void *_GetModuleHandleA(const char *lpModuleName);
 
 KERNEL32_ABI
+void *GetModuleHandleW(const uint16_t *lpModuleName);
+
+KERNEL32_ABI
 void *GetProcAddress(void *hModule, const char *lpProcName);
 
 /* SysV-compatible wrapper for GetProcAddress (callable from native code / tests) */

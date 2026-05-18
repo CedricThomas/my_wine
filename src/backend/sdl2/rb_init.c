@@ -22,8 +22,6 @@ static int g_signal_handlers_installed = 0;
 #define RB_X11_BAD_WINDOW 3
 
 rb_audio_state g_audio;
-rb_audio_buf *g_audio_buffers[32];
-int g_audio_buf_count = 0;
 
 static int rb_x11_error_handler(Display *display, XErrorEvent *event)
 {
@@ -92,26 +90,113 @@ typedef struct {
     uint32_t flags;
 } rb_sdl_init_args;
 
-static uintptr_t rb_sdl_init_call(void *arg)
+static int rb_sdl_init_video_events(uint32_t flags)
 {
-    rb_sdl_init_args *a = arg;
     const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
     int try_x11_fallback = 0;
 
     if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
         try_x11_fallback = 1;
 
-    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     rb_install_x11_error_handler();
-    int ret = SDL_Init(a->flags);
+    if (SDL_Init(flags) == 0) {
+        rb_install_x11_error_handler();
+        return 0;
+    }
+
     rb_install_x11_error_handler();
-    if (ret < 0 && getenv("DISPLAY") && try_x11_fallback) {
+    if (getenv("DISPLAY") && try_x11_fallback) {
         SDL_Quit();
         setenv("SDL_VIDEODRIVER", "x11", 1);
-        ret = SDL_Init(a->flags);
+        if (SDL_Init(flags) == 0) {
+            rb_install_x11_error_handler();
+            return 0;
+        }
         rb_install_x11_error_handler();
     }
-    return (uintptr_t)ret;
+
+    return -1;
+}
+
+static int rb_sdl_init_audio_default_or_fallback(void)
+{
+    const char *requested_audio_driver = getenv("SDL_AUDIODRIVER");
+    static const char *preferred_drivers[] = {
+        "pipewire",
+        "pulseaudio",
+        "alsa",
+        "jack",
+        "sndio",
+        "dsp",
+        "dummy",
+        "disk"
+    };
+    int i;
+    int num_drivers;
+
+    if (requested_audio_driver && requested_audio_driver[0] != '\0')
+        return SDL_AudioInit(requested_audio_driver);
+
+    if (SDL_AudioInit(NULL) == 0)
+        return 0;
+
+    num_drivers = SDL_GetNumAudioDrivers();
+    for (i = 0; i < (int)(sizeof(preferred_drivers) / sizeof(preferred_drivers[0])); i++) {
+        int j;
+
+        for (j = 0; j < num_drivers; j++) {
+            const char *driver = SDL_GetAudioDriver(j);
+
+            if (!driver || strcmp(driver, preferred_drivers[i]) != 0)
+                continue;
+            if (SDL_AudioInit(driver) == 0)
+                return 0;
+            break;
+        }
+    }
+
+    for (i = 0; i < num_drivers; i++) {
+        const char *driver = SDL_GetAudioDriver(i);
+
+        if (!driver || driver[0] == '\0')
+            continue;
+        if (strcmp(driver, "disk") == 0 || strcmp(driver, "dummy") == 0)
+            continue;
+        if (SDL_AudioInit(driver) == 0)
+            return 0;
+    }
+
+    for (i = 0; i < num_drivers; i++) {
+        const char *driver = SDL_GetAudioDriver(i);
+
+        if (!driver || driver[0] == '\0')
+            continue;
+        if ((strcmp(driver, "disk") != 0) && (strcmp(driver, "dummy") != 0))
+            continue;
+        if (SDL_AudioInit(driver) == 0)
+            return 0;
+    }
+
+    return -1;
+}
+
+static uintptr_t rb_sdl_init_call(void *arg)
+{
+    rb_sdl_init_args *a = arg;
+    uint32_t base_flags = a->flags & ~(uint32_t)SDL_INIT_AUDIO;
+    int want_audio = (a->flags & SDL_INIT_AUDIO) != 0;
+
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+
+    if (rb_sdl_init_video_events(base_flags) < 0)
+        return (uintptr_t)-1;
+
+    if (want_audio && rb_sdl_init_audio_default_or_fallback() < 0) {
+        SDL_Quit();
+        return (uintptr_t)-1;
+    }
+
+    return 0;
 }
 
 typedef struct {
@@ -165,7 +250,7 @@ int rb_init(void)
         return 0;
     }
 
-    rb_sdl_init_args args = { SDL_INIT_VIDEO | SDL_INIT_EVENTS };
+    rb_sdl_init_args args = { SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO };
     if ((int)rb_call_on_host_stack(rb_sdl_init_call, &args) < 0) {
         fprintf(stderr,
                 "WARNING: SDL backends requested video=%s audio=%s active video=%s audio=%s\n",
@@ -192,9 +277,8 @@ int rb_init(void)
     g_audio.channels = 2;
     g_audio.bits_per_sample = 16;
     g_audio.buffer_size = 4096;
-
-    g_audio_buf_count = 0;
-    memset(g_audio_buffers, 0, sizeof(g_audio_buffers));
+    g_audio.buffers = NULL;
+    g_audio.buffer_count = 0;
     g_shutdown_requested = 0;
     rb_install_signal_handlers();
 
@@ -224,6 +308,11 @@ int rb_runtime_consume_shutdown_request(void)
 
     g_shutdown_requested = 0;
     return 1;
+}
+
+int rb_runtime_shutdown_requested(void)
+{
+    return g_shutdown_requested ? 1 : 0;
 }
 
 void rb_display_get_size(int *out_w, int *out_h)
