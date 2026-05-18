@@ -209,6 +209,16 @@ build_exe() {
 
     local EXTRA_FLAGS=""
     [ "$CC" = "i686-w64-mingw32-gcc" ] && EXTRA_FLAGS="-fno-stack-protector"
+    local EXTRA_LIBS=""
+    if [ -f "$info" ]; then
+        local libs_val
+        libs_val="$(parse_sample_info "$info" "libs")"
+        if [ -n "$libs_val" ]; then
+            for lib in $libs_val; do
+                EXTRA_LIBS="$EXTRA_LIBS -l$lib"
+            done
+        fi
+    fi
 
     echo "  CC  $name (mingw)"
     if in_shared_build_container; then
@@ -217,7 +227,8 @@ build_exe() {
             -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O${OPT_LEVEL} -mconsole \
             $EXTRA_FLAGS \
             -o "$out_exe" \
-            $srcs 2>&1 || {
+            $srcs \
+            $EXTRA_LIBS 2>&1 || {
                 echo "  FAIL $name"; return 1
             }
     else
@@ -230,7 +241,8 @@ build_exe() {
             -Wall -Wextra -Wno-cast-function-type -Wno-array-bounds -Wno-stringop-overflow -O${OPT_LEVEL} -mconsole \
             $EXTRA_FLAGS \
             -o "/out/${name}.exe" \
-            $container_srcs 2>&1 || {
+            $container_srcs \
+            $EXTRA_LIBS 2>&1 || {
                 echo "  FAIL $name"; return 1
             }
     fi

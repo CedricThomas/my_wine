@@ -18,6 +18,7 @@
 #include "include/kernel32.h"
 #include "include/msvcrt.h"
 #include "include/common.h"
+#include "include/ddraw_types.h"
 
 #include "loader_priv.h"
 #include "src/pe_priv.h"
@@ -130,6 +131,7 @@ extern void ClipCursor(void);
 extern void LoadIconA(void);
 extern void wsprintfA(void);
 extern void SetRect(void);
+extern HRESULT KERNEL32_STUB DirectDrawCreate(const GUID *, LPDIRECTDRAW *, void *);
 
 /* Name→address table for NT, kernel32 and msvcrt functions */
 import_entry_t import_table[] = {
@@ -327,6 +329,7 @@ import_entry_t import_table[] = {
     { "user32.dll", "LoadIconA", (void*)LoadIconA },
     { "user32.dll", "wsprintfA", (void*)wsprintfA },
     { "user32.dll", "SetRect", (void*)SetRect },
+    { "ddraw.dll", "DirectDrawCreate", (void*)DirectDrawCreate },
     { "user32.DLL", "RegisterClassA", (void*)RegisterClassA },
     { "user32.DLL", "CreateWindowExA", (void*)CreateWindowExA },
     { "user32.DLL", "DestroyWindow", (void*)DestroyWindow },
@@ -378,6 +381,7 @@ import_entry_t import_table[] = {
     { "user32.DLL", "LoadIconA", (void*)LoadIconA },
     { "user32.DLL", "wsprintfA", (void*)wsprintfA },
     { "user32.DLL", "SetRect", (void*)SetRect },
+    { "ddraw.DLL", "DirectDrawCreate", (void*)DirectDrawCreate },
     { NULL, NULL, NULL }
 };
 

@@ -1,80 +1,61 @@
 # Subplan 7: Final Integration
 
-**Goal**: Dialog system for DOOM95 menus, GDI rendering support, end-to-end DOOM95 test.
+## Status
 
-**Outcome**: DOOM95 runs from title screen → game loop → menus work → keyboard input → sound effects.
+Not started, and intentionally moved to the end.
 
----
+## Goal
 
-## Tasks
+Use real Doom95 runs to determine the final missing pieces after DDraw,
+DSound, and system import coverage are in place.
 
-### 7.1 Dialog System (user32_dialog.c)
-- [ ] `CreateDialogParamA` → parse dialog resource from PE `.rsrc` (IDs 104, 130, 131)
-  - Build in-memory control tree
-  - Return mock `HWND` for the dialog
-- [ ] `IsDialogMessageA` → route messages to dialog `WNDPROC` if active
-- [ ] `GetDlgItem` → lookup control from dialog + ID
-- [ ] `CheckDlgButton` → store checkbox state per control
-- [ ] `IsDlgButtonChecked` → return checkbox state
-- [ ] `SetDlgItemTextA` → set text label per control
-- [ ] `MessageBoxA` → `SDL_ShowSimpleMessageBox()`
+This remains a runtime-driven integration phase, but parsing `DOOM95.EXE`
+confirms that both dialog-oriented `user32` APIs and `gdi32` rendering APIs
+are real requirements, not guesses.
 
-### 7.2 GDI (gdi32_surface.c, gdi32_palette.c, gdi32_font.c)
-- [ ] `CreateDCA` → return mock `HDC` wrapping `rb_window_get_dc()`
-- [ ] `GetDC` → same as `CreateDCA` (mock `HDC`)
-- [ ] `ReleaseDC` → `rb_window_release_dc()` → return 1
-- [ ] `DeleteDC` → return TRUE
-- [ ] `CreateDIBitmap` → `rb_surface_create()` from `BITMAPINFOHEADER`
-- [ ] `StretchDIBits` → `rb_surface_blt()` or `rb_surface_create()` + `rb_surface_blt()` for scaling
-  - **Critical for GDI fallback** when DDraw is unavailable
-- [ ] `GetObjectA` → return stored metrics from `HBITMAP`/`HFONT`
-- [ ] `DeleteObject` → type-tagged: `rb_surface_destroy()` for bitmaps, `rb_palette_destroy()` for palettes, `free()` for fonts
-- [ ] `GetDeviceCaps` → map index to hardcoded/display values:
-  - `BITSPIXEL`(12) → 8 or 32, `PLANES`(14) → 1, `DESKTOPVERTRES`(117) → display height, `DESKTOPHORZRES`(118) → display width
-- [ ] `GetStockObject` → return sentinel handle based on index (WHITEBRUSH=1, BLACKPEN=2, etc.)
-- [ ] `CreatePalette` → `rb_palette_create()`
-- [ ] `SelectPalette` → swap `SDL_Palette` on HDC
-- [ ] `RealizePalette` → `rb_surface_set_palette()` on window surface
-- [ ] `GetSystemPaletteEntries` → `rb_palette_get_colors()`
-- [ ] `SetBkColor` / `SetTextColor` → store color in HDC struct
-- [ ] `UnrealizeObject` → return TRUE
-- [ ] `CreateFontA` → store font metrics (height) in `HFONT`; return sentinel
+## Required Sequence
 
-### 7.3 Import Tables
-- [ ] Add all `gdi32.dll` entries to `import_table.c` (16 functions)
-- [ ] Ensure all user32 dialog entries are in `import_table.c`
+### 7.1 First runnable Doom95 attempt
+- [ ] unpack Doom95
+- [ ] remove or revise `samples/doom95/sample.info` once the sample is runnable beyond the current `skip=true` state
+- [ ] launch `./my_wine samples/unpacked/doom95/DOOM95.EXE`
+- [ ] capture the first concrete failing import or runtime crash
 
-### 7.4 DOOM95 Init Test
-- [ ] Launch `./my_wine samples/unpacked/doom95/DOOM95.EXE`
-- [ ] Expected: no crash during init (window created, DDraw init, DSound init, MIDI init, registry access)
-- [ ] Expected: SDL window appears (may be empty or show title screen)
-- [ ] Expected: init messages/errors don't crash (registry stubs return `ERROR_SUCCESS`, DPlay returns graceful error)
+### 7.2 Add only the missing user32/GDI surface
+- [ ] implement confirmed dialog imports:
+  - `CreateDialogParamA`
+  - `IsDialogMessageA`
+  - `GetDlgItem`
+  - `CheckDlgButton`
+  - `IsDlgButtonChecked`
+  - `SetDlgItemTextA`
+  - `LoadStringA`
+  - `MessageBoxA`
+- [ ] implement confirmed `gdi32` imports:
+  - `CreateDCA`
+  - `CreateDIBitmap`
+  - `CreateFontA`
+  - `CreatePalette`
+  - `DeleteDC`
+  - `DeleteObject`
+  - `GetDeviceCaps`
+  - `GetObjectA`
+  - `GetStockObject`
+  - `GetSystemPaletteEntries`
+  - `RealizePalette`
+  - `SelectPalette`
+  - `SetBkColor`
+  - `SetTextColor`
+  - `StretchDIBits`
+  - `UnrealizeObject`
 
-### 7.5 DOOM95 Game Loop Test
-- [ ] Launch DOOM95.EXE from title screen
-- [ ] Expected: game world is rendered (even if colors are wrong initially)
-- [ ] Expected: player movement works (keyboard input via `GetAsyncKeyState`)
-- [ ] Expected: sound effects play (DirectSound)
-- [ ] Expected: no repeated crashes
-- [ ] Expected: FPS is reasonable (≥ 15 fps acceptable for first pass)
+### 7.3 Promote to maintained sample only when justified
+- [ ] update `sample.info` from unsupported/skipped only after startup is stable enough to make automated runs meaningful
+- [ ] add the smallest useful harness or smoke test rather than pretending to have full game coverage
 
-### 7.6 DOOM95 Menus Test
-- [ ] From title screen, attempt to open options menu
-- [ ] Expected: dialog is created (doesn't crash)
-- [ ] Expected: control state can be read/written
-- [ ] Expected: menu can be closed
-- [ ] Expected: episode selection works
-- [ ] (Visual rendering of dialog controls may be incomplete — state tracking is the priority)
+## Parsed EXE Notes
 
----
-
-## Files
-| File | Action |
-|------|--------|
-| `src/stubs/user32_dialog.c` | **New** (~250 lines) |
-| `src/stubs/gdi32_surface.c` | **New** (~250 lines) |
-| `src/stubs/gdi32_palette.c` | **New** (~120 lines) |
-| `src/stubs/gdi32_font.c` | **New** (~40 lines) |
-| `src/loader/import_table.c` | Edit: add gdi32.dll entries |
-
-**~660 lines, ~4-5 days**
+- `DOOM95.EXE` is a 32-bit GUI PE with entry point `0x004444d8`
+- file size is `775117` bytes
+- the resource directory is present and `objdump` reports dialog resources with
+  IDs `104`, `130`, and `131`, which matches the older dialog notes

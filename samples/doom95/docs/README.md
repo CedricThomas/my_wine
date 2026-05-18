@@ -1,18 +1,24 @@
 # DOOM95 on my_wine — Documentation Index
 
-> Status: planning/reference material.
+> Status: mixed.
 >
-> These notes describe a possible Doom95 implementation path and imported API
-> surface. They are not maintained as current source architecture. For the
-> active runtime architecture, see `docs/architecture.md`, `docs/PE32.md`, and
-> `audit/architecture-boundaries.md`.
+> The subplans were re-audited against the current tree and can be used as a
+> current Doom95 work plan. The lower-level by-DLL/reference notes are still
+> mixed planning/reference material and may not exactly match the maintained
+> source layout. For active runtime architecture, see `docs/architecture.md`,
+> `docs/PE32.md`, and `audit/architecture-boundaries.md`.
+>
+> DirectDraw is now partially promoted from planning to maintained code: the
+> narrowed DDraw path exists in source/tests/samples, and the remaining DDraw
+> work is real-game validation against Doom95.
 
 ## Quick Lookup
 
 To implement function `X` from DLL `Y`:
 
 1. **Read `by_dll/Y.md`** → find the function row → get category + SDL2 mapping + notes
-2. **Read `reference/file_layout.md`** → find which stub file it belongs to
+2. **Read `reference/file_layout.md`** only as a rough historical map; prefer the
+   current source tree if it disagrees
 3. **Read `subplans/subplan_NN_*.md`** → find the specific task checklist
 
 ---
@@ -52,11 +58,11 @@ Self-contained extracts from the original large documents. Each 50–150 lines.
 
 ---
 
-## Historical Implementation Plan
+## Current Subplans
 
 | File | Content |
 |------|---------|
-| [subplan_00_tracking.md](subplan_00_tracking.md) | Historical subplan index and status |
+| [subplan_00_tracking.md](subplan_00_tracking.md) | Current Doom95 subplan index and status |
 | [subplans/subplan_01_foundation.md](subplans/subplan_01_foundation.md) | Phase 1: Foundation |
 | [subplans/subplan_02_sdl2_backend.md](subplans/subplan_02_sdl2_backend.md) | Phase 2: SDL2 Backend |
 | [subplans/subplan_03_windowing.md](subplans/subplan_03_windowing.md) | Phase 3: Windowing |

@@ -111,8 +111,6 @@ uint32_t GetLastError(void)
     return g_last_error;
 }
 
-/* ── TlsGetValue ───────────────────────────────────────────── */
-
 KERNEL32_STUB
 void *TlsGetValue(uint32_t dwTlsIndex)
 {

@@ -1,0 +1,2 @@
+expect_title DDraw Sample OK
+closewindow
