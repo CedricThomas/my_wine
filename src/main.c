@@ -46,6 +46,14 @@ static const char *envp_lookup(char *const envp[], const char *key)
     return NULL;
 }
 
+static void init_runtime_config(char *const envp[])
+{
+    const char *debug_level = envp_lookup(envp, "MY_WINE_DEBUG_LEVEL");
+    g_debug_level = parse_debug_level(debug_level);
+
+    set_wine_dll_path(envp_lookup(envp, "WINE_DLL_PATH"));
+}
+
 /* Pre-seed argc/argv/envp in .bss using COFF-derived offsets from g_crt.crt_ctx.
  * Explicit mprotect ensures .bss is writable.
  *
@@ -133,18 +141,7 @@ static int init_loader(int argc, char **argv,
     }
 
     /* Parse setup-time environment before GS can point at the guest TEB. */
-    {
-        const char *debug_level = envp_lookup(environ, "MY_WINE_DEBUG_LEVEL");
-        g_debug_level = parse_debug_level(debug_level);
-    }
-
-    {
-        const char *dll_path = envp_lookup(environ, "WINE_DLL_PATH");
-        if (dll_path != NULL) {
-            strncpy(g_wine_dll_path, dll_path, sizeof(g_wine_dll_path) - 1);
-            g_wine_dll_path[sizeof(g_wine_dll_path) - 1] = '\0';
-        }
-    }
+    init_runtime_config(environ);
 
     IMAGE_DOS_HEADER dos;
     IMAGE_NT_HEADERS nt;
@@ -159,7 +156,7 @@ static int init_loader(int argc, char **argv,
     IMAGE_SECTION_HEADER *sections = get_image_sections(base, &nt);
 
     if (pe_is_pe32(&nt)) {
-        if (munmap(base, (size_t)nt_size) != 0) {
+        if (munmap(base, pe_size_of_image(&nt)) != 0) {
             perror("WARNING: munmap on PE32 reject");
         }
         fprintf(stderr, "Error: PE32 binary detected. Use my_wine wrapper or my_wine32 directly.\n");

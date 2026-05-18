@@ -53,6 +53,10 @@ extern void seh_crash_handler(void *, void *, void *, void *);
 
 /* ── __acrt_iob_func patching ────────────────────────────────── */
 
+enum {
+    ACRT_IOB_PATCH_SIZE = 15,
+};
+
 /**
  * Patch __acrt_iob_func to return __wine_iob_data directly.
  *
@@ -80,7 +84,7 @@ static void acrt_iob_patch_cb(void *arg)
     code[1] = X86_MOV_ABS;                /* movabs rax, imm64 */
     *(uint64_t *)(code + 2) = (uint64_t)(uintptr_t)__wine_iob_data();
     code[10] = X86_RET;
-    for (int k = 11; k < 15; k++) code[k] = X86_NOP;
+    for (int k = 11; k < ACRT_IOB_PATCH_SIZE; k++) code[k] = X86_NOP;
 }
 
 /* Compute .text/code section end for bounds checking */
@@ -107,14 +111,14 @@ static int apply_iob_patch(void *thunk, uint8_t *code, uint64_t thunk_off,
         return -1;
     }
 
-    /* Bounds check: ensure 15-byte patch won't exceed .text section */
-    if (text_end == 0 || thunk_off + 15 > text_end) {
+    /* Bounds check: ensure the patch won't exceed .text section */
+    if (text_end == 0 || thunk_off + ACRT_IOB_PATCH_SIZE > text_end) {
         fprintf(stderr, "WARNING: __acrt_iob_func thunk at 0x%lx is too close to .text end (need 15 bytes, have %ld), skipping patch\n",
                 (unsigned long)thunk_off, (long)(text_end > thunk_off ? text_end - thunk_off : 0));
         return -1;
     }
 
-    if (with_mprotect_rw(thunk, 15, acrt_iob_patch_cb, thunk, PROT_READ | PROT_EXEC) != 0) {
+    if (with_mprotect_rw(thunk, ACRT_IOB_PATCH_SIZE, acrt_iob_patch_cb, thunk, PROT_READ | PROT_EXEC) != 0) {
         perror("mprotect __acrt_iob_func");
         return -1;
     }

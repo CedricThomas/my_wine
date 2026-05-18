@@ -21,7 +21,7 @@ static char g_exe_dir[512] = {0};
 static void init_exe_dir(void)
 {
     if (g_exe_dir[0] != '\0') return;
-    const char *pe_path = get_pe_path();
+    const char *pe_path = loader_get_pe_path();
     if (pe_path != NULL && pe_path[0] != '\0') {
         const char *last_slash = syscall_safe_strrchr(pe_path, '/');
         if (last_slash != NULL && last_slash != pe_path) {

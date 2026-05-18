@@ -520,16 +520,16 @@ static void *init_teb32(void *peb)
     *(uint32_t *)((uint8_t *)teb + TEB32_SEH_CHAIN) =
         (uint32_t)(uintptr_t)&g_seh_frame;
 
-    /* Wire EnvironmentPointer at TEB+0x48 (gap after ClientId) to environ. */
+    /* Wire EnvironmentPointer to environ. */
     {
         extern char **environ;
-        *(uint32_t *)((uint8_t *)teb + 0x48) =
+        *(uint32_t *)((uint8_t *)teb + TEB32_ENV_PTR) =
             (uint32_t)(uintptr_t)environ;
     }
 
-    /* Wire ClientId (TEB+0x40/0x44) = getpid()/gettid(). */
-    *(uint32_t *)((uint8_t *)teb + 0x40) = (uint32_t)INLINE_SYSCALL_GETPID();
-    *(uint32_t *)((uint8_t *)teb + 0x44) = (uint32_t)INLINE_SYSCALL_GETTID();
+    /* Wire ClientId = getpid()/gettid(). */
+    *(uint32_t *)((uint8_t *)teb + TEB32_CLIENT_ID_PID) = (uint32_t)INLINE_SYSCALL_GETPID();
+    *(uint32_t *)((uint8_t *)teb + TEB32_CLIENT_ID_TID) = (uint32_t)INLINE_SYSCALL_GETTID();
 
     return teb;
 }

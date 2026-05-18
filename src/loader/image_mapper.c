@@ -60,13 +60,8 @@ void *map_image_at(const char *path,
                    size_t *out_nt_size,
                    uintptr_t desired_base)
 {
-    /* Save PE path for DLL search — hand-rolled copy, no glibc */
-    {
-        size_t i;
-        for (i = 0; path[i] && i < sizeof(g_loader.pe_path) - 1; i++)
-            g_loader.pe_path[i] = path[i];
-        g_loader.pe_path[i] = '\0';
-    }
+    /* Cache the PE path for DLL search before guest handoff. */
+    loader_set_pe_path(path);
 
     /* 1. Open the PE file */
     long fd = INLINE_SYSCALL_OPENAT(AT_FDCWD, path, O_RDONLY, 0);

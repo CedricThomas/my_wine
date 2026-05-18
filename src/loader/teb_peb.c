@@ -64,8 +64,8 @@ void init_teb32_fields(void *teb, void *peb)
     p = (uint32_t *)((uint8_t *)teb + TEB32_FIBER_DATA);
     *p = (uint32_t)(uintptr_t)teb;
 
-    /* LastStatusValue (TEB+0x34) = STATUS_SUCCESS (0) */
-    p = (uint32_t *)((uint8_t *)teb + 0x34);
+    /* LastStatusValue = STATUS_SUCCESS (0) */
+    p = (uint32_t *)((uint8_t *)teb + TEB32_LAST_STATUS);
     *p = 0;
 
     /* GDI data targets (both zero) */

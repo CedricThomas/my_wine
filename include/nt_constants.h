@@ -76,6 +76,10 @@
 #define TEB32_TEB_SELF_REF   0x04   /* Self pointer */
 #define TEB32_THREAD_PTR     0x24   /* ThreadPointer field in x86_32 TEB */
 #define TEB32_PEB_PTR        0x30   /* PEB pointer */
+#define TEB32_LAST_STATUS    0x34   /* LastStatusValue */
+#define TEB32_CLIENT_ID_PID  0x40   /* ClientId.UniqueProcess */
+#define TEB32_CLIENT_ID_TID  0x44   /* ClientId.UniqueThread */
+#define TEB32_ENV_PTR        0x48   /* EnvironmentPointer */
 #define TEB32_FIBER_DATA     0x10   /* FiberData field in x86_32 TEB */
 #define TEB32_GDI_TEB_OFFSET 0x18   /* GdiTebOffset field in x86_32 TEB */
 #define TEB32_GDI_PROCESS_LOCAL 0x1C  /* GdiProcessLocals field in x86_32 TEB */

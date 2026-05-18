@@ -12,7 +12,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <stdio.h>
 
 #include "module_list.h"  /* loaded_module_t, MAX_MODULES */
 
@@ -48,13 +47,7 @@ static inline const char *loader_get_pe_path(void) {
     return g_loader.pe_path;
 }
 
-static inline void loader_set_pe_path(const char *path) {
-    if (path) {
-        snprintf(g_loader.pe_path, sizeof(g_loader.pe_path), "%s", path);
-    } else {
-        g_loader.pe_path[0] = '\0';
-    }
-}
+void loader_set_pe_path(const char *path);
 
 static inline void *loader_get_peb_ldr(void) {
     return g_loader.peb_ldr;

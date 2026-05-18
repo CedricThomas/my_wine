@@ -15,10 +15,6 @@
 #include "include/pe.h"
 #include "loader_state.h"  /* wine_loader_state_t, g_loader, accessors */
 
-/* Accessors for the PE path */
-const char *get_pe_path(void);
-void set_pe_path(const char *path);
-
 /**
  * Map a PE file at the preferred image base (uses PE's ImageBase).
  *

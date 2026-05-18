@@ -13,6 +13,17 @@ wine_loader_state_t g_loader = { .dll_base_next = DLL_ALLOC_BASE };
 /* Populated in main() before GS switch so find_dll_path is syscall-safe. */
 char g_wine_dll_path[WINE_DLL_PATH_MAX] = {0};
 
+void loader_set_pe_path(const char *path)
+{
+    if (path == NULL) {
+        g_loader.pe_path[0] = '\0';
+        return;
+    }
+
+    strncpy(g_loader.pe_path, path, sizeof(g_loader.pe_path) - 1);
+    g_loader.pe_path[sizeof(g_loader.pe_path) - 1] = '\0';
+}
+
 void set_wine_dll_path(const char *path)
 {
     if (path == NULL) {
