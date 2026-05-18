@@ -63,7 +63,10 @@ pe32_run_guest:
 
 pe32_guest_return_exit:
     movl %eax, %ebx
-    movl $1, %eax
+    /* Linux i386 __NR_exit_group = 252. Use process-wide exit here so a
+     * guest return cannot leave SDL/helper threads alive after the PE32
+     * main thread exits. */
+    movl $252, %eax
     int $0x80
 1:
     hlt
