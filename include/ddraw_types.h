@@ -151,28 +151,39 @@ static inline int IsEqualGUID(const GUID *rGuid1, const GUID *rGuid2)
 /* ── DDSCAPS flags ──────────────────────────────────────────── */
 /* ═══════════════════════════════════════════════════════════ */
 
-#define DDSCAPS_PRIMARYSURFACE      0x00000001L
-#define DDSCAPS_BACKBUFFER          0x00000002L
+#define DDSCAPS_ALPHA               0x00000002L
+#define DDSCAPS_BACKBUFFER          0x00000004L
 #define DDSCAPS_COMPLEX             0x00000008L
-#define DDSCAPS_FLIP                0x00000004L
+#define DDSCAPS_FLIP                0x00000010L
 #define DDSCAPS_FRONTBUFFER         0x00000020L
 #define DDSCAPS_OFFSCREENPLAIN      0x00000040L
 #define DDSCAPS_OVERLAY             0x00000080L
-#define DDSCAPS_WRITEONLY           0x00000100L
-#define DDSCAPS_PREALLOC            0x00000200L
-#define DDSCAPS_ALLOCONLOAD         0x00000400L
-#define DDSCAPS_VIDEOMEMORY         0x000C0000L
-#define DDSCAPS_LOCALVIDMEM         0x00040000L
-#define DDSCAPS_REMOTEVIDMEM        0x00080000L
-#define DDSCAPS_SYSTEMMEMORY        0x00100000L
-#define DDSCAPS_ZBUFFER             0x00002000L
-#define DDSCAPS_MIPMAP              0x00001000L
-#define DDSCAPS_ALPHA               0x00000800L
+#define DDSCAPS_PALETTE             0x00000100L
+#define DDSCAPS_PRIMARYSURFACE      0x00000200L
+#define DDSCAPS_PRIMARYSURFACELEFT  0x00000400L
+#define DDSCAPS_SYSTEMMEMORY        0x00000800L
+#define DDSCAPS_TEXTURE             0x00001000L
+#define DDSCAPS_3DDEVICE            0x00002000L
+#define DDSCAPS_VIDEOMEMORY         0x00004000L
+#define DDSCAPS_VISIBLE             0x00008000L
+#define DDSCAPS_RESERVED1           0x00000001L
+#define DDSCAPS_WRITEONLY           0x00010000L
+#define DDSCAPS_ZBUFFER             0x00020000L
+#define DDSCAPS_OWNDC               0x00040000L
+#define DDSCAPS_LIVEVIDEO           0x00080000L
+#define DDSCAPS_HWCODEC             0x00100000L
+#define DDSCAPS_MODEX               0x00200000L
+#define DDSCAPS_MIPMAP              0x00400000L
+#define DDSCAPS_RESERVED2           0x00800000L
+#define DDSCAPS_ALLOCONLOAD         0x04000000L
+#define DDSCAPS_VIDEOPORT           0x08000000L
+#define DDSCAPS_LOCALVIDMEM         0x10000000L
+#define DDSCAPS_REMOTEVIDMEM        0x20000000L
+#define DDSCAPS_STANDARDVGAMODE     0x40000000L
+#define DDSCAPS_OPTIMIZED           0x80000000L
 #define DDSCAPS_LUIDBUFFER          0x00004000L
 #define DDSCAPS_LLOVERRIDE          0x00008000L
 #define DDSCAPS_MANAGED             0x00020000L
-#define DDSCAPS_TEXTURE             0x04000000L
-#define DDSCAPS_VIDEOPORT           0x01000000L
 #define DDSCAPS_WRITEBLEND          0x80000000L
 #define DDSCAPS_STENCIL             0x00800000L
 #define DDSCAPS_AFFINEMATRIX        0x20000000L
@@ -448,9 +459,17 @@ typedef struct _DDCAPS {
 /* ── DDPCAPS_* palette flags ──────────────────────────────── */
 /* ═══════════════════════════════════════════════════════════ */
 
-#define DDPCAPS_8BIT          0x00000001L
-#define DDPCAPS_256COLOR      0x00000002L
+#define DDPCAPS_4BIT          0x00000001L
+#define DDPCAPS_8BITENTRIES   0x00000002L
+#define DDPCAPS_8BIT          0x00000004L
 #define DDPCAPS_INITIALIZE    0x00000008L
+#define DDPCAPS_PRIMARYSURFACE      0x00000010L
+#define DDPCAPS_PRIMARYSURFACELEFT  0x00000020L
+#define DDPCAPS_ALLOW256      0x00000040L
+#define DDPCAPS_VSYNC         0x00000080L
+#define DDPCAPS_1BIT          0x00000100L
+#define DDPCAPS_2BIT          0x00000200L
+#define DDPCAPS_ALPHA         0x00000400L
 
 #define DDGBLTST_QUEUED           0x00000001L
 #define DDGBLTST_INPROGRESS       0x00000002L
@@ -512,11 +531,10 @@ typedef struct _DDRECT {
 /* ═══════════════════════════════════════════════════════════ */
 
 /*
- * IDirectDrawVtbl — 27 slots (DirectX 5 SDK).
- *   Offsets 0–2: IUnknown (QueryInterface, AddRef, Release)
- *   Offsets 3–26: 24 IDirectDraw methods
+ * IDirectDrawVtbl — DirectDraw 1 layout returned by DirectDrawCreate().
  *
- * Games compiled against 1.x call methods at these same offsets.
+ * Offsets 0–2 are IUnknown, followed by the 20 IDirectDraw methods.
+ * Later DirectDraw versions extend this layout after WaitForVerticalBlank.
  */
 typedef struct _IDirectDrawVtbl {
     /* ── IUnknown (offsets 0–2) ────────────────────────── */
@@ -527,70 +545,71 @@ typedef struct _IDirectDrawVtbl {
     uint32_t (KERNEL32_STUB *AddRef)(void *this_ptr);
     uint32_t (KERNEL32_STUB *Release)(void *this_ptr);
 
-    /* ── IDirectDraw methods (offsets 3–26) ───────────── */
+    /* ── IDirectDraw methods (offsets 3–22) ───────────── */
     /*  3 */ HRESULT (KERNEL32_STUB *Compact)(void *this_ptr);
-    /*  4 */ HRESULT (KERNEL32_STUB *GetMonitorHandle)(void *this_ptr, void *hMonitor);
-    /*  5 */ HRESULT (KERNEL32_STUB *GetAvailableVidMem)(
-        void *this_ptr, void *ddvidmem);
-    /*  6 */ HRESULT (KERNEL32_STUB *GetMonitorFrequency)(void *this_ptr, uint32_t *dwFreq);
-    /*  7 */ HRESULT (KERNEL32_STUB *GetFourCCCodes)(void *this_ptr, uint32_t *dwCodes);
-    /*  8 */ HRESULT (KERNEL32_STUB *GetSurfaceFromDC)(
-        void *this_ptr, void *hdc, void **lpSurface);
-    /*  9 */ HRESULT (KERNEL32_STUB *EnumDisplayModes)(
-        uint32_t dwFlags,
-        void *ddsd,
-        void *lpContext,
-        void *lpEnumCallback);
-    /* 10 */ HRESULT (KERNEL32_STUB *GetDisplayMode)(void *this_ptr, void *ddsd);
-    /* 11 */ HRESULT (KERNEL32_STUB *RestoreDisplayMode)(void *this_ptr);
-    /* 12 */ HRESULT (KERNEL32_STUB *RestoreAllSurfaces)(void *this_ptr);
-    /* 13 */ HRESULT (KERNEL32_STUB *SetCooperativeLevel)(
-        void *this_ptr, void *hwnd, uint32_t flags);
-    /* 14 */ HRESULT (KERNEL32_STUB *SetDisplayMode)(
+    /*  4 */ HRESULT (KERNEL32_STUB *CreateClipper)(
         void *this_ptr,
-        uint32_t width,
-        uint32_t height,
-        uint32_t bpp);
-    /* 15 */ HRESULT (KERNEL32_STUB *CreateSurface)(
-        void *this_ptr,
-        void *ddsd,
-        void **lpSurface,
+        uint32_t flags,
+        void **lpClipper,
         void *unk);
-    /* 16 */ HRESULT (KERNEL32_STUB *GetDC)(void *this_ptr, void *hdc);
-    /* 17 */ HRESULT (KERNEL32_STUB *ReleaseDC)(void *this_ptr, void *hdc);
-    /* 18 */ HRESULT (KERNEL32_STUB *CreatePalette)(
+    /*  5 */ HRESULT (KERNEL32_STUB *CreatePalette)(
         void *this_ptr,
         uint32_t flags,
         void *ddpalette,
         void **lpPalette,
         void *unk);
-    /* 19 */ HRESULT (KERNEL32_STUB *CreateClipper)(
+    /*  6 */ HRESULT (KERNEL32_STUB *CreateSurface)(
         void *this_ptr,
-        uint32_t flags,
-        void **lpClipper,
+        void *ddsd,
+        void **lpSurface,
         void *unk);
-    /* 20 */ HRESULT (KERNEL32_STUB *FlipToGDISurface)(void *this_ptr);
-    /* 21 */ HRESULT (KERNEL32_STUB *GetGDIEvent)(void *this_ptr, void *hEvent);
-    /* 22 */ HRESULT (KERNEL32_STUB *GetCaps)(
+    /*  7 */ HRESULT (KERNEL32_STUB *DuplicateSurface)(
+        void *this_ptr,
+        void *lpDDSurface,
+        void **lplpDupDDSurface);
+    /*  8 */ HRESULT (KERNEL32_STUB *EnumDisplayModes)(
+        void *this_ptr,
+        uint32_t dwFlags,
+        void *ddsd,
+        void *lpContext,
+        void *lpEnumCallback);
+    /*  9 */ HRESULT (KERNEL32_STUB *EnumSurfaces)(
+        void *this_ptr,
+        uint32_t dwFlags,
+        void *ddsd,
+        void *lpContext,
+        void *lpEnumCallback);
+    /* 10 */ HRESULT (KERNEL32_STUB *FlipToGDISurface)(void *this_ptr);
+    /* 11 */ HRESULT (KERNEL32_STUB *GetCaps)(
         void *this_ptr,
         void *ddcaps1,
         void *ddcaps2);
-    /* 23 */ HRESULT (KERNEL32_STUB *GetDeviceIdentifier)(
+    /* 12 */ HRESULT (KERNEL32_STUB *GetDisplayMode)(void *this_ptr, void *ddsd);
+    /* 13 */ HRESULT (KERNEL32_STUB *GetFourCCCodes)(
         void *this_ptr,
-        void *dddevId,
-        uint32_t flags);
-    /* 24 */ HRESULT (KERNEL32_STUB *GetDeviceIdentifier2)(
+        uint32_t *lpNumCodes,
+        uint32_t *lpCodes);
+    /* 14 */ HRESULT (KERNEL32_STUB *GetGDISurface)(
         void *this_ptr,
-        void *dddevId,
-        uint32_t flags);
-    /* 25 */ HRESULT (KERNEL32_STUB *WaitForVerticalBlank)(
+        void **lpSurface);
+    /* 15 */ HRESULT (KERNEL32_STUB *GetMonitorFrequency)(void *this_ptr, uint32_t *dwFreq);
+    /* 16 */ HRESULT (KERNEL32_STUB *GetScanLine)(void *this_ptr, uint32_t *dwScanLine);
+    /* 17 */ HRESULT (KERNEL32_STUB *GetVerticalBlankStatus)(
+        void *this_ptr,
+        int *lpInVerticalBlank);
+    /* 18 */ HRESULT (KERNEL32_STUB *Initialize)(void *this_ptr, GUID *lpGUID);
+    /* 19 */ HRESULT (KERNEL32_STUB *RestoreDisplayMode)(void *this_ptr);
+    /* 20 */ HRESULT (KERNEL32_STUB *SetCooperativeLevel)(
+        void *this_ptr, void *hwnd, uint32_t flags);
+    /* 21 */ HRESULT (KERNEL32_STUB *SetDisplayMode)(
+        void *this_ptr,
+        uint32_t width,
+        uint32_t height,
+        uint32_t bpp);
+    /* 22 */ HRESULT (KERNEL32_STUB *WaitForVerticalBlank)(
         void *this_ptr,
         uint32_t flags,
         void *hEvent);
-    /* 26 */ HRESULT (KERNEL32_STUB *GetFlipStatus)(
-        void *this_ptr,
-        void *lpSurface,
-        uint32_t flags);
 } IDirectDrawVtbl;
 
 /*
@@ -610,123 +629,129 @@ typedef struct _IDirectDrawSurfaceVtbl {
     /*  1 */ uint32_t (KERNEL32_STUB *AddRef)(void *this_ptr);
     /*  2 */ uint32_t (KERNEL32_STUB *Release)(void *this_ptr);
 
-    /* ── IDirectDrawSurface methods (offsets 3–33) ────── */
+    /* ── IDirectDrawSurface methods (offsets 3–31) ────── */
     /*  3 */ HRESULT (KERNEL32_STUB *AddAttachedSurface)(
         void *this_ptr,
         void *lpDDS);
-    /*  4 */ HRESULT (KERNEL32_STUB *Blt)(
+    /*  4 */ HRESULT (KERNEL32_STUB *AddOverlayDirtyRect)(
+        void *this_ptr,
+        void *lpDDRect);
+    /*  5 */ HRESULT (KERNEL32_STUB *Blt)(
         void *this_ptr,
         void *lpDestRect,
         void *lpDDSrcSurface,
         void *lpSrcRect,
         uint32_t dwFlags,
         void *lpDDBltFX);
-    /*  5 */ HRESULT (KERNEL32_STUB *BltBatch)(
+    /*  6 */ HRESULT (KERNEL32_STUB *BltBatch)(
         void *this_ptr,
         void *lpDDLBltData,
         uint32_t dwCount,
         uint32_t dwFlags);
-    /*  6 */ HRESULT (KERNEL32_STUB *BltFast)(
+    /*  7 */ HRESULT (KERNEL32_STUB *BltFast)(
         void *this_ptr,
         uint32_t dwX,
         uint32_t dwY,
         void *lpDDSrcSurface,
         void *lpSrcRect,
         uint32_t dwFlags);
-    /*  7 */ HRESULT (KERNEL32_STUB *DeleteAttachedSurface)(
+    /*  8 */ HRESULT (KERNEL32_STUB *DeleteAttachedSurface)(
         void *this_ptr,
         uint32_t dwFlags,
         void *lpDDS);
-    /*  8 */ HRESULT (KERNEL32_STUB *Flip)(
+    /*  9 */ HRESULT (KERNEL32_STUB *EnumAttachedSurfaces)(
+        void *this_ptr,
+        void *lpContext,
+        void *lpEnumCallback);
+    /* 10 */ HRESULT (KERNEL32_STUB *EnumOverlayZOrders)(
+        void *this_ptr,
+        uint32_t dwFlags,
+        void *lpContext,
+        void *lpEnumCallback);
+    /* 11 */ HRESULT (KERNEL32_STUB *Flip)(
         void *this_ptr,
         void *lpDDSurface,
         uint32_t dwFlags);
-    /*  9 */ HRESULT (KERNEL32_STUB *GetAttachedSurface)(
+    /* 12 */ HRESULT (KERNEL32_STUB *GetAttachedSurface)(
         void *this_ptr,
         void *lpDDSCaps,
         void **lppDDSSurface);
-    /* 10 */ HRESULT (KERNEL32_STUB *GetBltStatus)(
+    /* 13 */ HRESULT (KERNEL32_STUB *GetBltStatus)(
         void *this_ptr,
-        uint32_t dwFlags,
-        uint32_t dwTimeout);
-    /* 11 */ HRESULT (KERNEL32_STUB *GetDC)(void *this_ptr, void **lphDC);
-    /* 12 */ HRESULT (KERNEL32_STUB *GetFlipStatus)(
+        uint32_t dwFlags);
+    /* 14 */ HRESULT (KERNEL32_STUB *GetCaps)(
         void *this_ptr,
-        uint32_t dwFlags,
-        uint32_t dwTimeout);
-    /* 13 */ HRESULT (KERNEL32_STUB *GetOverlayPosition)(
+        void *lpDDSCaps);
+    /* 15 */ HRESULT (KERNEL32_STUB *GetClipper)(
         void *this_ptr,
-        int32_t *lpl,
-        int32_t *lpt);
-    /* 14 */ HRESULT (KERNEL32_STUB *GetPalette)(
-        void *this_ptr,
-        void **lppPalette);
-    /* 15 */ HRESULT (KERNEL32_STUB *GetSurfaceDesc)(
-        void *this_ptr,
-        void *lpDDSurfaceDesc);
-    /* 16 */ HRESULT (KERNEL32_STUB *IsLost)(void *this_ptr);
-    /* 17 */ HRESULT (KERNEL32_STUB *Lock)(
-        void *this_ptr,
-        void *lpDDRect,
-        void **lplpSurface,
-        void *lpDDSurfaceDesc,
-        uint32_t dwFlags,
-        void *hWnd);
-    /* 18 */ HRESULT (KERNEL32_STUB *ReleaseDC)(
-        void *this_ptr,
-        void *hDC);
-    /* 19 */ HRESULT (KERNEL32_STUB *Restore)(void *this_ptr);
-    /* 20 */ HRESULT (KERNEL32_STUB *SetClipper)(
-        void *this_ptr,
-        void *lpDDClipper);
-    /* 21 */ HRESULT (KERNEL32_STUB *SetColorKey)(
+        void **lppDDClipper);
+    /* 16 */ HRESULT (KERNEL32_STUB *GetColorKey)(
         void *this_ptr,
         uint32_t dwFlags,
         void *lpDDColorKey);
-    /* 22 */ HRESULT (KERNEL32_STUB *SetOverlayPosition)(
+    /* 17 */ HRESULT (KERNEL32_STUB *GetDC)(void *this_ptr, void **lphDC);
+    /* 18 */ HRESULT (KERNEL32_STUB *GetFlipStatus)(
+        void *this_ptr,
+        uint32_t dwFlags);
+    /* 19 */ HRESULT (KERNEL32_STUB *GetOverlayPosition)(
+        void *this_ptr,
+        int32_t *lpl,
+        int32_t *lpt);
+    /* 20 */ HRESULT (KERNEL32_STUB *GetPalette)(
+        void *this_ptr,
+        void **lppPalette);
+    /* 21 */ HRESULT (KERNEL32_STUB *GetPixelFormat)(
+        void *this_ptr,
+        void *lpDDPixelFormat);
+    /* 22 */ HRESULT (KERNEL32_STUB *GetSurfaceDesc)(
+        void *this_ptr,
+        void *lpDDSurfaceDesc);
+    /* 23 */ HRESULT (KERNEL32_STUB *Initialize)(
+        void *this_ptr,
+        void *lpDDraw,
+        void *lpDDSurfaceDesc);
+    /* 24 */ HRESULT (KERNEL32_STUB *IsLost)(void *this_ptr);
+    /* 25 */ HRESULT (KERNEL32_STUB *Lock)(
+        void *this_ptr,
+        void *lpDDRect,
+        void *lpDDSurfaceDesc,
+        uint32_t dwFlags,
+        void *hEvent);
+    /* 26 */ HRESULT (KERNEL32_STUB *ReleaseDC)(
+        void *this_ptr,
+        void *hDC);
+    /* 27 */ HRESULT (KERNEL32_STUB *Restore)(void *this_ptr);
+    /* 28 */ HRESULT (KERNEL32_STUB *SetClipper)(
+        void *this_ptr,
+        void *lpDDClipper);
+    /* 29 */ HRESULT (KERNEL32_STUB *SetColorKey)(
+        void *this_ptr,
+        uint32_t dwFlags,
+        void *lpDDColorKey);
+    /* 30 */ HRESULT (KERNEL32_STUB *SetOverlayPosition)(
         void *this_ptr,
         int32_t l,
         int32_t t);
-    /* 23 */ HRESULT (KERNEL32_STUB *SetPalette)(
+    /* 31 */ HRESULT (KERNEL32_STUB *SetPalette)(
         void *this_ptr,
         void *lpPalette);
-    /* 24 */ HRESULT (KERNEL32_STUB *Unlock)(
+    /* 32 */ HRESULT (KERNEL32_STUB *Unlock)(
         void *this_ptr,
-        void *lpDDSurfaceDesc);
-    /* 25 */ HRESULT (KERNEL32_STUB *UnlockRect)(
+        void *lpSurfaceData);
+    /* 33 */ HRESULT (KERNEL32_STUB *UpdateOverlay)(
         void *this_ptr,
-        void *lpDDRect,
-        void *lpDDSurfaceDesc);
-    /* 26 */ HRESULT (KERNEL32_STUB *SetSurfaceDesc)(
+        void *lpSrcRect,
+        void *lpDDSDstSurface,
+        void *lpDstRect,
+        uint32_t dwFlags,
+        void *lpDDOverlayFx);
+    /* 34 */ HRESULT (KERNEL32_STUB *UpdateOverlayDisplay)(
         void *this_ptr,
-        void *lpDDSurfaceDesc,
         uint32_t dwFlags);
-    /* 27 */ HRESULT (KERNEL32_STUB *GetDDSurfaceDesc)(
-        void *this_ptr,
-        void *lpDDSurfaceDesc);
-    /* 28 */ HRESULT (KERNEL32_STUB *SetClipper2)(
-        void *this_ptr,
-        void *lpDDClipper);
-    /* 29 */ HRESULT (KERNEL32_STUB *GetClipper)(
-        void *this_ptr,
-        void **lppDDClipper);
-    /* 30 */ HRESULT (KERNEL32_STUB *OverrideCursor)(
-        void *this_ptr,
-        uint32_t bEnable);
-    /* 31 */ HRESULT (KERNEL32_STUB *GetOverrideCursor)(
-        void *this_ptr,
-        uint32_t *bEnable);
-    /* 32 */ HRESULT (KERNEL32_STUB *GetBltStatus2)(
+    /* 35 */ HRESULT (KERNEL32_STUB *UpdateOverlayZOrder)(
         void *this_ptr,
         uint32_t dwFlags,
-        uint32_t dwTimeout);
-    /* 33 */ HRESULT (KERNEL32_STUB *AddOverlayDirtyRect)(
-        void *this_ptr,
-        void *lpDDRect);
-    /* 34 */ HRESULT (KERNEL32_STUB *GetFlipStatus2)(
-        void *this_ptr,
-        uint32_t dwFlags,
-        uint32_t dwTimeout);
+        void *lpDDSReferenceSurface);
 } IDirectDrawSurfaceVtbl;
 
 /*

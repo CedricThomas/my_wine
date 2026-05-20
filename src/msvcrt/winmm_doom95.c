@@ -57,11 +57,21 @@ typedef struct {
 KERNEL32_STUB
 uint32_t timeGetTime(void)
 {
+    static uint32_t call_count = 0;
     struct timespec ts;
+    uint32_t value;
 
     if (INLINE_SYSCALL_CLOCK_GETTIME(CLOCK_MONOTONIC, &ts) != 0)
         return 0;
-    return (uint32_t)((uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL);
+    value = (uint32_t)((uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL);
+
+    if (debug_level_at_least(1)) {
+        uint32_t count = ++call_count;
+        if ((count & (count - 1)) == 0 || (count % 100000u) == 0)
+            DEBUG("winmm: timeGetTime count=%u value=%u", count, value);
+    }
+
+    return value;
 }
 
 KERNEL32_STUB

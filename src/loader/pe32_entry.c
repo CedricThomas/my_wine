@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "include/crt.h"
 #include "../syscall/syscalls_inline.h"
@@ -323,10 +324,28 @@ static void apply_doom95_runtime_compat(const char *path)
     if (slash == NULL)
         slash = path - 1;
     dir_len = (size_t)(slash - path + 1);
-    if (dir_len >= sizeof(g_doom95_basewad_path))
-        dir_len = sizeof(g_doom95_basewad_path) - 1;
-    memcpy(g_doom95_basewad_path, path, dir_len);
-    g_doom95_basewad_path[dir_len] = '\0';
+    if (path[0] != '/') {
+        char cwd[512];
+        size_t cwd_len;
+
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            cwd_len = strlen(cwd);
+            if (cwd_len > 0 && cwd[cwd_len - 1] == '/')
+                cwd_len--;
+            if (cwd_len + 1 + dir_len < sizeof(g_doom95_basewad_path)) {
+                memcpy(g_doom95_basewad_path, cwd, cwd_len);
+                g_doom95_basewad_path[cwd_len] = '/';
+                memcpy(g_doom95_basewad_path + cwd_len + 1, path, dir_len);
+                g_doom95_basewad_path[cwd_len + 1 + dir_len] = '\0';
+            }
+        }
+    }
+    if (g_doom95_basewad_path[0] == '\0') {
+        if (dir_len >= sizeof(g_doom95_basewad_path))
+            dir_len = sizeof(g_doom95_basewad_path) - 1;
+        memcpy(g_doom95_basewad_path, path, dir_len);
+        g_doom95_basewad_path[dir_len] = '\0';
+    }
     strncat(g_doom95_basewad_path, "DOOM1.WAD",
             sizeof(g_doom95_basewad_path) - strlen(g_doom95_basewad_path) - 1);
 
@@ -821,6 +840,7 @@ int main(int argc, char **argv)
 
     /* 2. Map the PE image */
     g_loader.image_base = map_pe(pe_path);
+    g_loader.image_size = pe_size_of_image(&g_nt_headers);
 
     /* Detect CRT type, activate the module, and patch refptrs
      * before import resolution — mirrors the PE32+ path in main.c */

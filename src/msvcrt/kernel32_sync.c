@@ -74,7 +74,16 @@ int ResetEvent(void *hEvent)
 KERNEL32_STUB
 uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 {
+    static uint32_t wait_count = 0;
     uintptr_t handle = (uintptr_t)hHandle;
+    uint32_t count = ++wait_count;
+
+    if (debug_level_at_least(1) &&
+        ((count & (count - 1)) == 0 || (count % 100000u) == 0)) {
+        DEBUG("kernel32: WaitForSingleObject count=%u handle=0x%lx timeout=%u",
+              count, (unsigned long)handle, dwMilliseconds);
+    }
+
     if (handle == 0) {
         g_last_error = 6;
         return 0x00000103UL; /* WAIT_ABANDONED - placeholder */

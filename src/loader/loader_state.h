@@ -21,6 +21,7 @@
 /* ── Consolidated loader state ─────────────────────────────────── */
 typedef struct {
     void         *image_base;            /* Mapped base of the main PE image */
+    size_t        image_size;            /* SizeOfImage of the main PE image */
     char          pe_path[512];          /* Path to the loaded PE file */
     void         *peb_ldr;               /* PEB_LDR_DATA* (void* to avoid forward-dep cycle) */
     volatile uintptr_t dll_base_next;    /* Next DLL allocation base (atomic CAS) */
@@ -41,6 +42,14 @@ static inline void *loader_get_image_base(void) {
 
 static inline void loader_set_image_base(void *base) {
     g_loader.image_base = base;
+}
+
+static inline size_t loader_get_image_size(void) {
+    return g_loader.image_size;
+}
+
+static inline void loader_set_image_size(size_t size) {
+    g_loader.image_size = size;
 }
 
 static inline const char *loader_get_pe_path(void) {

@@ -50,6 +50,7 @@ extern LRESULT KERNEL32_ABI DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, L
 extern ATOM KERNEL32_ABI RegisterClassA(const WNDCLASSA *lpWndClass);
 extern BOOL KERNEL32_ABI DestroyWindow(HWND hWnd);
 extern LRESULT KERNEL32_ABI SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+extern const char *wine_get_current_directory(void);
 extern HWND KERNEL32_ABI CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
                                          const char *lpWindowName, DWORD dwStyle, int X, int Y,
                                          int nWidth, int nHeight, HWND hWndParent, HMENU hMenu,
@@ -198,6 +199,8 @@ static void dialog_try_doom95_seed_basewad_state(HINSTANCE hInstance)
     uintptr_t *state_slot;
     uintptr_t state;
     char *basewad;
+    const char *cwd;
+    size_t cwd_len;
 
     if (module_base == 0)
         return;
@@ -208,6 +211,19 @@ static void dialog_try_doom95_seed_basewad_state(HINSTANCE hInstance)
         return;
 
     basewad = (char *)(uintptr_t)(state + 0x23u);
+    cwd = wine_get_current_directory();
+    cwd_len = cwd ? user32_strlen(cwd) : 0;
+    if (cwd && cwd_len > 0 && cwd_len + 10 < 0x100u) {
+        user32_strncpy(basewad, cwd, 0xff);
+        if (basewad[cwd_len - 1] != '/') {
+            basewad[cwd_len++] = '/';
+            basewad[cwd_len] = '\0';
+        }
+        user32_strncpy(basewad + cwd_len, "DOOM1.WAD", 0xff - cwd_len);
+        basewad[0xff] = '\0';
+        return;
+    }
+
     user32_strncpy(basewad, "DOOM1.WAD", 0xff);
     basewad[0xff] = '\0';
 }
@@ -320,12 +336,40 @@ static void dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
                                  (LPARAM)(uintptr_t)provider_hwnd);
 
     if (wad_hwnd) {
+        int wad_idx = -1;
+        int current_wad_idx = -1;
+
         if (SendMessageA(wad_hwnd, CB_GETCOUNT, 0, 0) <= 0)
             SendMessageA(wad_hwnd, CB_ADDSTRING, 0, (LPARAM)(uintptr_t)"DOOM1.WAD");
         SendMessageA(wad_hwnd, WM_SETTEXT, 0, (LPARAM)(uintptr_t)"DOOM1.WAD");
         dialog_try_doom95_seed_basewad_state(hInstance);
-        if (SendMessageA(wad_hwnd, CB_GETCOUNT, 0, 0) > 0) {
-            SendMessageA(wad_hwnd, CB_SETCURSEL, 0, 0);
+        current_wad_idx = (int)SendMessageA(wad_hwnd, CB_GETCURSEL, 0, 0);
+        if (current_wad_idx > 0) {
+            wad_idx = current_wad_idx;
+        } else if (wad_item && current_wad_idx == 0 &&
+                   wad_item->item_count == 1 &&
+                   user32_strcmp(wad_item->items[0], "(NONE)") != 0) {
+            wad_idx = current_wad_idx;
+        }
+        if (wad_idx < 0 && wad_item)
+            wad_idx = dialog_item_find_string(wad_item, 0, "DOOM1.WAD", 1);
+        if (wad_idx < 0 && wad_item)
+            wad_idx = dialog_item_find_string(wad_item, 0, "DOOM1", 1);
+        if (wad_idx < 0 && wad_item) {
+            uint32_t i;
+
+            for (i = 0; i < wad_item->item_count; i++) {
+                if (wad_item->item_data[i] != 0 &&
+                    user32_strcmp(wad_item->items[i], "(NONE)") != 0) {
+                    wad_idx = (int)i;
+                    break;
+                }
+            }
+        }
+        if (wad_idx < 0 && SendMessageA(wad_hwnd, CB_GETCOUNT, 0, 0) > 0)
+            wad_idx = 0;
+        if (wad_idx >= 0) {
+            SendMessageA(wad_hwnd, CB_SETCURSEL, (WPARAM)wad_idx, 0);
             ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_COMMAND,
                                          (WPARAM)(0x3f4u | (1u << 16)),
                                          (LPARAM)(uintptr_t)wad_hwnd);

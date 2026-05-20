@@ -10,9 +10,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "ddraw_priv.h"
 #include "user32_priv.h"
+#include "../syscall/syscalls_inline.h"
 
 extern int rb_init(void) __attribute__((weak));
 extern rb_window_t rb_window_create(const char *title, int x, int y, int w, int h,
@@ -56,22 +58,55 @@ typedef struct {
     rb_surface_t backbuffer;
 } ddraw_backend_window_state;
 
+typedef struct {
+    uint32_t dwCaps;
+} ddraw_guest_caps_t;
+
+typedef struct {
+    uint32_t ddSize;
+    uint32_t ddFlags;
+    uint32_t dwHeight;
+    uint32_t dwWidth;
+    int32_t lPitch;
+    uint32_t dwBackBufferCount;
+    uint32_t dwMipMapCount;
+    uint32_t dwAlphaBitDepth;
+    uint32_t dwReserved;
+    uint32_t lpSurface;
+    uint8_t reserved[0x68 - 0x28];
+    ddraw_guest_caps_t ddsCaps;
+} __attribute__((packed)) ddraw_guest_desc_t;
+
 my_dd_t *g_ddraw_instance = NULL;
 
 static int g_ddraw_backend_inited = 0;
 static int g_ddraw_backend_available = 0;
 
-#ifndef DDPCAPS_8BIT
-#define DDPCAPS_8BIT      0x00000001L
-#endif
+static void ddraw_debug_counter(const char *tag)
+{
+    typedef struct {
+        const char *tag;
+        uint32_t count;
+    } ddraw_debug_counter_slot;
+    static ddraw_debug_counter_slot slots[16];
+    int i;
 
-#ifndef DDPCAPS_256COLOR
-#define DDPCAPS_256COLOR  0x00000002L
-#endif
+    if (!debug_level_at_least(1) || !tag)
+        return;
 
-#ifndef DDPCAPS_INITIALIZE
-#define DDPCAPS_INITIALIZE 0x00000008L
-#endif
+    for (i = 0; i < 16; i++) {
+        if (slots[i].tag == tag || slots[i].tag == NULL) {
+            uint32_t count;
+
+            if (slots[i].tag == NULL)
+                slots[i].tag = tag;
+            count = ++slots[i].count;
+            if ((count & (count - 1)) == 0 || (count % 100000u) == 0)
+                DEBUG("ddraw: %s count=%u", tag, count);
+            return;
+        }
+    }
+}
 
 static int ddraw_ensure_backend(void)
 {
@@ -98,7 +133,7 @@ static rb_pixel_format_t ddraw_bpp_to_format(uint32_t bpp)
     }
 }
 
-static void ddraw_fill_surface_desc(my_surface_t *surf, DDSURFACEDESC *desc,
+static void ddraw_fill_surface_desc(my_surface_t *surf, ddraw_guest_desc_t *desc,
                                     void *surface_ptr)
 {
     if (!surf || !desc)
@@ -121,10 +156,11 @@ static void ddraw_fill_surface_desc(my_surface_t *surf, DDSURFACEDESC *desc,
     desc->ddFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH;
     if (surface_ptr)
         desc->ddFlags |= DDSD_LPSURFACE;
-    desc->ddCaps = surf->caps;
+    desc->ddsCaps.dwCaps = surf->caps;
     desc->lPitch = surf->pitch;
     desc->dwBackBufferCount = surf->next ? 1u : 0u;
-    desc->lHeight = surf->height;
+    desc->dwWidth = surf->width;
+    desc->dwHeight = surf->height;
     desc->lpSurface = (uint32_t)(uintptr_t)surface_ptr;
 }
 
@@ -188,6 +224,8 @@ static void ddraw_destroy_palette(my_palette_t *pal)
 
 static uint32_t KERNEL32_STUB palette_Release(void *this_ptr);
 static uint32_t KERNEL32_STUB surface_Release(void *this_ptr);
+static uint32_t KERNEL32_STUB clipper_AddRef(void *this_ptr);
+static uint32_t KERNEL32_STUB clipper_Release(void *this_ptr);
 
 static void ddraw_destroy_surface(my_surface_t *surf)
 {
@@ -212,6 +250,15 @@ static void ddraw_destroy_surface(my_surface_t *surf)
         rb_surface_destroy(surf->rb_surface);
 
     ddraw_free(surf);
+}
+
+static HRESULT KERNEL32_STUB ddraw_DuplicateSurface(void *this_ptr, void *lpDDSurface,
+                                                    void **lplpDupDDSurface)
+{
+    (void)this_ptr;
+    (void)lpDDSurface;
+    (void)lplpDupDDSurface;
+    return DDERR_UNSUPPORTED;
 }
 
 static HRESULT KERNEL32_STUB ddraw_QueryInterface(void *this_ptr, const GUID *riid, void **ppvObj)
@@ -276,29 +323,135 @@ static uint32_t KERNEL32_STUB ddraw_Release(void *this_ptr)
 }
 
 static HRESULT KERNEL32_STUB ddraw_Compact(void *this_ptr) { (void)this_ptr; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_GetMonitorHandle(void *this_ptr, void *hMonitor) { (void)this_ptr; (void)hMonitor; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_GetAvailableVidMem(void *this_ptr, void *ddvidmem) { (void)this_ptr; (void)ddvidmem; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_GetFourCCCodes(void *this_ptr, uint32_t *dwCodes) { (void)this_ptr; (void)dwCodes; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_GetSurfaceFromDC(void *this_ptr, void *hdc, void **lpSurface) { (void)this_ptr; (void)hdc; (void)lpSurface; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_CreateClipper(void *this_ptr, uint32_t flags, void **lplpClipper, void *unk) { (void)this_ptr; (void)flags; (void)lplpClipper; (void)unk; return DDERR_UNSUPPORTED; }
+static HRESULT KERNEL32_STUB ddraw_CreateClipper(void *this_ptr, uint32_t flags, void **lplpClipper, void *unk)
+{
+    my_dd_t *dd = (my_dd_t *)this_ptr;
+    my_clipper_t *clipper;
+
+    (void)flags;
+    (void)unk;
+
+    if (!dd || !lplpClipper)
+        return DDERR_INVALIDPARAMS;
+
+    clipper = ddraw_alloc_mem(sizeof(*clipper));
+    if (!clipper)
+        return DDERR_OUTOFMEMORY;
+
+    memset(clipper, 0, sizeof(*clipper));
+    clipper->lpVtbl = (IDirectDrawClipperVtbl *)&clipper_vtbl;
+    clipper->ref_count = 1;
+
+    *lplpClipper = FORCE_PTR_RETURN(clipper);
+    DEBUG("ddraw: CreateClipper flags=0x%x -> %p", flags, clipper);
+    return DD_OK;
+}
 static HRESULT KERNEL32_STUB ddraw_FlipToGDISurface(void *this_ptr) { (void)this_ptr; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_GetGDIEvent(void *this_ptr, void *hEvent) { (void)this_ptr; (void)hEvent; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_GetDeviceIdentifier(void *this_ptr, void *dddevId, uint32_t flags) { (void)this_ptr; (void)dddevId; (void)flags; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_GetDeviceIdentifier2(void *this_ptr, void *dddevId, uint32_t flags) { (void)this_ptr; (void)dddevId; (void)flags; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_WaitForVerticalBlank(void *this_ptr, uint32_t flags, void *hEvent) { (void)this_ptr; (void)flags; (void)hEvent; return DD_OK; }
-static HRESULT KERNEL32_STUB ddraw_GetFlipStatus(void *this_ptr, void *lpSurface, uint32_t flags) { (void)this_ptr; (void)lpSurface; (void)flags; return DD_OK; }
+static HRESULT KERNEL32_STUB ddraw_WaitForVerticalBlank(void *this_ptr, uint32_t flags, void *hEvent)
+{
+    struct timespec ts;
+
+    (void)this_ptr;
+    (void)flags;
+    (void)hEvent;
+
+    ddraw_debug_counter("WaitForVerticalBlank");
+    ts.tv_sec = 0;
+    ts.tv_nsec = 1000000L;
+    (void)INLINE_SYSCALL_NANOSLEEP(&ts, NULL);
+    return DD_OK;
+}
 
 static HRESULT KERNEL32_STUB ddraw_GetMonitorFrequency(void *this_ptr, uint32_t *dwFreq)
 {
     (void)this_ptr;
+    ddraw_debug_counter("GetMonitorFrequency");
     if (dwFreq)
         *dwFreq = 60;
     return DD_OK;
 }
 
-static HRESULT KERNEL32_STUB ddraw_EnumDisplayModes(uint32_t dwFlags, void *ddsd,
+static HRESULT KERNEL32_STUB ddraw_GetScanLine(void *this_ptr, uint32_t *dwScanLine)
+{
+    static uint32_t fake_scanline = 0;
+
+    (void)this_ptr;
+    ddraw_debug_counter("GetScanLine");
+    if (dwScanLine)
+        *dwScanLine = (fake_scanline++) % 449u;
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB ddraw_GetVerticalBlankStatus(void *this_ptr, int *lpInVerticalBlank)
+{
+    static uint32_t poll_count = 0;
+    static int fake_in_vblank = 0;
+    uint32_t count;
+    struct timespec ts;
+
+    (void)this_ptr;
+    ddraw_debug_counter("GetVerticalBlankStatus");
+    count = ++poll_count;
+    fake_in_vblank ^= 1;
+
+    if ((count & 63u) == 0u) {
+        ts.tv_sec = 0;
+        ts.tv_nsec = 1000000L;
+        (void)INLINE_SYSCALL_NANOSLEEP(&ts, NULL);
+    }
+    if (lpInVerticalBlank)
+        *lpInVerticalBlank = fake_in_vblank;
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB ddraw_GetFourCCCodes(void *this_ptr, uint32_t *lpNumCodes,
+                                                  uint32_t *lpCodes)
+{
+    (void)this_ptr;
+    if (lpNumCodes)
+        *lpNumCodes = 0;
+    (void)lpCodes;
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB ddraw_GetGDISurface(void *this_ptr, void **lpSurface)
+{
+    my_dd_t *dd = (my_dd_t *)this_ptr;
+
+    if (!dd || !lpSurface)
+        return DDERR_INVALIDPARAMS;
+
+    *lpSurface = NULL;
+    if (!dd->primary_surface)
+        return DDERR_NOTFOUND;
+
+    dd->primary_surface->ref_count++;
+    *lpSurface = FORCE_PTR_RETURN(dd->primary_surface);
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB ddraw_Initialize(void *this_ptr, GUID *lpGUID)
+{
+    (void)this_ptr;
+    (void)lpGUID;
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB ddraw_EnumDisplayModes(void *this_ptr, uint32_t dwFlags, void *ddsd,
                                                     void *lpContext, void *lpEnumCallback)
 {
+    (void)this_ptr;
+    (void)dwFlags;
+    (void)ddsd;
+    (void)lpContext;
+    (void)lpEnumCallback;
+    return DDERR_UNSUPPORTED;
+}
+
+static HRESULT KERNEL32_STUB ddraw_EnumSurfaces(void *this_ptr, uint32_t dwFlags, void *ddsd,
+                                                void *lpContext, void *lpEnumCallback)
+{
+    (void)this_ptr;
     (void)dwFlags;
     (void)ddsd;
     (void)lpContext;
@@ -309,7 +462,7 @@ static HRESULT KERNEL32_STUB ddraw_EnumDisplayModes(uint32_t dwFlags, void *ddsd
 static HRESULT KERNEL32_STUB ddraw_GetDisplayMode(void *this_ptr, void *ddsd)
 {
     my_dd_t *dd = (my_dd_t *)this_ptr;
-    DDSURFACEDESC *desc = (DDSURFACEDESC *)ddsd;
+    ddraw_guest_desc_t *desc = (ddraw_guest_desc_t *)ddsd;
 
     if (!dd || !desc)
         return DDERR_INVALIDPARAMS;
@@ -317,20 +470,14 @@ static HRESULT KERNEL32_STUB ddraw_GetDisplayMode(void *this_ptr, void *ddsd)
     memset(desc, 0, sizeof(*desc));
     desc->ddSize = sizeof(*desc);
     desc->ddFlags = DDSD_WIDTH | DDSD_HEIGHT;
-    desc->ddCaps = DDSCAPS_PRIMARYSURFACE;
-    desc->lWidth = dd->current_mode_w;
-    desc->lHeight = dd->current_mode_h;
+    desc->ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    desc->dwWidth = dd->current_mode_w;
+    desc->dwHeight = dd->current_mode_h;
     desc->lpSurface = 0;
     return DD_OK;
 }
 
 static HRESULT KERNEL32_STUB ddraw_RestoreDisplayMode(void *this_ptr)
-{
-    (void)this_ptr;
-    return DD_OK;
-}
-
-static HRESULT KERNEL32_STUB ddraw_RestoreAllSurfaces(void *this_ptr)
 {
     (void)this_ptr;
     return DD_OK;
@@ -352,6 +499,8 @@ static HRESULT KERNEL32_STUB ddraw_SetCooperativeLevel(void *this_ptr, void *hwn
     if (entry)
         dd->rb_window = entry->sdl_window;
 
+    DEBUG("ddraw: SetCooperativeLevel hwnd=%p flags=0x%x rb_window=%u", hwnd, flags,
+          (unsigned int)dd->rb_window);
     return DD_OK;
 }
 
@@ -382,6 +531,8 @@ static HRESULT KERNEL32_STUB ddraw_SetDisplayMode(void *this_ptr, uint32_t width
         rb_window_set_fullscreen(dd->rb_window, dd->is_exclusive,
                                  (int)width, (int)height, (int)bpp);
 
+    DEBUG("ddraw: SetDisplayMode %ux%ux%u exclusive=%d rb_window=%u", width, height, bpp,
+          dd->is_exclusive, (unsigned int)dd->rb_window);
     return DD_OK;
 }
 
@@ -389,7 +540,7 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
                                                  void **lplpDDSurface, void *unk)
 {
     my_dd_t *dd = (my_dd_t *)this_ptr;
-    DDSURFACEDESC *desc = (DDSURFACEDESC *)ddsd;
+    ddraw_guest_desc_t *desc = (ddraw_guest_desc_t *)ddsd;
     my_surface_t *primary = NULL;
     my_surface_t *backbuffer = NULL;
     rb_surface_t rb_primary = 0;
@@ -403,14 +554,17 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
     if (!ddraw_ensure_backend())
         return DDERR_UNSUPPORTED;
 
-    caps = desc->ddCaps;
-    if (desc->lWidth == 0)
-        desc->lWidth = dd->current_mode_w;
-    if (desc->lHeight == 0)
-        desc->lHeight = dd->current_mode_h;
+    caps = desc->ddsCaps.dwCaps;
+    if (desc->dwWidth == 0)
+        desc->dwWidth = dd->current_mode_w;
+    if (desc->dwHeight == 0)
+        desc->dwHeight = dd->current_mode_h;
 
     if ((caps & DDSCAPS_PRIMARYSURFACE) && !dd->rb_window)
         return DDERR_NOCOOPERATIVELEVELSET;
+
+    DEBUG("ddraw: CreateSurface caps=0x%x size=%ux%u backbuffers=%u",
+          caps, desc->dwWidth, desc->dwHeight, desc->dwBackBufferCount);
 
     if ((caps & DDSCAPS_PRIMARYSURFACE) && (caps & DDSCAPS_FLIP)) {
         ddraw_backend_window_state *wnd;
@@ -418,8 +572,8 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
         if (!rb_surface_create_flip_chain)
             return DDERR_UNSUPPORTED;
 
-        rb_primary = rb_surface_create_flip_chain(dd->rb_window, (int)desc->lWidth,
-                                                  (int)desc->lHeight,
+        rb_primary = rb_surface_create_flip_chain(dd->rb_window, (int)desc->dwWidth,
+                                                  (int)desc->dwHeight,
                                                   ddraw_bpp_to_format(dd->current_mode_bpp),
                                                   0, (int)desc->dwBackBufferCount);
         if (!rb_primary)
@@ -431,6 +585,16 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
 
         wnd = ddraw_get_backend_window(dd->rb_window);
         rb_backbuffer = wnd ? wnd->backbuffer : 0;
+        DEBUG("ddraw: flip chain primary=%u wnd=%p backend_backbuffer=%u",
+              (unsigned int)rb_primary, (void *)wnd, (unsigned int)rb_backbuffer);
+        if (!rb_backbuffer && wnd && rb_surface_create) {
+            rb_backbuffer = rb_surface_create((int)desc->dwWidth, (int)desc->dwHeight,
+                                              ddraw_bpp_to_format(dd->current_mode_bpp),
+                                              0, RB_SURFACE_BACK);
+            if (rb_backbuffer)
+                wnd->backbuffer = rb_backbuffer;
+            DEBUG("ddraw: created fallback backbuffer=%u", (unsigned int)rb_backbuffer);
+        }
         if (rb_backbuffer) {
             backbuffer = ddraw_alloc_surface(dd, rb_backbuffer,
                                              DDSCAPS_BACKBUFFER | DDSCAPS_FLIP);
@@ -452,7 +616,7 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
         if (!rb_surface_create)
             return DDERR_UNSUPPORTED;
 
-        rb_primary = rb_surface_create((int)desc->lWidth, (int)desc->lHeight,
+        rb_primary = rb_surface_create((int)desc->dwWidth, (int)desc->dwHeight,
                                        ddraw_bpp_to_format(dd->current_mode_bpp),
                                        0, rb_flags);
         if (!rb_primary)
@@ -468,13 +632,13 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
         }
     }
 
-    primary->width = desc->lWidth;
-    primary->height = desc->lHeight;
-    primary->pitch = (int32_t)desc->lWidth;
+    primary->width = desc->dwWidth;
+    primary->height = desc->dwHeight;
+    primary->pitch = (int32_t)desc->dwWidth;
     if (backbuffer) {
-        backbuffer->width = desc->lWidth;
-        backbuffer->height = desc->lHeight;
-        backbuffer->pitch = (int32_t)desc->lWidth;
+        backbuffer->width = desc->dwWidth;
+        backbuffer->height = desc->dwHeight;
+        backbuffer->pitch = (int32_t)desc->dwWidth;
     }
 
     *lplpDDSurface = FORCE_PTR_RETURN(primary);
@@ -489,9 +653,6 @@ out_of_memory:
         rb_surface_destroy(rb_primary);
     return DDERR_OUTOFMEMORY;
 }
-
-static HRESULT KERNEL32_STUB ddraw_GetDC(void *this_ptr, void *hdc) { (void)this_ptr; (void)hdc; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB ddraw_ReleaseDC(void *this_ptr, void *hdc) { (void)this_ptr; (void)hdc; return DDERR_UNSUPPORTED; }
 
 static HRESULT KERNEL32_STUB ddraw_CreatePalette(void *this_ptr, uint32_t flags,
                                                  void *ddpalette, void **lplpDDPalette,
@@ -511,8 +672,14 @@ static HRESULT KERNEL32_STUB ddraw_CreatePalette(void *this_ptr, uint32_t flags,
     if (!ddraw_ensure_backend() || !rb_palette_create)
         return DDERR_UNSUPPORTED;
 
-    if (!(flags & DDPCAPS_8BIT) && !(flags & DDPCAPS_256COLOR))
+    if (flags & DDPCAPS_1BIT)
+        count = 2;
+    else if (flags & DDPCAPS_2BIT)
+        count = 4;
+    else if (flags & DDPCAPS_4BIT)
         count = 16;
+    else if (flags & DDPCAPS_8BIT)
+        count = 256;
 
     rb_pal = rb_palette_create((int)count);
     if (!rb_pal)
@@ -531,7 +698,7 @@ static HRESULT KERNEL32_STUB ddraw_CreatePalette(void *this_ptr, uint32_t flags,
     pal->num_colors = count;
 
     memset(colors, 0, sizeof(colors));
-    if (entries && (flags & DDPCAPS_INITIALIZE)) {
+    if (entries) {
         uint32_t i;
         for (i = 0; i < count; i++) {
             colors[i] = ((uint32_t)entries[i].peBlue << 16) |
@@ -542,6 +709,7 @@ static HRESULT KERNEL32_STUB ddraw_CreatePalette(void *this_ptr, uint32_t flags,
     }
 
     *lplpDDPalette = FORCE_PTR_RETURN(pal);
+    DEBUG("ddraw: CreatePalette flags=0x%x count=%u -> %p", flags, count, pal);
     return DD_OK;
 }
 
@@ -577,29 +745,25 @@ const IDirectDrawVtbl ddraw_vtbl = {
     .AddRef = ddraw_AddRef,
     .Release = ddraw_Release,
     .Compact = ddraw_Compact,
-    .GetMonitorHandle = ddraw_GetMonitorHandle,
-    .GetAvailableVidMem = ddraw_GetAvailableVidMem,
-    .GetMonitorFrequency = ddraw_GetMonitorFrequency,
-    .GetFourCCCodes = ddraw_GetFourCCCodes,
-    .GetSurfaceFromDC = ddraw_GetSurfaceFromDC,
+    .CreateClipper = ddraw_CreateClipper,
+    .CreatePalette = ddraw_CreatePalette,
+    .CreateSurface = ddraw_CreateSurface,
+    .DuplicateSurface = ddraw_DuplicateSurface,
     .EnumDisplayModes = ddraw_EnumDisplayModes,
+    .EnumSurfaces = ddraw_EnumSurfaces,
+    .FlipToGDISurface = ddraw_FlipToGDISurface,
+    .GetCaps = ddraw_GetCaps,
     .GetDisplayMode = ddraw_GetDisplayMode,
+    .GetFourCCCodes = ddraw_GetFourCCCodes,
+    .GetGDISurface = ddraw_GetGDISurface,
+    .GetMonitorFrequency = ddraw_GetMonitorFrequency,
+    .GetScanLine = ddraw_GetScanLine,
+    .GetVerticalBlankStatus = ddraw_GetVerticalBlankStatus,
+    .Initialize = ddraw_Initialize,
     .RestoreDisplayMode = ddraw_RestoreDisplayMode,
-    .RestoreAllSurfaces = ddraw_RestoreAllSurfaces,
     .SetCooperativeLevel = ddraw_SetCooperativeLevel,
     .SetDisplayMode = ddraw_SetDisplayMode,
-    .CreateSurface = ddraw_CreateSurface,
-    .GetDC = ddraw_GetDC,
-    .ReleaseDC = ddraw_ReleaseDC,
-    .CreatePalette = ddraw_CreatePalette,
-    .CreateClipper = ddraw_CreateClipper,
-    .FlipToGDISurface = ddraw_FlipToGDISurface,
-    .GetGDIEvent = ddraw_GetGDIEvent,
-    .GetCaps = ddraw_GetCaps,
-    .GetDeviceIdentifier = ddraw_GetDeviceIdentifier,
-    .GetDeviceIdentifier2 = ddraw_GetDeviceIdentifier2,
     .WaitForVerticalBlank = ddraw_WaitForVerticalBlank,
-    .GetFlipStatus = ddraw_GetFlipStatus,
 };
 
 static HRESULT KERNEL32_STUB surface_QueryInterface(void *this_ptr, const GUID *riid, void **ppvObj)
@@ -659,6 +823,13 @@ static HRESULT KERNEL32_STUB surface_AddAttachedSurface(void *this_ptr, void *lp
     return DD_OK;
 }
 
+static HRESULT KERNEL32_STUB surface_AddOverlayDirtyRect(void *this_ptr, void *lpDDRect)
+{
+    (void)this_ptr;
+    (void)lpDDRect;
+    return DDERR_UNSUPPORTED;
+}
+
 static int ddraw_rect_to_rb(const DDRECT *src, rb_rect_t *dst)
 {
     if (!src || !dst)
@@ -685,6 +856,7 @@ static HRESULT KERNEL32_STUB surface_Blt(void *this_ptr, void *lpDestRect,
 
     if (!dst || !rb_surface_blt)
         return DDERR_INVALIDPARAMS;
+    ddraw_debug_counter("Blt");
 
     if (lpDestRect && ddraw_rect_to_rb((const DDRECT *)lpDestRect, &dst_rect))
         dst_rect_ptr = &dst_rect;
@@ -729,6 +901,7 @@ static HRESULT KERNEL32_STUB surface_BltFast(void *this_ptr, uint32_t dwX, uint3
 
     if (!src)
         return DDERR_INVALIDPARAMS;
+    ddraw_debug_counter("BltFast");
 
     if (lpSrcRect) {
         src_rect = *(const DDRECT *)lpSrcRect;
@@ -762,6 +935,25 @@ static HRESULT KERNEL32_STUB surface_DeleteAttachedSurface(void *this_ptr, uint3
     return DD_OK;
 }
 
+static HRESULT KERNEL32_STUB surface_EnumAttachedSurfaces(void *this_ptr, void *lpContext,
+                                                          void *lpEnumCallback)
+{
+    (void)this_ptr;
+    (void)lpContext;
+    (void)lpEnumCallback;
+    return DDERR_UNSUPPORTED;
+}
+
+static HRESULT KERNEL32_STUB surface_EnumOverlayZOrders(void *this_ptr, uint32_t dwFlags,
+                                                        void *lpContext, void *lpEnumCallback)
+{
+    (void)this_ptr;
+    (void)dwFlags;
+    (void)lpContext;
+    (void)lpEnumCallback;
+    return DDERR_UNSUPPORTED;
+}
+
 static HRESULT KERNEL32_STUB surface_Flip(void *this_ptr, void *lpDDSurface, uint32_t dwFlags)
 {
     my_surface_t *surf = (my_surface_t *)this_ptr;
@@ -771,6 +963,7 @@ static HRESULT KERNEL32_STUB surface_Flip(void *this_ptr, void *lpDDSurface, uin
 
     if (!surf || !rb_surface_flip)
         return DDERR_INVALIDPARAMS;
+    ddraw_debug_counter("Flip");
     return (rb_surface_flip(surf->rb_surface) == RB_OK) ? DD_OK : DDERR_NOFLIP;
 }
 
@@ -787,22 +980,49 @@ static HRESULT KERNEL32_STUB surface_GetAttachedSurface(void *this_ptr, void *lp
     if ((caps & DDSCAPS_BACKBUFFER) && surf->next) {
         surf->next->ref_count++;
         *lppDDSSurface = FORCE_PTR_RETURN(surf->next);
+        ddraw_debug_counter("GetAttachedSurface");
         return DD_OK;
     }
 
     return DDERR_NOTFOUND;
 }
 
-static HRESULT KERNEL32_STUB surface_GetBltStatus(void *this_ptr, uint32_t dwFlags, uint32_t dwTimeout)
+static HRESULT KERNEL32_STUB surface_GetBltStatus(void *this_ptr, uint32_t dwFlags)
 {
     (void)this_ptr;
     (void)dwFlags;
-    (void)dwTimeout;
+    ddraw_debug_counter("GetBltStatus");
     return DD_OK;
 }
 
+static HRESULT KERNEL32_STUB surface_GetCaps(void *this_ptr, void *lpDDSCaps)
+{
+    my_surface_t *surf = (my_surface_t *)this_ptr;
+    uint32_t *caps = (uint32_t *)lpDDSCaps;
+
+    if (!surf || !caps)
+        return DDERR_INVALIDPARAMS;
+
+    *caps = surf->caps;
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB surface_GetColorKey(void *this_ptr, uint32_t dwFlags, void *lpDDColorKey)
+{
+    (void)this_ptr;
+    (void)dwFlags;
+    (void)lpDDColorKey;
+    return DDERR_UNSUPPORTED;
+}
+
 static HRESULT KERNEL32_STUB surface_GetDC(void *this_ptr, void **lphDC) { (void)this_ptr; (void)lphDC; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB surface_GetFlipStatus(void *this_ptr, uint32_t dwFlags, uint32_t dwTimeout) { (void)this_ptr; (void)dwFlags; (void)dwTimeout; return DD_OK; }
+static HRESULT KERNEL32_STUB surface_GetFlipStatus(void *this_ptr, uint32_t dwFlags)
+{
+    (void)this_ptr;
+    (void)dwFlags;
+    ddraw_debug_counter("GetFlipStatus");
+    return DD_OK;
+}
 static HRESULT KERNEL32_STUB surface_GetOverlayPosition(void *this_ptr, int32_t *lpl, int32_t *lpt) { (void)this_ptr; (void)lpl; (void)lpt; return DDERR_UNSUPPORTED; }
 
 static HRESULT KERNEL32_STUB surface_GetPalette(void *this_ptr, void **lppPalette)
@@ -828,7 +1048,23 @@ static HRESULT KERNEL32_STUB surface_GetSurfaceDesc(void *this_ptr, void *lpDDSu
     if (!surf || !lpDDSurfaceDesc)
         return DDERR_INVALIDPARAMS;
 
-    ddraw_fill_surface_desc(surf, (DDSURFACEDESC *)lpDDSurfaceDesc, NULL);
+    ddraw_fill_surface_desc(surf, (ddraw_guest_desc_t *)lpDDSurfaceDesc, NULL);
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB surface_GetPixelFormat(void *this_ptr, void *lpDDPixelFormat)
+{
+    (void)this_ptr;
+    (void)lpDDPixelFormat;
+    return DDERR_UNSUPPORTED;
+}
+
+static HRESULT KERNEL32_STUB surface_Initialize(void *this_ptr, void *lpDDraw,
+                                                void *lpDDSurfaceDesc)
+{
+    (void)this_ptr;
+    (void)lpDDraw;
+    (void)lpDDSurfaceDesc;
     return DD_OK;
 }
 
@@ -839,17 +1075,18 @@ static HRESULT KERNEL32_STUB surface_IsLost(void *this_ptr)
 }
 
 static HRESULT KERNEL32_STUB surface_Lock(void *this_ptr, void *lpDDRect,
-                                          void **lplpSurface, void *lpDDSurfaceDesc,
-                                          uint32_t dwFlags, void *hWnd)
+                                          void *lpDDSurfaceDesc, uint32_t dwFlags,
+                                          void *hEvent)
 {
     my_surface_t *surf = (my_surface_t *)this_ptr;
     rb_rect_t rect;
     const rb_rect_t *rect_ptr = NULL;
     uint8_t *data = NULL;
     int pitch = 0;
+    ddraw_guest_desc_t *desc = (ddraw_guest_desc_t *)lpDDSurfaceDesc;
 
     (void)dwFlags;
-    (void)hWnd;
+    (void)hEvent;
 
     if (!surf || !rb_surface_lock)
         return DDERR_INVALIDPARAMS;
@@ -864,10 +1101,9 @@ static HRESULT KERNEL32_STUB surface_Lock(void *this_ptr, void *lpDDRect,
 
     surf->locked = 1;
     surf->pitch = pitch;
-    if (lplpSurface)
-        *lplpSurface = FORCE_PTR_RETURN(data);
-    if (lpDDSurfaceDesc)
-        ddraw_fill_surface_desc(surf, (DDSURFACEDESC *)lpDDSurfaceDesc, data);
+    ddraw_debug_counter("Lock");
+    if (desc)
+        ddraw_fill_surface_desc(surf, desc, data);
 
     return DD_OK;
 }
@@ -878,9 +1114,21 @@ static HRESULT KERNEL32_STUB surface_Restore(void *this_ptr) { (void)this_ptr; r
 static HRESULT KERNEL32_STUB surface_SetClipper(void *this_ptr, void *lpDDClipper)
 {
     my_surface_t *surf = (my_surface_t *)this_ptr;
+    my_clipper_t *clipper = (my_clipper_t *)lpDDClipper;
     if (!surf)
         return DDERR_INVALIDPARAMS;
-    surf->clipper = (my_clipper_t *)lpDDClipper;
+
+    if (clipper == surf->clipper)
+        return DD_OK;
+
+    if (surf->clipper)
+        clipper_Release(surf->clipper);
+
+    surf->clipper = clipper;
+    if (clipper)
+        clipper_AddRef(clipper);
+
+    DEBUG("ddraw: surface SetClipper surface=%p clipper=%p", surf, clipper);
     return DD_OK;
 }
 
@@ -913,6 +1161,7 @@ static HRESULT KERNEL32_STUB surface_SetPalette(void *this_ptr, void *lpPalette)
     surf->palette = pal;
     if (pal) {
         pal->ref_count++;
+        ddraw_debug_counter("SetPalette");
         if (rb_surface_set_palette && rb_surface_set_palette(surf->rb_surface, pal->rb_palette) != RB_OK)
             return DDERR_UNSUPPORTED;
         if (surf->next && rb_surface_set_palette)
@@ -934,31 +1183,8 @@ static HRESULT KERNEL32_STUB surface_Unlock(void *this_ptr, void *lpDDSurfaceDes
         return DDERR_NOTLOCKED;
 
     surf->locked = 0;
+    ddraw_debug_counter("Unlock");
     return (rb_surface_unlock(surf->rb_surface) == RB_OK) ? DD_OK : DDERR_NOTLOCKED;
-}
-
-static HRESULT KERNEL32_STUB surface_UnlockRect(void *this_ptr, void *lpDDRect, void *lpDDSurfaceDesc)
-{
-    (void)lpDDRect;
-    return surface_Unlock(this_ptr, lpDDSurfaceDesc);
-}
-
-static HRESULT KERNEL32_STUB surface_SetSurfaceDesc(void *this_ptr, void *lpDDSurfaceDesc, uint32_t dwFlags)
-{
-    (void)this_ptr;
-    (void)lpDDSurfaceDesc;
-    (void)dwFlags;
-    return DDERR_UNSUPPORTED;
-}
-
-static HRESULT KERNEL32_STUB surface_GetDDSurfaceDesc(void *this_ptr, void *lpDDSurfaceDesc)
-{
-    return surface_GetSurfaceDesc(this_ptr, lpDDSurfaceDesc);
-}
-
-static HRESULT KERNEL32_STUB surface_SetClipper2(void *this_ptr, void *lpDDClipper)
-{
-    return surface_SetClipper(this_ptr, lpDDClipper);
 }
 
 static HRESULT KERNEL32_STUB surface_GetClipper(void *this_ptr, void **lppDDClipper)
@@ -967,33 +1193,70 @@ static HRESULT KERNEL32_STUB surface_GetClipper(void *this_ptr, void **lppDDClip
 
     if (!surf || !lppDDClipper)
         return DDERR_INVALIDPARAMS;
+    if (!surf->clipper) {
+        *lppDDClipper = NULL;
+        return DDERR_NOCLIPPERATTACHED;
+    }
+
+    clipper_AddRef(surf->clipper);
     *lppDDClipper = FORCE_PTR_RETURN(surf->clipper);
     return DD_OK;
 }
 
-static HRESULT KERNEL32_STUB surface_OverrideCursor(void *this_ptr, uint32_t bEnable) { (void)this_ptr; (void)bEnable; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB surface_GetOverrideCursor(void *this_ptr, uint32_t *bEnable) { if (bEnable) *bEnable = 0; (void)this_ptr; return DD_OK; }
-static HRESULT KERNEL32_STUB surface_GetBltStatus2(void *this_ptr, uint32_t dwFlags, uint32_t dwTimeout) { (void)this_ptr; (void)dwFlags; (void)dwTimeout; return DD_OK; }
-static HRESULT KERNEL32_STUB surface_AddOverlayDirtyRect(void *this_ptr, void *lpDDRect) { (void)this_ptr; (void)lpDDRect; return DDERR_UNSUPPORTED; }
-static HRESULT KERNEL32_STUB surface_GetFlipStatus2(void *this_ptr, uint32_t dwFlags, uint32_t dwTimeout) { (void)this_ptr; (void)dwFlags; (void)dwTimeout; return DD_OK; }
+static HRESULT KERNEL32_STUB surface_UpdateOverlay(void *this_ptr, void *lpSrcRect,
+                                                   void *lpDDSDstSurface, void *lpDstRect,
+                                                   uint32_t dwFlags, void *lpDDOverlayFx)
+{
+    (void)this_ptr;
+    (void)lpSrcRect;
+    (void)lpDDSDstSurface;
+    (void)lpDstRect;
+    (void)dwFlags;
+    (void)lpDDOverlayFx;
+    return DDERR_UNSUPPORTED;
+}
+
+static HRESULT KERNEL32_STUB surface_UpdateOverlayDisplay(void *this_ptr, uint32_t dwFlags)
+{
+    (void)this_ptr;
+    (void)dwFlags;
+    return DDERR_UNSUPPORTED;
+}
+
+static HRESULT KERNEL32_STUB surface_UpdateOverlayZOrder(void *this_ptr, uint32_t dwFlags,
+                                                         void *lpDDSReferenceSurface)
+{
+    (void)this_ptr;
+    (void)dwFlags;
+    (void)lpDDSReferenceSurface;
+    return DDERR_UNSUPPORTED;
+}
 
 const IDirectDrawSurfaceVtbl surface_vtbl = {
     .QueryInterface = surface_QueryInterface,
     .AddRef = surface_AddRef,
     .Release = surface_Release,
     .AddAttachedSurface = surface_AddAttachedSurface,
+    .AddOverlayDirtyRect = surface_AddOverlayDirtyRect,
     .Blt = surface_Blt,
     .BltBatch = surface_BltBatch,
     .BltFast = surface_BltFast,
     .DeleteAttachedSurface = surface_DeleteAttachedSurface,
+    .EnumAttachedSurfaces = surface_EnumAttachedSurfaces,
+    .EnumOverlayZOrders = surface_EnumOverlayZOrders,
     .Flip = surface_Flip,
     .GetAttachedSurface = surface_GetAttachedSurface,
     .GetBltStatus = surface_GetBltStatus,
+    .GetCaps = surface_GetCaps,
+    .GetClipper = surface_GetClipper,
+    .GetColorKey = surface_GetColorKey,
     .GetDC = surface_GetDC,
     .GetFlipStatus = surface_GetFlipStatus,
     .GetOverlayPosition = surface_GetOverlayPosition,
     .GetPalette = surface_GetPalette,
+    .GetPixelFormat = surface_GetPixelFormat,
     .GetSurfaceDesc = surface_GetSurfaceDesc,
+    .Initialize = surface_Initialize,
     .IsLost = surface_IsLost,
     .Lock = surface_Lock,
     .ReleaseDC = surface_ReleaseDC,
@@ -1003,16 +1266,9 @@ const IDirectDrawSurfaceVtbl surface_vtbl = {
     .SetOverlayPosition = surface_SetOverlayPosition,
     .SetPalette = surface_SetPalette,
     .Unlock = surface_Unlock,
-    .UnlockRect = surface_UnlockRect,
-    .SetSurfaceDesc = surface_SetSurfaceDesc,
-    .GetDDSurfaceDesc = surface_GetDDSurfaceDesc,
-    .SetClipper2 = surface_SetClipper2,
-    .GetClipper = surface_GetClipper,
-    .OverrideCursor = surface_OverrideCursor,
-    .GetOverrideCursor = surface_GetOverrideCursor,
-    .GetBltStatus2 = surface_GetBltStatus2,
-    .AddOverlayDirtyRect = surface_AddOverlayDirtyRect,
-    .GetFlipStatus2 = surface_GetFlipStatus2,
+    .UpdateOverlay = surface_UpdateOverlay,
+    .UpdateOverlayDisplay = surface_UpdateOverlayDisplay,
+    .UpdateOverlayZOrder = surface_UpdateOverlayZOrder,
 };
 
 static HRESULT KERNEL32_STUB palette_QueryInterface(void *this_ptr, const GUID *riid, void **ppvObj)
@@ -1095,6 +1351,7 @@ static HRESULT KERNEL32_STUB palette_SetEntries(void *this_ptr, void *ddpba,
 
     if (!pal || !entries || !rb_palette_set_colors)
         return DDERR_INVALIDPARAMS;
+    ddraw_debug_counter("PaletteSetEntries");
     if (dwCount > pal->num_colors)
         dwCount = pal->num_colors;
 
@@ -1175,5 +1432,6 @@ HRESULT KERNEL32_STUB DirectDrawCreate(const GUID *lpGUID, LPDIRECTDRAW *lplpDD,
 
     g_ddraw_instance = dd;
     *lplpDD = FORCE_PTR_RETURN(dd);
+    DEBUG("ddraw: DirectDrawCreate guid=%p -> %p", lpGUID, dd);
     return DD_OK;
 }

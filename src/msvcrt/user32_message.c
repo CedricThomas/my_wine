@@ -353,6 +353,8 @@ KERNEL32_STUB
 BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
                   UINT wMsgFilterMax, UINT wRemoveMsg)
 {
+    static uint32_t idle_poll_count = 0;
+
     (void)hWnd;
     (void)wMsgFilterMin;
     (void)wMsgFilterMax;
@@ -368,8 +370,17 @@ BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
     }
 
     int remove = (wRemoveMsg & 0x0001) != 0;
-    if (!fetch_translated_message(0, remove, hWnd, wMsgFilterMin, wMsgFilterMax, &rb))
+    if (!fetch_translated_message(0, remove, hWnd, wMsgFilterMin, wMsgFilterMax, &rb)) {
+        uint32_t count = ++idle_poll_count;
+
+        if (debug_level_at_least(1) &&
+            ((count & (count - 1)) == 0 || (count % 100000u) == 0)) {
+            DEBUG("user32: PeekMessageA idle count=%u remove=%d hwnd=0x%lx",
+                  count, remove, (unsigned long)hWnd);
+        }
         return 0;
+    }
+    idle_poll_count = 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);
 

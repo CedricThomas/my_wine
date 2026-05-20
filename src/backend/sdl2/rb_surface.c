@@ -155,7 +155,12 @@ static uintptr_t rb_sdl_update_window_surface_call(void *arg)
     if (!ws)
         return 0;
 
-    SDL_BlitSurface(a->surface, NULL, ws, NULL);
+    if (a->surface->w != ws->w || a->surface->h != ws->h) {
+        SDL_Rect dst = { 0, 0, ws->w, ws->h };
+        SDL_SoftStretch(a->surface, NULL, ws, &dst);
+    } else {
+        SDL_BlitSurface(a->surface, NULL, ws, NULL);
+    }
     SDL_UpdateWindowSurface(a->window);
     return 1;
 }

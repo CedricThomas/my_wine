@@ -36,6 +36,10 @@
 #define wine_mprotect(a, l, p) mprotect(a, l, p)
 #endif
 
+#ifndef IMAGE_SCN_CNT_UNINITIALIZED_DATA
+#define IMAGE_SCN_CNT_UNINITIALIZED_DATA 0x00000080
+#endif
+
 /**
  * Internal core: map a PE file at the given desired base address.
  *
@@ -212,8 +216,13 @@ void *map_image_at(const char *path,
 
     /* 5. Copy section data from file to image */
     for (int i = 0; i < num_sections; i++) {
-        if (sections[i].SizeOfRawData == 0)
-            continue; /* .bss etc. - zero-filled, already anonymous */
+        /*
+         * Some PE32 images, including Doom95, encode .bss-like sections with a
+         * non-zero SizeOfRawData but PointerToRawData == 0. Those sections are
+         * still uninitialized and must remain zero-filled.
+         */
+        if (sections[i].SizeOfRawData == 0 || sections[i].PointerToRawData == 0)
+            continue; /* zero-filled / no file-backed payload */
         if (!pe_rva_range_is_valid(sections[i].VirtualAddress,
                                    sections[i].SizeOfRawData,
                                    image_size)) {
@@ -243,6 +252,43 @@ void *map_image_at(const char *path,
             /* Re-point sections into the image */
             sections = get_image_sections(base, &nt);
         }
+    }
+
+    /*
+     * Re-zero any section that has no file-backed payload. Some PE32 images use
+     * SizeOfRawData for reservation accounting while still leaving
+     * PointerToRawData at zero for .bss-like data.
+     */
+    for (int i = 0; i < num_sections; i++) {
+        size_t size;
+        void *dest;
+
+        if (sections[i].PointerToRawData != 0 &&
+            (sections[i].Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA) == 0)
+            continue;
+
+        size = sections[i].Misc.VirtualSize;
+        if (size == 0)
+            size = sections[i].SizeOfRawData;
+        if (size == 0)
+            continue;
+        if (!pe_rva_range_is_valid(sections[i].VirtualAddress, size, image_size)) {
+            DEBUG("section zero-fill exceeds image bounds");
+            wine_munmap(base, image_size);
+            wine_munmap(file_base, file_size);
+            INLINE_SYSCALL_CLOSE(fd);
+            return NULL;
+        }
+
+        dest = pe_rva_to_ptr(base, &nt, sections[i].VirtualAddress, size);
+        if (dest == NULL) {
+            DEBUG("invalid zero-fill destination");
+            wine_munmap(base, image_size);
+            wine_munmap(file_base, file_size);
+            INLINE_SYSCALL_CLOSE(fd);
+            return NULL;
+        }
+        memset(dest, 0, size);
     }
 
     /* Apply base relocations (needed when actual base != preferred ImageBase) */
@@ -295,6 +341,7 @@ void *map_image_at(const char *path,
 
     /* Save the image base for later use (import resolution, TEB/PEB, etc.) */
     g_loader.image_base = base;
+    g_loader.image_size = image_size;
     return base;
 }
 

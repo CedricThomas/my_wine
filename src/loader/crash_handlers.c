@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/time.h>
 #include <ucontext.h>
 #include <sys/syscall.h>
 #ifdef __x86_64__
@@ -31,6 +32,110 @@
 
 static int g_alt_stack_available = 1;  /* Flipped to 0 if signal stack mmap fails */
 static volatile int g_in_crash_handler = 0;  /* Recursion guard */
+static volatile uintptr_t g_sample_last_eip = 0;
+static volatile uint32_t g_sample_repeat_count = 0;
+
+static void sample_guest_eip(int sig, siginfo_t *info, void *ucontext)
+{
+    (void)sig;
+    (void)info;
+
+#if defined(__i386__)
+    if (ucontext != NULL) {
+        uintptr_t uc_ptr = (uintptr_t)ucontext;
+
+        if ((uc_ptr & 3) == 0 && uc_ptr >= 0x1000 && uc_ptr < 0xFFFFC000UL) {
+            ucontext_t *uc = (ucontext_t *)ucontext;
+            uintptr_t eip = (uintptr_t)uc->uc_mcontext.gregs[REG_EIP];
+            uintptr_t image_base = 0;
+            uintptr_t image_size = 0;
+            const char *module_name = "main";
+            int i;
+
+            if (g_loader.image_base != NULL && g_loader.image_size != 0) {
+                uintptr_t main_base = (uintptr_t)g_loader.image_base;
+                uintptr_t main_end = main_base + (uintptr_t)g_loader.image_size;
+                if (eip >= main_base && eip < main_end) {
+                    image_base = main_base;
+                    image_size = (uintptr_t)g_loader.image_size;
+                }
+            }
+
+            if (image_base == 0) {
+                for (i = 0; i < g_loader.module_count; i++) {
+                    loaded_module_t *mod = &g_loader.modules[i];
+                    uintptr_t base;
+                    uintptr_t end;
+
+                    if (mod->base == NULL)
+                        continue;
+                    base = (uintptr_t)mod->base;
+                    end = base + (uintptr_t)mod->ldr_entry.SizeOfImage;
+                    if (eip >= base && eip < end) {
+                        image_base = base;
+                        image_size = (uintptr_t)mod->ldr_entry.SizeOfImage;
+                        module_name = mod->name;
+                        break;
+                    }
+                }
+            }
+
+            if (image_base != 0 && image_size != 0) {
+                uint32_t count;
+                uintptr_t rva = eip - image_base;
+
+                if (g_sample_last_eip == eip) {
+                    count = ++g_sample_repeat_count;
+                } else {
+                    g_sample_last_eip = eip;
+                    g_sample_repeat_count = 1;
+                    count = 1;
+                }
+
+                if (count <= 8 || (count & (count - 1)) == 0) {
+                    char buf[128];
+                    int n = 0;
+                    const char *p;
+
+                    p = "SAMPLE: EIP=0x";
+                    while (*p && n < 120) buf[n++] = *p++;
+                    for (int h = 7; h >= 0; h--)
+                        buf[n++] = "0123456789abcdef"[(eip >> (h * 4)) & 0xf];
+
+                    p = " RVA=0x";
+                    while (*p && n < 120) buf[n++] = *p++;
+                    for (int h = 7; h >= 0; h--)
+                        buf[n++] = "0123456789abcdef"[(rva >> (h * 4)) & 0xf];
+
+                    p = " mod=";
+                    while (*p && n < 120) buf[n++] = *p++;
+                    for (i = 0; module_name[i] != '\0' && n < 120; i++)
+                        buf[n++] = module_name[i];
+
+                    p = " count=";
+                    while (*p && n < 120) buf[n++] = *p++;
+                    {
+                        char tmp[16];
+                        int t = 0;
+                        uint32_t v = count;
+
+                        do {
+                            tmp[t++] = (char)('0' + (v % 10));
+                            v /= 10;
+                        } while (v > 0 && t < (int)sizeof(tmp));
+                        while (t > 0 && n < 120)
+                            buf[n++] = tmp[--t];
+                    }
+                    buf[n++] = '\n';
+                    INLINE_SYSCALL_WRITE_ERR(buf, (size_t)n);
+                }
+            }
+        }
+    }
+#else
+    (void)ucontext;
+#endif
+}
 
 /*
  * SEH handler — called when an exception occurs in guest code.
@@ -375,5 +480,35 @@ void install_crash_signal_handlers(void)
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGTRAP, &sa, NULL);
 #endif
+
+    if (debug_level_at_least(1)) {
+        struct sigaction prof_sa;
+        struct itimerval timer;
+
+#ifdef MY_WINE32
+        __builtin_memset(&prof_sa, 0, sizeof(prof_sa));
+#else
+        memset(&prof_sa, 0, sizeof(prof_sa));
+#endif
+        prof_sa.sa_sigaction = sample_guest_eip;
+        prof_sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+#ifdef MY_WINE32
+        for (int _si = 0; _si < (int)(sizeof(prof_sa.sa_mask.__val)/sizeof(prof_sa.sa_mask.__val[0])); _si++)
+            prof_sa.sa_mask.__val[_si] = 0;
+        INLINE_SYSCALL_SIGACTION(SIGALRM, &prof_sa, NULL);
+#else
+        sigemptyset(&prof_sa.sa_mask);
+        sigaction(SIGALRM, &prof_sa, NULL);
+#endif
+
+#ifdef MY_WINE32
+        __builtin_memset(&timer, 0, sizeof(timer));
+#else
+        memset(&timer, 0, sizeof(timer));
+#endif
+        timer.it_interval.tv_usec = 100000;
+        timer.it_value.tv_usec = 100000;
+        setitimer(ITIMER_REAL, &timer, NULL);
+    }
     DEBUG("GUEST: all handlers set");
 }

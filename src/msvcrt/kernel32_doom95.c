@@ -7,6 +7,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <unistd.h>
 #include <asm/unistd.h>
 
 #include "kernel32_priv.h"
@@ -124,6 +125,7 @@ static void wine_init_process_directory(void)
 {
     const char *pe_path;
     const char *slash;
+    char cwd[1024];
     size_t len;
 
     if (g_process_current_directory[0] != '\0')
@@ -152,6 +154,25 @@ static void wine_init_process_directory(void)
 
     if (len >= sizeof(g_process_current_directory))
         len = sizeof(g_process_current_directory) - 1;
+
+    /*
+     * Normalize relative launch paths to an absolute host path so later
+     * case-insensitive lookups do not depend on the caller's cwd shape.
+     */
+    if (pe_path[0] != '/' && getcwd(cwd, sizeof(cwd)) != NULL) {
+        size_t cwd_len = strlen(cwd);
+
+        if (cwd_len > 0 && cwd[cwd_len - 1] == '/')
+            cwd_len--;
+        if (cwd_len + 1 + len < sizeof(g_process_current_directory)) {
+            memcpy(g_process_current_directory, cwd, cwd_len);
+            g_process_current_directory[cwd_len] = '/';
+            memcpy(g_process_current_directory + cwd_len + 1, pe_path, len);
+            g_process_current_directory[cwd_len + 1 + len] = '\0';
+            return;
+        }
+    }
+
     memcpy(g_process_current_directory, pe_path, len);
     g_process_current_directory[len] = '\0';
 }
@@ -374,11 +395,21 @@ static int wine_search_existing_path(const char *directory, const char *filename
 KERNEL32_STUB
 uint32_t GetTickCount(void)
 {
+    static uint32_t call_count = 0;
     struct timespec ts;
+    uint32_t value;
 
     if (INLINE_SYSCALL_CLOCK_GETTIME(CLOCK_MONOTONIC, &ts) != 0)
         return 0;
-    return (uint32_t)((uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL);
+    value = (uint32_t)((uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL);
+
+    if (debug_level_at_least(1)) {
+        uint32_t count = ++call_count;
+        if ((count & (count - 1)) == 0 || (count % 100000u) == 0)
+            DEBUG("kernel32: GetTickCount count=%u value=%u", count, value);
+    }
+
+    return value;
 }
 
 KERNEL32_STUB
@@ -773,6 +804,11 @@ void *CreateThread(void *lpThreadAttributes, uintptr_t dwStackSize, void *lpStar
     (void)lpStartAddress;
     (void)lpParameter;
     (void)dwCreationFlags;
+
+    if (debug_level_at_least(1)) {
+        DEBUG("kernel32: CreateThread start=%p param=%p stack=%lu flags=0x%x",
+              lpStartAddress, lpParameter, (unsigned long)dwStackSize, dwCreationFlags);
+    }
 
     handle = (uint32_t)wine_handle_alloc(HANDLE_TYPE_THREAD, NULL);
     if (lpThreadId)

@@ -22,10 +22,21 @@ typedef struct {
     int count;
 } rb_sdl_set_palette_colors_args;
 
+static uintptr_t rb_sdl_alloc_palette_call(void *arg)
+{
+    return (uintptr_t)SDL_AllocPalette(*(int *)arg);
+}
+
 static uintptr_t rb_sdl_set_palette_colors_call(void *arg)
 {
     rb_sdl_set_palette_colors_args *a = arg;
     return (uintptr_t)SDL_SetPaletteColors(a->palette, a->colors, a->start, a->count);
+}
+
+static uintptr_t rb_sdl_free_palette_call(void *arg)
+{
+    SDL_FreePalette((SDL_Palette *)arg);
+    return 0;
 }
 
 rb_palette_t rb_palette_create(int num_colors)
@@ -33,26 +44,13 @@ rb_palette_t rb_palette_create(int num_colors)
     if (num_colors <= 0)
         return 0;
 
-    SDL_Palette *pal = rb_host_malloc(sizeof(SDL_Palette));
+    SDL_Palette *pal = (SDL_Palette *)rb_call_on_host_stack(rb_sdl_alloc_palette_call, &num_colors);
     if (!pal)
         return 0;
 
-    SDL_Color *colors = rb_host_calloc((size_t)num_colors, sizeof(SDL_Color));
-    if (!colors) {
-        rb_host_free(pal);
-        return 0;
-    }
-
-    /* Initialize palette fields directly (SDL_CreatePalette not available in all SDL2 versions) */
-    pal->ncolors = num_colors;
-    pal->colors = colors;
-    pal->version = 1;
-    pal->refcount = 1;
-
     rb_palette *p = rb_host_malloc(sizeof(*p));
     if (!p) {
-        rb_host_free(colors);
-        rb_host_free(pal);
+        rb_call_on_host_stack(rb_sdl_free_palette_call, pal);
         return 0;
     }
     p->palette = pal;
@@ -67,8 +65,7 @@ int rb_palette_destroy(rb_palette_t pal)
     if (!p)
         return RB_FAIL;
 
-    rb_host_free(p->palette->colors);
-    rb_host_free(p->palette);
+    rb_call_on_host_stack(rb_sdl_free_palette_call, p->palette);
     rb_host_free(p);
     wine_handle_free((uint32_t)pal);
     return RB_OK;
