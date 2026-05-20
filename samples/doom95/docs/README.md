@@ -55,6 +55,7 @@ Self-contained extracts from the original large documents. Each 50–150 lines.
 | [reference/rendering.md](reference/rendering.md) | Surface hierarchy, rendering pattern, resolution |
 | [reference/audio_config.md](reference/audio_config.md) | Audio subsystem details (DirectSound + MIDI) |
 | [reference/loader_notes.md](reference/loader_notes.md) | What changes for new DLLs + loader architecture |
+| [debug.md](debug.md) | Dated runtime progression and issues faced while executing DOOM95 |
 
 ---
 

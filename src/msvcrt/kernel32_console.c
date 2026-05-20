@@ -9,6 +9,8 @@
 KERNEL32_STUB
 void write_to_stderr(const char *msg)
 {
+    if (msg == NULL)
+        return;
     syscall_safe_stderr_write_cstr(msg);
 }
 

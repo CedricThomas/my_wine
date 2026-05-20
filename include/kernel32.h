@@ -195,19 +195,17 @@ uint32_t GetLastError(void);
 /* Startup info */
 typedef struct {
     uint32_t cb;
-    void *lpReserved;
-    void *hDesktop;
-    void *hHeap;
-    void *hProcess;
-    void *hThread;
+    char *lpReserved;
+    char *lpDesktop;
+    char *lpTitle;
     uint32_t dwX, dwY;
     uint32_t dwXSize, dwYSize;
-    uint32_t dwCharX, dwCharY;
+    uint32_t dwXCountChars, dwYCountChars;
     uint32_t dwFillAttribute;
     uint32_t dwFlags;
     uint16_t wShowWindow;
     uint16_t cbReserved2;
-    void *lpReserved2;
+    uint8_t *lpReserved2;
     void *hStdInput;
     void *hStdOutput;
     void *hStdError;

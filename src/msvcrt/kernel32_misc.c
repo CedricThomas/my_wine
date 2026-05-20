@@ -7,6 +7,7 @@
 #include "include/nt_constants.h"
 
 #define AT_FDCWD ((long)-100)
+#define CP_ACP 0
 
 /*
  * g_crt is declared in include/crt.h (included via msvcrt_priv.h) and defined
@@ -112,10 +113,20 @@ uint32_t GetLastError(void)
 }
 
 KERNEL32_STUB
+int IsTNT(void)
+{
+    return 0;
+}
+
+KERNEL32_STUB
 void *TlsGetValue(uint32_t dwTlsIndex)
 {
-    (void)dwTlsIndex;
-    return FORCE_PTR_RETURN(NULL);
+    extern uint32_t g_tls_bitmap;
+    extern void *g_tls_values[];
+
+    if (dwTlsIndex >= 64 || (g_tls_bitmap & (1u << dwTlsIndex)) == 0)
+        return FORCE_PTR_RETURN(NULL);
+    return FORCE_PTR_RETURN(g_tls_values[dwTlsIndex]);
 }
 
 /* ── GetSystemTimeAsFileTime ───────────────────────────────── */
@@ -279,13 +290,15 @@ const char *GetCommandLineA(void)
 /* ── GetEnvironmentStringsA ────────────────────────────────── */
 /*
  * Returns the environment block for the current process.
- * Returns NULL — most PE startup code only reads this to verify
- * the environment is accessible, and the CRT uses __initenv instead.
+ * Some Watcom PE32 startup code walks this block unconditionally, so returning
+ * NULL crashes even when argv/envp were already pre-seeded elsewhere.
+ * A minimal empty environment is two trailing NUL bytes.
  */
 KERNEL32_STUB
 char *GetEnvironmentStringsA(void)
 {
-    return FORCE_PTR_RETURN(NULL);
+    static char empty_env_block[2] = { '\0', '\0' };
+    return FORCE_PTR_RETURN(empty_env_block);
 }
 
 /* ── IsDBCSLeadByteEx ──────────────────────────────────────── */
@@ -303,13 +316,31 @@ int MultiByteToWideChar(uint32_t code_page, uint32_t dw_flags,
                         const char *lpMultiByteStr, int cbMultiByteChar,
                         void *lpWideCharStr, int cchWideChar)
 {
+    uint16_t *out = (uint16_t *)lpWideCharStr;
+    int count = 0;
+    int i;
+
     (void)code_page;
     (void)dw_flags;
-    (void)lpMultiByteStr;
-    (void)cbMultiByteChar;
-    (void)lpWideCharStr;
-    (void)cchWideChar;
-    return 0;
+
+    if (lpMultiByteStr == NULL)
+        return 0;
+
+    if (cbMultiByteChar < 0) {
+        cbMultiByteChar = 0;
+        while (lpMultiByteStr[cbMultiByteChar] != '\0')
+            cbMultiByteChar++;
+        cbMultiByteChar++;
+    }
+
+    if (cchWideChar == 0 || out == NULL)
+        return cbMultiByteChar;
+
+    count = (cbMultiByteChar < cchWideChar) ? cbMultiByteChar : cchWideChar;
+    for (i = 0; i < count; i++)
+        out[i] = (uint8_t)lpMultiByteStr[i];
+
+    return count;
 }
 
 /* ── WideCharToMultiByte ───────────────────────────────────── */
@@ -319,15 +350,36 @@ int WideCharToMultiByte(uint32_t code_page, uint32_t dw_flags,
                         char *lpMultiByteStr, int cbMultiByteChar,
                         void *lpDefaultChar, void *lpUsedDefaultChar)
 {
-    (void)code_page;
+    const uint16_t *src = (const uint16_t *)lpWideCharStr;
+    int count = 0;
+    int i;
+
+    if (code_page != 0 && code_page != 1252 && code_page != CP_ACP)
+        return 0;
     (void)dw_flags;
-    (void)lpWideCharStr;
-    (void)cchWideChar;
-    (void)lpMultiByteStr;
-    (void)cbMultiByteChar;
     (void)lpDefaultChar;
     (void)lpUsedDefaultChar;
-    return 0;
+
+    if (src == NULL)
+        return 0;
+
+    if (cchWideChar < 0) {
+        cchWideChar = 0;
+        while (src[cchWideChar] != 0)
+            cchWideChar++;
+        cchWideChar++;
+    }
+
+    if (cbMultiByteChar == 0 || lpMultiByteStr == NULL)
+        return cchWideChar;
+
+    count = (cchWideChar < cbMultiByteChar) ? cchWideChar : cbMultiByteChar;
+    for (i = 0; i < count; i++) {
+        uint16_t ch = src[i];
+        lpMultiByteStr[i] = (ch <= 0xffu) ? (char)ch : '?';
+    }
+
+    return count;
 }
 
 /* ── __C_specific_handler ──────────────────────────────────── */
@@ -409,41 +461,9 @@ void *CreateFileA(const char *lpFileName, uint32_t dwDesiredAccess,
     if (lpFileName == NULL)
         return FORCE_PTR_RETURN(INVALID_HANDLE_VALUE);
 
-    /*
-     * Normalize Windows path: strip drive letter ("C:\") and convert \\ to /
-     * so that "C:\tmp\file.dat" becomes "/tmp/file.dat".
-     */
     char path_buf[1024];
-    const char *p = lpFileName;
-    char *d = path_buf;
-
-    /* Skip drive letter prefix like "C:\" */
-    if (p[0] != '\0' && p[1] == ':') {
-        p += 2;
-        if (*p == '\\' || *p == '/') p++; /* skip root separator */
-    }
-
-    /* Copy, converting backslashes to forward slashes */
-    int max_len = (int)__builtin_strlen(p);
-    if (max_len > 1022) max_len = 1022;
-    int i;
-    for (i = 0; i < max_len; i++) {
-        char c = p[i];
-        if (c == '\\') c = '/';
-        *d++ = c;
-    }
-    *d = '\0';
-
-    /* Ensure path starts with / */
-    if (path_buf[0] != '/') {
-        /* Shift bytes right by 1 to make room for '/' at front.
-         * Can't use memmove (libc) after GS base switch in 32-bit. */
-        int len = (int)(d - path_buf);  /* includes '\0' */
-        int k;
-        for (k = len; k >= 0; k--)
-            path_buf[k + 1] = path_buf[k];
-        path_buf[0] = '/';
-    }
+    if (!wine_resolve_path(lpFileName, path_buf, sizeof(path_buf)))
+        return FORCE_PTR_RETURN(INVALID_HANDLE_VALUE);
 
     /* Map desired access to Linux open flags */
     int oflags = 0;
@@ -507,36 +527,9 @@ int DeleteFileA(const char *lpFileName)
     if (lpFileName == NULL)
         return 0;
 
-    /* Normalize Windows path same as CreateFileA */
     char path_buf[1024];
-    const char *p = lpFileName;
-    char *d = path_buf;
-
-    /* Skip drive letter prefix like "C:\" */
-    if (p[0] != '\0' && p[1] == ':') {
-        p += 2;
-        if (*p == '\\' || *p == '/') p++;
-    }
-
-    /* Copy, converting backslashes to forward slashes */
-    int max_len = (int)__builtin_strlen(p);
-    if (max_len > 1022) max_len = 1022;
-    int i;
-    for (i = 0; i < max_len; i++) {
-        char c = p[i];
-        if (c == '\\') c = '/';
-        *d++ = c;
-    }
-    *d = '\0';
-
-    /* Ensure path starts with / */
-    if (path_buf[0] != '/') {
-        int len = (int)(d - path_buf);
-        int k;
-        for (k = len; k >= 0; k--)
-            path_buf[k + 1] = path_buf[k];
-        path_buf[0] = '/';
-    }
+    if (!wine_resolve_path(lpFileName, path_buf, sizeof(path_buf)))
+        return 0;
 
     /* Use unlinkat(AT_FDCWD, path, 0) via syscall to avoid libc dependency */
     long res = INLINE_SYSCALL_UNLINKAT(AT_FDCWD, path_buf, 0);

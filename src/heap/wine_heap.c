@@ -22,6 +22,9 @@
 /* Global process heap */
 void *g_process_heap = NULL;
 
+#define MAX_HEAP_HANDLES 64
+static void *g_heap_handles[MAX_HEAP_HANDLES];
+
 /* wine_heap_t: wrapper around a named heap */
 typedef struct wine_heap {
 #ifndef MY_WINE32
@@ -29,6 +32,37 @@ typedef struct wine_heap {
 #endif
     int is_valid;  /* flag to validate heap handles */
 } wine_heap_t;
+
+static int heap_handle_find(void *hHeap)
+{
+    int i;
+
+    for (i = 0; i < MAX_HEAP_HANDLES; i++) {
+        if (g_heap_handles[i] == hHeap)
+            return i;
+    }
+    return -1;
+}
+
+static int heap_handle_add(void *hHeap)
+{
+    int i;
+
+    for (i = 0; i < MAX_HEAP_HANDLES; i++) {
+        if (g_heap_handles[i] == NULL) {
+            g_heap_handles[i] = hHeap;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void heap_handle_remove(void *hHeap)
+{
+    int idx = heap_handle_find(hHeap);
+    if (idx >= 0)
+        g_heap_handles[idx] = NULL;
+}
 
 /*
  * HeapCreate(flOptions, dwInitialSize, dwMaximumSize)
@@ -61,6 +95,11 @@ void *HeapCreate(uint32_t flOptions, uintptr_t dwInitialSize, uintptr_t dwMaximu
     (void)dwInitialSize;
     (void)dwMaximumSize;
 
+    if (!heap_handle_add(heap)) {
+        INLINE_SYSCALL_MUNMAP(mem, sizeof(wine_heap_t));
+        return NULL;
+    }
+
     return (void *)heap;
 }
 
@@ -73,7 +112,7 @@ void *HeapAlloc(void *hHeap, uint32_t dwFlags, uintptr_t dwBytes)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
-    if (!heap || !heap->is_valid || dwBytes == 0) {
+    if (!hHeap || heap_handle_find(hHeap) < 0 || !heap->is_valid || dwBytes == 0) {
         return NULL;
     }
 
@@ -102,7 +141,7 @@ int HeapFree(void *hHeap, uint32_t dwFlags, void *lpMem)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
-    if (!heap || !heap->is_valid) {
+    if (!hHeap || heap_handle_find(hHeap) < 0 || !heap->is_valid) {
         return 0;
     }
 
@@ -131,7 +170,7 @@ void *HeapReAlloc(void *hHeap, uint32_t dwFlags, void *lpMem, uintptr_t dwBytes)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
-    if (!heap || !heap->is_valid) {
+    if (!hHeap || heap_handle_find(hHeap) < 0 || !heap->is_valid) {
         return NULL;
     }
 
@@ -175,11 +214,12 @@ int HeapDestroy(void *hHeap)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
-    if (!heap || !heap->is_valid) {
+    if (!hHeap || heap_handle_find(hHeap) < 0 || !heap->is_valid) {
         return 0;
     }
 
     heap->is_valid = 0;
+    heap_handle_remove(hHeap);
 #ifndef MY_WINE32
     pthread_mutex_destroy(&heap->mutex);
 #endif
@@ -213,7 +253,7 @@ uintptr_t HeapSize(void *hHeap, uint32_t dwFlags, const void *lpMem)
 {
     wine_heap_t *heap = (wine_heap_t *)hHeap;
 
-    if (!heap || !heap->is_valid || lpMem == NULL) {
+    if (!hHeap || heap_handle_find(hHeap) < 0 || !heap->is_valid || lpMem == NULL) {
         return (uintptr_t)-1;
     }
 

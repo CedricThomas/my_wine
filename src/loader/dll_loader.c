@@ -15,6 +15,7 @@
 #include "src/pe_priv.h"
 #include "include/common.h"
 #include "include/nt_constants.h"
+#include "include/wine_abi.h"
 #include "loader_priv.h"
 #include "export_table.h"
 #include "module_list.h"
@@ -24,6 +25,58 @@
 #include "image_mapper.h"
 #include "dll_path.h"
 #include "dll_loader.h"
+
+#define DLL_PROCESS_DETACH 0
+#define DLL_PROCESS_ATTACH 1
+
+typedef int (KERNEL32_ABI *dll_entry_fn_t)(void *, uint32_t, void *);
+
+static int invoke_module_dllmain(dll_entry_fn_t entry, void *base, uint32_t reason)
+{
+#if defined(__i386__)
+    int result;
+
+    __asm__ volatile(
+        "pushf\n\t"
+        "push %%ebx\n\t"
+        "push %%esi\n\t"
+        "push %%edi\n\t"
+        "push %%ebp\n\t"
+        "push $0\n\t"
+        "push %[reason]\n\t"
+        "push %[base]\n\t"
+        "call *%[entry]\n\t"
+        "pop %%ebp\n\t"
+        "pop %%edi\n\t"
+        "pop %%esi\n\t"
+        "pop %%ebx\n\t"
+        "popf\n\t"
+        "cld\n\t"
+        : "=a"(result)
+        : [entry] "r"(entry), [base] "r"(base), [reason] "r"(reason)
+        : "ecx", "edx", "memory", "cc");
+
+    return result;
+#else
+    return entry(base, reason, NULL);
+#endif
+}
+
+static int call_module_dllmain(loaded_module_t *mod, uint32_t reason)
+{
+    uint32_t entry_rva;
+    dll_entry_fn_t entry;
+
+    if (mod == NULL || mod->base == NULL || mod->nt == NULL)
+        return 1;
+
+    entry_rva = pe_entry_rva(mod->nt);
+    if (entry_rva == 0)
+        return 1;
+
+    entry = (dll_entry_fn_t)((uint8_t *)mod->base + entry_rva);
+    return invoke_module_dllmain(entry, mod->base, reason) != 0;
+}
 
 /* DLL base allocator: maps DLLs below 4GB to avoid GCC ms_abi truncation bug.
  * Uses atomic operations for allocation — still not fully thread-safe (mmap
@@ -174,6 +227,19 @@ loaded_module_t *load_dll(const char *path, int depth)
         parse_export_table(mod);
         syscall_safe_debug_write_str(2, "load_dll: parse_export=", "ok");
     }
+
+    if (!call_module_dllmain(mod, DLL_PROCESS_ATTACH)) {
+        if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
+            ldr_remove_module(mod);
+        }
+        reset_export_cache(mod);
+        remove_module(mod);
+        uintptr_t sz = pe_size_of_image(img_nt);
+        INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
+        INLINE_SYSCALL_MUNMAP(base, sz);
+        return NULL;
+    }
+    mod->dllmain_called = 1;
 
     return mod;
 }

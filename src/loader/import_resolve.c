@@ -400,6 +400,36 @@ static int resolve_import_pass2(void *base, IMAGE_NT_HEADERS *nt)
     return 0;
 }
 
+static int is_builtin_stub_library(const char *dll_name)
+{
+    static const char *const stub_libs[] = {
+        "kernel32.dll",
+        "ntdll.dll",
+        "msvcrt.dll",
+        "advapi32.dll",
+        "user32.dll",
+        "gdi32.dll",
+        "winmm.dll",
+        "ddraw.dll",
+        "dsound.dll",
+        "dplay.dll",
+        "comdlg32.dll",
+        "comctl32.dll",
+        NULL
+    };
+    int i;
+
+    if (dll_name == NULL)
+        return 0;
+
+    for (i = 0; stub_libs[i] != NULL; i++) {
+        if (syscall_safe_strcasecmp(stub_libs[i], dll_name) == 0)
+            return 1;
+    }
+
+    return 0;
+}
+
 /**
  * Resolve all imports in the PE image.
  */
@@ -457,9 +487,7 @@ int resolve_module_imports(loaded_module_t *mod, int depth)
         loaded_module_t *dep = find_module_by_name(dll_name);
         if (dep == NULL) {
             /* Check if this is a known stub library */
-            if (syscall_safe_strcasecmp("kernel32.dll", dll_name) == 0 ||
-                syscall_safe_strcasecmp("ntdll.dll", dll_name) == 0 ||
-                syscall_safe_strcasecmp("msvcrt.dll", dll_name) == 0) {
+            if (is_builtin_stub_library(dll_name)) {
                 desc_offset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
                 d = pe_rva_to_ptr(base, nt, import_rva + desc_offset,
                                   sizeof(IMAGE_IMPORT_DESCRIPTOR));

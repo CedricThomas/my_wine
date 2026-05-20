@@ -86,12 +86,16 @@ extern char *__p__fmode;
 /* user32 stub function declarations — minimal forward refs (we only need void* addresses).
  * Cannot include user32_types.h here: BOOL/ULONG typedefs conflict with ntdll.h in 64-bit. */
 extern void RegisterClassA(void);
+extern void AppendMenuA(void);
 extern void CreateWindowExA(void);
+extern void DialogBoxParamA(void);
 extern void DestroyWindow(void);
+extern void FindWindowA(void);
 extern void ShowWindow(void);
 extern void SetWindowPos(void);
 extern void MoveWindow(void);
 extern void SetWindowTextA(void);
+extern void GetWindowPlacement(void);
 extern void GetWindowRect(void);
 extern void GetClientRect(void);
 extern void GetWindowLongA(void);
@@ -101,9 +105,16 @@ extern void SetWindowLongPtrA(void);
 extern void IsWindow(void);
 extern void EnableWindow(void);
 extern void GetDesktopWindow(void);
+extern void GetSystemMenu(void);
 extern void GetActiveWindow(void);
+extern void GetLastActivePopup(void);
 extern void GetFocus(void);
+extern void GetParent(void);
+extern void IsIconic(void);
+extern void IsWindowVisible(void);
 extern void SetFocus(void);
+extern void SetForegroundWindow(void);
+extern void SetWindowPlacement(void);
 extern void UpdateWindow(void);
 extern void InvalidateRect(void);
 extern void ValidateRect(void);
@@ -120,6 +131,7 @@ extern void PeekMessageA(void);
 extern void DispatchMessageA(void);
 extern void TranslateMessage(void);
 extern void PostMessageA(void);
+extern void PostThreadMessageA(void);
 extern void PostQuitMessage(void);
 extern void SendMessageA(void);
 extern void DefWindowProcA(void);
@@ -136,6 +148,130 @@ extern void ClipCursor(void);
 extern void LoadIconA(void);
 extern void wsprintfA(void);
 extern void SetRect(void);
+extern void CheckDlgButton(void);
+extern void CreateDialogParamA(void);
+extern void EndDialog(void);
+extern void GetDlgItem(void);
+extern void GetDlgItemInt(void);
+extern void GetDlgItemTextA(void);
+extern void IsDialogMessageA(void);
+extern void IsDlgButtonChecked(void);
+extern void LoadStringA(void);
+extern void MessageBoxA(void);
+extern void SetDlgItemInt(void);
+extern void SetDlgItemTextA(void);
+extern void WinHelpA(void);
+extern void PropertySheetA(void);
+extern void InitCommonControls(void);
+extern void GetOpenFileNameA(void);
+extern void CommDlgExtendedError(void);
+extern void GetSaveFileNameA(void);
+extern void CreateDCA(void);
+extern void CreateDIBitmap(void);
+extern void CreateFontA(void);
+extern void CreatePalette(void);
+extern void DeleteDC(void);
+extern void DeleteObject(void);
+extern void GetDeviceCaps(void);
+extern void GetObjectA(void);
+extern void GetStockObject(void);
+extern void GetSystemPaletteEntries(void);
+extern void RealizePalette(void);
+extern void SelectPalette(void);
+extern void SetBkColor(void);
+extern void SetTextColor(void);
+extern void StretchDIBits(void);
+extern void UnrealizeObject(void);
+extern void DeviceIoControl(void);
+extern void DebugBreak(void);
+extern void FindResourceA(void);
+extern void GetCurrentThreadId(void);
+extern void GetSystemInfo(void);
+extern void GetTickCount(void);
+extern void GlobalAlloc(void);
+extern void LoadResource(void);
+extern void LocalAlloc(void);
+extern void LocalFree(void);
+extern void LockResource(void);
+extern void SearchPathA(void);
+extern void SizeofResource(void);
+extern void CreateDirectoryA(void);
+extern void CreateThread(void);
+extern void DosDateTimeToFileTime(void);
+extern void ExitThread(void);
+extern void FileTimeToDosDateTime(void);
+extern void FileTimeToLocalFileTime(void);
+extern void FindNextFileA(void);
+extern void GetCPInfo(void);
+extern void GetConsoleMode(void);
+extern void GetCurrentProcessId(void);
+extern void GetCurrentThread(void);
+extern void GetEnvironmentStrings(void);
+extern void GetFileAttributesA(void);
+extern void GetFileSize(void);
+extern void GetFileTime(void);
+extern void GetFileType(void);
+extern void IsTNT(void);
+extern void GetModuleFileNameA(void);
+extern void GetTimeZoneInformation(void);
+extern void GetVersion(void);
+extern void LocalFileTimeToFileTime(void);
+extern void ReadConsoleInputA(void);
+extern void SetConsoleMode(void);
+extern void SetFilePointer(void);
+extern void SetStdHandle(void);
+extern void TlsAlloc(void);
+extern void TlsFree(void);
+extern void TlsSetValue(void);
+extern void WriteConsoleA(void);
+extern void timeGetTime(void);
+extern void joyGetNumDevs(void);
+extern void joyGetDevCapsA(void);
+extern void joyGetPosEx(void);
+extern void midiOutGetNumDevs(void);
+extern void midiOutPrepareHeader(void);
+extern void midiOutReset(void);
+extern void midiOutSetVolume(void);
+extern void midiOutUnprepareHeader(void);
+extern void midiStreamClose(void);
+extern void midiStreamOpen(void);
+extern void midiStreamOut(void);
+extern void midiStreamPause(void);
+extern void midiStreamProperty(void);
+extern void midiStreamRestart(void);
+extern void RegCloseKey(void);
+extern void RegCreateKeyA(void);
+extern void RegOpenKeyA(void);
+extern void RegQueryValueExA(void);
+extern void RegSetValueExA(void);
+extern void GetUserNameA(void);
+extern void DPCreate(void);
+extern void SetCurrentDirectoryA(void);
+extern void GetCurrentDirectoryA(void);
+extern void SetErrorMode(void);
+extern void SetEnvironmentVariableA(void);
+extern void FindClose(void);
+extern void FlushFileBuffers(void);
+extern void SetEndOfFile(void);
+extern void SetHandleCount(void);
+extern void GetACP(void);
+extern void FileTimeToSystemTime(void);
+extern void GetEnvironmentStringsW(void);
+extern void FreeEnvironmentStringsW(void);
+extern void FreeEnvironmentStringsA(void);
+extern void GetOEMCP(void);
+extern void SetLastError(void);
+extern void CompareStringW(void);
+extern void CompareStringA(void);
+extern void LCMapStringW(void);
+extern void LCMapStringA(void);
+extern void GetStringTypeW(void);
+extern void GetStringTypeA(void);
+extern void FindFirstFileA(void);
+extern void IsBadCodePtr(void);
+extern void IsBadWritePtr(void);
+extern void IsBadReadPtr(void);
+extern void RtlUnwind(void);
 extern HRESULT KERNEL32_STUB DirectDrawCreate(const GUID *, LPDIRECTDRAW *, void *);
 extern HRESULT KERNEL32_STUB DirectSoundCreate(const GUID *, LPDIRECTSOUND *, void *);
 
@@ -175,11 +311,24 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "DeleteFileA", (void*)DeleteFileA },
     { "kernel32.dll", "ExitProcess", (void*)ExitProcess },
     { "kernel32.dll", "GetProcAddress", (void*)GetProcAddress },
+    { "kernel32.dll", "GetCurrentThreadId", (void*)GetCurrentThreadId },
+    { "kernel32.dll", "GetSystemInfo", (void*)GetSystemInfo },
+    { "kernel32.dll", "GetTickCount", (void*)GetTickCount },
+    { "kernel32.dll", "GlobalAlloc", (void*)GlobalAlloc },
     { "kernel32.dll", "LoadLibraryA", (void*)LoadLibraryA },
+    { "kernel32.dll", "LoadResource", (void*)LoadResource },
+    { "kernel32.dll", "LocalAlloc", (void*)LocalAlloc },
+    { "kernel32.dll", "LocalFree", (void*)LocalFree },
+    { "kernel32.dll", "LockResource", (void*)LockResource },
+    { "kernel32.dll", "SearchPathA", (void*)SearchPathA },
+    { "kernel32.dll", "SizeofResource", (void*)SizeofResource },
     { "kernel32.dll", "GetModuleHandleA", (void*)GetModuleHandleA },
     { "kernel32.dll", "GetModuleHandleW", (void*)GetModuleHandleW },
     { "kernel32.dll", "GetCommandLineA", (void*)GetCommandLineA },
+    { "kernel32.dll", "GetEnvironmentStrings", (void*)GetEnvironmentStrings },
     { "kernel32.dll", "GetEnvironmentStringsA", (void*)GetEnvironmentStringsA },
+    { "kernel32.dll", "FindResourceA", (void*)FindResourceA },
+    { "kernel32.dll", "DeviceIoControl", (void*)DeviceIoControl },
     /* mingw-w64 imports "FreeLibrary" (no 'A' suffix) — alias to FreeLibraryA */
     { "kernel32.dll", "FreeLibrary", (void*)FreeLibraryA },
     { "kernel32.dll", "FreeLibraryA", (void*)FreeLibraryA },
@@ -190,6 +339,7 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "DeleteCriticalSection", (void*)DeleteCriticalSection },
     { "kernel32.dll", "EnterCriticalSection", (void*)EnterCriticalSection },
     { "kernel32.dll", "GetLastError", (void*)GetLastError },
+    { "kernel32.dll", "IsTNT", (void*)IsTNT },
     { "kernel32.dll", "GetStartupInfoA", (void*)GetStartupInfoA },
     { "kernel32.dll", "HeapAlloc", (void*)HeapAlloc },
     { "kernel32.dll", "HeapCreate", (void*)HeapCreate },
@@ -210,7 +360,61 @@ import_entry_t import_table[] = {
     { "kernel32.dll", "WaitForSingleObject", (void*)WaitForSingleObject },
     { "kernel32.dll", "CreateMutexA", (void*)CreateMutexA },
     { "kernel32.dll", "ReleaseMutex", (void*)ReleaseMutex },
+    { "kernel32.dll", "CreateDirectoryA", (void*)CreateDirectoryA },
+    { "kernel32.dll", "CreateThread", (void*)CreateThread },
+    { "kernel32.dll", "DosDateTimeToFileTime", (void*)DosDateTimeToFileTime },
+    { "kernel32.dll", "ExitThread", (void*)ExitThread },
+    { "kernel32.dll", "FileTimeToDosDateTime", (void*)FileTimeToDosDateTime },
+    { "kernel32.dll", "FileTimeToLocalFileTime", (void*)FileTimeToLocalFileTime },
+    { "kernel32.dll", "FileTimeToSystemTime", (void*)FileTimeToSystemTime },
+    { "kernel32.dll", "FindClose", (void*)FindClose },
+    { "kernel32.dll", "FindNextFileA", (void*)FindNextFileA },
+    { "kernel32.dll", "FlushFileBuffers", (void*)FlushFileBuffers },
+    { "kernel32.dll", "GetACP", (void*)GetACP },
+    { "kernel32.dll", "GetCPInfo", (void*)GetCPInfo },
+    { "kernel32.dll", "GetConsoleMode", (void*)GetConsoleMode },
+    { "kernel32.dll", "GetCurrentDirectoryA", (void*)GetCurrentDirectoryA },
+    { "kernel32.dll", "GetCurrentProcessId", (void*)GetCurrentProcessId },
+    { "kernel32.dll", "GetCurrentThread", (void*)GetCurrentThread },
+    { "kernel32.dll", "DebugBreak", (void*)DebugBreak },
+    { "kernel32.dll", "GetFileAttributesA", (void*)GetFileAttributesA },
+    { "kernel32.dll", "GetFileSize", (void*)GetFileSize },
+    { "kernel32.dll", "GetFileTime", (void*)GetFileTime },
+    { "kernel32.dll", "GetFileType", (void*)GetFileType },
+    { "kernel32.dll", "GetModuleFileNameA", (void*)GetModuleFileNameA },
+    { "kernel32.dll", "GetTimeZoneInformation", (void*)GetTimeZoneInformation },
+    { "kernel32.dll", "GetVersion", (void*)GetVersion },
+    { "kernel32.dll", "GetEnvironmentStringsW", (void*)GetEnvironmentStringsW },
+    { "kernel32.dll", "FreeEnvironmentStringsA", (void*)FreeEnvironmentStringsA },
+    { "kernel32.dll", "FreeEnvironmentStringsW", (void*)FreeEnvironmentStringsW },
+    { "kernel32.dll", "GetOEMCP", (void*)GetOEMCP },
+    { "kernel32.dll", "LocalFileTimeToFileTime", (void*)LocalFileTimeToFileTime },
+    { "kernel32.dll", "ReadConsoleInputA", (void*)ReadConsoleInputA },
+    { "kernel32.dll", "RtlUnwind", (void*)RtlUnwind },
+    { "kernel32.dll", "SetCurrentDirectoryA", (void*)SetCurrentDirectoryA },
+    { "kernel32.dll", "SetConsoleMode", (void*)SetConsoleMode },
+    { "kernel32.dll", "SetEnvironmentVariableA", (void*)SetEnvironmentVariableA },
+    { "kernel32.dll", "SetErrorMode", (void*)SetErrorMode },
+    { "kernel32.dll", "SetEndOfFile", (void*)SetEndOfFile },
+    { "kernel32.dll", "SetFilePointer", (void*)SetFilePointer },
+    { "kernel32.dll", "SetHandleCount", (void*)SetHandleCount },
+    { "kernel32.dll", "SetLastError", (void*)SetLastError },
+    { "kernel32.dll", "SetStdHandle", (void*)SetStdHandle },
+    { "kernel32.dll", "CompareStringA", (void*)CompareStringA },
+    { "kernel32.dll", "CompareStringW", (void*)CompareStringW },
+    { "kernel32.dll", "FindFirstFileA", (void*)FindFirstFileA },
+    { "kernel32.dll", "GetStringTypeA", (void*)GetStringTypeA },
+    { "kernel32.dll", "GetStringTypeW", (void*)GetStringTypeW },
+    { "kernel32.dll", "IsBadCodePtr", (void*)IsBadCodePtr },
+    { "kernel32.dll", "IsBadReadPtr", (void*)IsBadReadPtr },
+    { "kernel32.dll", "IsBadWritePtr", (void*)IsBadWritePtr },
+    { "kernel32.dll", "LCMapStringA", (void*)LCMapStringA },
+    { "kernel32.dll", "LCMapStringW", (void*)LCMapStringW },
+    { "kernel32.dll", "TlsAlloc", (void*)TlsAlloc },
+    { "kernel32.dll", "TlsFree", (void*)TlsFree },
     { "kernel32.dll", "TlsGetValue", (void*)TlsGetValue },
+    { "kernel32.dll", "TlsSetValue", (void*)TlsSetValue },
+    { "kernel32.dll", "WriteConsoleA", (void*)WriteConsoleA },
     { "kernel32.dll", "VirtualProtect", (void*)VirtualProtect },
     { "kernel32.dll", "VirtualQuery", (void*)VirtualQuery },
     { "kernel32.dll", "VirtualAlloc", (void*)VirtualAlloc },
@@ -289,6 +493,17 @@ import_entry_t import_table[] = {
     { "msvcrt.dll", "_iob", (void*)__iob_func },
 #endif
     /* ── user32 stubs ───────────────────────────────────────────────── */
+    { "user32.dll", "AppendMenuA", (void*)AppendMenuA },
+    { "user32.dll", "DialogBoxParamA", (void*)DialogBoxParamA },
+    { "user32.dll", "EndDialog", (void*)EndDialog },
+    { "user32.dll", "FindWindowA", (void*)FindWindowA },
+    { "user32.dll", "GetDlgItemInt", (void*)GetDlgItemInt },
+    { "user32.dll", "GetDlgItemTextA", (void*)GetDlgItemTextA },
+    { "user32.dll", "GetParent", (void*)GetParent },
+    { "user32.dll", "GetSystemMenu", (void*)GetSystemMenu },
+    { "user32.dll", "GetWindowPlacement", (void*)GetWindowPlacement },
+    { "user32.dll", "IsIconic", (void*)IsIconic },
+    { "user32.dll", "IsWindowVisible", (void*)IsWindowVisible },
     { "user32.dll", "RegisterClassA", (void*)RegisterClassA },
     { "user32.dll", "CreateWindowExA", (void*)CreateWindowExA },
     { "user32.dll", "DestroyWindow", (void*)DestroyWindow },
@@ -306,6 +521,7 @@ import_entry_t import_table[] = {
     { "user32.dll", "EnableWindow", (void*)EnableWindow },
     { "user32.dll", "GetDesktopWindow", (void*)GetDesktopWindow },
     { "user32.dll", "GetActiveWindow", (void*)GetActiveWindow },
+    { "user32.dll", "GetLastActivePopup", (void*)GetLastActivePopup },
     { "user32.dll", "GetFocus", (void*)GetFocus },
     { "user32.dll", "SetFocus", (void*)SetFocus },
     { "user32.dll", "UpdateWindow", (void*)UpdateWindow },
@@ -324,14 +540,27 @@ import_entry_t import_table[] = {
     { "user32.dll", "DispatchMessageA", (void*)DispatchMessageA },
     { "user32.dll", "TranslateMessage", (void*)TranslateMessage },
     { "user32.dll", "PostMessageA", (void*)PostMessageA },
+    { "user32.dll", "PostThreadMessageA", (void*)PostThreadMessageA },
     { "user32.dll", "PostQuitMessage", (void*)PostQuitMessage },
     { "user32.dll", "SendMessageA", (void*)SendMessageA },
     { "user32.dll", "DefWindowProcA", (void*)DefWindowProcA },
     { "user32.dll", "CallWindowProcA", (void*)CallWindowProcA },
+    { "user32.dll", "CheckDlgButton", (void*)CheckDlgButton },
     { "user32.dll", "SetWindowsHookExA", (void*)SetWindowsHookExA },
     { "user32.dll", "UnhookWindowsHookEx", (void*)UnhookWindowsHookEx },
     { "user32.dll", "CallNextHookEx", (void*)CallNextHookEx },
+    { "user32.dll", "CreateDialogParamA", (void*)CreateDialogParamA },
+    { "user32.dll", "GetDlgItem", (void*)GetDlgItem },
+    { "user32.dll", "IsDialogMessageA", (void*)IsDialogMessageA },
+    { "user32.dll", "IsDlgButtonChecked", (void*)IsDlgButtonChecked },
+    { "user32.dll", "LoadStringA", (void*)LoadStringA },
+    { "user32.dll", "MessageBoxA", (void*)MessageBoxA },
+    { "user32.dll", "SetDlgItemInt", (void*)SetDlgItemInt },
+    { "user32.dll", "SetForegroundWindow", (void*)SetForegroundWindow },
+    { "user32.dll", "SetDlgItemTextA", (void*)SetDlgItemTextA },
+    { "user32.dll", "SetWindowPlacement", (void*)SetWindowPlacement },
     { "user32.dll", "SystemParametersInfoA", (void*)SystemParametersInfoA },
+    { "user32.dll", "WinHelpA", (void*)WinHelpA },
     { "user32.dll", "GetAsyncKeyState", (void*)GetAsyncKeyState },
     { "user32.dll", "LoadCursorA", (void*)LoadCursorA },
     { "user32.dll", "SetCursor", (void*)SetCursor },
@@ -342,6 +571,17 @@ import_entry_t import_table[] = {
     { "user32.dll", "SetRect", (void*)SetRect },
     { "ddraw.dll", "DirectDrawCreate", (void*)DirectDrawCreate },
     { "dsound.dll", "DirectSoundCreate", (void*)DirectSoundCreate },
+    { "user32.DLL", "AppendMenuA", (void*)AppendMenuA },
+    { "user32.DLL", "DialogBoxParamA", (void*)DialogBoxParamA },
+    { "user32.DLL", "EndDialog", (void*)EndDialog },
+    { "user32.DLL", "FindWindowA", (void*)FindWindowA },
+    { "user32.DLL", "GetDlgItemInt", (void*)GetDlgItemInt },
+    { "user32.DLL", "GetDlgItemTextA", (void*)GetDlgItemTextA },
+    { "user32.DLL", "GetParent", (void*)GetParent },
+    { "user32.DLL", "GetSystemMenu", (void*)GetSystemMenu },
+    { "user32.DLL", "GetWindowPlacement", (void*)GetWindowPlacement },
+    { "user32.DLL", "IsIconic", (void*)IsIconic },
+    { "user32.DLL", "IsWindowVisible", (void*)IsWindowVisible },
     { "user32.DLL", "RegisterClassA", (void*)RegisterClassA },
     { "user32.DLL", "CreateWindowExA", (void*)CreateWindowExA },
     { "user32.DLL", "DestroyWindow", (void*)DestroyWindow },
@@ -359,6 +599,7 @@ import_entry_t import_table[] = {
     { "user32.DLL", "EnableWindow", (void*)EnableWindow },
     { "user32.DLL", "GetDesktopWindow", (void*)GetDesktopWindow },
     { "user32.DLL", "GetActiveWindow", (void*)GetActiveWindow },
+    { "user32.DLL", "GetLastActivePopup", (void*)GetLastActivePopup },
     { "user32.DLL", "GetFocus", (void*)GetFocus },
     { "user32.DLL", "SetFocus", (void*)SetFocus },
     { "user32.DLL", "UpdateWindow", (void*)UpdateWindow },
@@ -377,14 +618,27 @@ import_entry_t import_table[] = {
     { "user32.DLL", "DispatchMessageA", (void*)DispatchMessageA },
     { "user32.DLL", "TranslateMessage", (void*)TranslateMessage },
     { "user32.DLL", "PostMessageA", (void*)PostMessageA },
+    { "user32.DLL", "PostThreadMessageA", (void*)PostThreadMessageA },
     { "user32.DLL", "PostQuitMessage", (void*)PostQuitMessage },
     { "user32.DLL", "SendMessageA", (void*)SendMessageA },
     { "user32.DLL", "DefWindowProcA", (void*)DefWindowProcA },
     { "user32.DLL", "CallWindowProcA", (void*)CallWindowProcA },
+    { "user32.DLL", "CheckDlgButton", (void*)CheckDlgButton },
     { "user32.DLL", "SetWindowsHookExA", (void*)SetWindowsHookExA },
     { "user32.DLL", "UnhookWindowsHookEx", (void*)UnhookWindowsHookEx },
     { "user32.DLL", "CallNextHookEx", (void*)CallNextHookEx },
+    { "user32.DLL", "CreateDialogParamA", (void*)CreateDialogParamA },
+    { "user32.DLL", "GetDlgItem", (void*)GetDlgItem },
+    { "user32.DLL", "IsDialogMessageA", (void*)IsDialogMessageA },
+    { "user32.DLL", "IsDlgButtonChecked", (void*)IsDlgButtonChecked },
+    { "user32.DLL", "LoadStringA", (void*)LoadStringA },
+    { "user32.DLL", "MessageBoxA", (void*)MessageBoxA },
+    { "user32.DLL", "SetDlgItemInt", (void*)SetDlgItemInt },
+    { "user32.DLL", "SetForegroundWindow", (void*)SetForegroundWindow },
+    { "user32.DLL", "SetDlgItemTextA", (void*)SetDlgItemTextA },
+    { "user32.DLL", "SetWindowPlacement", (void*)SetWindowPlacement },
     { "user32.DLL", "SystemParametersInfoA", (void*)SystemParametersInfoA },
+    { "user32.DLL", "WinHelpA", (void*)WinHelpA },
     { "user32.DLL", "GetAsyncKeyState", (void*)GetAsyncKeyState },
     { "user32.DLL", "LoadCursorA", (void*)LoadCursorA },
     { "user32.DLL", "SetCursor", (void*)SetCursor },
@@ -393,6 +647,87 @@ import_entry_t import_table[] = {
     { "user32.DLL", "LoadIconA", (void*)LoadIconA },
     { "user32.DLL", "wsprintfA", (void*)wsprintfA },
     { "user32.DLL", "SetRect", (void*)SetRect },
+    { "comctl32.dll", "InitCommonControls", (void*)InitCommonControls },
+    { "comctl32.dll", "PropertySheetA", (void*)PropertySheetA },
+    { "comdlg32.dll", "CommDlgExtendedError", (void*)CommDlgExtendedError },
+    { "comdlg32.dll", "GetOpenFileNameA", (void*)GetOpenFileNameA },
+    { "comdlg32.dll", "GetSaveFileNameA", (void*)GetSaveFileNameA },
+    { "gdi32.dll", "CreateDCA", (void*)CreateDCA },
+    { "gdi32.dll", "CreateDIBitmap", (void*)CreateDIBitmap },
+    { "gdi32.dll", "CreateFontA", (void*)CreateFontA },
+    { "gdi32.dll", "CreatePalette", (void*)CreatePalette },
+    { "gdi32.dll", "DeleteDC", (void*)DeleteDC },
+    { "gdi32.dll", "DeleteObject", (void*)DeleteObject },
+    { "gdi32.dll", "GetDeviceCaps", (void*)GetDeviceCaps },
+    { "gdi32.dll", "GetObjectA", (void*)GetObjectA },
+    { "gdi32.dll", "GetStockObject", (void*)GetStockObject },
+    { "gdi32.dll", "GetSystemPaletteEntries", (void*)GetSystemPaletteEntries },
+    { "gdi32.dll", "RealizePalette", (void*)RealizePalette },
+    { "gdi32.dll", "SelectPalette", (void*)SelectPalette },
+    { "gdi32.dll", "SetBkColor", (void*)SetBkColor },
+    { "gdi32.dll", "SetTextColor", (void*)SetTextColor },
+    { "gdi32.dll", "StretchDIBits", (void*)StretchDIBits },
+    { "gdi32.dll", "UnrealizeObject", (void*)UnrealizeObject },
+    { "gdi32.DLL", "CreateDCA", (void*)CreateDCA },
+    { "gdi32.DLL", "CreateDIBitmap", (void*)CreateDIBitmap },
+    { "gdi32.DLL", "CreateFontA", (void*)CreateFontA },
+    { "gdi32.DLL", "CreatePalette", (void*)CreatePalette },
+    { "gdi32.DLL", "DeleteDC", (void*)DeleteDC },
+    { "gdi32.DLL", "DeleteObject", (void*)DeleteObject },
+    { "gdi32.DLL", "GetDeviceCaps", (void*)GetDeviceCaps },
+    { "gdi32.DLL", "GetObjectA", (void*)GetObjectA },
+    { "gdi32.DLL", "GetStockObject", (void*)GetStockObject },
+    { "gdi32.DLL", "GetSystemPaletteEntries", (void*)GetSystemPaletteEntries },
+    { "gdi32.DLL", "RealizePalette", (void*)RealizePalette },
+    { "gdi32.DLL", "SelectPalette", (void*)SelectPalette },
+    { "gdi32.DLL", "SetBkColor", (void*)SetBkColor },
+    { "gdi32.DLL", "SetTextColor", (void*)SetTextColor },
+    { "gdi32.DLL", "StretchDIBits", (void*)StretchDIBits },
+    { "gdi32.DLL", "UnrealizeObject", (void*)UnrealizeObject },
+    { "winmm.dll", "joyGetDevCapsA", (void*)joyGetDevCapsA },
+    { "winmm.dll", "joyGetNumDevs", (void*)joyGetNumDevs },
+    { "winmm.dll", "joyGetPosEx", (void*)joyGetPosEx },
+    { "winmm.dll", "midiOutGetNumDevs", (void*)midiOutGetNumDevs },
+    { "winmm.dll", "midiOutPrepareHeader", (void*)midiOutPrepareHeader },
+    { "winmm.dll", "midiOutReset", (void*)midiOutReset },
+    { "winmm.dll", "midiOutSetVolume", (void*)midiOutSetVolume },
+    { "winmm.dll", "midiOutUnprepareHeader", (void*)midiOutUnprepareHeader },
+    { "winmm.dll", "midiStreamClose", (void*)midiStreamClose },
+    { "winmm.dll", "midiStreamOpen", (void*)midiStreamOpen },
+    { "winmm.dll", "midiStreamOut", (void*)midiStreamOut },
+    { "winmm.dll", "midiStreamPause", (void*)midiStreamPause },
+    { "winmm.dll", "midiStreamProperty", (void*)midiStreamProperty },
+    { "winmm.dll", "midiStreamRestart", (void*)midiStreamRestart },
+    { "winmm.dll", "timeGetTime", (void*)timeGetTime },
+    { "winmm.DLL", "joyGetDevCapsA", (void*)joyGetDevCapsA },
+    { "winmm.DLL", "joyGetNumDevs", (void*)joyGetNumDevs },
+    { "winmm.DLL", "joyGetPosEx", (void*)joyGetPosEx },
+    { "winmm.DLL", "midiOutGetNumDevs", (void*)midiOutGetNumDevs },
+    { "winmm.DLL", "midiOutPrepareHeader", (void*)midiOutPrepareHeader },
+    { "winmm.DLL", "midiOutReset", (void*)midiOutReset },
+    { "winmm.DLL", "midiOutSetVolume", (void*)midiOutSetVolume },
+    { "winmm.DLL", "midiOutUnprepareHeader", (void*)midiOutUnprepareHeader },
+    { "winmm.DLL", "midiStreamClose", (void*)midiStreamClose },
+    { "winmm.DLL", "midiStreamOpen", (void*)midiStreamOpen },
+    { "winmm.DLL", "midiStreamOut", (void*)midiStreamOut },
+    { "winmm.DLL", "midiStreamPause", (void*)midiStreamPause },
+    { "winmm.DLL", "midiStreamProperty", (void*)midiStreamProperty },
+    { "winmm.DLL", "midiStreamRestart", (void*)midiStreamRestart },
+    { "winmm.DLL", "timeGetTime", (void*)timeGetTime },
+    { "advapi32.dll", "RegCloseKey", (void*)RegCloseKey },
+    { "advapi32.dll", "GetUserNameA", (void*)GetUserNameA },
+    { "advapi32.dll", "RegCreateKeyA", (void*)RegCreateKeyA },
+    { "advapi32.dll", "RegOpenKeyA", (void*)RegOpenKeyA },
+    { "advapi32.dll", "RegQueryValueExA", (void*)RegQueryValueExA },
+    { "advapi32.dll", "RegSetValueExA", (void*)RegSetValueExA },
+    { "advapi32.DLL", "RegCloseKey", (void*)RegCloseKey },
+    { "advapi32.DLL", "GetUserNameA", (void*)GetUserNameA },
+    { "advapi32.DLL", "RegCreateKeyA", (void*)RegCreateKeyA },
+    { "advapi32.DLL", "RegOpenKeyA", (void*)RegOpenKeyA },
+    { "advapi32.DLL", "RegQueryValueExA", (void*)RegQueryValueExA },
+    { "advapi32.DLL", "RegSetValueExA", (void*)RegSetValueExA },
+    { "dplay.dll", "DPCreate", (void*)DPCreate },
+    { "dplay.DLL", "DPCreate", (void*)DPCreate },
     { "ddraw.DLL", "DirectDrawCreate", (void*)DirectDrawCreate },
     { "dsound.DLL", "DirectSoundCreate", (void*)DirectSoundCreate },
     { NULL, NULL, NULL }

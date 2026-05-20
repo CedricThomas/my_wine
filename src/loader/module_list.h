@@ -69,6 +69,7 @@ typedef struct {
     LDR_DATA_TABLE_ENTRY ldr_entry; /* Embedded PEB LDR entry (no malloc) */
     int load_count;              /* Reference count */
     uint8_t ldr_linked;          /* Whether ldr_entry is linked in lists */
+    uint8_t dllmain_called;      /* Whether DllMain(DLL_PROCESS_ATTACH) succeeded */
 } loaded_module_t;
 
 #define MAX_MODULES 16

@@ -49,6 +49,7 @@
 #include "loader_state.h"
 #include "pe32_process.h"
 #include "include/syscall_safe_utils.h"
+#include "include/handle_manager.h"
 #include "../heap/wine_heap.h"
 
 /*
@@ -200,6 +201,10 @@ enum {
     X86_REL32_BRANCH_LEN         = 5,
 
     WATCOM_ENTRY_STUB_LEN        = X86_MOV_ABS32_IMM32_LEN + X86_REL32_BRANCH_LEN,
+
+    DOOM95_STD_HANDLE_COUNT_RVA = 0x218358,
+    DOOM95_STD_HANDLE_TABLE_RVA = 0x21835c,
+    DOOM95_TRAP_FLAG_RVA        = 0x077d84,
 };
 
 static int abs32_to_rva(uint32_t abs, uint32_t *out_rva)
@@ -250,6 +255,57 @@ static int rva_in_section_with_flags(uint32_t rva, uint32_t len,
     }
 
     return 0;
+}
+
+static int is_doom95_path(const char *path)
+{
+    const char *name;
+
+    if (path == NULL)
+        return 0;
+
+    name = strrchr(path, '/');
+    name = name ? name + 1 : path;
+    return strcmp(name, "DOOM95.EXE") == 0;
+}
+
+static void apply_doom95_runtime_compat(const char *path)
+{
+    uint32_t *std_handle_count;
+    uint32_t *std_handle_table_slot;
+    uint8_t *trap_flag;
+    uint32_t *guest_table;
+    void *table_page;
+
+    if (!is_doom95_path(path))
+        return;
+
+    trap_flag = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
+                              DOOM95_TRAP_FLAG_RVA, sizeof(uint8_t));
+    std_handle_count = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
+                                     DOOM95_STD_HANDLE_COUNT_RVA,
+                                     sizeof(uint32_t));
+    std_handle_table_slot = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
+                                          DOOM95_STD_HANDLE_TABLE_RVA,
+                                          sizeof(uint32_t));
+    if (trap_flag == NULL || std_handle_count == NULL ||
+        std_handle_table_slot == NULL) {
+        return;
+    }
+
+    table_page = INLINE_SYSCALL_MMAP(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (table_page == MAP_FAILED)
+        return;
+
+    guest_table = (uint32_t *)table_page;
+    guest_table[0] = (uint32_t)STDIN_HANDLE;
+    guest_table[1] = (uint32_t)STDOUT_HANDLE;
+    guest_table[2] = (uint32_t)STDERR_HANDLE;
+
+    *trap_flag = 0;
+    *std_handle_count = 3;
+    *std_handle_table_slot = (uint32_t)(uintptr_t)guest_table;
 }
 
 /*
@@ -360,6 +416,12 @@ static uint32_t resolve_entry_symbol(const char *path)
     const crt_module_t *mod = crt_get_active();
     const char *const *entry_syms = crt_entry_symbols(mod);
 
+    /* DOOM95 relies on Watcom CRT startup to provision thread-local runtime
+     * state before D_DoomMain runs, so bypassing directly to the user symbol
+     * crashes in its early command-line setup. */
+    if (is_doom95_path(path))
+        return pe_entry;
+
     /* If COFF symbols are available, try to look up entry symbols */
     if (ptr_sym != 0 && num_sym != 0) {
         IMAGE_SYMBOL *symbols = NULL;
@@ -418,15 +480,17 @@ static uint32_t resolve_entry_symbol(const char *path)
         }
     }
 
-    /* For stripped Watcom images, infer the user entry from a validated
-     * startup stub. If symbols exist but do not name a known user entry,
-     * do not guess: fall back to the PE entry point. */
-    if (entry_rva == pe_entry && !had_symbols) {
+    /* For Watcom images, infer the user entry from a validated startup stub
+     * when symbol lookup does not recover a callable user entry. Some
+     * release/debug hybrids carry a COFF table that is present enough to set
+     * had_symbols but still lacks a usable main symbol. */
+    if (entry_rva == pe_entry) {
         uint32_t extracted_rva;
         if (extract_watcom_entry_from_entry_stub(&extracted_rva)) {
-            DEBUG_LEVEL(1, "watcom_entry_extract: user_func VA=0x%x -> RVA=0x%x",
+            DEBUG_LEVEL(1, "watcom_entry_extract: user_func VA=0x%x -> RVA=0x%x%s",
                         (uint32_t)(uintptr_t)g_loader.image_base + extracted_rva,
-                        extracted_rva);
+                        extracted_rva,
+                        had_symbols ? " (fallback after symbol lookup miss)" : "");
             entry_rva = extracted_rva;
         }
         /* else: falls back to pe_entry_rva (already in entry_rva) */
@@ -989,6 +1053,8 @@ int main(int argc, char **argv)
             seed_pe32_bss_vars(g_loader.image_base, &g_nt_headers);
         }
     }
+
+    apply_doom95_runtime_compat(pe_path);
 
     /* 7. Set FS → TEB and jump to PE entry */
     setup_fs_and_jump(teb, pe_path, entry_abs, stack_top);

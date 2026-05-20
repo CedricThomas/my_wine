@@ -68,6 +68,32 @@ void seh_crash_handler(void *exception_record, void *establisher_frame,
  */
 static void crash_handler(int sig, siginfo_t *info, void *ucontext)
 {
+    /* Guest int3 breakpoints are resumable: Linux reports SIGTRAP with EIP
+     * already advanced past 0xCC. Returning continues at the next guest
+     * instruction instead of aborting the whole loader. */
+#if defined(__i386__)
+    if (sig == SIGTRAP && ucontext != NULL) {
+        uintptr_t uc_ptr = (uintptr_t)ucontext;
+        uintptr_t image_base = (uintptr_t)g_loader.image_base;
+        uintptr_t eip;
+        const uint8_t *trap;
+
+        if ((uc_ptr & 3) == 0 && uc_ptr >= 0x1000 && uc_ptr < 0xFFFFC000UL) {
+            ucontext_t *uc = (ucontext_t *)ucontext;
+            eip = (uintptr_t)uc->uc_mcontext.gregs[REG_EIP];
+            trap = (const uint8_t *)(eip - 1);
+        } else {
+            eip = 0;
+            trap = NULL;
+        }
+
+        if (image_base != 0 && eip > image_base && trap != NULL && *trap == 0xCC) {
+            g_in_crash_handler = 0;
+            return;
+        }
+    }
+#endif
+
     /* Recursion guard: if we're already in the handler, just exit immediately */
     if (g_in_crash_handler) {
         INLINE_SYSCALL_EXIT_GROUP(EXIT_SIGSEGV);

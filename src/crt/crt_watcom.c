@@ -22,6 +22,7 @@
 #include "include/crt.h"
 #include "include/common.h"
 #include "include/debug.h"
+#include "include/handle_manager.h"
 #include "include/pe.h"
 #include "include/pe_parser.h"
 #include "src/pe_priv.h"
@@ -55,9 +56,78 @@ static const char *watcom_entry_symbols[] = {
     NULL
 };
 
+enum {
+    DOOM95_STD_HANDLE_COUNT_RVA = 0x218358,
+    DOOM95_STD_HANDLE_TABLE_RVA = 0x21835c,
+    DOOM95_TRAP_FLAG_RVA        = 0x077d84,
+};
+
 const refptr_mapping_t watcom_refptr_mappings[] = {
     { NULL, NULL }
 };
+
+static int is_doom95_image(const char *file_path)
+{
+    const char *name;
+
+    if (file_path == NULL)
+        return 0;
+
+    name = strrchr(file_path, '/');
+    name = name ? name + 1 : file_path;
+    return strcmp(name, "DOOM95.EXE") == 0;
+}
+
+static int looks_like_doom95_layout(IMAGE_NT_HEADERS *nt)
+{
+    if (nt == NULL)
+        return 0;
+
+    return pe_entry_rva(nt) == 0x444d8 &&
+           pe_size_of_image(nt) == 0x290000;
+}
+
+static void watcom_seed_doom95_runtime(void *image_base, IMAGE_NT_HEADERS *nt)
+{
+    uint32_t *std_handle_count;
+    uint32_t *std_handle_table_slot;
+    uint8_t *trap_flag;
+    uint32_t *guest_table;
+    void *table_page;
+
+    std_handle_count = pe_rva_to_ptr(image_base, nt,
+                                     DOOM95_STD_HANDLE_COUNT_RVA,
+                                     sizeof(uint32_t));
+    std_handle_table_slot = pe_rva_to_ptr(image_base, nt,
+                                          DOOM95_STD_HANDLE_TABLE_RVA,
+                                          sizeof(uint32_t));
+    trap_flag = pe_rva_to_ptr(image_base, nt,
+                              DOOM95_TRAP_FLAG_RVA,
+                              sizeof(uint8_t));
+    if (std_handle_count == NULL || std_handle_table_slot == NULL ||
+        trap_flag == NULL) {
+        DEBUG_LEVEL(1, "doom95_compat: required runtime slots missing");
+        return;
+    }
+
+    table_page = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (table_page == MAP_FAILED) {
+        DEBUG_LEVEL(1, "doom95_compat: failed to allocate std handle table");
+        return;
+    }
+
+    guest_table = (uint32_t *)table_page;
+    guest_table[0] = (uint32_t)STDIN_HANDLE;
+    guest_table[1] = (uint32_t)STDOUT_HANDLE;
+    guest_table[2] = (uint32_t)STDERR_HANDLE;
+
+    *std_handle_count = 3;
+    *std_handle_table_slot = (uint32_t)(uintptr_t)guest_table;
+    *trap_flag = 0;
+
+    DEBUG_LEVEL(1, "doom95_compat: seeded Watcom runtime slots");
+}
 
 /* ── Detection ─────────────────────────────────────────────────── */
 
@@ -268,6 +338,9 @@ static void watcom_patch_refptrs(const char *file_path, void *image_base,
         }
     }
 
+    if (is_doom95_image(file_path))
+        watcom_seed_doom95_runtime(image_base, nt);
+
     DEBUG_LEVEL(2, "watcom_patch_refptrs: no refptr mappings to patch (empty table)");
 }
 
@@ -349,6 +422,9 @@ static void watcom_seed_bss(void *image_base, IMAGE_NT_HEADERS *nt,
         fprintf(stderr, "WARNING: envp_bss_offset is 0, "
                 "skipping envp pre-seed\n");
     }
+
+    if (looks_like_doom95_layout(nt))
+        watcom_seed_doom95_runtime(image_base, nt);
 }
 
 /* ── Module definition ─────────────────────────────────────────── */

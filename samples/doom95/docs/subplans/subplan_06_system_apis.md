@@ -2,7 +2,7 @@
 
 ## Status
 
-Partially complete already, but the original plan is badly overstated.
+Implemented for the current import surface.
 
 Existing code already covers part of what this subplan used to own, including
 pieces of:
@@ -16,6 +16,16 @@ pieces of:
 
 So this subplan should no longer be treated as “implement all remaining
 kernel32”.
+
+This pass added the remaining Doom95 startup-facing import coverage in the
+current tree:
+
+- `kernel32`: module/file/TLS/resource/time/process helpers used by the EXE's
+  real import table
+- `winmm`: timer, joystick, and no-op MIDI stream stubs
+- `advapi32`: in-memory registry shim for the Doom95 config path
+- `dplay`: ordinal `#1` / `DPCreate` graceful stub
+- import-table and ordinal-table wiring for those exports
 
 ## Goal
 
@@ -42,51 +52,58 @@ runtime and import table are accounted for.
   `GetEnvironmentStrings`, `GetFileAttributesA`, `GetFileSize`,
   `GetFileTime`, `GetModuleFileNameA`, `GetTimeZoneInformation`,
   `GetVersion`, `SetFilePointer`, `TlsAlloc`, `TlsFree`, and `TlsSetValue`.
-- [ ] Compare that confirmed list against `src/loader/import_table.c` and `src/loader/ordinal_table.c`
-- [ ] Trim this plan further if some imports are already fully implemented
+- [x] Compare that confirmed list against `src/loader/import_table.c` and `src/loader/ordinal_table.c`
+- [x] Trim this plan further if some imports are already fully implemented
 
 ### 6.2 Kernel32 delta only
-- [ ] Implement only missing kernel32 functions that Doom95 demonstrably imports or reaches at runtime
-- [ ] Prioritize:
+- [x] Implement only missing kernel32 functions that Doom95 demonstrably imports or reaches at runtime
+- [x] Prioritize:
   - `GetModuleFileNameA`
   - file search/enumeration helpers if imports confirm them
   - TLS functions beyond the current stubbed `TlsGetValue`
   - PE resource helpers if dialogs or string resources require them
-- [ ] Avoid creating a new `kernel32_extended.c` if the work fits better into
+- [x] Avoid creating a new `kernel32_extended.c` if the work fits better into
   existing `src/msvcrt/kernel32_*.c` modules
 
 ### 6.3 WINMM minimal layer
-- [ ] `timeGetTime`
-- [ ] `joyGetNumDevs`
-- [ ] `joyGetDevCapsA`
-- [ ] `joyGetPosEx`
-- [ ] `midiOutGetNumDevs`
-- [ ] `midiOutPrepareHeader`
-- [ ] `midiOutReset`
-- [ ] `midiOutSetVolume`
-- [ ] `midiOutUnprepareHeader`
-- [ ] `midiStreamClose`
-- [ ] `midiStreamOpen`
-- [ ] `midiStreamOut`
-- [ ] `midiStreamPause`
-- [ ] `midiStreamProperty`
-- [ ] `midiStreamRestart`
+- [x] `timeGetTime`
+- [x] `joyGetNumDevs`
+- [x] `joyGetDevCapsA`
+- [x] `joyGetPosEx`
+- [x] `midiOutGetNumDevs`
+- [x] `midiOutPrepareHeader`
+- [x] `midiOutReset`
+- [x] `midiOutSetVolume`
+- [x] `midiOutUnprepareHeader`
+- [x] `midiStreamClose`
+- [x] `midiStreamOpen`
+- [x] `midiStreamOut`
+- [x] `midiStreamPause`
+- [x] `midiStreamProperty`
+- [x] `midiStreamRestart`
 
 ### 6.4 ADVAPI32 minimal registry layer
-- [ ] in-memory registry for the Doom95 config path
-- [ ] `RegCreateKeyA`
-- [ ] `RegOpenKeyA`
-- [ ] `RegCloseKey`
-- [ ] `RegQueryValueExA`
-- [ ] `RegSetValueExA`
+- [x] in-memory registry for the Doom95 config path
+- [x] `RegCreateKeyA`
+- [x] `RegOpenKeyA`
+- [x] `RegCloseKey`
+- [x] `RegQueryValueExA`
+- [x] `RegSetValueExA`
 
 ### 6.5 DPLAY bootstrap stub
-- [ ] add ordinal `#1` / `DPCreate`
-- [ ] return a stable no-op object or graceful failure path that does not abort startup
+- [x] add ordinal `#1` / `DPCreate`
+- [x] return a stable no-op object or graceful failure path that does not abort startup
 
 ### 6.6 Import-table integration
-- [ ] add only the DLL exports actually needed for Doom95 startup
-- [ ] keep `ordinal_table.c` changes narrow and explicit
+- [x] add only the DLL exports actually needed for Doom95 startup
+- [x] keep `ordinal_table.c` changes narrow and explicit
+
+## Result
+
+The Doom95 import set now resolves through the maintained runtime instead of
+failing on missing `kernel32`/`winmm`/`advapi32`/`dplay` coverage. The next
+blocker is no longer missing system API exposure; it is the real guest runtime
+crash captured in Subplan 7.
 
 ## Scope Reduction
 
