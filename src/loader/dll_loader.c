@@ -228,18 +228,23 @@ loaded_module_t *load_dll(const char *path, int depth)
         syscall_safe_debug_write_str(2, "load_dll: parse_export=", "ok");
     }
 
-    if (!call_module_dllmain(mod, DLL_PROCESS_ATTACH)) {
-        if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
-            ldr_remove_module(mod);
+    /* PE32 Doom95 launcher work depends on DLL_PROCESS_ATTACH, but the current
+     * PE32+ loader still lacks the TLS/CRT loader contract needed by MinGW
+     * DLL startup. Skip PE32+ attach hooks until that loader surface exists. */
+    if (img_nt->pe_type == PE_TYPE_32) {
+        if (!call_module_dllmain(mod, DLL_PROCESS_ATTACH)) {
+            if (g_loader.peb_ldr != NULL && mod->ldr_linked) {
+                ldr_remove_module(mod);
+            }
+            reset_export_cache(mod);
+            remove_module(mod);
+            uintptr_t sz = pe_size_of_image(img_nt);
+            INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
+            INLINE_SYSCALL_MUNMAP(base, sz);
+            return NULL;
         }
-        reset_export_cache(mod);
-        remove_module(mod);
-        uintptr_t sz = pe_size_of_image(img_nt);
-        INLINE_SYSCALL_MUNMAP(nt_alloc, PAGE_SIZE);
-        INLINE_SYSCALL_MUNMAP(base, sz);
-        return NULL;
+        mod->dllmain_called = 1;
     }
-    mod->dllmain_called = 1;
 
     return mod;
 }

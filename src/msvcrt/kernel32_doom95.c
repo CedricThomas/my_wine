@@ -2,7 +2,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <asm/unistd.h>
@@ -226,6 +228,149 @@ static void wine_unix_time_to_filetime(int64_t sec, int64_t nsec, FILETIME *out_
     out_ft->dwHighDateTime = (uint32_t)(value >> 32);
 }
 
+static int wine_path_lookup_case_insensitive(const char *path, char *resolved, size_t resolved_size)
+{
+    char current[1024];
+    const char *segment;
+    struct stat st;
+
+    if (!path || !resolved || resolved_size == 0)
+        return 0;
+
+    if (stat(path, &st) == 0) {
+        wine_copy_cstr(resolved, resolved_size, path);
+        return 1;
+    }
+
+    if (path[0] != '/')
+        return 0;
+
+    current[0] = '/';
+    current[1] = '\0';
+    segment = path + 1;
+
+    while (*segment != '\0') {
+        const char *next = segment;
+        char wanted[256];
+        size_t wanted_len = 0;
+        DIR *dir;
+        struct dirent *entry;
+        const char *match = NULL;
+        size_t current_len;
+
+        while (*next != '\0' && *next != '/')
+            next++;
+        wanted_len = (size_t)(next - segment);
+        if (wanted_len == 0) {
+            segment = (*next == '/') ? next + 1 : next;
+            continue;
+        }
+        if (wanted_len >= sizeof(wanted))
+            return 0;
+        memcpy(wanted, segment, wanted_len);
+        wanted[wanted_len] = '\0';
+
+        dir = opendir(current);
+        if (!dir)
+            return 0;
+
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcasecmp(entry->d_name, wanted) == 0) {
+                match = entry->d_name;
+                break;
+            }
+        }
+
+        if (!match) {
+            closedir(dir);
+            return 0;
+        }
+
+        current_len = strlen(current);
+        if (current_len > 1) {
+            if (current_len + 1 >= sizeof(current)) {
+                closedir(dir);
+                return 0;
+            }
+            current[current_len++] = '/';
+            current[current_len] = '\0';
+        }
+        if (current_len + strlen(match) >= sizeof(current)) {
+            closedir(dir);
+            return 0;
+        }
+        memcpy(current + current_len, match, strlen(match) + 1);
+        closedir(dir);
+
+        segment = (*next == '/') ? next + 1 : next;
+    }
+
+    if (stat(current, &st) != 0)
+        return 0;
+
+    wine_copy_cstr(resolved, resolved_size, current);
+    return 1;
+}
+
+static int wine_build_search_candidate(const char *directory, const char *filename,
+                                       const char *extension, char *candidate,
+                                       size_t candidate_size)
+{
+    const char *base = filename ? filename : "";
+    int has_extension = 0;
+    const char *scan;
+    size_t used = 0;
+
+    if (!candidate || candidate_size == 0)
+        return 0;
+
+    candidate[0] = '\0';
+    if (directory && directory[0] != '\0') {
+        used = snprintf(candidate, candidate_size, "%s", directory);
+        if (used >= candidate_size)
+            return 0;
+        if (used > 0 && candidate[used - 1] != '/' && candidate[used - 1] != '\\') {
+            if (used + 1 >= candidate_size)
+                return 0;
+            candidate[used++] = '\\';
+            candidate[used] = '\0';
+        }
+    }
+
+    if (used + strlen(base) >= candidate_size)
+        return 0;
+    memcpy(candidate + used, base, strlen(base) + 1);
+
+    scan = strrchr(base, '\\');
+    if (!scan)
+        scan = strrchr(base, '/');
+    scan = scan ? scan + 1 : base;
+    has_extension = strrchr(scan, '.') != NULL;
+
+    if (!has_extension && extension && extension[0] != '\0') {
+        size_t ext_len = strlen(extension);
+        if (used + strlen(base) + ext_len >= candidate_size)
+            return 0;
+        memcpy(candidate + used + strlen(base), extension, ext_len + 1);
+    }
+
+    return 1;
+}
+
+static int wine_search_existing_path(const char *directory, const char *filename,
+                                     const char *extension, char *resolved,
+                                     size_t resolved_size)
+{
+    char candidate[1024];
+    char unix_path[1024];
+
+    if (!wine_build_search_candidate(directory, filename, extension, candidate, sizeof(candidate)))
+        return 0;
+    if (!wine_resolve_path(candidate, unix_path, sizeof(unix_path)))
+        return 0;
+    return wine_path_lookup_case_insensitive(unix_path, resolved, resolved_size);
+}
+
 KERNEL32_STUB
 uint32_t GetTickCount(void)
 {
@@ -372,15 +517,23 @@ KERNEL32_STUB
 uint32_t GetFileAttributesA(const char *lpFileName)
 {
     char path[1024];
+    char resolved[1024];
     struct stat st;
     int rc;
     if (!lpFileName || lpFileName[0] == '\0')
         return 0xffffffffu;
+    if (strcasestr(lpFileName, "wad"))
+        fprintf(stderr, "GetFileAttributesA('%s')\n", lpFileName);
 
     if (!wine_resolve_path(lpFileName, path, sizeof(path)))
         return 0xffffffffu;
 
-    rc = stat(path, &st);
+    if (!wine_path_lookup_case_insensitive(path, resolved, sizeof(resolved)))
+        return 0xffffffffu;
+    if (strcasestr(lpFileName, "wad"))
+        fprintf(stderr, "GetFileAttributesA -> '%s'\n", resolved);
+
+    rc = stat(resolved, &st);
     if (rc != 0)
         return 0xffffffffu;
     if (S_ISDIR(st.st_mode))
@@ -529,19 +682,53 @@ KERNEL32_STUB
 uint32_t SearchPathA(const char *lpPath, const char *lpFileName, const char *lpExtension,
                      uint32_t nBufferLength, char *lpBuffer, char **lpFilePart)
 {
-    char path[1024];
-    const char *src;
+    char resolved[1024];
+    char path_list[1024];
+    const char *src = resolved;
     uint32_t len = 0;
-    (void)lpPath;
-    (void)lpExtension;
+    int found = 0;
 
     if (!lpFileName)
         return 0;
+    if (strcasestr(lpFileName, "wad"))
+        fprintf(stderr, "SearchPathA(path='%s', file='%s', ext='%s')\n",
+                lpPath ? lpPath : "", lpFileName, lpExtension ? lpExtension : "");
 
-    if (!wine_resolve_path(lpFileName, path, sizeof(path)))
+    if (strchr(lpFileName, '\\') || strchr(lpFileName, '/') ||
+        (lpFileName[0] != '\0' && lpFileName[1] == ':')) {
+        found = wine_search_existing_path(NULL, lpFileName, lpExtension, resolved, sizeof(resolved));
+    } else {
+        const char *segment;
+
+        if (lpPath && lpPath[0] != '\0') {
+            wine_copy_cstr(path_list, sizeof(path_list), lpPath);
+            segment = path_list;
+            while (*segment != '\0' && !found) {
+                char *end = (char *)strchr(segment, ';');
+                char saved = '\0';
+
+                if (end) {
+                    saved = *end;
+                    *end = '\0';
+                }
+                if (segment[0] != '\0')
+                    found = wine_search_existing_path(segment, lpFileName, lpExtension, resolved, sizeof(resolved));
+                if (!end)
+                    break;
+                *end = saved;
+                segment = end + 1;
+            }
+        }
+
+        if (!found)
+            found = wine_search_existing_path(NULL, lpFileName, lpExtension, resolved, sizeof(resolved));
+    }
+
+    if (!found)
         return 0;
+    if (strcasestr(lpFileName, "wad"))
+        fprintf(stderr, "SearchPathA -> '%s'\n", resolved);
 
-    src = path;
     while (src[len] != '\0')
         len++;
 
@@ -754,6 +941,8 @@ int FindNextFileA(void *hFindFile, void *lpFindFileData)
         data->nFileSizeLow = (uint32_t)st.st_size;
         data->nFileSizeHigh = (uint32_t)(((uint64_t)st.st_size) >> 32);
         strncpy(data->cFileName, entry->d_name, sizeof(data->cFileName) - 1);
+        if (strcasestr(find->pattern, "wad"))
+            fprintf(stderr, "FindNextFileA('%s') -> '%s'\n", find->pattern, data->cFileName);
         return 1;
     }
 

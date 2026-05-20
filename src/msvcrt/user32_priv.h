@@ -161,4 +161,9 @@ static inline char *user32_strncpy(char *dst, const char *src, size_t n)
     return dst;
 }
 
+int user32_dialog_run_modal(HWND hwnd, void *lpDialogFunc);
+BOOL user32_dialog_end(HWND hDlg, intptr_t nResult);
+LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+LONG_PTR user32_dialog_get_window_long_ptr(HWND hWnd, int nIndex);
+
 #endif /* MY_WINE_USER32_PRIV_H */

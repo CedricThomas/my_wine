@@ -154,13 +154,20 @@ extern void EndDialog(void);
 extern void GetDlgItem(void);
 extern void GetDlgItemInt(void);
 extern void GetDlgItemTextA(void);
+extern void GetDlgCtrlID(void);
+extern void GetDialogBaseUnits(void);
+extern void GetWindowTextA(void);
 extern void IsDialogMessageA(void);
 extern void IsDlgButtonChecked(void);
 extern void LoadStringA(void);
+extern void MapVirtualKeyA(void);
 extern void MessageBoxA(void);
+extern void SendDlgItemMessageA(void);
 extern void SetDlgItemInt(void);
 extern void SetDlgItemTextA(void);
 extern void WinHelpA(void);
+extern void CreateDialogIndirectParamA(void);
+extern void CopyRect(void);
 extern void PropertySheetA(void);
 extern void InitCommonControls(void);
 extern void GetOpenFileNameA(void);
@@ -188,6 +195,8 @@ extern void FindResourceA(void);
 extern void GetCurrentThreadId(void);
 extern void GetSystemInfo(void);
 extern void GetTickCount(void);
+extern void RegDeleteKeyA(void);
+extern void RegEnumKeyExA(void);
 extern void GlobalAlloc(void);
 extern void LoadResource(void);
 extern void LocalAlloc(void);
@@ -246,6 +255,7 @@ extern void RegQueryValueExA(void);
 extern void RegSetValueExA(void);
 extern void GetUserNameA(void);
 extern void DPCreate(void);
+extern void DirectPlayEnumerateA(void);
 extern void SetCurrentDirectoryA(void);
 extern void GetCurrentDirectoryA(void);
 extern void SetErrorMode(void);
@@ -497,12 +507,16 @@ import_entry_t import_table[] = {
     { "user32.dll", "DialogBoxParamA", (void*)DialogBoxParamA },
     { "user32.dll", "EndDialog", (void*)EndDialog },
     { "user32.dll", "FindWindowA", (void*)FindWindowA },
+    { "user32.dll", "GetDialogBaseUnits", (void*)GetDialogBaseUnits },
+    { "user32.dll", "GetDlgCtrlID", (void*)GetDlgCtrlID },
     { "user32.dll", "GetDlgItemInt", (void*)GetDlgItemInt },
     { "user32.dll", "GetDlgItemTextA", (void*)GetDlgItemTextA },
     { "user32.dll", "GetParent", (void*)GetParent },
     { "user32.dll", "GetSystemMenu", (void*)GetSystemMenu },
     { "user32.dll", "GetWindowPlacement", (void*)GetWindowPlacement },
+    { "user32.dll", "GetWindowTextA", (void*)GetWindowTextA },
     { "user32.dll", "IsIconic", (void*)IsIconic },
+    { "user32.dll", "IsWindowEnabled", (void*)EnableWindow },
     { "user32.dll", "IsWindowVisible", (void*)IsWindowVisible },
     { "user32.dll", "RegisterClassA", (void*)RegisterClassA },
     { "user32.dll", "CreateWindowExA", (void*)CreateWindowExA },
@@ -549,12 +563,16 @@ import_entry_t import_table[] = {
     { "user32.dll", "SetWindowsHookExA", (void*)SetWindowsHookExA },
     { "user32.dll", "UnhookWindowsHookEx", (void*)UnhookWindowsHookEx },
     { "user32.dll", "CallNextHookEx", (void*)CallNextHookEx },
+    { "user32.dll", "CopyRect", (void*)CopyRect },
+    { "user32.dll", "CreateDialogIndirectParamA", (void*)CreateDialogIndirectParamA },
     { "user32.dll", "CreateDialogParamA", (void*)CreateDialogParamA },
     { "user32.dll", "GetDlgItem", (void*)GetDlgItem },
     { "user32.dll", "IsDialogMessageA", (void*)IsDialogMessageA },
     { "user32.dll", "IsDlgButtonChecked", (void*)IsDlgButtonChecked },
     { "user32.dll", "LoadStringA", (void*)LoadStringA },
+    { "user32.dll", "MapVirtualKeyA", (void*)MapVirtualKeyA },
     { "user32.dll", "MessageBoxA", (void*)MessageBoxA },
+    { "user32.dll", "SendDlgItemMessageA", (void*)SendDlgItemMessageA },
     { "user32.dll", "SetDlgItemInt", (void*)SetDlgItemInt },
     { "user32.dll", "SetForegroundWindow", (void*)SetForegroundWindow },
     { "user32.dll", "SetDlgItemTextA", (void*)SetDlgItemTextA },
@@ -575,12 +593,16 @@ import_entry_t import_table[] = {
     { "user32.DLL", "DialogBoxParamA", (void*)DialogBoxParamA },
     { "user32.DLL", "EndDialog", (void*)EndDialog },
     { "user32.DLL", "FindWindowA", (void*)FindWindowA },
+    { "user32.DLL", "GetDialogBaseUnits", (void*)GetDialogBaseUnits },
+    { "user32.DLL", "GetDlgCtrlID", (void*)GetDlgCtrlID },
     { "user32.DLL", "GetDlgItemInt", (void*)GetDlgItemInt },
     { "user32.DLL", "GetDlgItemTextA", (void*)GetDlgItemTextA },
     { "user32.DLL", "GetParent", (void*)GetParent },
     { "user32.DLL", "GetSystemMenu", (void*)GetSystemMenu },
     { "user32.DLL", "GetWindowPlacement", (void*)GetWindowPlacement },
+    { "user32.DLL", "GetWindowTextA", (void*)GetWindowTextA },
     { "user32.DLL", "IsIconic", (void*)IsIconic },
+    { "user32.DLL", "IsWindowEnabled", (void*)EnableWindow },
     { "user32.DLL", "IsWindowVisible", (void*)IsWindowVisible },
     { "user32.DLL", "RegisterClassA", (void*)RegisterClassA },
     { "user32.DLL", "CreateWindowExA", (void*)CreateWindowExA },
@@ -627,12 +649,16 @@ import_entry_t import_table[] = {
     { "user32.DLL", "SetWindowsHookExA", (void*)SetWindowsHookExA },
     { "user32.DLL", "UnhookWindowsHookEx", (void*)UnhookWindowsHookEx },
     { "user32.DLL", "CallNextHookEx", (void*)CallNextHookEx },
+    { "user32.DLL", "CopyRect", (void*)CopyRect },
+    { "user32.DLL", "CreateDialogIndirectParamA", (void*)CreateDialogIndirectParamA },
     { "user32.DLL", "CreateDialogParamA", (void*)CreateDialogParamA },
     { "user32.DLL", "GetDlgItem", (void*)GetDlgItem },
     { "user32.DLL", "IsDialogMessageA", (void*)IsDialogMessageA },
     { "user32.DLL", "IsDlgButtonChecked", (void*)IsDlgButtonChecked },
     { "user32.DLL", "LoadStringA", (void*)LoadStringA },
+    { "user32.DLL", "MapVirtualKeyA", (void*)MapVirtualKeyA },
     { "user32.DLL", "MessageBoxA", (void*)MessageBoxA },
+    { "user32.DLL", "SendDlgItemMessageA", (void*)SendDlgItemMessageA },
     { "user32.DLL", "SetDlgItemInt", (void*)SetDlgItemInt },
     { "user32.DLL", "SetForegroundWindow", (void*)SetForegroundWindow },
     { "user32.DLL", "SetDlgItemTextA", (void*)SetDlgItemTextA },
@@ -717,17 +743,23 @@ import_entry_t import_table[] = {
     { "advapi32.dll", "RegCloseKey", (void*)RegCloseKey },
     { "advapi32.dll", "GetUserNameA", (void*)GetUserNameA },
     { "advapi32.dll", "RegCreateKeyA", (void*)RegCreateKeyA },
+    { "advapi32.dll", "RegDeleteKeyA", (void*)RegDeleteKeyA },
+    { "advapi32.dll", "RegEnumKeyExA", (void*)RegEnumKeyExA },
     { "advapi32.dll", "RegOpenKeyA", (void*)RegOpenKeyA },
     { "advapi32.dll", "RegQueryValueExA", (void*)RegQueryValueExA },
     { "advapi32.dll", "RegSetValueExA", (void*)RegSetValueExA },
     { "advapi32.DLL", "RegCloseKey", (void*)RegCloseKey },
     { "advapi32.DLL", "GetUserNameA", (void*)GetUserNameA },
     { "advapi32.DLL", "RegCreateKeyA", (void*)RegCreateKeyA },
+    { "advapi32.DLL", "RegDeleteKeyA", (void*)RegDeleteKeyA },
+    { "advapi32.DLL", "RegEnumKeyExA", (void*)RegEnumKeyExA },
     { "advapi32.DLL", "RegOpenKeyA", (void*)RegOpenKeyA },
     { "advapi32.DLL", "RegQueryValueExA", (void*)RegQueryValueExA },
     { "advapi32.DLL", "RegSetValueExA", (void*)RegSetValueExA },
     { "dplay.dll", "DPCreate", (void*)DPCreate },
+    { "dplay.dll", "DirectPlayEnumerateA", (void*)DirectPlayEnumerateA },
     { "dplay.DLL", "DPCreate", (void*)DPCreate },
+    { "dplay.DLL", "DirectPlayEnumerateA", (void*)DirectPlayEnumerateA },
     { "ddraw.DLL", "DirectDrawCreate", (void*)DirectDrawCreate },
     { "dsound.DLL", "DirectSoundCreate", (void*)DirectSoundCreate },
     { NULL, NULL, NULL }

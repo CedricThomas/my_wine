@@ -25,6 +25,31 @@
 
 #define MAX_IMPORT_DEPTH 8
 
+#if defined(MY_WINE32)
+static int import_name_equal(const char *a, const char *b)
+{
+    unsigned char ua, ub;
+
+    if (a == NULL || b == NULL)
+        return 0;
+
+    while (*a != '\0' && *b != '\0') {
+        ua = (unsigned char)*a;
+        ub = (unsigned char)*b;
+        if (ua >= 'A' && ua <= 'Z')
+            ua = (unsigned char)(ua - 'A' + 'a');
+        if (ub >= 'A' && ub <= 'Z')
+            ub = (unsigned char)(ub - 'A' + 'a');
+        if (ua != ub)
+            return 0;
+        a++;
+        b++;
+    }
+
+    return *a == '\0' && *b == '\0';
+}
+#endif
+
 static int image_cstr_valid(void *base, IMAGE_NT_HEADERS *nt, uint32_t rva)
 {
     size_t image_size = pe_size_of_image(nt);
@@ -57,8 +82,12 @@ static void *resolve_import(const char *dll_name, const char *func_name)
     /* Tier 1: lookup in our stub import table */
     import_entry_t *entry = NULL;
 #if defined(MY_WINE32)
-    /* 32-bit: linear scan (avoid sort/bsearch dependency issues) */
+    /* 32-bit: linear scan (avoid sort/bsearch dependency issues).
+     * Match both DLL and function name because many Win32 exports share the
+     * same symbol across DLL spellings / duplicate table entries. */
     for (size_t i = 0; i < import_table_count; i++) {
+        if (!import_name_equal(dll_name, import_table[i].dll_name))
+            continue;
         if (import_cmp_by_name(func_name, &import_table[i]) == 0) {
             entry = &import_table[i];
             break;
@@ -220,6 +249,11 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                 const char *func_name = ordinal_lookup(dll_name, ordinal);
                 if (func_name != NULL) {
                     addr = resolve_import(dll_name, func_name);
+                    DEBUG_LEVEL(2, "resolve_import ordinal: %s#%u -> %s (%p)",
+                                dll_name, (unsigned)ordinal, func_name, addr);
+                } else {
+                    DEBUG_LEVEL(1, "resolve_import ordinal: %s#%u unresolved name",
+                                dll_name, (unsigned)ordinal);
                 }
             } else {
                 /* Name import */

@@ -39,6 +39,14 @@ U32W int32_t GetClientRect(uintptr_t hwnd, void *lpRect) { (void)hwnd; (void)lpR
 U32W int32_t GetWindowLongA(uintptr_t hwnd, int nIndex) { (void)hwnd; (void)nIndex; return 0; }
 U32W int32_t SetWindowLongA(uintptr_t hwnd, int nIndex, int32_t dwNewLong)
 { (void)hwnd; (void)nIndex; (void)dwNewLong; return 0; }
+U32W int64_t user32_dialog_send_control_message(uintptr_t hWnd, uint32_t Msg, uintptr_t wParam, intptr_t lParam)
+{
+    (void)hWnd;
+    (void)Msg;
+    (void)wParam;
+    (void)lParam;
+    return (int64_t)(intptr_t)-2147483647L;
+}
 U32W intptr_t GetWindowLongPtrA(uintptr_t hwnd, int nIndex) { (void)hwnd; (void)nIndex; return 0; }
 U32W intptr_t SetWindowLongPtrA(uintptr_t hwnd, int nIndex, intptr_t dwNewLong)
 { (void)hwnd; (void)nIndex; (void)dwNewLong; return 0; }

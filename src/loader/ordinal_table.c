@@ -167,6 +167,7 @@ static const ordinal_entry_t ordinal_table[] = {
     { "kernel32.dll", 304, "GetProcessHeaps" },
     { "comctl32.dll", 17, "InitCommonControls" },
     { "dplay.dll", 1, "DPCreate" },
+    { "dplay.dll", 2, "DirectPlayEnumerateA" },
     /* msvcrt.dll ordinals (subset) */
     { "msvcrt.dll", 1,  "abort" },
     { "msvcrt.dll", 5,  "_amsg_exit" },

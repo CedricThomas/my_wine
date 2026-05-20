@@ -166,7 +166,9 @@ void EnterCriticalSection(CRITICAL_SECTION *cs)
      */
     for (;;) {
         if (cs->LockSemaphore == 0) {
-            handler_NtCreateEvent(&cs->LockSemaphore, 0, 0, 0, 0);
+            uint64_t handle = 0;
+            handler_NtCreateEvent(&handle, 0, 0, 0, 0);
+            cs->LockSemaphore = (uintptr_t)handle;
         }
         handler_NtResetEvent(cs->LockSemaphore, 0);
         handler_NtWaitForSingleObject(cs->LockSemaphore, 0, 0);

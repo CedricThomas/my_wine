@@ -72,6 +72,8 @@ static IMAGE_NT_HEADERS g_nt_headers;
 /* Entry type tracking — set by resolve_entry_symbol(), used for stack layout decisions */
 typedef enum { ENTRY_TYPE_MAIN, ENTRY_TYPE_WINMAIN, ENTRY_TYPE_WWINMAIN } entry_type_t;
 static entry_type_t g_entry_type = ENTRY_TYPE_MAIN;
+static char g_doom95_basewad_option[] = "-basewad";
+static char g_doom95_basewad_path[512];
 
 void *map_image(const char *path, IMAGE_DOS_HEADER *out_dos,
                 IMAGE_NT_HEADERS *out_nt, size_t *out_nt_size);
@@ -205,6 +207,8 @@ enum {
     DOOM95_STD_HANDLE_COUNT_RVA = 0x218358,
     DOOM95_STD_HANDLE_TABLE_RVA = 0x21835c,
     DOOM95_TRAP_FLAG_RVA        = 0x077d84,
+    DOOM95_COMMAND_ARRAY_RVA    = 0x0805d0,
+    DOOM95_COMMAND_ARRAY_BYTES  = 0x100,
 };
 
 static int abs32_to_rva(uint32_t abs, uint32_t *out_rva)
@@ -273,9 +277,13 @@ static void apply_doom95_runtime_compat(const char *path)
 {
     uint32_t *std_handle_count;
     uint32_t *std_handle_table_slot;
+    uint32_t *command_slots;
     uint8_t *trap_flag;
+    uint8_t *command_array;
     uint32_t *guest_table;
     void *table_page;
+    const char *slash;
+    size_t dir_len;
 
     if (!is_doom95_path(path))
         return;
@@ -288,8 +296,11 @@ static void apply_doom95_runtime_compat(const char *path)
     std_handle_table_slot = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
                                           DOOM95_STD_HANDLE_TABLE_RVA,
                                           sizeof(uint32_t));
+    command_array = pe_rva_to_ptr(g_loader.image_base, &g_nt_headers,
+                                  DOOM95_COMMAND_ARRAY_RVA,
+                                  DOOM95_COMMAND_ARRAY_BYTES);
     if (trap_flag == NULL || std_handle_count == NULL ||
-        std_handle_table_slot == NULL) {
+        std_handle_table_slot == NULL || command_array == NULL) {
         return;
     }
 
@@ -306,6 +317,23 @@ static void apply_doom95_runtime_compat(const char *path)
     *trap_flag = 0;
     *std_handle_count = 3;
     *std_handle_table_slot = (uint32_t)(uintptr_t)guest_table;
+    memset(command_array, 0, DOOM95_COMMAND_ARRAY_BYTES);
+
+    slash = strrchr(path, '/');
+    if (slash == NULL)
+        slash = path - 1;
+    dir_len = (size_t)(slash - path + 1);
+    if (dir_len >= sizeof(g_doom95_basewad_path))
+        dir_len = sizeof(g_doom95_basewad_path) - 1;
+    memcpy(g_doom95_basewad_path, path, dir_len);
+    g_doom95_basewad_path[dir_len] = '\0';
+    strncat(g_doom95_basewad_path, "DOOM1.WAD",
+            sizeof(g_doom95_basewad_path) - strlen(g_doom95_basewad_path) - 1);
+
+    command_slots = (uint32_t *)command_array;
+    command_slots[0] = (uint32_t)(uintptr_t)g_doom95_basewad_option;
+    command_slots[1] = (uint32_t)(uintptr_t)g_doom95_basewad_path;
+    command_slots[2] = 0;
 }
 
 /*

@@ -28,6 +28,14 @@ extern void rb_event_set_active_window(uintptr_t hwnd);
 extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
 KERNEL32_STUB BOOL AdjustWindowRectEx(RECT *lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle);
 
+__attribute__((weak))
+LONG_PTR user32_dialog_get_window_long_ptr(HWND hWnd, int nIndex)
+{
+    (void)hWnd;
+    (void)nIndex;
+    return 0;
+}
+
 static void *user32_alloc(size_t size)
 {
 #ifdef MY_WINE32
@@ -265,6 +273,9 @@ ATOM RegisterClassA(const WNDCLASSA *lpWndClass)
     user32_class_entry *entry;
     int idx;
 
+    DEBUG_LEVEL(1, "user32: RegisterClassA class=%s wndproc=%p",
+                (lpWndClass && lpWndClass->lpszClassName) ? lpWndClass->lpszClassName : "(null)",
+                lpWndClass ? lpWndClass->lpfnWndProc : NULL);
     if (!lpWndClass || !lpWndClass->lpszClassName)
         return 0;
 
@@ -285,6 +296,7 @@ ATOM RegisterClassA(const WNDCLASSA *lpWndClass)
     entry->wndclass.lpszClassName = class_name_copy;
 
     g_class_count++;
+    DEBUG_LEVEL(1, "user32: RegisterClassA success atom=%d", g_class_count);
     return (ATOM)g_class_count;
 }
 
@@ -369,6 +381,12 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     (void)dwExStyle;
 
     g_user32_window_create_attempted = 1;
+    DEBUG_LEVEL(1, "user32: CreateWindowExA class=%s title=%s style=0x%lx parent=0x%lx menu=0x%lx",
+                lpClassName ? lpClassName : "(null)",
+                lpWindowName ? lpWindowName : "(null)",
+                (unsigned long)dwStyle,
+                (unsigned long)(uintptr_t)hWndParent,
+                (unsigned long)(uintptr_t)hMenu);
 
     if (!user32_ensure_backend())
         return FORCE_HANDLE_RETURN(0, HWND);
@@ -414,6 +432,7 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
 
     rb_window_t rb_win = rb_window_create(entry->title, px, py, pw, ph, rb_flags);
     if (!rb_win) {
+        DEBUG_LEVEL(1, "user32: CreateWindowExA rb_window_create failed");
         user32_free(entry);
         return FORCE_HANDLE_RETURN(0, HWND);
     }
@@ -423,12 +442,15 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     /* Allocate the entry in the handle manager as HANDLE_TYPE_HWIN */
     uint64_t handle = wine_handle_alloc(HANDLE_TYPE_HWIN, entry);
     if (!handle) {
+        DEBUG_LEVEL(1, "user32: CreateWindowExA handle alloc failed");
         rb_window_destroy(rb_win);
         user32_free(entry);
         return FORCE_HANDLE_RETURN(0, HWND);
     }
     g_user32_live_windows++;
     if (rb_window_attach_guest_hwnd(rb_win, handle) != RB_OK) {
+        DEBUG_LEVEL(1, "user32: CreateWindowExA attach_guest_hwnd failed handle=0x%lx",
+                    (unsigned long)handle);
         g_user32_live_windows--;
         wine_handle_free((uint32_t)handle);
         rb_window_destroy(rb_win);
@@ -452,6 +474,8 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
 
     create_result = TRUE;
     if (entry->wnd_proc) {
+        DEBUG_LEVEL(1, "user32: CreateWindowExA WM_NCCREATE hwnd=0x%lx wndproc=%p",
+                    (unsigned long)handle, entry->wnd_proc);
         create_result = user32_call_wndproc((WNDPROC)entry->wnd_proc,
                                             (HWND)handle, WM_NCCREATE, 0,
                                             (LPARAM)(intptr_t)&create_struct);
@@ -466,6 +490,8 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
 
     create_result = 0;
     if (entry->wnd_proc) {
+        DEBUG_LEVEL(1, "user32: CreateWindowExA WM_CREATE hwnd=0x%lx",
+                    (unsigned long)handle);
         create_result = user32_call_wndproc((WNDPROC)entry->wnd_proc,
                                             (HWND)handle, WM_CREATE, 0,
                                             (LPARAM)(intptr_t)&create_struct);
@@ -479,6 +505,8 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     }
 
     user32_set_foreground_focus((HWND)handle, 1);
+    DEBUG_LEVEL(1, "user32: CreateWindowExA success hwnd=0x%lx",
+                (unsigned long)handle);
     return FORCE_HANDLE_RETURN(handle, HWND);
 }
 
@@ -674,8 +702,12 @@ KERNEL32_STUB
 LONG GetWindowLongA(HWND hwnd, int nIndex)
 {
     wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry)
-        return 0;
+    LONG_PTR dialog_value;
+
+    if (!entry) {
+        dialog_value = user32_dialog_get_window_long_ptr(hwnd, nIndex);
+        return (LONG)dialog_value;
+    }
 
     return (LONG)user32_get_window_long_ptr(entry, nIndex);
 }
@@ -699,8 +731,12 @@ KERNEL32_STUB
 LONG_PTR GetWindowLongPtrA(HWND hwnd, int nIndex)
 {
     wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry)
-        return 0;
+    LONG_PTR dialog_value;
+
+    if (!entry) {
+        dialog_value = user32_dialog_get_window_long_ptr(hwnd, nIndex);
+        return dialog_value;
+    }
 
     return user32_get_window_long_ptr(entry, nIndex);
 }

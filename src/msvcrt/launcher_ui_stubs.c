@@ -1,4 +1,6 @@
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "user32_priv.h"
 #include "include/handle_manager.h"
@@ -26,9 +28,13 @@ typedef struct {
     int32_t rcNormalBottom;
 } WINDOWPLACEMENT_WINE;
 
-extern HWND CreateDialogParamA(HINSTANCE hInstance, const char *lpTemplateName, HWND hWndParent,
-                               void *lpDialogFunc, LPARAM dwInitParam);
-extern BOOL DestroyWindow(HWND hWnd);
+extern HWND KERNEL32_ABI CreateDialogParamA(HINSTANCE hInstance, const char *lpTemplateName,
+                                            HWND hWndParent, void *lpDialogFunc,
+                                            LPARAM dwInitParam);
+extern BOOL KERNEL32_ABI DestroyWindow(HWND hWnd);
+extern HWND KERNEL32_ABI GetDlgItem(HWND hDlg, int nIDDlgItem);
+extern LRESULT KERNEL32_ABI SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+extern LONG KERNEL32_ABI GetWindowLongA(HWND hwnd, int nIndex);
 
 static int user32_strings_match(const char *a, const char *b)
 {
@@ -66,15 +72,14 @@ KERNEL32_STUB int DialogBoxParamA(HINSTANCE hInstance, const char *lpTemplateNam
 {
     HWND hwnd = CreateDialogParamA(hInstance, lpTemplateName, hWndParent,
                                    lpDialogFunc, dwInitParam);
-    return hwnd ? IDOK : 0;
+    DEBUG_LEVEL(1, "user32: DialogBoxParamA created hwnd=0x%lx template=%p dlgproc=%p",
+                (unsigned long)(uintptr_t)hwnd, (const void *)lpTemplateName, lpDialogFunc);
+    return user32_dialog_run_modal(hwnd, lpDialogFunc);
 }
 
 KERNEL32_STUB BOOL EndDialog(HWND hDlg, intptr_t nResult)
 {
-    (void)nResult;
-    if (hDlg != 0)
-        DestroyWindow(hDlg);
-    return TRUE;
+    return user32_dialog_end(hDlg, nResult);
 }
 
 KERNEL32_STUB BOOL PostThreadMessageA(uint32_t idThread, UINT Msg, WPARAM wParam, LPARAM lParam)
@@ -143,31 +148,64 @@ KERNEL32_STUB HWND GetParent(HWND hWnd)
 
 KERNEL32_STUB UINT GetDlgItemTextA(HWND hDlg, int nIDDlgItem, char *lpString, int cchMax)
 {
-    (void)hDlg;
-    (void)nIDDlgItem;
+    HWND item = GetDlgItem(hDlg, nIDDlgItem);
+    UINT copied;
+
     if (lpString == NULL || cchMax <= 0)
         return 0;
-    lpString[0] = '\0';
-    return 0;
+
+    copied = (UINT)SendMessageA(item, WM_GETTEXT, (WPARAM)cchMax, (LPARAM)(uintptr_t)lpString);
+    if (copied >= (UINT)cchMax)
+        copied = (UINT)(cchMax - 1);
+    lpString[copied] = '\0';
+    DEBUG_LEVEL(1, "user32: GetDlgItemTextA dialog=0x%lx id=0x%x -> '%s' (%u)",
+                (unsigned long)(uintptr_t)hDlg, (unsigned)nIDDlgItem, lpString, copied);
+    return copied;
 }
 
 KERNEL32_STUB UINT GetDlgItemInt(HWND hDlg, int nIDDlgItem, BOOL *lpTranslated, BOOL bSigned)
 {
-    (void)hDlg;
-    (void)nIDDlgItem;
+    HWND item = GetDlgItem(hDlg, nIDDlgItem);
+    char text[64];
+    char *end = NULL;
+    long value;
+
     (void)bSigned;
+
     if (lpTranslated)
         *lpTranslated = FALSE;
-    return 0;
+    if (!item)
+        return 0;
+
+    text[0] = '\0';
+    if (SendMessageA(item, WM_GETTEXT, (WPARAM)sizeof(text), (LPARAM)(uintptr_t)text) <= 0)
+        return 0;
+
+    value = strtol(text, &end, 10);
+    if (end == text || *end != '\0' || value < 0)
+        return 0;
+
+    if (lpTranslated)
+        *lpTranslated = TRUE;
+    return (UINT)value;
 }
 
 KERNEL32_STUB BOOL SetDlgItemInt(HWND hDlg, int nIDDlgItem, UINT uValue, BOOL bSigned)
 {
-    (void)hDlg;
-    (void)nIDDlgItem;
+    HWND item = GetDlgItem(hDlg, nIDDlgItem);
+    char text[32];
+
     (void)uValue;
     (void)bSigned;
-    return TRUE;
+    if (!item)
+        return FALSE;
+
+    if (bSigned)
+        snprintf(text, sizeof(text), "%d", (int)uValue);
+    else
+        snprintf(text, sizeof(text), "%u", (unsigned)uValue);
+
+    return SendMessageA(item, WM_SETTEXT, 0, (LPARAM)(uintptr_t)text) ? TRUE : FALSE;
 }
 
 KERNEL32_STUB BOOL WinHelpA(HWND hWndMain, const char *lpszHelp, UINT uCommand, uintptr_t dwData)
@@ -208,4 +246,54 @@ KERNEL32_STUB BOOL GetSaveFileNameA(void *info)
 KERNEL32_STUB uint32_t CommDlgExtendedError(void)
 {
     return 0;
+}
+
+KERNEL32_STUB int GetWindowTextA(HWND hWnd, char *lpString, int nMaxCount)
+{
+    if (lpString == NULL || nMaxCount <= 0)
+        return 0;
+    return (int)SendMessageA(hWnd, WM_GETTEXT, (WPARAM)nMaxCount, (LPARAM)(uintptr_t)lpString);
+}
+
+KERNEL32_STUB LONG GetDlgCtrlID(HWND hWnd)
+{
+    return GetWindowLongA(hWnd, GWL_ID);
+}
+
+KERNEL32_STUB LRESULT SendDlgItemMessageA(HWND hDlg, int nIDDlgItem, UINT Msg, WPARAM wParam, LPARAM lParam)
+{
+    return SendMessageA(GetDlgItem(hDlg, nIDDlgItem), Msg, wParam, lParam);
+}
+
+KERNEL32_STUB BOOL IsWindowEnabled(HWND hWnd)
+{
+    return get_window_entry(hWnd) != NULL;
+}
+
+KERNEL32_STUB UINT MapVirtualKeyA(UINT uCode, UINT uMapType)
+{
+    (void)uMapType;
+    return uCode;
+}
+
+KERNEL32_STUB HWND CreateDialogIndirectParamA(HINSTANCE hInstance, const void *lpTemplate,
+                                              HWND hWndParent, void *lpDialogFunc,
+                                              LPARAM dwInitParam)
+{
+    (void)lpTemplate;
+    return CreateDialogParamA(hInstance, (const char *)(uintptr_t)1u, hWndParent,
+                              lpDialogFunc, dwInitParam);
+}
+
+KERNEL32_STUB LONG GetDialogBaseUnits(void)
+{
+    return (LONG)((8 & 0xffff) | ((16 & 0xffff) << 16));
+}
+
+KERNEL32_STUB BOOL CopyRect(RECT *lprcDst, const RECT *lprcSrc)
+{
+    if (lprcDst == NULL || lprcSrc == NULL)
+        return FALSE;
+    *lprcDst = *lprcSrc;
+    return TRUE;
 }

@@ -23,6 +23,8 @@
 /* Forward declarations for cross-referenced stubs within this file */
 KERNEL32_STUB LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_STUB BOOL DestroyWindow(HWND hwnd);
+extern LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam,
+                                                  LPARAM lParam) __attribute__((weak));
 
 static int g_quit_pending = 0;
 static int g_quit_exit_code = 0;
@@ -465,6 +467,13 @@ KERNEL32_STUB
 LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
     wine_window_entry *entry = get_window_entry(hWnd);
+    LRESULT dialog_result = (LRESULT)(intptr_t)-2147483647L;
+
+    if (user32_dialog_send_control_message != NULL)
+        dialog_result = user32_dialog_send_control_message(hWnd, Msg, wParam, lParam);
+
+    if (dialog_result != (LRESULT)(intptr_t)-2147483647L)
+        return dialog_result;
 
     switch (Msg) {
     case WM_GETTEXT: {

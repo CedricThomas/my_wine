@@ -185,6 +185,42 @@ uint32_t RegSetValueExA(void *hKey, const char *lpValueName, uint32_t Reserved,
 }
 
 KERNEL32_STUB
+uint32_t RegDeleteKeyA(void *hKey, const char *lpSubKey)
+{
+    char path[256];
+    int i;
+
+    reg_join_path((uintptr_t)hKey, lpSubKey, path, sizeof(path));
+    for (i = 0; i < 64; i++) {
+        if (!g_reg_values[i].used)
+            continue;
+        if (strcmp(g_reg_values[i].path, path) != 0)
+            continue;
+        memset(&g_reg_values[i], 0, sizeof(g_reg_values[i]));
+    }
+    return 0;
+}
+
+KERNEL32_STUB
+uint32_t RegEnumKeyExA(void *hKey, uint32_t dwIndex, char *lpName, uint32_t *lpcchName,
+                       uint32_t *lpReserved, char *lpClass, uint32_t *lpcchClass,
+                       FILETIME *lpftLastWriteTime)
+{
+    (void)hKey;
+    (void)dwIndex;
+    (void)lpReserved;
+    (void)lpClass;
+    (void)lpcchClass;
+    (void)lpftLastWriteTime;
+
+    if (lpName && lpcchName && *lpcchName > 0)
+        lpName[0] = '\0';
+    if (lpcchName)
+        *lpcchName = 0;
+    return 259; /* ERROR_NO_MORE_ITEMS */
+}
+
+KERNEL32_STUB
 uint32_t GetUserNameA(char *buffer, uint32_t *size)
 {
     static const char user[] = "player";
