@@ -74,6 +74,7 @@ typedef struct my_palette {
     uint32_t     ref_count;            /* COM reference count           */
     rb_palette_t rb_palette;           /* underlying render backend pal */
     uint32_t     num_colors;           /* number of palette entries     */
+    uint32_t     caps;                 /* DDPCAPS_* creation flags      */
 } my_palette_t;
 
 /*

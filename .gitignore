@@ -35,6 +35,10 @@ include/crt_offsets_generated.h
 src/syscall/dispatcher_generated.c
 .gen_crt_offsets.*/
 
+# Visual debug captures
+artifacts/screenshots/
+doom95_*.png
+
 # Python
 __pycache__/
 *.pyc

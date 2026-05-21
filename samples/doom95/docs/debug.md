@@ -9,15 +9,21 @@ Keep only facts that change the next debugging move.
 
 - Use `./my_wine32`, not `./my_wine`, when validating the newest 32-bit changes.
 - `make my_wine32` succeeds.
+- The Docker debug image `my_wine-samples` can now build and debug `my_wine32` inside Ubuntu 22.04.
 - Doom95 no longer dies in the old post-launcher crash sites.
-- Doom95 still does not reach confirmed gameplay.
+- Doom95 no longer crashes on the post-palette `IDirectDrawPalette::SetEntries` call.
+- Doom95 now reaches sustained frame production.
+- Visual gameplay is confirmed under Xvfb/openbox using the Docker debug image.
 - The current live behavior is:
   - launcher autostart runs
   - `DOOM1.WAD` is found
   - `Doom95Class` window is created
   - DirectDraw setup gets much farther than before
   - `CreatePalette` and `SetPalette` both complete
-  - process stays alive and spins hot instead of exiting cleanly or entering obvious gameplay
+  - `PaletteSetEntries` completes
+  - `Lock` / `Unlock`, `Flip`, and occasional `Blt` continue steadily
+  - `doom95_window.png` captures live gameplay
+  - process stays alive and spins hot, dominated by `timeGetTime` polling
 
 ## Most important changes already proved
 
@@ -39,10 +45,13 @@ Keep only facts that change the next debugging move.
 - `IDirectDrawSurface` vtable layout was also wrong.
 - `DDSCAPS_*` values were wrong for the flags Doom95 uses.
 - `DDSURFACEDESC` handling in `src/msvcrt/ddraw_interface.c` was reading the guest descriptor incorrectly.
+- `IDirectDrawPalette` vtable layout was missing `GetCaps` and `Initialize`; Doom95 calls
+  `SetEntries` at vtable offset `0x18`, so the old 5-slot layout jumped through NULL.
 - These fixes were necessary to get past:
   - crash immediately after `DirectDrawCreate`
   - crash after primary-surface setup
   - early `Couldn't set up screen!` failure
+  - null call after `CreatePalette` / `SetPalette` at guest return site near `0x0043c41e`
 
 ### 3. The current run is beyond the old fatal setup error
 
@@ -54,30 +63,40 @@ Current debug trace from `./my_wine32` shows:
 - `ddraw: SetDisplayMode 640x400x8 exclusive=1 rb_window=23`
 - `ddraw: CreateSurface caps=0x4218 size=640x400 backbuffers=2`
 - `ddraw: CreateSurface caps=0x40 size=640x400 backbuffers=2`
-- `ddraw: CreatePalette flags=0x44 count=16 -> ...`
+- `ddraw: CreatePalette flags=0x44 count=256 -> ...`
 - `ddraw: SetPalette count=1`
+- `ddraw: PaletteSetEntries count=1`
+- `ddraw: Lock count=...`
+- `ddraw: Unlock count=...`
+- `ddraw: Flip count=...`
+- `winmm: timeGetTime count=...`
 
-After that, Doom95 remains alive instead of crashing.
+After that, Doom95 remains alive, continues producing DDraw activity, and presents visible gameplay frames.
+
+## Visual confirmation
+
+- Rebuilt the updated Docker image:
+  - `DOCKER_BUILDKIT=0 docker build -t my_wine-samples .`
+- Rebuilt the 32-bit binary inside the image to avoid host/container glibc mismatch:
+  - `docker run --rm -v "$PWD:/project" -w /project my_wine-samples bash -lc 'make -B my_wine32'`
+- Captured visual output under Xvfb/openbox:
+  - `doom95_window.png`
+  - `doom95_root.png`
+- The captured frame shows live in-game Doom rendering.
+- The prior black frame was not missing game drawing. The backbuffer had nonzero indexed pixels and a valid palette, but presentation used `SDL_SoftStretch` from `INDEX8` to the Xvfb `RGB888` window surface. SDL rejected that path with:
+  - `Only works with same format surfaces`
+  - then `Blit combination not supported`
+- `src/backend/sdl2/rb_surface.c` now converts indexed frames to the window format before scaling/presenting.
+- `MY_WINE_DEBUG_LEVEL=1` no longer enables the `SIGALRM` sampler; the sampler is level 2+ only, so level 1 traces are usable for normal Doom95 debugging.
 
 ## Current blocker
 
-The blocker is no longer loader corruption, launcher state, or the first DirectDraw object creation.
+The blocker is no longer loader corruption, launcher state, first DirectDraw object creation, palette setup, or visual presentation.
 
-The blocker is:
+The blocker is now:
 
-- Doom95 gets through major DirectDraw setup plus first palette attach
-- then the process keeps running at high CPU
-- gameplay is not yet confirmed
-- short live sampling does not show a sustained post-palette storm in:
-  - `IDirectDrawSurface::Flip`
-  - `IDirectDrawSurface::Lock` / `Unlock`
-  - `PeekMessageA`
-  - `timeGetTime`
-  - `GetTickCount`
-- the remaining likelihood is shifting toward:
-  - guest Doom95 code spinning after setup
-  - an uninstrumented imported API path
-  - a render/backend issue that occurs after only a few initial DDraw calls
+- CPU remains hot because Doom95 calls `timeGetTime` extremely aggressively.
+- The remaining likelihood is expected Doom95 busy-wait timing behavior that may need conservative throttling/yielding.
 
 ## Important confirmed facts
 
@@ -93,65 +112,58 @@ The blocker is:
   - `GetAttachedSurface`
   - `CreatePalette`
   - `SetPalette`
-- A fresh instrumented run showed only a small early burst before the hot spin:
-  - `GetAttachedSurface count=1`
-  - `Flip count=4`
-  - `Lock count=2`
-  - `Unlock count=2`
-  - `timeGetTime count=1`
-- `PeekMessageA` idled a few times during launcher teardown, but no large post-start message-pump storm was observed.
+  - `GetVerticalBlankStatus`
+  - `IDirectDrawPalette::SetEntries`
+  - `Lock` / `Unlock`
+  - `Flip`
+  - `Blt`
+- A fresh instrumented run showed sustained post-palette activity:
+  - `PaletteSetEntries count=2`
+  - `Flip count=512+`
+  - `Lock count=2048+`
+  - `Unlock count=2048+`
+  - `timeGetTime count=100,000,000+`
+- A Docker/Xvfb capture showed visible gameplay and successful presentation:
+  - `SDL_PIXELFORMAT_INDEX8` backbuffer
+  - `SDL_PIXELFORMAT_RGB888` window surface
+  - converted/scaled present returns `0`
+  - screenshot contains 173 colors
+- `PeekMessageA` idle polling rises slowly compared with the timer storm.
 - A fallback backbuffer path was added in `src/msvcrt/ddraw_interface.c` so Doom95 can keep going even if the backend flip-chain state is incomplete.
-- `ptrace` attach with `gdb` is blocked in this environment (`Operation not permitted`), so the next move cannot depend on live debugger attach unless that restriction changes.
+- `gdb` batch launch works in the current environment and is useful for reproducing Doom95 behavior; plain sandboxed `./my_wine32` may still exit with code `159` before userland output.
 
 ## Best next move
 
-Treat this as a spinning-runtime bug after palette attach, not a startup-crash bug.
+Treat this as a hot timing/performance issue, not a startup-crash or render-confirmation bug.
 
-### Priority 1: broaden in-process sampling around the post-palette gap
+### Priority 1: throttle or explain the `timeGetTime` storm
 
-- Run `./my_wine32 samples/unpacked/doom95/DOOM95.EXE`
-- keep the new low-overhead counters enabled
-- add the next narrow counters/logs to APIs that can still explain a hot spin:
-  - `Blt` / `BltFast`
-  - `GetFlipStatus` / `GetBltStatus`
-  - `WaitForSingleObject` / `Sleep(0)` / sync waits
-  - `QueryPerformanceCounter` or other timing APIs if present
-- if needed, add one in-process guest-PC sampler instead of relying on external `gdb`
+- Consider a narrow compatibility throttle in `timeGetTime` only after repeated same-millisecond polls.
+- Keep it conservative; Doom95 is producing frames, so do not perturb timing heavily.
+- Re-run with `MY_WINE_DEBUG_LEVEL=1` only briefly because timer logging becomes enormous.
 
 The next session should answer:
 
-- is Doom95 spinning in guest code without frequent imported calls?
-- is it polling an uninstrumented timing or wait API?
-- does it switch to `Blt`/status polling after the first palette attach?
+- does a small yield in the timer poll reduce CPU without breaking frame production?
+- is the apparent hot loop just Doom95's normal uncapped busy wait?
 
-### Priority 2: verify the backbuffer path is actually usable after `SetPalette`
+### Priority 2: clean up stale DDraw harnesses
 
-- recheck whether the primary surface has a valid attached backbuffer object on the live path
-- if needed, add narrow logs for:
-  - `surface_Blt`
-  - `surface_GetFlipStatus`
-  - `surface_GetBltStatus`
-
-The goal is to confirm whether frames are being produced but not presented, or not produced at all.
-
-### Priority 3: check uninstrumented wait/timer behavior
-
-- if the hot loop is not in the extra DDraw/status logs, inspect:
-  - kernel wait/sync stubs
-  - timing APIs beyond `timeGetTime` / `GetTickCount`
-  - focus/active-window assumptions
-  - keyboard/input polling paths
+- `samples/ddraw_sample_32` still carries an old local `IDirectDraw`/surface ABI and is not a reliable Doom95 verifier.
+- `tests/test_ddraw.c` now builds after using the SDK-style `Lock` descriptor result, but its expectations still expose older DDSURFACEDESC/backend assumptions.
 
 ## What to avoid
 
 - Do not spend more time on the old launcher invalid-control theory unless a fresh trace points back there.
 - Do not reopen the old `0x004450cb` crash analysis unless the code regresses to that path.
 - Do not broaden into unrelated DLL/import work without a new trace proving it matters.
+- Do not revert the palette vtable fix; Doom95 directly needs the 7-slot palette ABI.
 
 ## Most relevant files
 
 - [src/loader/image_mapper.c](/home/arzad/Playground/projects/my_wine/src/loader/image_mapper.c)
 - [include/ddraw_types.h](/home/arzad/Playground/projects/my_wine/include/ddraw_types.h)
 - [src/msvcrt/ddraw_interface.c](/home/arzad/Playground/projects/my_wine/src/msvcrt/ddraw_interface.c)
+- [src/backend/sdl2/rb_surface.c](/home/arzad/Playground/projects/my_wine/src/backend/sdl2/rb_surface.c)
 - [src/msvcrt/kernel32_doom95.c](/home/arzad/Playground/projects/my_wine/src/msvcrt/kernel32_doom95.c)
 - [src/msvcrt/user32_dialog.c](/home/arzad/Playground/projects/my_wine/src/msvcrt/user32_dialog.c)

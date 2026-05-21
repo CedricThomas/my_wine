@@ -10,6 +10,7 @@
  */
 
 #define _GNU_SOURCE
+#include <stdbool.h>
 #include <unistd.h>
 #include "kernel32_priv.h"
 

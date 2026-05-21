@@ -696,6 +696,7 @@ static HRESULT KERNEL32_STUB ddraw_CreatePalette(void *this_ptr, uint32_t flags,
     pal->ref_count = 1;
     pal->rb_palette = rb_pal;
     pal->num_colors = count;
+    pal->caps = flags;
 
     memset(colors, 0, sizeof(colors));
     if (entries) {
@@ -1311,6 +1312,17 @@ static uint32_t KERNEL32_STUB palette_Release(void *this_ptr)
     return 0;
 }
 
+static HRESULT KERNEL32_STUB palette_GetCaps(void *this_ptr, uint32_t *lpdwCaps)
+{
+    my_palette_t *pal = (my_palette_t *)this_ptr;
+
+    if (!pal || !lpdwCaps)
+        return DDERR_INVALIDPARAMS;
+
+    *lpdwCaps = pal->caps;
+    return DD_OK;
+}
+
 static HRESULT KERNEL32_STUB palette_GetEntries(void *this_ptr, void *ddpba,
                                                 uint32_t dwStart, uint32_t dwCount,
                                                 void *ddpe)
@@ -1335,6 +1347,22 @@ static HRESULT KERNEL32_STUB palette_GetEntries(void *this_ptr, void *ddpba,
         entries[i].peBlue = (uint8_t)((colors[i] >> 16) & 0xFF);
         entries[i].peFlags = 0;
     }
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB palette_Initialize(void *this_ptr, void *lpDD,
+                                                uint32_t dwFlags,
+                                                void *lpDDColorTable)
+{
+    my_palette_t *pal = (my_palette_t *)this_ptr;
+
+    (void)lpDD;
+    (void)lpDDColorTable;
+
+    if (!pal)
+        return DDERR_INVALIDPARAMS;
+
+    pal->caps = dwFlags;
     return DD_OK;
 }
 
@@ -1369,7 +1397,9 @@ const IDirectDrawPaletteVtbl palette_vtbl = {
     .QueryInterface = palette_QueryInterface,
     .AddRef = palette_AddRef,
     .Release = palette_Release,
+    .GetCaps = palette_GetCaps,
     .GetEntries = palette_GetEntries,
+    .Initialize = palette_Initialize,
     .SetEntries = palette_SetEntries,
 };
 

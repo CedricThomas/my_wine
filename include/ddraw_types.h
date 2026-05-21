@@ -755,7 +755,10 @@ typedef struct _IDirectDrawSurfaceVtbl {
 } IDirectDrawSurfaceVtbl;
 
 /*
- * IDirectDrawPaletteVtbl — 5 methods.
+ * IDirectDrawPaletteVtbl — DirectDraw 1 palette layout.
+ *
+ * Offsets 0–2 are IUnknown, followed by GetCaps, GetEntries,
+ * Initialize, and SetEntries.
  */
 typedef struct _IDirectDrawPaletteVtbl {
     /*  0 */ HRESULT (KERNEL32_STUB *QueryInterface)(
@@ -764,13 +767,21 @@ typedef struct _IDirectDrawPaletteVtbl {
         void **ppvObj);
     /*  1 */ uint32_t (KERNEL32_STUB *AddRef)(void *this_ptr);
     /*  2 */ uint32_t (KERNEL32_STUB *Release)(void *this_ptr);
-    /*  3 */ HRESULT (KERNEL32_STUB *GetEntries)(
+    /*  3 */ HRESULT (KERNEL32_STUB *GetCaps)(
+        void *this_ptr,
+        uint32_t *lpdwCaps);
+    /*  4 */ HRESULT (KERNEL32_STUB *GetEntries)(
         void *this_ptr,
         void *ddpba,
         uint32_t dwStart,
         uint32_t dwCount,
         void *ddpe);
-    /*  4 */ HRESULT (KERNEL32_STUB *SetEntries)(
+    /*  5 */ HRESULT (KERNEL32_STUB *Initialize)(
+        void *this_ptr,
+        void *lpDD,
+        uint32_t dwFlags,
+        void *lpDDColorTable);
+    /*  6 */ HRESULT (KERNEL32_STUB *SetEntries)(
         void *this_ptr,
         void *ddpba,
         uint32_t dwStart,

@@ -83,14 +83,16 @@ static inline int debug_level_at_least(int level) {
 #define DEBUG_WRITE_ERR(msg, len)                                     \
     do {                                                              \
         if (debug_level_at_least(1)) {                                \
-            write(STDERR_FILENO, (msg), (len));                       \
+            ssize_t debug_write_ret = write(STDERR_FILENO, (msg), (len)); \
+            (void)debug_write_ret;                                    \
         }                                                             \
     } while (0)
 
 #define DEBUG_WRITE_ERR_LEVEL(level, msg, len)                        \
     do {                                                              \
         if (debug_level_at_least(level)) {                            \
-            write(STDERR_FILENO, (msg), (len));                       \
+            ssize_t debug_write_ret = write(STDERR_FILENO, (msg), (len)); \
+            (void)debug_write_ret;                                    \
         }                                                             \
     } while (0)
 

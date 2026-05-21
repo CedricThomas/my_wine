@@ -4,6 +4,7 @@
  * SDL2 backend initialization and shutdown.
  */
 
+#define _GNU_SOURCE
 #include "rb_sdl2_priv.h"
 #include <stdio.h>
 #include <signal.h>

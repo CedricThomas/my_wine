@@ -352,6 +352,7 @@ $(BUILDDIR32)/test_dsound: tests/test_dsound.c $(TEST_dsound32_OBJS)
 #   make samples SAMPLE=foo                  build one sample binary
 #   make graphical-samples SAMPLE=foo        build one graphical sample binary
 #   make run-samples-scenarios SAMPLE=foo    unified console/graphical scenario runner
+#   make screenshot-doom95                   capture Doom95 via Docker/Xvfb
 SAMPLE ?=
 
 samples:
@@ -366,6 +367,9 @@ build-docker-image:
 	@echo "Building my_wine-samples Docker image..."
 	@DOCKER_BUILDKIT=0 docker build -t my_wine-samples . || { echo "FAIL: Docker build failed"; exit 1; }
 	@echo "OK  my_wine-samples image ready"
+
+screenshot-doom95:
+	@bash scripts/capture_screenshot.sh
 
 # ── Clean And Rebuild Helpers ───────────────────────────────────
 clean:

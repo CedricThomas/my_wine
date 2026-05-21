@@ -973,6 +973,7 @@ int GetSystemMetrics(int nIndex)
  * Stub: *lpRect unchanged, returns TRUE.
  */
 KERNEL32_STUB
+KERNEL32_STUB
 BOOL AdjustWindowRect(LPRECT lpRect, DWORD dwStyle, BOOL bMenu)
 {
     return AdjustWindowRectEx(lpRect, dwStyle, bMenu, 0);
@@ -1017,6 +1018,7 @@ static void user32_adjust_window_rect_impl(LPRECT lpRect, DWORD dwStyle,
     lpRect->bottom += bottom;
 }
 
+KERNEL32_STUB
 BOOL AdjustWindowRectEx(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle)
 {
     user32_adjust_window_rect_impl(lpRect, dwStyle, bMenu, dwExStyle);

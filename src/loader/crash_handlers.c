@@ -481,7 +481,7 @@ void install_crash_signal_handlers(void)
     sigaction(SIGTRAP, &sa, NULL);
 #endif
 
-    if (debug_level_at_least(1)) {
+    if (debug_level_at_least(2)) {
         struct sigaction prof_sa;
         struct itimerval timer;
 

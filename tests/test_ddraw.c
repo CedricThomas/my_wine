@@ -129,8 +129,9 @@ int main(void)
         if (offscreen) {
             memset(&lock_desc, 0, sizeof(lock_desc));
             lock_desc.ddSize = sizeof(lock_desc);
-            T(offscreen->lpVtbl->Lock(offscreen, NULL, (void **)&pixels, &lock_desc, 0, NULL) == DD_OK,
+            T(offscreen->lpVtbl->Lock(offscreen, NULL, &lock_desc, 0, NULL) == DD_OK,
               "offscreen Lock failed");
+            pixels = (uint8_t *)(uintptr_t)lock_desc.lpSurface;
             T(pixels != NULL, "offscreen Lock returned NULL pixels");
             T(lock_desc.lPitch >= 64, "offscreen pitch too small");
 
@@ -151,8 +152,9 @@ int main(void)
             pixels = NULL;
             memset(&lock_desc, 0, sizeof(lock_desc));
             lock_desc.ddSize = sizeof(lock_desc);
-            T(backbuffer->lpVtbl->Lock(backbuffer, NULL, (void **)&pixels, &lock_desc, 0, NULL) == DD_OK,
+            T(backbuffer->lpVtbl->Lock(backbuffer, NULL, &lock_desc, 0, NULL) == DD_OK,
               "backbuffer Lock failed");
+            pixels = (uint8_t *)(uintptr_t)lock_desc.lpSurface;
             T(pixels != NULL, "backbuffer Lock returned NULL pixels");
             T(backbuffer->lpVtbl->Unlock(backbuffer, NULL) == DD_OK, "backbuffer Unlock failed");
             T(primary->lpVtbl->Flip(primary, NULL, 0) == DD_OK,
@@ -170,8 +172,9 @@ int main(void)
             pixels = NULL;
             memset(&lock_desc, 0, sizeof(lock_desc));
             lock_desc.ddSize = sizeof(lock_desc);
-            T(primary->lpVtbl->Lock(primary, NULL, (void **)&pixels, &lock_desc, 0, NULL) == DD_OK,
+            T(primary->lpVtbl->Lock(primary, NULL, &lock_desc, 0, NULL) == DD_OK,
               "primary Lock failed");
+            pixels = (uint8_t *)(uintptr_t)lock_desc.lpSurface;
             T(pixels != NULL, "primary Lock returned NULL pixels");
             T(primary->lpVtbl->Unlock(primary, NULL) == DD_OK, "primary Unlock failed");
         }

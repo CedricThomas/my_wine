@@ -47,6 +47,7 @@ make samples SAMPLE=hello_world                 # build one e2e sample binary
 make run-samples-scenarios SAMPLE=hello_world   # unified console/graphical runner
 make run-samples-scenarios SAMPLE=sdl2_window   # graphical samples run in Docker/Xvfb
 GRAPHICAL_RUNTIME=wine make run-samples-scenarios SAMPLE=sdl2_window  # run graphical sample under real Wine as reference
+make screenshot-doom95                          # capture Doom95 under Docker/Xvfb
 ```
 
 You should see `Hello from Windows!` printed to the terminal.
@@ -81,6 +82,7 @@ For example:
 | `make graphical-samples SAMPLE=foo` | Cross-compile one graphical sample binary |
 | `make run-samples-scenarios SAMPLE=foo` | Build and run one sample scenario, dispatching graphical samples to Xvfb |
 | `make run-samples-scenarios` | Unified run for console and graphical sample scenarios |
+| `make screenshot-doom95` | Capture a Doom95 screenshot via Docker/Xvfb into `artifacts/screenshots/` |
 
 Graphical samples are marked with `type=graphical` in `sample.info`. Add
 `applied_inputs.txt` beside the sample to replay deterministic events after the
@@ -93,6 +95,13 @@ Wine inside the Docker image for reference behavior; the default remains
 `GRAPHICAL_RUNTIME=my_wine`. The Wine reference path keeps the same window/input
 checks but skips strict geometry assertions, since Wine window-manager sizing
 does not match the loader's SDL window sizing exactly.
+
+For ad-hoc visual debugging, use `scripts/capture_screenshot.sh`. With no
+arguments it captures Doom95. For another window, pass a title and command:
+
+```bash
+scripts/capture_screenshot.sh --title "Test" --out artifacts/screenshots/test.png -- ./my_wine samples/sdl2_window/sdl2_window.exe
+```
 
 ### Dependencies
 
