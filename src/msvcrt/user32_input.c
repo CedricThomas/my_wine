@@ -44,7 +44,15 @@ static int g_user32_clip_rect_enabled = 0;
 KERNEL32_STUB
 SHORT GetAsyncKeyState(int vKey)
 {
-    return rb_keyboard_get_async_state(vKey);
+    static uint8_t previous_down[256];
+    uint8_t idx = (uint8_t)vKey;
+    SHORT state = rb_keyboard_get_async_state(vKey);
+    int is_down = (state & (SHORT)0x8000) != 0;
+
+    if (is_down && !previous_down[idx])
+        state |= 0x0001;
+    previous_down[idx] = (uint8_t)is_down;
+    return state;
 }
 
 /* ── 2. LoadCursorA ───────────────────────────────────────── */

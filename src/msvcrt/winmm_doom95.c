@@ -58,12 +58,26 @@ KERNEL32_STUB
 uint32_t timeGetTime(void)
 {
     static uint32_t call_count = 0;
+    static uint32_t last_value = 0;
+    static uint32_t same_tick_polls = 0;
     struct timespec ts;
     uint32_t value;
 
     if (INLINE_SYSCALL_CLOCK_GETTIME(CLOCK_MONOTONIC, &ts) != 0)
         return 0;
     value = (uint32_t)((uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL);
+
+    if (value == last_value) {
+        same_tick_polls++;
+        if (same_tick_polls >= 2048u && (same_tick_polls & 255u) == 0u) {
+            ts.tv_sec = 0;
+            ts.tv_nsec = 1000000L;
+            (void)INLINE_SYSCALL_NANOSLEEP(&ts, NULL);
+        }
+    } else {
+        last_value = value;
+        same_tick_polls = 0;
+    }
 
     if (debug_level_at_least(1)) {
         uint32_t count = ++call_count;

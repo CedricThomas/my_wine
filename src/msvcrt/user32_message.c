@@ -26,10 +26,17 @@ KERNEL32_STUB BOOL DestroyWindow(HWND hwnd);
 extern LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam,
                                                   LPARAM lParam) __attribute__((weak));
 
+typedef LRESULT (KERNEL32_ABI *HOOKPROC_WINE)(int nCode, WPARAM wParam, LPARAM lParam);
+
 static int g_quit_pending = 0;
 static int g_quit_exit_code = 0;
+static HOOKPROC_WINE g_keyboard_hook_proc = NULL;
+static HHOOK g_keyboard_hook_handle = 0;
 #define USER32_TRANSLATED_QUEUE_CAPACITY 64
 #define USER32_POSTED_QUEUE_CAPACITY 64
+
+#define WH_KEYBOARD 2
+#define HC_ACTION 0
 
 static rb_msg_t g_translated_queue[USER32_TRANSLATED_QUEUE_CAPACITY];
 static size_t g_translated_queue_head = 0;
@@ -304,6 +311,23 @@ static int fetch_translated_message(int blocking, int remove,
     }
 }
 
+static int is_keyboard_message(UINT message)
+{
+    return message == WM_KEYDOWN || message == WM_KEYUP ||
+           message == WM_SYSKEYDOWN || message == WM_SYSKEYUP;
+}
+
+static int user32_call_keyboard_hook(const rb_msg_t *msg)
+{
+    if (!msg || !g_keyboard_hook_proc || !is_keyboard_message(msg->message))
+        return 0;
+
+    DEBUG_LEVEL(2, "user32: WH_KEYBOARD vk=0x%lx lp=0x%lx msg=0x%x",
+                (unsigned long)msg->wParam, (unsigned long)msg->lParam,
+                (unsigned)msg->message);
+    return g_keyboard_hook_proc(HC_ACTION, msg->wParam, msg->lParam) != 0;
+}
+
 /* ═══════════════════════════════════════════════════════════
  * 13 exported message functions
  * ═══════════════════════════════════════════════════════════ */
@@ -336,6 +360,7 @@ BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
         return 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);
+    (void)user32_call_keyboard_hook(&rb);
 
     if (lpMsg->message == WM_QUIT)
         return 0;
@@ -383,6 +408,7 @@ BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
     idle_poll_count = 0;
 
     copy_rb_msg_to_MSG(&rb, lpMsg);
+    (void)user32_call_keyboard_hook(&rb);
 
     /* Always return 1 when a message is available */
     return 1;
@@ -580,12 +606,18 @@ LRESULT CallWindowProcA(WNDPROC lpPrevWndFunc, HWND hWnd,
  * Stub: returns NULL (no hook support).
  */
 KERNEL32_STUB
-HHOOK SetWindowsHookExA(int idHook, WNDPROC lpfn, HINSTANCE hMod, DWORD dwThreadId)
+HHOOK SetWindowsHookExA(int idHook, void *lpfn, HINSTANCE hMod, DWORD dwThreadId)
 {
-    (void)idHook;
-    (void)lpfn;
     (void)hMod;
     (void)dwThreadId;
+
+    DEBUG_LEVEL(1, "user32: SetWindowsHookExA id=%d proc=%p", idHook, lpfn);
+    if (idHook == WH_KEYBOARD && lpfn) {
+        g_keyboard_hook_proc = (HOOKPROC_WINE)lpfn;
+        g_keyboard_hook_handle = (HHOOK)(uintptr_t)0x60000002u;
+        return FORCE_HANDLE_RETURN(g_keyboard_hook_handle, HHOOK);
+    }
+
     return FORCE_HANDLE_RETURN(0, HHOOK);
 }
 
@@ -596,7 +628,10 @@ HHOOK SetWindowsHookExA(int idHook, WNDPROC lpfn, HINSTANCE hMod, DWORD dwThread
 KERNEL32_STUB
 BOOL UnhookWindowsHookEx(HHOOK hhk)
 {
-    (void)hhk;
+    if (hhk != 0 && hhk == g_keyboard_hook_handle) {
+        g_keyboard_hook_proc = NULL;
+        g_keyboard_hook_handle = 0;
+    }
     return TRUE;
 }
 

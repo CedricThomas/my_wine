@@ -359,6 +359,16 @@ static const int g_vk_to_scancode[256] = {
     [0x58] = SDL_SCANCODE_X,           /* VK_X           */
     [0x59] = SDL_SCANCODE_Y,           /* VK_Y           */
     [0x5A] = SDL_SCANCODE_Z,           /* VK_Z           */
+    [0x60] = SDL_SCANCODE_KP_0,        /* VK_NUMPAD0     */
+    [0x61] = SDL_SCANCODE_KP_1,        /* VK_NUMPAD1     */
+    [0x62] = SDL_SCANCODE_KP_2,        /* VK_NUMPAD2     */
+    [0x63] = SDL_SCANCODE_KP_3,        /* VK_NUMPAD3     */
+    [0x64] = SDL_SCANCODE_KP_4,        /* VK_NUMPAD4     */
+    [0x65] = SDL_SCANCODE_KP_5,        /* VK_NUMPAD5     */
+    [0x66] = SDL_SCANCODE_KP_6,        /* VK_NUMPAD6     */
+    [0x67] = SDL_SCANCODE_KP_7,        /* VK_NUMPAD7     */
+    [0x68] = SDL_SCANCODE_KP_8,        /* VK_NUMPAD8     */
+    [0x69] = SDL_SCANCODE_KP_9,        /* VK_NUMPAD9     */
     [0x70] = SDL_SCANCODE_F1,          /* VK_F1          */
     [0x71] = SDL_SCANCODE_F2,          /* VK_F2          */
     [0x72] = SDL_SCANCODE_F3,          /* VK_F3          */
@@ -402,6 +412,8 @@ static inline int scancode_to_vk(SDL_Scancode scancode)
 }
 
 /* ---- Event system helpers ---- */
+void rb_keyboard_note_key_event(int vk, int is_down, int is_repeat);
+void rb_event_install_watch(void);
 void rb_event_set_active_window(uintptr_t hwnd);
 uintptr_t rb_event_get_active_window(void);
 int rb_event_bind_window(uintptr_t hwnd, rb_window_t win);

@@ -478,6 +478,34 @@ static int rb_is_system_key_event(const SDL_KeyboardEvent *key)
     return (key->keysym.mod & KMOD_ALT) != 0;
 }
 
+static int rb_event_watch(void *userdata, SDL_Event *event)
+{
+    int vk;
+
+    (void)userdata;
+    if (!event)
+        return 1;
+
+    if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) {
+        vk = rb_keycode_to_vk(event->key.keysym.sym, event->key.keysym.scancode);
+        if (vk >= 0)
+            rb_keyboard_note_key_event(vk, event->type == SDL_KEYDOWN,
+                                       event->key.repeat != 0);
+    }
+
+    return 1;
+}
+
+void rb_event_install_watch(void)
+{
+    static int installed = 0;
+
+    if (installed)
+        return;
+    SDL_AddEventWatch(rb_event_watch, NULL);
+    installed = 1;
+}
+
 static uint32_t rb_build_key_lparam(const SDL_KeyboardEvent *key, int is_keyup)
 {
     uint32_t lparam = 1u | ((uint32_t)key->keysym.scancode << 16);
@@ -549,6 +577,7 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
         vk = rb_keycode_to_vk(sdl->key.keysym.sym, sdl->key.keysym.scancode);
         if (vk < 0)
             return 0;
+        rb_keyboard_note_key_event(vk, 1, sdl->key.repeat != 0);
         if (rb_is_system_key_event(&sdl->key) && vk == VK_F4) {
             msg->message = WM_CLOSE;
             msg->wParam = 0;
@@ -577,6 +606,7 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
         vk = rb_keycode_to_vk(sdl->key.keysym.sym, sdl->key.keysym.scancode);
         if (vk < 0)
             return 0;
+        rb_keyboard_note_key_event(vk, 0, 0);
         if (rb_is_system_key_event(&sdl->key) && vk == VK_F4) {
             if (sdl->key.keysym.sym == SDLK_LALT || sdl->key.keysym.sym == SDLK_RALT)
                 g_alt_key_down = 0;

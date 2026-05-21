@@ -78,6 +78,7 @@ static uint32_t g_next_dialog_item_handle = 0x40000000u;
 
 typedef struct {
     HWND dialog;
+    void *dlgproc;
     intptr_t result;
     int ended;
 } dialog_modal_state;
@@ -430,8 +431,11 @@ HWND CreateDialogParamA(HINSTANCE hInstance, const char *lpTemplateName, HWND hW
     user32_dialog_ensure_class();
     hwnd = CreateWindowExA(0, "MY_WINE_DIALOG", "Dialog", WS_POPUP | WS_CAPTION,
                            0, 0, 320, 200, hWndParent, 0, hInstance, NULL);
-    if (hwnd)
-        (void)dialog_find_modal(hwnd, 1);
+    if (hwnd) {
+        dialog_modal_state *modal = dialog_find_modal(hwnd, 1);
+        if (modal)
+            modal->dlgproc = lpDialogFunc;
+    }
     if (hwnd && lpDialogFunc) {
         DEBUG_LEVEL(1, "user32: CreateDialogParamA init hwnd=0x%lx",
                     (unsigned long)(uintptr_t)hwnd);
@@ -490,8 +494,25 @@ int user32_dialog_run_modal(HWND hwnd, void *lpDialogFunc)
 KERNEL32_STUB
 BOOL IsDialogMessageA(HWND hDlg, MSG *lpMsg)
 {
-    (void)hDlg;
-    (void)lpMsg;
+    dialog_modal_state *modal;
+    dialog_item_state *item;
+
+    if (!hDlg || !lpMsg)
+        return FALSE;
+
+    modal = dialog_find_modal(hDlg, 0);
+    if (!modal || !modal->dlgproc)
+        return FALSE;
+
+    if (lpMsg->hwnd != hDlg) {
+        item = dialog_find_item_by_handle(lpMsg->hwnd);
+        if (!item || item->dialog != hDlg)
+            return FALSE;
+    }
+
+    if (((DLGPROC_WINE)modal->dlgproc)(hDlg, lpMsg->message,
+                                       lpMsg->wParam, lpMsg->lParam))
+        return TRUE;
     return FALSE;
 }
 

@@ -4,7 +4,9 @@
  * SDL2 backend initialization and shutdown.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "rb_sdl2_priv.h"
 #include <stdio.h>
 #include <signal.h>
@@ -282,6 +284,7 @@ int rb_init(void)
     g_audio.buffer_count = 0;
     g_shutdown_requested = 0;
     rb_install_signal_handlers();
+    rb_event_install_watch();
 
     g_initialized = 1;
     return RB_OK;

@@ -9,6 +9,14 @@ Keep only facts that change the next debugging move.
 
 - Use `./my_wine32`, not `./my_wine`, when validating the newest 32-bit changes.
 - `make my_wine32` succeeds.
+- Doom95 installs a `WH_KEYBOARD` hook (`SetWindowsHookExA id=2`) after the
+  `Doom95Class` window and DirectDraw setup; returning NULL from this hook path
+  is a credible cause of "renders but keys are ignored."
+- `src/msvcrt/user32_message.c` now stores a minimal `WH_KEYBOARD` hook and
+  invokes it for key messages retrieved through `GetMessageA` / `PeekMessageA`.
+- SDL keydown/up events are now latched into the backend async-key state via an
+  event watch, so short key taps can be observed by `GetAsyncKeyState` low-bit
+  semantics even after the key is released.
 - The Docker debug image `my_wine-samples` can now build and debug `my_wine32` inside Ubuntu 22.04.
 - Doom95 no longer dies in the old post-launcher crash sites.
 - Doom95 no longer crashes on the post-palette `IDirectDrawPalette::SetEntries` call.
@@ -93,10 +101,15 @@ After that, Doom95 remains alive, continues producing DDraw activity, and presen
 
 The blocker is no longer loader corruption, launcher state, first DirectDraw object creation, palette setup, or visual presentation.
 
-The blocker is now:
+The latest input-focused run proved:
 
+- Doom95 polls `GetAsyncKeyState(VK_ESCAPE)` once, but live gameplay input is
+  more likely through its `WH_KEYBOARD` hook.
+- Doom95 reaches the live `Doom 95` window and then installs `WH_KEYBOARD`.
+- Synthetic `xdotool` key events under Xvfb did not visually open the menu in
+  the screenshot smoke test, so real interactive keyboard validation is still
+  needed.
 - CPU remains hot because Doom95 calls `timeGetTime` extremely aggressively.
-- The remaining likelihood is expected Doom95 busy-wait timing behavior that may need conservative throttling/yielding.
 
 ## Important confirmed facts
 

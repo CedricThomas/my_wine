@@ -160,29 +160,126 @@ int rb_joy_get_state(int idx,
 
 /* ---- Keyboard ---- */
 
+static uint8_t g_async_key_down[256];
+static uint8_t g_async_key_pressed[256];
+
+void rb_keyboard_note_key_event(int vk, int is_down, int is_repeat)
+{
+    uint8_t idx = (uint8_t)vk;
+    int generic_vk = -1;
+
+    if (vk < 0)
+        return;
+    g_async_key_down[idx] = (uint8_t)(is_down != 0);
+    if (is_down && !is_repeat)
+        g_async_key_pressed[idx] = 1;
+
+    switch (idx) {
+    case 0xA0:
+    case 0xA1:
+        generic_vk = 0x10;
+        break;
+    case 0xA2:
+    case 0xA3:
+        generic_vk = 0x11;
+        break;
+    case 0xA4:
+    case 0xA5:
+        generic_vk = 0x12;
+        break;
+    default:
+        break;
+    }
+
+    if (generic_vk >= 0) {
+        uint8_t generic_idx = (uint8_t)generic_vk;
+        g_async_key_down[generic_idx] = (uint8_t)(is_down != 0);
+        if (is_down && !is_repeat)
+            g_async_key_pressed[generic_idx] = 1;
+    }
+}
+
 typedef struct {
     int scancode;
+    int alternate_scancode;
     int pressed;
 } rb_sdl_keyboard_state_args;
 
 static uintptr_t rb_sdl_get_keyboard_state_call(void *arg)
 {
     rb_sdl_keyboard_state_args *a = arg;
-    const Uint8 *state = SDL_GetKeyboardState(NULL);
-    a->pressed = state ? state[a->scancode] : 0;
+    const Uint8 *state;
+
+    SDL_PumpEvents();
+    state = SDL_GetKeyboardState(NULL);
+    a->pressed = 0;
+    if (state) {
+        if (a->scancode >= 0 && state[a->scancode])
+            a->pressed = 1;
+        if (a->alternate_scancode >= 0 && state[a->alternate_scancode])
+            a->pressed = 1;
+    }
+    return 0;
+}
+
+static uintptr_t rb_sdl_get_mouse_state_call(void *arg)
+{
+    uint32_t *state = arg;
+
+    SDL_PumpEvents();
+    *state = SDL_GetMouseState(NULL, NULL);
     return 0;
 }
 
 int16_t rb_keyboard_get_async_state(int vk)
 {
     int scancode = vk_to_scancode(vk);
-    if (scancode < 0)
-        return 0;  // not mapped = not pressed
+    int alternate_scancode = -1;
+    uint8_t idx = (uint8_t)vk;
+    uint8_t was_pressed = g_async_key_pressed[idx];
+    int pressed = 0;
 
-    rb_sdl_keyboard_state_args args = { scancode, 0 };
+    if (vk == 0x01 || vk == 0x02 || vk == 0x04 || vk == 0x05 || vk == 0x06) {
+        static const uint32_t button_masks[7] = {
+            [0x01] = SDL_BUTTON(SDL_BUTTON_LEFT),
+            [0x02] = SDL_BUTTON(SDL_BUTTON_RIGHT),
+            [0x04] = SDL_BUTTON(SDL_BUTTON_MIDDLE),
+            [0x05] = SDL_BUTTON(SDL_BUTTON_X1),
+            [0x06] = SDL_BUTTON(SDL_BUTTON_X2),
+        };
+        uint32_t mask = button_masks[vk & 0xFF];
+        uint32_t state = 0;
+
+        rb_call_on_host_stack(rb_sdl_get_mouse_state_call, &state);
+        pressed = (state & mask) != 0;
+        g_async_key_pressed[idx] = 0;
+        return (int16_t)((pressed ? 0x8000 : 0) | (was_pressed ? 0x0001 : 0));
+    }
+
+    if (scancode < 0) {
+        g_async_key_pressed[idx] = 0;
+        return (int16_t)(was_pressed ? 0x0001 : 0);
+    }
+
+    switch (vk & 0xFF) {
+    case 0x10: /* VK_SHIFT */
+        alternate_scancode = SDL_SCANCODE_RSHIFT;
+        break;
+    case 0x11: /* VK_CONTROL */
+        alternate_scancode = SDL_SCANCODE_RCTRL;
+        break;
+    case 0x12: /* VK_MENU */
+        alternate_scancode = SDL_SCANCODE_RALT;
+        break;
+    default:
+        break;
+    }
+
+    rb_sdl_keyboard_state_args args = { scancode, alternate_scancode, 0 };
     rb_call_on_host_stack(rb_sdl_get_keyboard_state_call, &args);
-    int pressed = args.pressed;
-    return (int16_t)(pressed ? 0x8000 : 0);  // top bit = pressed, toggle bit = 0
+    pressed = args.pressed || g_async_key_down[idx];
+    g_async_key_pressed[idx] = 0;
+    return (int16_t)((pressed ? 0x8000 : 0) | (was_pressed ? 0x0001 : 0));
 }
 
 /* ---- Cursor ---- */
