@@ -10,6 +10,7 @@ extern int rb_joy_get_caps(int idx, char *name, int name_len,
                            uint16_t *min, uint16_t *max) __attribute__((weak));
 extern int rb_joy_get_state(int idx, uint16_t *axes, int n_axes,
                             uint8_t *buttons, int n_buttons) __attribute__((weak));
+extern void rb_event_pump_host(void) __attribute__((weak));
 
 typedef struct {
     uint16_t wMid;
@@ -58,6 +59,7 @@ KERNEL32_STUB
 uint32_t timeGetTime(void)
 {
     static uint32_t call_count = 0;
+    static uint32_t pump_count = 0;
     static uint32_t last_value = 0;
     static uint32_t same_tick_polls = 0;
     struct timespec ts;
@@ -84,6 +86,10 @@ uint32_t timeGetTime(void)
         if ((count & (count - 1)) == 0 || (count % 100000u) == 0)
             DEBUG("winmm: timeGetTime count=%u value=%u", count, value);
     }
+
+    pump_count++;
+    if (rb_event_pump_host && ((pump_count & 0x7ffu) == 0))
+        rb_event_pump_host();
 
     return value;
 }

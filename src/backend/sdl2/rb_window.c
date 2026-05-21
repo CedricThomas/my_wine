@@ -192,8 +192,9 @@ static uintptr_t rb_sdl_window_set_fullscreen_call(void *arg)
 {
     rb_sdl_window_fullscreen_args *a = arg;
     const char *title = SDL_GetWindowTitle(a->old_window);
-    uint32_t flags = a->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0;
+    uint32_t flags = SDL_WINDOW_SHOWN;
 
+    (void)a->fullscreen;
     a->new_window = SDL_CreateWindow(title,
                                      SDL_WINDOWPOS_CENTERED,
                                      SDL_WINDOWPOS_CENTERED,
@@ -203,6 +204,9 @@ static uintptr_t rb_sdl_window_set_fullscreen_call(void *arg)
         return 0;
 
     SDL_DestroyWindow(a->old_window);
+    SDL_ShowWindow(a->new_window);
+    SDL_RaiseWindow(a->new_window);
+    SDL_PumpEvents();
     return 1;
 }
 
@@ -465,6 +469,8 @@ int rb_window_get_client_rect(rb_window_t win, rb_rect_t *rect)
 
 int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int height, int bpp)
 {
+    extern void user32_activate_window_direct(uintptr_t hwnd)
+        __attribute__((weak));
     (void)bpp;
     rb_window *wnd = get_window(win);
     if (!wnd)
@@ -483,8 +489,12 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
     wnd->window = args.new_window;
     if (rb_window_refresh_ids(wnd) != RB_OK)
         return RB_FAIL;
-    if (wnd->guest_hwnd)
+    if (wnd->guest_hwnd) {
         rb_event_bind_window(wnd->guest_hwnd, win);
+        rb_event_activate_window(wnd->guest_hwnd);
+        if (user32_activate_window_direct)
+            user32_activate_window_direct(wnd->guest_hwnd);
+    }
     return RB_OK;
 }
 

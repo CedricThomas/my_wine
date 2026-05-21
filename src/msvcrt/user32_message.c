@@ -45,6 +45,8 @@ static rb_msg_t g_posted_queue[USER32_POSTED_QUEUE_CAPACITY];
 static size_t g_posted_queue_head = 0;
 static size_t g_posted_queue_count = 0;
 
+static int is_keyboard_message(UINT message);
+
 static int queue_push(rb_msg_t *queue, size_t capacity,
                       size_t *head, size_t *count,
                       const rb_msg_t *msg)
@@ -94,6 +96,12 @@ static int message_matches_filter(const rb_msg_t *msg, HWND hwnd_filter,
     message = msg->message;
     if (message == WM_QUIT)
         return 1;
+
+    if (is_keyboard_message(message))
+        hwnd_filter = 0;
+
+    if (hwnd_filter != 0 && get_window_entry(hwnd_filter) == NULL)
+        hwnd_filter = 0;
 
     if (hwnd_filter != 0 && msg->hwnd != (uintptr_t)hwnd_filter)
         return 0;
@@ -326,6 +334,21 @@ static int user32_call_keyboard_hook(const rb_msg_t *msg)
                 (unsigned long)msg->wParam, (unsigned long)msg->lParam,
                 (unsigned)msg->message);
     return g_keyboard_hook_proc(HC_ACTION, msg->wParam, msg->lParam) != 0;
+}
+
+int user32_call_keyboard_hook_direct(uint32_t message, uint32_t wParam,
+                                     intptr_t lParam)
+{
+    int result;
+
+    if (!g_keyboard_hook_proc || !is_keyboard_message(message))
+        return 0;
+
+    result = g_keyboard_hook_proc(HC_ACTION, (WPARAM)wParam,
+                                  (LPARAM)lParam) != 0;
+    DEBUG_LEVEL(2, "user32: WH_KEYBOARD direct vk=0x%x lp=0x%lx msg=0x%x result=%d",
+                wParam, (unsigned long)(uintptr_t)lParam, message, result);
+    return 1;
 }
 
 /* ═══════════════════════════════════════════════════════════

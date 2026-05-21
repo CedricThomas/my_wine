@@ -415,6 +415,7 @@ static inline int scancode_to_vk(SDL_Scancode scancode)
 void rb_keyboard_note_key_event(int vk, int is_down, int is_repeat);
 void rb_event_install_watch(void);
 void rb_event_set_active_window(uintptr_t hwnd);
+void rb_event_activate_window(uintptr_t hwnd);
 uintptr_t rb_event_get_active_window(void);
 int rb_event_bind_window(uintptr_t hwnd, rb_window_t win);
 void rb_event_unbind_window(uintptr_t hwnd);

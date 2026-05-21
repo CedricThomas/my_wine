@@ -24,6 +24,7 @@ KERNEL32_ABI void PostQuitMessage(int nExitCode);
 KERNEL32_ABI BOOL PeekMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin,
                                UINT wMsgFilterMax, UINT wRemoveMsg);
 KERNEL32_ABI BOOL GetMessageA(MSG *lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax);
+KERNEL32_ABI HHOOK SetWindowsHookExA(int idHook, void *lpfn, HINSTANCE hMod, DWORD dwThreadId);
 KERNEL32_ABI BOOL IsWindow(HWND hwnd);
 
 static int g_failures = 0;
@@ -38,6 +39,8 @@ static int g_activate_messages = 0;
 static int g_send_messages = 0;
 static int g_callproc_messages = 0;
 static int g_create_payload = 0;
+static int g_keyboard_hook_messages = 0;
+static WPARAM g_keyboard_hook_wparam = 0;
 
 #define T(cond, msg)                                                           \
     do {                                                                       \
@@ -53,6 +56,19 @@ static int g_create_payload = 0;
 #define TEST_CALLPROC_RESULT  0x5678
 #define PM_NOREMOVE           0x0000
 #define PM_REMOVE             0x0001
+#define WH_KEYBOARD           2
+#define HC_ACTION             0
+
+static LRESULT KERNEL32_ABI test_keyboard_hook(int nCode, WPARAM wParam, LPARAM lParam)
+{
+    (void)lParam;
+
+    if (nCode == HC_ACTION) {
+        g_keyboard_hook_messages++;
+        g_keyboard_hook_wparam = wParam;
+    }
+    return 0;
+}
 
 static LRESULT KERNEL32_ABI test_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -213,6 +229,32 @@ int main(void)
         T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,
           "Queue should be empty after PM_REMOVE");
 
+        T(SetWindowsHookExA(WH_KEYBOARD, test_keyboard_hook, 0, 0) != 0,
+          "SetWindowsHookExA did not install WH_KEYBOARD hook");
+
+        HWND hwnd_filter = CreateWindowExA(0, wc.lpszClassName, "dispatch-filter",
+                                           WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                           20, 20, 320, 200, 0, 0, 0, NULL);
+        T(hwnd_filter != 0, "CreateWindowExA filter window failed");
+
+        memset(&backend_msg, 0, sizeof(backend_msg));
+        backend_msg.hwnd = hwnd2;
+        backend_msg.message = WM_KEYDOWN;
+        backend_msg.wParam = VK_ESCAPE;
+        backend_msg.lParam = 1;
+        T(rb_event_push(&backend_msg) == RB_OK,
+          "rb_event_push failed for backend key message");
+
+        memset(&msg, 0, sizeof(msg));
+        T(PeekMessageA(&msg, hwnd_filter, WM_KEYDOWN, WM_KEYDOWN, PM_REMOVE) == TRUE,
+          "PeekMessageA should ignore a live mismatched hwnd filter for backend key messages");
+        T(msg.hwnd == hwnd2, "mismatched-filter key message returned wrong hwnd");
+        T(msg.message == WM_KEYDOWN, "mismatched-filter key message returned wrong message");
+        T(msg.wParam == VK_ESCAPE, "mismatched-filter key message returned wrong VK");
+        T(g_keyboard_hook_messages == 1, "WH_KEYBOARD hook did not see mismatched-filter key message");
+        T(g_keyboard_hook_wparam == VK_ESCAPE, "WH_KEYBOARD hook received wrong VK");
+        T(DestroyWindow(hwnd_filter) == TRUE, "DestroyWindow on filter window failed");
+
         PostQuitMessage(77);
         memset(&msg, 0, sizeof(msg));
         T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == TRUE,
@@ -234,7 +276,7 @@ int main(void)
         msg.message = WM_CLOSE;
         T(DispatchMessageA(&msg) == 0, "DispatchMessageA did not close second window");
         T(IsWindow(hwnd2) == FALSE, "Second window should be destroyed by WM_CLOSE");
-        T(g_ncdestroy_messages == 2, "Destroying both windows should send WM_NCDESTROY twice");
+        T(g_ncdestroy_messages == 3, "Destroying both windows plus filter should send WM_NCDESTROY three times");
 
         memset(&msg, 0, sizeof(msg));
         T(PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE) == FALSE,

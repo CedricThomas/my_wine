@@ -344,6 +344,28 @@ static int run_tests(void) {
     T((msg.lParam & 0xFFFF) == 21 && ((msg.lParam >> 16) & 0xFFFF) == 34,
       "WM_MOVE coordinates were packed incorrectly");
 
+    memset(&event, 0, sizeof(event));
+    event.type = SDL_KEYDOWN;
+    event.key.windowID = lookup_window_state(event_win)->sdl_window_id;
+    event.key.keysym.sym = SDLK_w;
+    event.key.keysym.scancode = SDL_SCANCODE_W;
+    T(rb_event_translate_sdl_event(&event, &msg) == 1,
+      "SDL keydown did not translate");
+    T(msg.hwnd == guest_hwnd && msg.message == WM_KEYDOWN && msg.wParam == 'W',
+      "SDL W keydown did not translate to WM_KEYDOWN/VK_W");
+    T(((msg.lParam >> 16) & 0xff) == 0x11,
+      "WM_KEYDOWN lParam should contain a Win32 scan code, not an SDL scancode");
+
+    memset(&event, 0, sizeof(event));
+    event.type = SDL_KEYUP;
+    event.key.windowID = lookup_window_state(event_win)->sdl_window_id;
+    event.key.keysym.sym = SDLK_w;
+    event.key.keysym.scancode = SDL_SCANCODE_W;
+    T(rb_event_translate_sdl_event(&event, &msg) == 1,
+      "SDL keyup did not translate");
+    T((msg.lParam & (1u << 31)) != 0 && ((msg.lParam >> 16) & 0xff) == 0x11,
+      "WM_KEYUP lParam should preserve Win32 scan code and transition bit");
+
     T(rb_window_destroy(event_win) == RB_OK, "event test window destroy failed");
   }
   printf("OK\n");

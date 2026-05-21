@@ -28,6 +28,67 @@ static rb_msg_t *g_synthetic_queue = NULL;
 static size_t g_synthetic_queue_capacity = 0;
 static size_t g_synthetic_queue_count = 0;
 
+static void rb_event_queue_focus_messages(uintptr_t hwnd, int gained);
+
+#define RB_KEY_WATCH_QUEUE_CAPACITY 64
+typedef struct {
+    uint32_t type;
+    uint32_t timestamp;
+    uint32_t window_id;
+    SDL_Scancode scancode;
+    SDL_Keycode sym;
+} rb_key_watch_event;
+
+static rb_key_watch_event g_key_watch_queue[RB_KEY_WATCH_QUEUE_CAPACITY];
+static size_t g_key_watch_queue_count = 0;
+
+static void rb_event_note_watched_key(const SDL_KeyboardEvent *key)
+{
+    rb_key_watch_event *entry;
+
+    if (!key)
+        return;
+    if (g_key_watch_queue_count >= RB_KEY_WATCH_QUEUE_CAPACITY) {
+        memmove(g_key_watch_queue, g_key_watch_queue + 1,
+                (RB_KEY_WATCH_QUEUE_CAPACITY - 1) * sizeof(g_key_watch_queue[0]));
+        g_key_watch_queue_count = RB_KEY_WATCH_QUEUE_CAPACITY - 1;
+    }
+
+    entry = &g_key_watch_queue[g_key_watch_queue_count++];
+    entry->type = key->type;
+    entry->timestamp = key->timestamp;
+    entry->window_id = key->windowID;
+    entry->scancode = key->keysym.scancode;
+    entry->sym = key->keysym.sym;
+}
+
+static int rb_event_take_watched_key(const SDL_KeyboardEvent *key)
+{
+    size_t i;
+
+    if (!key)
+        return 0;
+
+    for (i = 0; i < g_key_watch_queue_count; i++) {
+        rb_key_watch_event *entry = &g_key_watch_queue[i];
+
+        if (entry->type == key->type &&
+            entry->timestamp == key->timestamp &&
+            entry->window_id == key->windowID &&
+            entry->scancode == key->keysym.scancode &&
+            entry->sym == key->keysym.sym) {
+            if (i + 1 < g_key_watch_queue_count) {
+                memmove(&g_key_watch_queue[i], &g_key_watch_queue[i + 1],
+                        (g_key_watch_queue_count - i - 1) * sizeof(g_key_watch_queue[0]));
+            }
+            g_key_watch_queue_count--;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static int rb_event_ensure_route_capacity(size_t needed)
 {
     size_t new_capacity;
@@ -100,6 +161,15 @@ static int rb_event_pop_synthetic(rb_msg_t *msg)
 void rb_event_set_active_window(uintptr_t hwnd)
 {
     g_active_window = hwnd;
+}
+
+void rb_event_activate_window(uintptr_t hwnd)
+{
+    if (!hwnd)
+        return;
+
+    g_active_window = hwnd;
+    rb_event_queue_focus_messages(hwnd, 1);
 }
 
 uintptr_t rb_event_get_active_window(void)
@@ -341,6 +411,13 @@ static uintptr_t rb_sdl_peep_event_call(void *arg)
     return (uintptr_t)rb_peep_events((SDL_Event *)arg, 1, SDL_GETEVENT);
 }
 
+static uintptr_t rb_sdl_pump_events_call(void *arg)
+{
+    (void)arg;
+    SDL_PumpEvents();
+    return 0;
+}
+
 static void rb_event_begin_shutdown(void)
 {
     size_t count = 0;
@@ -478,6 +555,8 @@ static int rb_is_system_key_event(const SDL_KeyboardEvent *key)
     return (key->keysym.mod & KMOD_ALT) != 0;
 }
 
+static uint32_t rb_build_key_lparam(const SDL_KeyboardEvent *key, int is_keyup);
+
 static int rb_event_watch(void *userdata, SDL_Event *event)
 {
     int vk;
@@ -488,9 +567,50 @@ static int rb_event_watch(void *userdata, SDL_Event *event)
 
     if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) {
         vk = rb_keycode_to_vk(event->key.keysym.sym, event->key.keysym.scancode);
-        if (vk >= 0)
+        if (vk >= 0) {
+            uint32_t message;
+            uint32_t lparam;
+            extern int user32_call_keyboard_hook_direct(uint32_t message,
+                                                        uint32_t wParam,
+                                                        intptr_t lParam)
+                                                        __attribute__((weak));
+
             rb_keyboard_note_key_event(vk, event->type == SDL_KEYDOWN,
                                        event->key.repeat != 0);
+            if (user32_call_keyboard_hook_direct) {
+                message = (event->type == SDL_KEYDOWN)
+                          ? (rb_is_system_key_event(&event->key) ? WM_SYSKEYDOWN : WM_KEYDOWN)
+                          : (rb_is_system_key_event(&event->key) ? WM_SYSKEYUP : WM_KEYUP);
+                lparam = rb_build_key_lparam(&event->key, event->type == SDL_KEYUP);
+                if (event->type == SDL_KEYDOWN)
+                    lparam &= ~(1u << 30);
+                (void)user32_call_keyboard_hook_direct(message, (uint32_t)vk,
+                                                       (intptr_t)lparam);
+            }
+
+            {
+                uintptr_t hwnd = rb_event_resolve_hwnd_from_sdl_window(event->key.windowID);
+                rb_msg_t msg;
+
+                if (!hwnd)
+                    hwnd = g_active_window;
+                if (hwnd) {
+                    memset(&msg, 0, sizeof(msg));
+                    msg.hwnd = hwnd;
+                    msg.message = (event->type == SDL_KEYDOWN)
+                                  ? (rb_is_system_key_event(&event->key) ? WM_SYSKEYDOWN : WM_KEYDOWN)
+                                  : (rb_is_system_key_event(&event->key) ? WM_SYSKEYUP : WM_KEYUP);
+                    msg.wParam = (uintptr_t)vk;
+                    msg.lParam = (intptr_t)rb_build_key_lparam(&event->key,
+                                                               event->type == SDL_KEYUP);
+                    if (event->type == SDL_KEYDOWN)
+                        msg.lParam &= ~((intptr_t)1 << 30);
+                    msg.time = (uint32_t)event->key.timestamp;
+                    rb_event_push_synthetic(&msg);
+                    rb_event_note_watched_key(&event->key);
+                }
+            }
+        }
     }
 
     return 1;
@@ -508,10 +628,104 @@ void rb_event_install_watch(void)
 
 static uint32_t rb_build_key_lparam(const SDL_KeyboardEvent *key, int is_keyup)
 {
-    uint32_t lparam = 1u | ((uint32_t)key->keysym.scancode << 16);
+    uint32_t scancode = 0;
+    uint32_t extended = 0;
+    uint32_t lparam;
+
+    switch (key->keysym.scancode) {
+    case SDL_SCANCODE_ESCAPE: scancode = 0x01; break;
+    case SDL_SCANCODE_1: scancode = 0x02; break;
+    case SDL_SCANCODE_2: scancode = 0x03; break;
+    case SDL_SCANCODE_3: scancode = 0x04; break;
+    case SDL_SCANCODE_4: scancode = 0x05; break;
+    case SDL_SCANCODE_5: scancode = 0x06; break;
+    case SDL_SCANCODE_6: scancode = 0x07; break;
+    case SDL_SCANCODE_7: scancode = 0x08; break;
+    case SDL_SCANCODE_8: scancode = 0x09; break;
+    case SDL_SCANCODE_9: scancode = 0x0a; break;
+    case SDL_SCANCODE_0: scancode = 0x0b; break;
+    case SDL_SCANCODE_MINUS: scancode = 0x0c; break;
+    case SDL_SCANCODE_EQUALS: scancode = 0x0d; break;
+    case SDL_SCANCODE_BACKSPACE: scancode = 0x0e; break;
+    case SDL_SCANCODE_TAB: scancode = 0x0f; break;
+    case SDL_SCANCODE_Q: scancode = 0x10; break;
+    case SDL_SCANCODE_W: scancode = 0x11; break;
+    case SDL_SCANCODE_E: scancode = 0x12; break;
+    case SDL_SCANCODE_R: scancode = 0x13; break;
+    case SDL_SCANCODE_T: scancode = 0x14; break;
+    case SDL_SCANCODE_Y: scancode = 0x15; break;
+    case SDL_SCANCODE_U: scancode = 0x16; break;
+    case SDL_SCANCODE_I: scancode = 0x17; break;
+    case SDL_SCANCODE_O: scancode = 0x18; break;
+    case SDL_SCANCODE_P: scancode = 0x19; break;
+    case SDL_SCANCODE_LEFTBRACKET: scancode = 0x1a; break;
+    case SDL_SCANCODE_RIGHTBRACKET: scancode = 0x1b; break;
+    case SDL_SCANCODE_RETURN: scancode = 0x1c; break;
+    case SDL_SCANCODE_LCTRL: scancode = 0x1d; break;
+    case SDL_SCANCODE_RCTRL: scancode = 0x1d; extended = 1; break;
+    case SDL_SCANCODE_A: scancode = 0x1e; break;
+    case SDL_SCANCODE_S: scancode = 0x1f; break;
+    case SDL_SCANCODE_D: scancode = 0x20; break;
+    case SDL_SCANCODE_F: scancode = 0x21; break;
+    case SDL_SCANCODE_G: scancode = 0x22; break;
+    case SDL_SCANCODE_H: scancode = 0x23; break;
+    case SDL_SCANCODE_J: scancode = 0x24; break;
+    case SDL_SCANCODE_K: scancode = 0x25; break;
+    case SDL_SCANCODE_L: scancode = 0x26; break;
+    case SDL_SCANCODE_SEMICOLON: scancode = 0x27; break;
+    case SDL_SCANCODE_APOSTROPHE: scancode = 0x28; break;
+    case SDL_SCANCODE_GRAVE: scancode = 0x29; break;
+    case SDL_SCANCODE_LSHIFT: scancode = 0x2a; break;
+    case SDL_SCANCODE_BACKSLASH: scancode = 0x2b; break;
+    case SDL_SCANCODE_Z: scancode = 0x2c; break;
+    case SDL_SCANCODE_X: scancode = 0x2d; break;
+    case SDL_SCANCODE_C: scancode = 0x2e; break;
+    case SDL_SCANCODE_V: scancode = 0x2f; break;
+    case SDL_SCANCODE_B: scancode = 0x30; break;
+    case SDL_SCANCODE_N: scancode = 0x31; break;
+    case SDL_SCANCODE_M: scancode = 0x32; break;
+    case SDL_SCANCODE_COMMA: scancode = 0x33; break;
+    case SDL_SCANCODE_PERIOD: scancode = 0x34; break;
+    case SDL_SCANCODE_SLASH: scancode = 0x35; break;
+    case SDL_SCANCODE_RSHIFT: scancode = 0x36; break;
+    case SDL_SCANCODE_KP_MULTIPLY: scancode = 0x37; break;
+    case SDL_SCANCODE_LALT: scancode = 0x38; break;
+    case SDL_SCANCODE_RALT: scancode = 0x38; extended = 1; break;
+    case SDL_SCANCODE_SPACE: scancode = 0x39; break;
+    case SDL_SCANCODE_CAPSLOCK: scancode = 0x3a; break;
+    case SDL_SCANCODE_F1: scancode = 0x3b; break;
+    case SDL_SCANCODE_F2: scancode = 0x3c; break;
+    case SDL_SCANCODE_F3: scancode = 0x3d; break;
+    case SDL_SCANCODE_F4: scancode = 0x3e; break;
+    case SDL_SCANCODE_F5: scancode = 0x3f; break;
+    case SDL_SCANCODE_F6: scancode = 0x40; break;
+    case SDL_SCANCODE_F7: scancode = 0x41; break;
+    case SDL_SCANCODE_F8: scancode = 0x42; break;
+    case SDL_SCANCODE_F9: scancode = 0x43; break;
+    case SDL_SCANCODE_F10: scancode = 0x44; break;
+    case SDL_SCANCODE_HOME: scancode = 0x47; extended = 1; break;
+    case SDL_SCANCODE_UP: scancode = 0x48; extended = 1; break;
+    case SDL_SCANCODE_PAGEUP: scancode = 0x49; extended = 1; break;
+    case SDL_SCANCODE_LEFT: scancode = 0x4b; extended = 1; break;
+    case SDL_SCANCODE_RIGHT: scancode = 0x4d; extended = 1; break;
+    case SDL_SCANCODE_END: scancode = 0x4f; extended = 1; break;
+    case SDL_SCANCODE_DOWN: scancode = 0x50; extended = 1; break;
+    case SDL_SCANCODE_PAGEDOWN: scancode = 0x51; extended = 1; break;
+    case SDL_SCANCODE_INSERT: scancode = 0x52; extended = 1; break;
+    case SDL_SCANCODE_DELETE: scancode = 0x53; extended = 1; break;
+    case SDL_SCANCODE_F11: scancode = 0x57; break;
+    case SDL_SCANCODE_F12: scancode = 0x58; break;
+    default:
+        scancode = (uint32_t)key->keysym.scancode & 0x7fu;
+        break;
+    }
+
+    lparam = 1u | ((scancode & 0xffu) << 16);
 
     if (rb_is_system_key_event(key))
         lparam |= (1u << 29);
+    if (extended)
+        lparam |= (1u << 24);
     if (key->repeat || is_keyup)
         lparam |= (1u << 30);
     if (is_keyup)
@@ -568,6 +782,8 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
     case SDL_KEYDOWN:
     {
         int vk;
+        if (rb_event_take_watched_key(&sdl->key))
+            return 0;
         if (!msg->hwnd)
             msg->hwnd = g_active_window;
         if (!msg->hwnd)
@@ -599,6 +815,8 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
     case SDL_KEYUP:
     {
         int vk;
+        if (rb_event_take_watched_key(&sdl->key))
+            return 0;
         if (!msg->hwnd)
             msg->hwnd = g_active_window;
         if (!msg->hwnd)
@@ -820,6 +1038,11 @@ static int rb_event_translate_bad_window(rb_msg_t *out_msg)
 }
 
 /* ---- Public API ---- */
+
+void rb_event_pump_host(void)
+{
+    rb_call_on_host_stack(rb_sdl_pump_events_call, NULL);
+}
 
 int rb_event_wait(rb_msg_t *out_msg)
 {

@@ -101,6 +101,9 @@ static int rb_sdl_init_video_events(uint32_t flags)
     if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
         try_x11_fallback = 1;
 
+    if (getenv("DISPLAY") && try_x11_fallback)
+        setenv("SDL_VIDEODRIVER", "x11", 1);
+
     rb_install_x11_error_handler();
     if (SDL_Init(flags) == 0) {
         rb_install_x11_error_handler();

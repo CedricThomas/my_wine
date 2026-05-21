@@ -216,6 +216,15 @@ static void user32_set_foreground_focus(HWND target, int send_messages)
     }
 }
 
+void user32_activate_window_direct(uintptr_t hwnd)
+{
+    HWND target = (HWND)(uintptr_t)hwnd;
+
+    if (!get_window_entry(target))
+        return;
+    user32_set_foreground_focus(target, 1);
+}
+
 static int ensure_class_capacity(int needed_count)
 {
     user32_class_entry *new_registry;
