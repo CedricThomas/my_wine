@@ -101,6 +101,14 @@ static int rb_sdl_init_video_events(uint32_t flags)
     const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
     int try_x11_fallback = 0;
 
+    /*
+     * Desktop launchers can leave startup-notification state in the
+     * environment. SDL windows created under that state may keep a busy
+     * cursor over the window even after the app is responsive.
+     */
+    unsetenv("DESKTOP_STARTUP_ID");
+    unsetenv("XDG_ACTIVATION_TOKEN");
+
     if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
         try_x11_fallback = 1;
 

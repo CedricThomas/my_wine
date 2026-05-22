@@ -326,6 +326,7 @@ rb_cursor_t rb_cursor_create(int idc)
         case 32646: type = SDL_SYSTEM_CURSOR_SIZEALL;   break;  /* IDC_SIZEALL */
         case 32648: type = SDL_SYSTEM_CURSOR_NO;        break;  /* IDC_NO */
         case 32649: type = SDL_SYSTEM_CURSOR_HAND;      break;  /* IDC_HAND */
+        case 32650: type = SDL_SYSTEM_CURSOR_ARROW;     break;  /* IDC_APPSTARTING */
         default: type = SDL_SYSTEM_CURSOR_ARROW;        break;
     }
 

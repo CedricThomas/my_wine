@@ -226,6 +226,12 @@ static uintptr_t rb_sdl_set_cursor_call(void *arg)
     return 0;
 }
 
+static uintptr_t rb_sdl_get_default_cursor_call(void *arg)
+{
+    (void)arg;
+    return (uintptr_t)SDL_GetDefaultCursor();
+}
+
 typedef struct {
     SDL_Window *window;
     int x;
@@ -255,6 +261,22 @@ static int rb_window_refresh_ids(rb_window *wnd)
     wnd->sdl_window_id = args.window_id;
     wnd->native_window_id = args.native_window_id;
     return args.window_id ? RB_OK : RB_FAIL;
+}
+
+static void rb_window_set_default_cursor(rb_window *wnd)
+{
+    SDL_Cursor *cursor;
+    rb_sdl_cursor_args args;
+
+    if (!wnd || !wnd->window)
+        return;
+
+    cursor = (SDL_Cursor *)rb_call_on_host_stack(rb_sdl_get_default_cursor_call, NULL);
+    if (!cursor)
+        return;
+
+    args.cursor = cursor;
+    rb_call_on_host_stack(rb_sdl_set_cursor_call, &args);
 }
 
 /* ---- 13 window lifecycle functions ---- */
@@ -305,6 +327,8 @@ rb_window_t rb_window_create(const char *title,
         rb_host_free(win);
         return 0;
     }
+
+    rb_window_set_default_cursor(win);
 
     return (rb_window_t)wine_handle_alloc(HANDLE_TYPE_RB_WINDOW, win);
 }
@@ -489,6 +513,7 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
     wnd->window = args.new_window;
     if (rb_window_refresh_ids(wnd) != RB_OK)
         return RB_FAIL;
+    rb_window_set_default_cursor(wnd);
     if (wnd->guest_hwnd) {
         rb_event_bind_window(wnd->guest_hwnd, win);
         rb_event_activate_window(wnd->guest_hwnd);

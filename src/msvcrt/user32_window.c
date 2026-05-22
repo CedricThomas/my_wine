@@ -27,6 +27,7 @@
 extern void rb_event_set_active_window(uintptr_t hwnd);
 extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
 KERNEL32_STUB BOOL AdjustWindowRectEx(RECT *lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle);
+KERNEL32_STUB HCURSOR LoadCursorA(HINSTANCE hInstance, const char *lpCursorName);
 
 __attribute__((weak))
 LONG_PTR user32_dialog_get_window_long_ptr(HWND hWnd, int nIndex)
@@ -424,9 +425,12 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     entry->hinstance = hInstance;
     entry->parent = hWndParent;
     entry->menu = hMenu;
+    entry->class_cursor = wc->hCursor;
     entry->class_atom = (ATOM)(cidx + 1);
     user32_strncpy(entry->title, lpWindowName ? lpWindowName : "", sizeof(entry->title) - 1);
     entry->title[sizeof(entry->title) - 1] = '\0';
+    if (entry->class_cursor == 0)
+        entry->class_cursor = LoadCursorA(0, IDC_ARROW);
 
     /* Resolve CW_USEDEFAULT → centered; -1 for rb to pick auto */
     int px = (x == (int)CW_USEDEFAULT) ? -1 : x;

@@ -152,7 +152,7 @@ TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $
 TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/debug.o
 TEST_dsound_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/dsound_interface.o $(BUILDDIR)/dsound_buffer.o $(BUILDDIR)/debug.o
 TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
-TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/debug.o
+TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
@@ -289,7 +289,7 @@ debug-tests: tests
 define TEST_RULE
 $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
 	@echo "  LD $$@"
-	@$(CC) $(CFLAGS) -I include -o $$@ $$^ $(LDFLAGS) $(SDL2_LIBS) -lm
+	@$(CC) $(CFLAGS) -I include -o $$@ $$^ $(LDFLAGS) $(SDL2_LIBS) $(FLUID_LIBS) -lm
 endef
 
 $(eval $(call TEST_RULE,parse,$(TEST_parse_OBJS)))

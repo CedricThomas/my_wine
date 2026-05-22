@@ -23,6 +23,8 @@
 /* Forward declarations for cross-referenced stubs within this file */
 KERNEL32_STUB LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 KERNEL32_STUB BOOL DestroyWindow(HWND hwnd);
+KERNEL32_STUB LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+KERNEL32_STUB HCURSOR SetCursor(HCURSOR hCursor);
 extern LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam,
                                                   LPARAM lParam) __attribute__((weak));
 
@@ -161,6 +163,19 @@ static void user32_fill_minmaxinfo(wine_window_entry *entry, MINMAXINFO *info)
         if (rect.h > 0)
             info->ptMinTrackSize.y = rect.h;
     }
+}
+
+static LRESULT user32_apply_class_cursor(HWND hWnd)
+{
+    wine_window_entry *entry = get_window_entry(hWnd);
+
+    if (!entry)
+        return FALSE;
+    if (entry->class_cursor != 0) {
+        SetCursor(entry->class_cursor);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 /* ── Helper: copy an rb_msg_t into an MSG ──────────────────── */
@@ -461,6 +476,20 @@ LRESULT DispatchMessageA(const MSG *lpMsg)
     if (!lpMsg)
         return 0;
 
+    if (lpMsg->message == WM_MOUSEMOVE ||
+        lpMsg->message == WM_LBUTTONDOWN ||
+        lpMsg->message == WM_LBUTTONUP ||
+        lpMsg->message == WM_LBUTTONDBLCLK ||
+        lpMsg->message == WM_RBUTTONDOWN ||
+        lpMsg->message == WM_RBUTTONUP ||
+        lpMsg->message == WM_RBUTTONDBLCLK ||
+        lpMsg->message == WM_MBUTTONDOWN ||
+        lpMsg->message == WM_MBUTTONUP ||
+        lpMsg->message == WM_MBUTTONDBLCLK ||
+        lpMsg->message == WM_MOUSEWHEEL) {
+        SendMessageA(lpMsg->hwnd, WM_SETCURSOR, (WPARAM)lpMsg->hwnd, 0);
+    }
+
     if (lpMsg->message == WM_CLOSE || lpMsg->message == WM_DESTROY ||
         lpMsg->message == WM_QUIT || lpMsg->message == WM_SYSCOMMAND) {
         DEBUG_WRITE_ERR("user32: DispatchMessageA close-path\n",
@@ -593,6 +622,9 @@ LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 
     if (Msg == WM_NCCREATE) {
         return TRUE;
+    }
+    if (Msg == WM_SETCURSOR) {
+        return user32_apply_class_cursor(hWnd);
     }
     if (Msg == WM_CLOSE) {
         DEBUG_WRITE_ERR("user32: DefWindowProcA WM_CLOSE\n",

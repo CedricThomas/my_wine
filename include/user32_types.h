@@ -192,6 +192,7 @@ typedef struct {
 #define IDC_SIZEALL     ((const char *)(uintptr_t)32646)
 #define IDC_HAND        ((const char *)(uintptr_t)32649)
 #define IDC_NO          ((const char *)(uintptr_t)32648)
+#define IDC_APPSTARTING ((const char *)(uintptr_t)32650)
 
 /*
  * ── Show Window Constants (SW_*) ─────────────────────────────

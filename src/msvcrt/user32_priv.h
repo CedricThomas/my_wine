@@ -24,6 +24,7 @@ typedef struct {
     HINSTANCE     hinstance;
     HWND          parent;
     HMENU         menu;
+    HCURSOR       class_cursor;
     ATOM          class_atom;
     rb_rect_t     client_rect;
     bool          destroy_in_progress;
