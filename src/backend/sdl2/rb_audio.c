@@ -504,11 +504,18 @@ int rb_audio_buffer_unlock(rb_audio_buf_t buf, const uint8_t *ptr, uint32_t len)
 int rb_audio_buffer_play(rb_audio_buf_t buf, int loop)
 {
     rb_audio_buf *audio_buf = rb_audio_get_buf(buf);
+    int total_frames;
+    uint64_t end_cursor_fp;
 
     if (!audio_buf)
         return RB_FAIL;
 
+    total_frames = rb_audio_frame_count(audio_buf);
+    end_cursor_fp = (uint64_t)(total_frames > 0 ? total_frames : 0) << RB_AUDIO_CURSOR_SHIFT;
+
     rb_audio_lock_device();
+    if (!audio_buf->playing && audio_buf->cursor_fp >= end_cursor_fp)
+        audio_buf->cursor_fp = 0;
     audio_buf->playing = 1;
     audio_buf->loop = (loop != 0);
     rb_audio_unlock_device();

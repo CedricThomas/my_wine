@@ -71,15 +71,22 @@ implementation guidance without re-auditing the source.
 
 ---
 
-## Risk 5: MIDI Playback — **MEDIUM likelihood, LOW impact**
+## Risk 5: MIDI Playback Backend Availability — **MEDIUM likelihood, MEDIUM impact**
 
-**The gap:** DOOM95 uses `midiStreamOpen` + `midiStreamOut` for music. SDL2 has no MIDI support. Stubbing means silent music.
+**The gap:** DOOM95 uses `midiStreamOpen` + `midiStreamOut` for music, and the
+current implementation schedules streamed MIDI events into a FluidSynth backend.
+Music now depends on two runtime prerequisites:
+- a readable GM soundfont
+- a working host audio driver for FluidSynth
 
-**Impact:** No background music. Sound effects (DirectSound) still work. Low impact on playability.
+**Impact:** If either prerequisite is missing, the game still runs and SFX still
+work, but background music stays silent.
 
 **Mitigation:**
-1. **Stub (phase 1)**: `midiStreamOpen` returns a valid handle. `midiStreamOut` is a no-op. Game runs silent for music.
-2. **libmodplug/Timidity++ (phase 2)**: Link one of these libraries. `midiStreamOpen` opens a synth instance. `midiStreamOut` feeds MIDI bytes to the synth.
-3. **SDL_mixer (phase 2)**: `Mix_OpenAudio()` + `Mix_PlayMusic()` with MOD support.
+1. Install a GM soundfont such as `soundfont-fluid`.
+2. Ensure the 32-bit synth runtime is present (`lib32-fluidsynth` on Arch-based hosts).
+3. Keep the backend driver configurable via environment overrides so the host can
+   switch between `pulseaudio`, `pipewire`, or `alsa` if needed.
 
-**Recommendation:** Option 1 for initial milestone. Add Option 2 or 3 in a follow-up.
+**Recommendation:** Keep the WinMM stream scheduler and FluidSynth backend, and
+debug missing music as a host-runtime issue rather than reverting to MIDI stubs.

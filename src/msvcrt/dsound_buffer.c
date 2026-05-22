@@ -1,5 +1,15 @@
 #include "dsound_priv.h"
 
+static DWORD dsound_legacy_buffer_desc_size(void)
+{
+    return (DWORD)offsetof(DSBUFFERDESC, guid3DAlgorithm);
+}
+
+static DWORD dsound_min_buffer_caps_size(void)
+{
+    return (DWORD)(offsetof(DSBCAPS, dwUnlockTransferRate) + sizeof(DWORD));
+}
+
 extern rb_audio_buf_t rb_audio_buffer_create(const rb_audio_format_t *format,
                                              int buffer_size) __attribute__((weak));
 extern int rb_audio_buffer_destroy(rb_audio_buf_t buf) __attribute__((weak));
@@ -78,11 +88,16 @@ static uint32_t KERNEL32_STUB dsound_buffer_Release(void *this_ptr)
 static HRESULT KERNEL32_STUB dsound_buffer_GetCaps(void *this_ptr, DSBCAPS *caps)
 {
     my_ds_buffer_t *buffer = (my_ds_buffer_t *)this_ptr;
+    DWORD copy_size;
 
-    if (!buffer || !caps || caps->dwSize < sizeof(*caps))
+    if (!buffer || !caps || caps->dwSize < dsound_min_buffer_caps_size())
         return DSERR_INVALIDPARAM;
 
-    memset(caps, 0, caps->dwSize);
+    copy_size = caps->dwSize;
+    if (copy_size > sizeof(*caps))
+        copy_size = sizeof(*caps);
+
+    memset(caps, 0, copy_size);
     caps->dwSize = sizeof(*caps);
     caps->dwFlags = buffer->desc_flags;
     caps->dwBufferBytes = buffer->buffer_bytes;
@@ -194,6 +209,7 @@ static HRESULT KERNEL32_STUB dsound_buffer_Lock(void *this_ptr, DWORD write_curs
                                                 DWORD flags)
 {
     my_ds_buffer_t *buffer = (my_ds_buffer_t *)this_ptr;
+    static uint32_t lock_count = 0;
     DWORD offset;
     DWORD size1;
     uint8_t *data1 = NULL;
@@ -224,6 +240,13 @@ static HRESULT KERNEL32_STUB dsound_buffer_Lock(void *this_ptr, DWORD write_curs
         if (rb_audio_buffer_lock(buffer->rb_buffer, offset, write_bytes, &data1, bytes1) != RB_OK)
             return DSERR_INVALIDCALL;
         *ptr1 = FORCE_PTR_RETURN(data1);
+        lock_count++;
+        if (debug_level_at_least(1) &&
+            ((lock_count & (lock_count - 1)) == 0 || lock_count <= 4u)) {
+            DEBUG("dsound: Lock #%u bytes=%lu offset=%lu total=%lu primary=%d",
+                  lock_count, (unsigned long)write_bytes, (unsigned long)offset,
+                  (unsigned long)buffer->buffer_bytes, buffer->is_primary);
+        }
         return DS_OK;
     }
 
@@ -235,6 +258,13 @@ static HRESULT KERNEL32_STUB dsound_buffer_Lock(void *this_ptr, DWORD write_curs
 
     *ptr1 = FORCE_PTR_RETURN(data1);
     *ptr2 = FORCE_PTR_RETURN(data2);
+    lock_count++;
+    if (debug_level_at_least(1) &&
+        ((lock_count & (lock_count - 1)) == 0 || lock_count <= 4u)) {
+        DEBUG("dsound: Lock #%u split bytes=%lu offset=%lu total=%lu primary=%d",
+              lock_count, (unsigned long)write_bytes, (unsigned long)offset,
+              (unsigned long)buffer->buffer_bytes, buffer->is_primary);
+    }
     return DS_OK;
 }
 
@@ -242,6 +272,7 @@ static HRESULT KERNEL32_STUB dsound_buffer_Play(void *this_ptr, DWORD reserved1,
                                                 DWORD priority, DWORD flags)
 {
     my_ds_buffer_t *buffer = (my_ds_buffer_t *)this_ptr;
+    static uint32_t play_count = 0;
 
     (void)reserved1;
     (void)priority;
@@ -254,6 +285,14 @@ static HRESULT KERNEL32_STUB dsound_buffer_Play(void *this_ptr, DWORD reserved1,
         return DSERR_INVALIDCALL;
 
     buffer->play_flags = flags;
+    play_count++;
+    if (debug_level_at_least(1) &&
+        ((play_count & (play_count - 1)) == 0 || play_count <= 8u)) {
+        DEBUG("dsound: Play #%u flags=0x%lx bytes=%lu rate=%lu channels=%u bits=%u",
+              play_count, (unsigned long)flags, (unsigned long)buffer->buffer_bytes,
+              (unsigned long)buffer->frequency, (unsigned)buffer->format.nChannels,
+              (unsigned)buffer->format.wBitsPerSample);
+    }
     if (rb_audio_buffer_play(buffer->rb_buffer, (flags & DSBPLAY_LOOPING) != 0) != RB_OK)
         return DSERR_INVALIDCALL;
     return DS_OK;
@@ -287,6 +326,11 @@ static HRESULT KERNEL32_STUB dsound_buffer_SetFormat(void *this_ptr, const WAVEF
     hr = dsound_apply_format(buffer, format);
     if (hr != DS_OK)
         return hr;
+
+    DEBUG_LEVEL(1, "dsound: SetFormat primary=%d rate=%lu channels=%u bits=%u bytes=%lu",
+                buffer->is_primary, (unsigned long)format->nSamplesPerSec,
+                (unsigned)format->nChannels, (unsigned)format->wBitsPerSample,
+                (unsigned long)buffer->buffer_bytes);
 
     if (buffer->is_primary) {
         if (!rb_audio_open)
@@ -465,7 +509,7 @@ HRESULT KERNEL32_STUB dsound_buffer_create(void *this_ptr, const DSBUFFERDESC *d
         return DSERR_INVALIDPARAM;
     if (outer_unknown)
         return CLASS_E_NOAGGREGATION;
-    if (desc->dwSize < sizeof(*desc))
+    if (desc->dwSize < dsound_legacy_buffer_desc_size())
         return DSERR_INVALIDPARAM;
 
     *out_buffer = NULL;
@@ -485,6 +529,12 @@ HRESULT KERNEL32_STUB dsound_buffer_create(void *this_ptr, const DSBUFFERDESC *d
     buffer->buffer_bytes = desc->dwBufferBytes;
     buffer->volume = DSBVOLUME_MAX;
     buffer->pan = DSBPAN_CENTER;
+
+    DEBUG_LEVEL(1,
+                "dsound: CreateSoundBuffer flags=0x%lx bytes=%lu hasfmt=%d",
+                (unsigned long)desc->dwFlags,
+                (unsigned long)desc->dwBufferBytes,
+                desc->lpwfxFormat != NULL);
 
     if (desc->dwFlags & DSBCAPS_PRIMARYBUFFER) {
         WAVEFORMATEX *primary_format = desc->lpwfxFormat ? desc->lpwfxFormat : &ds->primary_format;

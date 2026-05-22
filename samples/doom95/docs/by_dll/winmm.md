@@ -4,7 +4,7 @@
 
 | Function | Category | SDL2 Mapping | Notes |
 |----------|----------|-------------|-------|
-| `timeGetTime` | critical | `SDL_GetTicks()` | Direct replacement. Both return milliseconds. |
+| `timeGetTime` | critical | monotonic host clock | Pure timer API. Event pumping is handled outside the timer path. |
 
 ## Joystick (4)
 
@@ -21,19 +21,19 @@
 
 | Function | Category | SDL2 Mapping | Notes |
 |----------|----------|-------------|-------|
-| `midiStreamOpen` | critical | **No SDL2 equivalent** | **Custom needed.** Synth library (Timidity++, FluidSynth) or SDL_mixer. |
-| `midiStreamOut` | critical | Feed MIDI events to synth | Pipe MIDI bytes to synth |
-| `midiStreamClose` | critical | Close synth, free resources | Direct cleanup |
-| `midiStreamPause` | cosmetic | Pause synth playback | Custom synth wrapper |
-| `midiStreamRestart` | cosmetic | Resume synth | Custom |
-| `midiStreamProperty` | optional | Stub (return MMSYSERR_NOERROR) | Unused |
-| `midiOutGetNumDevs` | critical | Stub (return 0 or 1) | Return 1 if MIDI synth available |
-| `midiOutPrepareHeader` | critical | No-op (return MMSYSERR_NOERROR) | WinMM-specific |
-| `midiOutUnprepareHeader` | critical | No-op (return MMSYSERR_NOERROR) | Same |
-| `midiOutReset` | optional | No-op | Return MMSYSERR_NOERROR |
-| `midiOutSetVolume` | cosmetic | Stub | Adjust synth volume if available |
+| `midiStreamOpen` | critical | custom | Initialize stream state and start worker thread lazily |
+| `midiStreamOut` | critical | custom | Parse `MIDIEVENT` buffers and queue timed events |
+| `midiStreamClose` | critical | custom | Stop worker, clear queue, and tear down synth backend |
+| `midiStreamPause` | cosmetic | custom | Pause scheduled event dispatch |
+| `midiStreamRestart` | cosmetic | custom | Resume scheduled event dispatch |
+| `midiStreamProperty` | important | custom | Track `MIDIPROPTEMPO` and `MIDIPROPTIMEDIV` |
+| `midiOutGetNumDevs` | critical | custom | Report availability when a readable soundfont is present |
+| `midiOutPrepareHeader` | critical | WinMM bookkeeping | Maintain header flags |
+| `midiOutUnprepareHeader` | critical | WinMM bookkeeping | Maintain header flags |
+| `midiOutReset` | important | custom | Flush queue and stop current playback |
+| `midiOutSetVolume` | cosmetic | custom | Map WinMM volume to FluidSynth gain |
 
-**MIDI has no direct SDL2 support.** Options:
-1. **Stub (phase 1)** — game runs silent for music, falls back to WAV SFX
-2. **libmodplug/Timidity++ (phase 2)** — full MIDI playback
-3. **SDL_mixer (phase 2)** — MOD support via native drivers
+Current backend:
+1. WinMM stream scheduling in `winmm_doom95.c`
+2. FluidSynth software synth
+3. Host audio driver selection preferring `pulseaudio` on this host

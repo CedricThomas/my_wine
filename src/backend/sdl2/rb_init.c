@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <pthread.h>
 
 static int g_initialized = 0;
 static int (*g_prev_x_error_handler)(Display *, XErrorEvent *) = NULL;
@@ -21,6 +22,8 @@ static volatile sig_atomic_t g_shutdown_requested = 0;
 static struct sigaction g_prev_sigint_action;
 static struct sigaction g_prev_sigterm_action;
 static int g_signal_handlers_installed = 0;
+static pthread_t g_event_pump_thread;
+static volatile int g_event_pump_thread_running = 0;
 
 #define RB_X11_BAD_WINDOW 3
 
@@ -247,6 +250,46 @@ static uintptr_t rb_sdl_get_display_mode_call(void *arg)
     return (uintptr_t)SDL_GetDisplayMode(0, 0, mode);
 }
 
+static void *rb_event_pump_thread_main(void *arg)
+{
+    (void)arg;
+
+    while (__atomic_load_n(&g_event_pump_thread_running, __ATOMIC_ACQUIRE)) {
+        SDL_PumpEvents();
+        SDL_Delay(1);
+    }
+
+    return NULL;
+}
+
+static uintptr_t rb_event_pump_thread_start_host_call(void *arg)
+{
+    (void)arg;
+
+    if (__atomic_load_n(&g_event_pump_thread_running, __ATOMIC_ACQUIRE))
+        return 1;
+
+    __atomic_store_n(&g_event_pump_thread_running, 1, __ATOMIC_RELEASE);
+    if (pthread_create(&g_event_pump_thread, NULL, rb_event_pump_thread_main, NULL) != 0) {
+        __atomic_store_n(&g_event_pump_thread_running, 0, __ATOMIC_RELEASE);
+        return 0;
+    }
+
+    return 1;
+}
+
+static uintptr_t rb_event_pump_thread_stop_host_call(void *arg)
+{
+    (void)arg;
+
+    if (!__atomic_load_n(&g_event_pump_thread_running, __ATOMIC_ACQUIRE))
+        return 0;
+
+    __atomic_store_n(&g_event_pump_thread_running, 0, __ATOMIC_RELEASE);
+    (void)pthread_join(g_event_pump_thread, NULL);
+    return 0;
+}
+
 int rb_init(void)
 {
     const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
@@ -288,6 +331,7 @@ int rb_init(void)
     g_shutdown_requested = 0;
     rb_install_signal_handlers();
     rb_event_install_watch();
+    (void)rb_call_on_host_stack(rb_event_pump_thread_start_host_call, NULL);
 
     g_initialized = 1;
     return RB_OK;
@@ -303,6 +347,7 @@ void rb_shutdown(void)
         rb_audio_close();
     }
 
+    (void)rb_call_on_host_stack(rb_event_pump_thread_stop_host_call, NULL);
     rb_call_on_host_stack(rb_sdl_quit_call, NULL);
     rb_restore_signal_handlers();
     g_initialized = 0;

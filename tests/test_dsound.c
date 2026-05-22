@@ -1,5 +1,6 @@
 #include "dsound_types.h"
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -104,6 +105,26 @@ int main(void)
         T(secondary != NULL, "secondary buffer is NULL");
     }
 
+    if (secondary) {
+        LPDIRECTSOUNDBUFFER legacy_secondary = NULL;
+
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = (DWORD)offsetof(DSBUFFERDESC, guid3DAlgorithm);
+        desc.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLPAN | DSBCAPS_CTRLFREQUENCY;
+        desc.dwBufferBytes = secondary_fmt.nAvgBytesPerSec / 20;
+        desc.lpwfxFormat = &secondary_fmt;
+        T(primary != NULL, "primary buffer should exist before legacy secondary test");
+        primary->lpVtbl->Release(primary);
+        primary = NULL;
+        secondary->lpVtbl->Release(secondary);
+        secondary = NULL;
+
+        T(ds->lpVtbl->CreateSoundBuffer(ds, &desc, (void **)&legacy_secondary, NULL) == DS_OK,
+          "CreateSoundBuffer(legacy secondary) failed");
+        T(legacy_secondary != NULL, "legacy secondary buffer is NULL");
+        secondary = legacy_secondary;
+    }
+
     if (ds_qi) {
         ds_qi->lpVtbl->Release(ds_qi);
         ds_qi = NULL;
@@ -156,6 +177,12 @@ int main(void)
         T(secondary->lpVtbl->GetStatus(secondary, &status) == DS_OK &&
           (status & DSBSTATUS_PLAYING) == 0,
           "GetStatus did not observe natural stop");
+        T(secondary->lpVtbl->Play(secondary, 0, 0, 0) == DS_OK,
+          "Play after natural stop failed");
+        T(secondary->lpVtbl->GetStatus(secondary, &status) == DS_OK &&
+          (status & DSBSTATUS_PLAYING) != 0,
+          "Play after natural stop did not restart");
+        T(secondary->lpVtbl->Stop(secondary) == DS_OK, "Stop after replay failed");
         T(secondary->lpVtbl->SetCurrentPosition(secondary, 0) == DS_OK,
           "SetCurrentPosition replay failed");
         T(secondary->lpVtbl->Play(secondary, 0, 0, DSBPLAY_LOOPING) == DS_OK,

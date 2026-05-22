@@ -22,6 +22,10 @@ Keep only facts that change the next debugging move.
 - Doom95 no longer crashes on the post-palette `IDirectDrawPalette::SetEntries` call.
 - Doom95 now reaches sustained frame production.
 - Visual gameplay is confirmed under Xvfb/openbox using the Docker debug image.
+- WinMM music now uses a queued MIDI-event scheduler plus FluidSynth, not the
+  earlier in-memory SMF rebuild path.
+- SDL host event pumping now runs from a backend thread; `timeGetTime` no
+  longer pumps events.
 - The current live behavior is:
   - launcher autostart runs
   - `DOOM1.WAD` is found
@@ -31,7 +35,7 @@ Keep only facts that change the next debugging move.
   - `PaletteSetEntries` completes
   - `Lock` / `Unlock`, `Flip`, and occasional `Blt` continue steadily
   - `doom95_window.png` captures live gameplay
-  - process stays alive and spins hot, dominated by `timeGetTime` polling
+  - process stays alive and still spins hot, dominated by game-side `timeGetTime` polling
 
 ## Most important changes already proved
 
@@ -149,10 +153,11 @@ The latest input-focused run proved:
 
 Treat this as a hot timing/performance issue, not a startup-crash or render-confirmation bug.
 
-### Priority 1: throttle or explain the `timeGetTime` storm
+### Priority 1: understand the remaining timer storm
 
-- Consider a narrow compatibility throttle in `timeGetTime` only after repeated same-millisecond polls.
-- Keep it conservative; Doom95 is producing frames, so do not perturb timing heavily.
+- Do not reintroduce event pumping or compatibility throttling inside `timeGetTime`.
+- Treat the remaining hot loop as guest behavior unless a trace proves the timer
+  implementation is semantically wrong.
 - Re-run with `MY_WINE_DEBUG_LEVEL=1` only briefly because timer logging becomes enormous.
 
 The next session should answer:

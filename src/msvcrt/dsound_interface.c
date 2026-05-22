@@ -5,6 +5,11 @@ extern int rb_audio_open(int sample_rate, int channels, int bits_per_sample,
                          int buffer_size) __attribute__((weak));
 extern int rb_audio_buffer_destroy(rb_audio_buf_t buf) __attribute__((weak));
 
+static DWORD dsound_min_device_caps_size(void)
+{
+    return (DWORD)(offsetof(DSCAPS, dwPrimaryBuffers) + sizeof(DWORD));
+}
+
 void dsound_default_wave_format(WAVEFORMATEX *format)
 {
     if (!format)
@@ -60,6 +65,10 @@ HRESULT dsound_ensure_backend(my_ds_t *ds)
         return DSERR_INVALIDCALL;
     }
 
+    DEBUG_LEVEL(1, "dsound: open backend rate=%lu channels=%u bits=%u",
+                (unsigned long)ds->primary_format.nSamplesPerSec,
+                (unsigned)ds->primary_format.nChannels,
+                (unsigned)ds->primary_format.wBitsPerSample);
     ds->backend_ready = 1;
     return DS_OK;
 }
@@ -150,15 +159,21 @@ static uint32_t KERNEL32_STUB dsound_Release(void *this_ptr)
 static HRESULT KERNEL32_STUB dsound_GetCaps(void *this_ptr, DSCAPS *caps)
 {
     my_ds_t *ds = (my_ds_t *)this_ptr;
+    DWORD copy_size;
 
-    if (!ds || !caps || caps->dwSize < sizeof(*caps))
+    if (!ds || !caps || caps->dwSize < dsound_min_device_caps_size())
         return DSERR_INVALIDPARAM;
 
-    memset(caps, 0, caps->dwSize);
+    copy_size = caps->dwSize;
+    if (copy_size > sizeof(*caps))
+        copy_size = sizeof(*caps);
+
+    memset(caps, 0, copy_size);
     caps->dwSize = sizeof(*caps);
     caps->dwMinSecondarySampleRate = DSBFREQUENCY_MIN;
     caps->dwMaxSecondarySampleRate = DSBFREQUENCY_MAX;
     caps->dwPrimaryBuffers = 1;
+    DEBUG_LEVEL(1, "dsound: GetCaps");
     return DS_OK;
 }
 
@@ -184,6 +199,8 @@ static HRESULT KERNEL32_STUB dsound_SetCooperativeLevel(void *this_ptr, void *hw
 
     ds->cooperative_hwnd = hwnd;
     ds->cooperative_level = level;
+    DEBUG_LEVEL(1, "dsound: SetCooperativeLevel hwnd=%p level=0x%lx", hwnd,
+                (unsigned long)level);
     return DS_OK;
 }
 
@@ -253,6 +270,7 @@ HRESULT KERNEL32_STUB DirectSoundCreate(const GUID *guid, LPDIRECTSOUND *out_ds,
     ds->cooperative_level = DSSCL_NORMAL;
     dsound_default_wave_format(&ds->primary_format);
 
+    DEBUG_LEVEL(1, "dsound: DirectSoundCreate -> %p", (void *)ds);
     *out_ds = FORCE_PTR_RETURN(ds);
     return DS_OK;
 }

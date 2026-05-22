@@ -63,12 +63,12 @@ my_wine/
 │   │                          # SetFrequency, SetFormat, SetStatus, GetCaps,
 │   │                          # GetFormat, GetVolume, Restore, GetCursorPos,
 │   │                          # SetLoopPoints + rb_audio_* → mixer loop
-│   ├── winmm_timer.c           # timeGetTime
-│   ├── winmm_joystick.c        # joyGetNumDevs, joyGetDevCapsA, joyGetPosEx
-│   ├── winmm_midi.c            # midiStreamOpen, midiStreamOut, midiStreamClose,
+│   ├── winmm_doom95.c          # timeGetTime, joystick entry points, and WinMM MIDI:
+│   │                          # midiStreamOpen, midiStreamOut, midiStreamClose,
 │   │                          # midiStreamPause, midiStreamRestart, midiStreamProperty,
 │   │                          # midiOutGetNumDevs, midiOutPrepareHeader,
-│   │                          # midiOutUnprepareHeader, midiOutReset, midiOutSetVolume
+│   │                          # midiOutUnprepareHeader, midiOutReset, midiOutSetVolume,
+│   │                          # plus MIDI event scheduling and FluidSynth backend glue
 │   ├── advapi32_registry.c     # RegCreateKeyA, RegOpenKeyA, RegCloseKey,
 │   │                          # RegQueryValueExA, RegSetValueExA
 │   ├── kernel32_extended.c     # CreateFileA, CloseHandle (extend existing),
@@ -114,9 +114,7 @@ my_wine/
 | `ddraw_surface.c` | 500 | IDirectDrawSurface vtable (24 methods) + Lock/Unlock/Blt |
 | `dsound_interface.c` | 200 | IDirectSound vtable (12 methods) |
 | `dsound_buffer.c` | 400 | IDirectSoundBuffer vtable (12 methods) + PCM mixer (~100 lines) |
-| `winmm_timer.c` | 10 | Single function |
-| `winmm_joystick.c` | 100 | Joystick open/query/state |
-| `winmm_midi.c` | 150 | MIDI stubs (or libmodplug wrapper) |
+| `winmm_doom95.c` | 500+ | Timer, joystick, WinMM MIDI scheduler, FluidSynth backend |
 | `advapi32_registry.c` | 120 | In-memory registry hashmap |
 | `kernel32_extended.c` | 500 | ~40 new kernel32 functions + resource loader |
 | `dplay_stub.c` | 50 | Mock IDirectPlay |

@@ -14,11 +14,17 @@ The binary imports both DirectSound and multiple MIDI/WinMM functions — dual a
 
 ### WinMM MIDI (for music)
 
-- `midiStreamOpen` → Open MIDI output device
-- `midiStreamOut` → Play MIDI sequences
-- `midiStreamPause`/`midiStreamRestart` → Pause/resume music
-- `midiOutSetVolume` → Volume control
+- `midiStreamOpen` → Create WinMM stream state and worker thread on demand
+- `midiStreamOut` → Queue `MIDIEVENT` / sysex records directly
+- `midiStreamPause`/`midiStreamRestart` → Pause/resume scheduled stream playback
+- `midiOutSetVolume` → Update synth gain
 - `midiOutPrepareHeader`/`midiOutUnprepareHeader` → MIDI buffer management
+
+Current backend shape:
+- WinMM stream parser/scheduler in `winmm_doom95.c`
+- FluidSynth software synth with a host soundfont such as `FluidR3_GM.sf2`
+- Audio output via FluidSynth's host audio driver (`pulseaudio` preferred on this host)
+- No in-memory MIDI-file rebuild and no vendored parser/player
 
 ### WinMM Joystick
 

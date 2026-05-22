@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern void winmm_doom95_set_application_active(int active) __attribute__((weak));
+
 /* ---- Active window tracking ---- */
 
 static uintptr_t g_active_window = 0;
@@ -425,7 +427,7 @@ static void rb_event_begin_shutdown(void)
 
     g_shutdown_hwnd_head = 0;
     g_shutdown_hwnd_count = 0;
-    g_shutdown_force_quit_pending = 1;
+    g_shutdown_force_quit_pending = 0;
 
     if (rb_event_ensure_shutdown_capacity(g_window_route_capacity + 1) != RB_OK)
         return;
@@ -444,9 +446,10 @@ static void rb_event_begin_shutdown(void)
     }
 
     g_shutdown_hwnd_count = count;
-    DEBUG_LEVEL(1, "rb_event: begin shutdown queued=%lu active=0x%lx",
+    DEBUG_LEVEL(1, "rb_event: begin shutdown queued=%lu active=0x%lx force_quit=%d",
                 (unsigned long)g_shutdown_hwnd_count,
-                (unsigned long)g_active_window);
+                (unsigned long)g_active_window,
+                g_shutdown_force_quit_pending);
 }
 
 static int rb_event_translate_shutdown(rb_msg_t *out_msg)
@@ -568,25 +571,8 @@ static int rb_event_watch(void *userdata, SDL_Event *event)
     if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) {
         vk = rb_keycode_to_vk(event->key.keysym.sym, event->key.keysym.scancode);
         if (vk >= 0) {
-            uint32_t message;
-            uint32_t lparam;
-            extern int user32_call_keyboard_hook_direct(uint32_t message,
-                                                        uint32_t wParam,
-                                                        intptr_t lParam)
-                                                        __attribute__((weak));
-
             rb_keyboard_note_key_event(vk, event->type == SDL_KEYDOWN,
                                        event->key.repeat != 0);
-            if (user32_call_keyboard_hook_direct) {
-                message = (event->type == SDL_KEYDOWN)
-                          ? (rb_is_system_key_event(&event->key) ? WM_SYSKEYDOWN : WM_KEYDOWN)
-                          : (rb_is_system_key_event(&event->key) ? WM_SYSKEYUP : WM_KEYUP);
-                lparam = rb_build_key_lparam(&event->key, event->type == SDL_KEYUP);
-                if (event->type == SDL_KEYDOWN)
-                    lparam &= ~(1u << 30);
-                (void)user32_call_keyboard_hook_direct(message, (uint32_t)vk,
-                                                       (intptr_t)lparam);
-            }
 
             {
                 uintptr_t hwnd = rb_event_resolve_hwnd_from_sdl_window(event->key.windowID);
@@ -903,11 +889,15 @@ int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg)
     case SDL_WINDOWEVENT:
         if (sdl->window.event == SDL_WINDOWEVENT_FOCUS_GAINED && event_hwnd) {
             g_active_window = event_hwnd;
+            if (winmm_doom95_set_application_active)
+                winmm_doom95_set_application_active(1);
             rb_event_queue_focus_messages(event_hwnd, 1);
             return rb_event_pop_synthetic(msg);
         }
         if (sdl->window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
             event_hwnd && g_active_window == event_hwnd) {
+            if (winmm_doom95_set_application_active)
+                winmm_doom95_set_application_active(0);
             rb_event_queue_focus_messages(event_hwnd, 0);
             g_active_window = 0;
             g_alt_key_down = 0;

@@ -1,9 +1,11 @@
 #ifndef MY_WINE_DSOUND_PRIV_H
 #define MY_WINE_DSOUND_PRIV_H
 
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "include/debug.h"
 #include "dsound_types.h"
 #include "render_backend.h"
 #include "wine_abi.h"

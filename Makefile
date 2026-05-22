@@ -6,6 +6,7 @@ LDFLAGS  = -lrt -lpthread -ldl
 # SDL2 backend (optional - needed for DOOM95 render backend)
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null || echo "-I/usr/include/SDL2")
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2")
+FLUID_LIBS  := $(shell pkg-config --libs fluidsynth 2>/dev/null || echo "-lfluidsynth")
 
 # 32-bit SDL2 detection — test if -m32 linking actually finds a 32-bit SDL2 lib.
 # Without lib32-sdl2 installed the linker rejects 64-bit .so files.
@@ -166,6 +167,10 @@ $(foreach obj,$(notdir $(STUBS_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(SYSCALL_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 
+# winmm_doom95 uses host multimedia libraries and keeps stack realignment enabled
+# for the 32-bit guest-facing build.
+CFLAGS_winmm_doom95.o = $(filter-out -mno-sse,$(SPECIAL_CFLAGS)) -mstackrealign
+
 # pe32plus_musl_malloc_backend needs extra include paths for stubs and musl source.
 CFLAGS_pe32plus_musl_malloc_backend.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/heap/musl_src
 
@@ -218,6 +223,10 @@ $(BUILDDIR32)/%.o: %.c | $(BUILDDIR32)
 	@echo "  CC32 $<"
 	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
 
+$(BUILDDIR32)/winmm_doom95.o: src/msvcrt/winmm_doom95.c | $(BUILDDIR32)
+	@echo "  CC32 $<"
+	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) -mstackrealign -c $< -o $@
+
 $(BUILDDIR32)/pe32_run_guest.o: src/loader/pe32_run_guest.S | $(BUILDDIR32)
 	@echo "  AS32 $<"
 	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
@@ -244,13 +253,13 @@ my_wine: $(BUILDDIR)/wrapper_main.o
 # my_wine64 loads PE32+ images directly.
 my_wine64: $(OBJS)
 	@echo "==== Link my_wine64 ===="
-	@$(CC) $(CFLAGS) -o my_wine64 $(OBJS) $(LDFLAGS) $(SDL2_LIBS) -lm
+	@$(CC) $(CFLAGS) -o my_wine64 $(OBJS) $(LDFLAGS) $(SDL2_LIBS) $(FLUID_LIBS) -lm
 
 # ── PE32 Runtime Binary ─────────────────────────────────────────
 # my_wine32 uses pe32_entry.c as main() entry point.
 my_wine32: $(MY_WINE32_OBJS)
 	@echo "==== Link my_wine32 ===="
-	@$(MY_WINE32_CC) -no-pie -o my_wine32 $(MY_WINE32_OBJS) -lpthread $(SDL2_LIBS_32)
+	@$(MY_WINE32_CC) -no-pie -o my_wine32 $(MY_WINE32_OBJS) -lpthread $(SDL2_LIBS_32) $(FLUID_LIBS)
 
 # ── Test Targets ────────────────────────────────────────────────
 # Test binaries (native ELF) plus the hello_world sample .exe they exercise.
@@ -280,7 +289,7 @@ debug-tests: tests
 define TEST_RULE
 $(BUILDDIR)/test_$(1): tests/test_$(1).c $(2)
 	@echo "  LD $$@"
-	@$(CC) $(CFLAGS) -I include -o $$@ $$^ $(LDFLAGS)
+	@$(CC) $(CFLAGS) -I include -o $$@ $$^ $(LDFLAGS) $(SDL2_LIBS) -lm
 endef
 
 $(eval $(call TEST_RULE,parse,$(TEST_parse_OBJS)))
@@ -337,7 +346,7 @@ $(BUILDDIR32)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend32
 	@echo "  LD32 $@"
 	@$(MY_WINE32_CC) -no-pie $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS_32)
 
-TEST_dsound32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o $(BUILDDIR32)/dsound_interface.o $(BUILDDIR32)/dsound_buffer.o
+TEST_dsound32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o $(BUILDDIR32)/dsound_interface.o $(BUILDDIR32)/dsound_buffer.o $(BUILDDIR32)/debug.o
 $(BUILDDIR32)/test_dsound: tests/test_dsound.c $(TEST_dsound32_OBJS)
 	@echo "  LD32 $@"
 	@$(MY_WINE32_CC) -no-pie $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -I include -o $@ $^ $(SDL2_LIBS_32)
