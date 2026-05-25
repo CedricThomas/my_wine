@@ -181,8 +181,7 @@ static uintptr_t rb_sdl_window_get_client_rect_call(void *arg)
 }
 
 typedef struct {
-    SDL_Window *old_window;
-    SDL_Window *new_window;
+    SDL_Window *window;
     int fullscreen;
     int width;
     int height;
@@ -191,21 +190,14 @@ typedef struct {
 static uintptr_t rb_sdl_window_set_fullscreen_call(void *arg)
 {
     rb_sdl_window_fullscreen_args *a = arg;
-    const char *title = SDL_GetWindowTitle(a->old_window);
-    uint32_t flags = SDL_WINDOW_SHOWN;
-
-    (void)a->fullscreen;
-    a->new_window = SDL_CreateWindow(title,
-                                     SDL_WINDOWPOS_CENTERED,
-                                     SDL_WINDOWPOS_CENTERED,
-                                     a->width, a->height,
-                                     flags);
-    if (!a->new_window)
+    if (!a->window)
         return 0;
 
-    SDL_DestroyWindow(a->old_window);
-    SDL_ShowWindow(a->new_window);
-    SDL_RaiseWindow(a->new_window);
+    if (!SDL_SetWindowFullscreen(a->window, a->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0))
+        return 0;
+    SDL_SetWindowSize(a->window, a->width, a->height);
+    SDL_ShowWindow(a->window);
+    SDL_RaiseWindow(a->window);
     SDL_PumpEvents();
     return 1;
 }
@@ -300,13 +292,17 @@ rb_window_t rb_window_create(const char *title,
     int ypos = (y == RB_HINT_AUTO || y == -1) ? (int)SDL_WINDOWPOS_CENTERED : y;
 
     rb_sdl_create_window_args args = { title, xpos, ypos, w, h, sdl_flags };
+    rb_event_pump_pause();
     SDL_Window *sdl_win = (SDL_Window *)rb_call_on_host_stack(rb_sdl_create_window_call, &args);
-    if (!sdl_win)
+    if (!sdl_win) {
+        rb_event_pump_resume();
         return 0;
+    }
     if (flags & RB_WINDOW_SHOWN)
         rb_call_on_host_stack(rb_sdl_show_raise_pump_call, sdl_win);
     else
         rb_call_on_host_stack(rb_sdl_pump_events_call, NULL);
+    rb_event_pump_resume();
 
     rb_window *win = rb_host_malloc(sizeof(*win));
     if (!win) {
@@ -501,8 +497,7 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
         return RB_FAIL;
 
     rb_sdl_window_fullscreen_args args = {
-        .old_window = wnd->window,
-        .new_window = NULL,
+        .window = wnd->window,
         .fullscreen = fullscreen,
         .width = width,
         .height = height,
@@ -510,7 +505,6 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
     if (!rb_call_on_host_stack(rb_sdl_window_set_fullscreen_call, &args))
         return RB_FAIL;
 
-    wnd->window = args.new_window;
     if (rb_window_refresh_ids(wnd) != RB_OK)
         return RB_FAIL;
     rb_window_set_default_cursor(wnd);

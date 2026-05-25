@@ -2,6 +2,39 @@
 #include "debug.h"
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <errno.h>
+
+/*
+ * rb_alloc_32bit — allocate memory in the lower 32-bit address range.
+ *
+ * Used for DDraw surface pixel buffers that are referenced by 32-bit pointers
+ * in the DDSURFACEDESC v1 format. The guest stores the surface data address
+ * in a 32-bit lpSurface field, so the buffer must be below 0x100000000.
+ */
+static uint8_t *rb_alloc_32bit(size_t size)
+{
+    uint8_t *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    if (ptr == MAP_FAILED) {
+        DEBUG("rb: mmap MAP_32BIT failed: %s, falling back to malloc", strerror(errno));
+        return rb_host_malloc(size);
+    }
+    return ptr;
+}
+
+static void rb_free_32bit(uint8_t *ptr, size_t size)
+{
+    if (!ptr)
+        return;
+    if (size > 0) {
+        if (mprotect(ptr, size, PROT_READ | PROT_WRITE) == 0 &&
+            munmap(ptr, size) == 0)
+            return;
+    }
+    /* Fall back to host free if this wasn't mmap'd (e.g., from fallback path). */
+    rb_host_free(ptr);
+}
 
 static inline rb_surface *get_surface(rb_surface_t surf)
 {
@@ -248,7 +281,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
 
     int pitch = rb_surface_pitch_for_bpp(w, bpp);
     int buf_size = pitch * h;
-    uint8_t *buf = rb_host_malloc(buf_size);
+    uint8_t *buf = rb_alloc_32bit(buf_size);
     if (!buf)
         return 0;
     memset(buf, 0, buf_size);
@@ -260,7 +293,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
         rb_sdl_surface_create_args mask_args = { .bpp = 0 };
         int mask_ret = (int)rb_call_on_host_stack(rb_sdl_pixel_format_masks_call, &mask_args);
         if (!mask_ret) {
-            rb_host_free(buf);
+            rb_free_32bit(buf, buf_size);
             return 0;
         }
         rmask = mask_args.rmask;
@@ -277,7 +310,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     };
     SDL_Surface *surface = (SDL_Surface *)rb_call_on_host_stack(rb_sdl_create_surface_from_call, &create_args);
     if (!surface) {
-        rb_host_free(buf);
+        rb_free_32bit(buf, buf_size);
         return 0;
     }
 
@@ -292,7 +325,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     rb_surface *s = rb_host_malloc(sizeof(*s));
     if (!s) {
         rb_call_on_host_stack(rb_sdl_free_surface_call, surface);
-        rb_host_free(buf);
+        rb_free_32bit(buf, buf_size);
         return 0;
     }
     s->surface = surface;
@@ -391,8 +424,14 @@ int rb_surface_destroy(rb_surface_t surf)
         }
     }
 
+    int buf_size = 0;
+    if (s->surface) {
+        buf_size = s->pitch * s->surface->h;
+    }
     rb_call_on_host_stack(rb_sdl_free_surface_call, s->surface);
-    rb_host_free(s->own_buf);
+    if (s->own_buf) {
+        rb_free_32bit(s->own_buf, buf_size);
+    }
     rb_host_free(s);
     wine_handle_free((uint32_t)surf);
     return RB_OK;

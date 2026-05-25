@@ -12,11 +12,52 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
+#include <dlfcn.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 #include "render_backend.h"
 #include "handle_manager.h"
 #include "src/loader/loader_state.h"
+
+/*
+ * In 32-bit loader mode, the PLT redirects malloc/calloc/free to the
+ * my_wine mmap heap. To allocate on the REAL host heap, we resolve
+ * the actual glibc functions via dlsym(RTLD_DEFAULT, ...) which
+ * bypasses the PLT. These pointers are cached after first resolution.
+ */
+static inline void *real_malloc(size_t size)
+{
+    static void *(*fn)(size_t) = NULL;
+    if (!fn)
+        fn = dlsym(RTLD_DEFAULT, "malloc");
+    return fn ? fn(size) : NULL;
+}
+
+static inline void *real_calloc(size_t nmemb, size_t size)
+{
+    static void *(*fn)(size_t, size_t) = NULL;
+    if (!fn)
+        fn = dlsym(RTLD_DEFAULT, "calloc");
+    return fn ? fn(nmemb, size) : NULL;
+}
+
+static inline void real_free(void *ptr)
+{
+    static void (*fn)(void *) = NULL;
+    if (!fn)
+        fn = dlsym(RTLD_DEFAULT, "free");
+    if (fn && ptr)
+        fn(ptr);
+}
+
+/* 32-bit: use mmap(MAP_32BIT) for host allocations so returned pointers
+ * stay within the 32-bit address space. The guest truncates host pointers
+ * to 32 bits; glibc malloc may return addresses >2GB which truncate to
+ * garbage (e.g. 0x80450004 -> 0x4). */
+#if defined(__i386__)
+#include "src/syscall/syscalls_inline.h"
+#endif
 
 extern wine_loader_state_t g_loader __attribute__((weak));
 extern void *unix_stack_ptr_val __attribute__((weak));
@@ -183,6 +224,13 @@ static inline int rb_host_context_is_active(void)
 
 static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
 {
+    /* Reentrancy guard: if already on host stack (correct FS/GS),
+     * call the function directly without stack switching. This prevents
+     * nested stack-pointer manipulation when host-stack wrappers are
+     * called from inside rb_call_on_host_stack() callbacks. */
+    if (rb_host_context_is_active())
+        return (uintptr_t)fn(arg);
+
 #if defined(__x86_64__)
     uintptr_t ret;
     uintptr_t old_rsp;
@@ -250,6 +298,32 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
 #endif
 }
 
+#if defined(__i386__)
+/* 32-bit: use real glibc malloc/calloc/free resolved via dlsym to bypass
+ * the PLT redirect to my_wine's mmap heap. */
+static inline uintptr_t rb_host_malloc_call(void *arg)
+{
+    return (uintptr_t)real_malloc(*(size_t *)arg);
+}
+
+typedef struct {
+    size_t nmemb;
+    size_t size;
+} rb_host_calloc_args;
+
+static inline uintptr_t rb_host_calloc_call(void *arg)
+{
+    rb_host_calloc_args *a = arg;
+    return (uintptr_t)real_calloc(a->nmemb, a->size);
+}
+
+static inline uintptr_t rb_host_free_call(void *arg)
+{
+    real_free(arg);
+    return 0;
+}
+#else
+
 static inline uintptr_t rb_host_malloc_call(void *arg)
 {
     return (uintptr_t)malloc(*(size_t *)arg);
@@ -271,6 +345,7 @@ static inline uintptr_t rb_host_free_call(void *arg)
     free(arg);
     return 0;
 }
+#endif /* __i386__ */
 
 static inline uintptr_t rb_host_getenv_call(void *arg)
 {
@@ -297,6 +372,33 @@ static inline void rb_host_free(void *ptr)
 static inline const char *rb_host_getenv(const char *name)
 {
     return (const char *)rb_call_on_host_stack(rb_host_getenv_call, (void *)name);
+}
+
+typedef struct {
+    const char *name;
+    const char *value;
+} rb_host_setenv_args;
+
+static inline uintptr_t rb_host_setenv_call(void *arg)
+{
+    rb_host_setenv_args *a = arg;
+    return (uintptr_t)setenv(a->name, a->value, 1);
+}
+
+static inline int rb_host_setenv(const char *name, const char *value)
+{
+    rb_host_setenv_args args = { name, value };
+    return (int)rb_call_on_host_stack(rb_host_setenv_call, &args);
+}
+
+static inline uintptr_t rb_host_unsetenv_call(void *arg)
+{
+    return (uintptr_t)unsetenv((const char *)arg);
+}
+
+static inline void rb_host_unsetenv(const char *name)
+{
+    (void)rb_call_on_host_stack(rb_host_unsetenv_call, (void *)name);
 }
 
 /* ---- Global audio state ---- */

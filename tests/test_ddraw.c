@@ -24,8 +24,8 @@ int main(void)
     LPDIRECTDRAWSURFACE offscreen = NULL;
     DDSURFACEDESC desc;
     DDSURFACEDESC mode_desc;
-    DDCAPS caps1;
-    DDCAPS caps2;
+    /* DDCAPS caps1;  // unused - GetCaps removed from guest vtable */
+    /* DDCAPS caps2;  // unused */
     DDPALETTEENTRY palette_entries[256];
     DDPALETTEENTRY palette_readback[256];
     uint32_t backbuffer_caps = DDSCAPS_BACKBUFFER;
@@ -53,11 +53,14 @@ int main(void)
         T(dd->lpVtbl->GetDisplayMode(dd, &mode_desc) == DD_OK, "GetDisplayMode failed");
         T(mode_desc.lWidth == 64 && mode_desc.lHeight == 48,
           "GetDisplayMode dimensions mismatch");
+        /* GetCaps removed from guest-compatible vtable layout */
+        /*
         memset(&caps1, 0, sizeof(caps1));
         memset(&caps2, 0, sizeof(caps2));
         T(dd->lpVtbl->GetCaps(dd, &caps1, &caps2) == DD_OK, "GetCaps failed");
         T(caps1.dwPaletteEntries == 256, "GetCaps palette entries mismatch");
         T((caps1.dwCaps & DDCAPS_FLIP) != 0, "GetCaps missing flip capability");
+        */
 
         for (int i = 0; i < 256; i++) {
             palette_entries[i].peRed = (uint8_t)i;

@@ -4,7 +4,7 @@
 #   DOCKER_BUILDKIT=0 docker build -t my_wine-samples .
 #
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
@@ -24,6 +24,8 @@ RUN dpkg --add-architecture i386 && \
         libsdl2-dev:i386 \
         libsdl2-2.0-0 \
         libsdl2-2.0-0:i386 \
+        libfluidsynth3 \
+        libfluidsynth3:i386 \
         gdb \
         gdb-multiarch \
         imagemagick \
@@ -38,3 +40,12 @@ RUN dpkg --add-architecture i386 && \
         xdotool \
         xvfb && \
     rm -rf /var/lib/apt/lists/*
+
+# Create symlinks so host-compiled binaries can find libraries in multiarch paths
+RUN ln -sf /usr/lib/x86_64-linux-gnu/libSDL2-2.0.so.0 /usr/lib/libSDL2-2.0.so.0 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libfluidsynth.so.3 /usr/lib/libfluidsynth.so.3 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libfluidsynth.so.3 /lib/libfluidsynth.so.3 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 /usr/lib/libgcc_s.so.1 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/lib/libstdc++.so.6 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libm.so.6 /usr/lib/libm.so.6 && \
+    ldconfig

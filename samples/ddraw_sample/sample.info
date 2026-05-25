@@ -1,5 +1,7 @@
 type=graphical
 libs=ddraw
+
+
 window_title=DDraw Sample
 window_width=320
 window_height=200

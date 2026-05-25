@@ -171,8 +171,19 @@ $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 # for the 32-bit guest-facing build.
 CFLAGS_winmm_doom95.o = $(filter-out -mno-sse,$(SPECIAL_CFLAGS)) -mstackrealign
 
+# user32_window calls rb_call_on_host_stack which switches to host stack;
+# disable stack protector to avoid false positive canary corruption.
+CFLAGS_user32_window.o = $(SPECIAL_CFLAGS)
+CFLAGS_user32_message.o = $(SPECIAL_CFLAGS)
+CFLAGS_user32_input.o = $(SPECIAL_CFLAGS)
+
 # pe32plus_musl_malloc_backend needs extra include paths for stubs and musl source.
 CFLAGS_pe32plus_musl_malloc_backend.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs -Isrc/heap/musl_src
+
+# Backend files that use rb_call_on_host_stack need -fno-stack-protector
+# because the inline asm switches to a different stack and the canary
+# can be corrupted by the host function calling back to guest memory.
+$(foreach f,rb_audio.o rb_event.o rb_init.o rb_input.o rb_palette.o rb_surface.o rb_window.o,$(eval CFLAGS_backend/sdl2/$(f) = $(SPECIAL_CFLAGS) $(SDL2_CFLAGS)))
 
 # ── Default Target ──────────────────────────────────────────────
 all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
@@ -332,13 +343,13 @@ $(BUILDDIR)/test_user32_message_dispatch: tests/test_user32_message_dispatch.c $
 $(BUILDDIR)/backend/%.o: %.c | $(BUILDDIR)
 	@mkdir -p $(@D)
 	@echo "  CC-SDL2 $<"
-	@$(CC) $(filter-out -mno-sse,$(CFLAGS)) -mstackrealign $(SDL2_CFLAGS) -c $< -o $@
+	@$(CC) $(filter-out -mno-sse,$(CFLAGS)) -mstackrealign -fno-stack-protector $(SDL2_CFLAGS) -c $< -o $@
 
 # 32-bit backend compile rule
 $(BUILDDIR32)/backend/%.o: %.c | $(BUILDDIR32)
 	@mkdir -p $(@D)
 	@echo "  CC32-SDL2 $<"
-	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) -mstackrealign $(SDL2_CFLAGS) -c $< -o $@
+	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) -mstackrealign -fno-stack-protector $(SDL2_CFLAGS) -c $< -o $@
 
 # SDL2 backend test (32-bit)
 TEST_sdl2_backend32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o

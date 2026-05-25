@@ -133,6 +133,20 @@ static int run_tests(void) {
   }
   printf("OK\n");
 
+  /* ---- Fullscreen toggle ---- */
+  printf("  fullscreen toggle... ");
+  rb_window_t fs_win =
+      rb_window_create("SDL2 Fullscreen Test", -1, -1, 320, 200, RB_WINDOW_SHOWN);
+  T(fs_win != 0, "fullscreen test window create failed");
+  if (fs_win) {
+    T(rb_window_set_fullscreen(fs_win, 1, 320, 200, 0) == RB_OK,
+      "set_fullscreen(1) failed");
+    T(rb_window_set_fullscreen(fs_win, 0, 320, 200, 0) == RB_OK,
+      "set_fullscreen(0) restore failed");
+    T(rb_window_destroy(fs_win) == RB_OK, "fullscreen test window destroy failed");
+  }
+  printf("OK\n");
+
   /* ---- Window recreate regression ---- */
   printf("  window recreate... ");
   for (int i = 0; i < 3; i++) {

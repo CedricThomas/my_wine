@@ -62,6 +62,23 @@ typedef struct {
     uint32_t dwCaps;
 } ddraw_guest_caps_t;
 
+/*
+ * ddraw_guest_desc_t — canonical host layout matching DDSURFACEDESC2 (104 bytes).
+ *
+ *   0x00  ddSize          (DWORD)
+ *   0x04  ddFlags         (DWORD)
+ *   0x08  dwHeight        (DWORD)
+ *   0x0C  dwWidth         (DWORD)
+ *   0x10  lPitch          (LONG)
+ *   0x14  dwBackBufferCount (DWORD)
+ *   0x18  dwMipMapCount   (DWORD)
+ *   0x1C  dwAlphaBitDepth (DWORD)
+ *   0x20  dwReserved      (DWORD)
+ *   0x24  lpSurface       (DWORD)
+ *   0x28-0x67  reserved
+ *   0x68  ddsCaps         (DDSCAPS: dwCaps at +0)
+ * Total: 0x6C (108) bytes; actually 0x68 = 104 with the packed caps struct
+ */
 typedef struct {
     uint32_t ddSize;
     uint32_t ddFlags;
@@ -76,6 +93,44 @@ typedef struct {
     uint8_t reserved[0x68 - 0x28];
     ddraw_guest_caps_t ddsCaps;
 } __attribute__((packed)) ddraw_guest_desc_t;
+
+/*
+ * ddraw_guest_desc1_t — DirectDraw 1.x (DDSURFACEDESC v1) layout.
+ *
+ * 36 bytes. This is what legacy guests (Doom95, sample code) use.
+ * Layout:
+ *   0x00  ddSize       (DWORD)
+ *   0x04  ddFlags      (DWORD)
+ *   0x08  ddCaps       (DWORD)   <- caps at 0x08, not 0x68!
+ *   0x0C  ddX          (DWORD)
+ *   0x10  ddY          (DWORD)
+ *   0x14  union{lPitch,lWidth}   (DWORD)
+ *   0x18  dwBackBufferCount (DWORD)
+ *   0x1C  union{wWidth,wHeight,lWidth2,lHeight} (DWORD)
+ *   0x20  union{lpSurface,lpDDSurfaceDesc} (DWORD)
+ */
+typedef struct {
+    uint32_t  ddSize;
+    uint32_t  ddFlags;
+    uint32_t  ddCaps;
+    uint32_t  ddX;
+    uint32_t  ddY;
+    union {
+        int32_t   lPitch;
+        uint32_t  lWidth;
+    };
+    uint32_t  dwBackBufferCount;
+    union {
+        uint32_t  wWidth;
+        uint32_t  wHeight;
+        uint32_t  lWidth2;
+        uint32_t  lHeight;
+    };
+    union {
+        uint32_t  lpSurface;
+        uint32_t  lpDDSurfaceDesc;
+    };
+} __attribute__((packed)) ddraw_guest_desc1_t;
 
 my_dd_t *g_ddraw_instance = NULL;
 
@@ -133,12 +188,32 @@ static rb_pixel_format_t ddraw_bpp_to_format(uint32_t bpp)
     }
 }
 
-static void ddraw_fill_surface_desc(my_surface_t *surf, ddraw_guest_desc_t *desc,
-                                    void *surface_ptr)
+/*
+ * ddraw_guest_ptr_valid — check that a guest pointer is in the valid
+ * guest address range (> 0x10000).  Prevents writes to low addresses
+ * that could alias stack slots or other host memory.
+ */
+static inline int ddraw_guest_ptr_valid(const void *ptr)
 {
-    if (!surf || !desc)
-        return;
+    return (uintptr_t)ptr > 0x10000;
+}
 
+/* ─── surface-desc normalization helpers ─── */
+
+/* Normalized surface data shared between v1 and v2 writers. */
+typedef struct {
+    uint32_t caps;
+    int32_t  pitch;
+    uint32_t width;
+    uint32_t height;
+    uint32_t backbuffer_count;
+    uint32_t lp_surface;
+    uint32_t dd_flags;
+} ddraw_surface_desc_data_t;
+
+static void ddraw_normalize_surface_data(my_surface_t *surf, void *surface_ptr,
+                                         ddraw_surface_desc_data_t *out)
+{
     if (rb_surface_get_desc) {
         int width = 0;
         int height = 0;
@@ -151,17 +226,66 @@ static void ddraw_fill_surface_desc(my_surface_t *surf, ddraw_guest_desc_t *desc
         }
     }
 
-    memset(desc, 0, sizeof(*desc));
-    desc->ddSize = sizeof(*desc);
-    desc->ddFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH;
+    out->caps = surf->caps;
+    out->pitch = surf->pitch;
+    out->width = surf->width;
+    out->height = surf->height;
+    out->backbuffer_count = surf->next ? 1u : 0u;
+    out->lp_surface = (uint32_t)(uintptr_t)surface_ptr;
+    out->dd_flags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH;
     if (surface_ptr)
-        desc->ddFlags |= DDSD_LPSURFACE;
-    desc->ddsCaps.dwCaps = surf->caps;
-    desc->lPitch = surf->pitch;
-    desc->dwBackBufferCount = surf->next ? 1u : 0u;
-    desc->dwWidth = surf->width;
-    desc->dwHeight = surf->height;
-    desc->lpSurface = (uint32_t)(uintptr_t)surface_ptr;
+        out->dd_flags |= DDSD_LPSURFACE;
+}
+
+static void ddraw_write_desc_v1(ddraw_guest_desc1_t *desc1, const ddraw_surface_desc_data_t *d)
+{
+    memset(desc1, 0, sizeof(*desc1));
+    desc1->ddSize = sizeof(*desc1);
+    desc1->ddFlags = d->dd_flags;
+    desc1->ddCaps = d->caps;
+    desc1->lPitch = d->pitch;
+    desc1->dwBackBufferCount = d->backbuffer_count;
+    desc1->lWidth2 = d->width;
+    desc1->lHeight = d->height;
+    desc1->lpSurface = d->lp_surface;
+}
+
+static void ddraw_write_desc_v2(ddraw_guest_desc_t *desc, const ddraw_surface_desc_data_t *d)
+{
+    uint32_t write_size = desc->ddSize;
+    if (write_size < 0x20)
+        write_size = 0x20;
+    else if (write_size > sizeof(*desc))
+        write_size = sizeof(*desc);
+    memset(desc, 0, write_size);
+    if (write_size >= 4)
+        desc->ddSize = write_size;
+    desc->ddFlags = d->dd_flags;
+    if (write_size >= 0x68)
+        desc->ddsCaps.dwCaps = d->caps;
+    desc->lPitch = d->pitch;
+    desc->dwBackBufferCount = d->backbuffer_count;
+    desc->dwWidth = d->width;
+    desc->dwHeight = d->height;
+    desc->lpSurface = d->lp_surface;
+}
+
+static void ddraw_fill_surface_desc(my_surface_t *surf, ddraw_guest_desc_t *desc,
+                                    void *surface_ptr)
+{
+    ddraw_surface_desc_data_t data;
+
+    if (!surf || !desc)
+        return;
+
+    ddraw_normalize_surface_data(surf, surface_ptr, &data);
+
+    if (desc->ddSize == sizeof(ddraw_guest_desc1_t)) {
+        ddraw_write_desc_v1((ddraw_guest_desc1_t *)desc, &data);
+        return;
+    }
+
+    ddraw_write_desc_v2(desc, &data);
 }
 
 static ddraw_backend_window_state *ddraw_get_backend_window(rb_window_t win)
@@ -189,6 +313,132 @@ static my_surface_t *ddraw_alloc_surface(my_dd_t *dd, rb_surface_t rb_surface,
         dd->surface_list = surf;
     }
     return surf;
+}
+
+/* ─── CreateSurface helpers ─── */
+
+/* Parse the guest surface-desc and extract caps/size/backbuffer count. */
+static void ddraw_parse_surface_desc(const void *ddsd, uint32_t *caps,
+                                     uint32_t *width, uint32_t *height,
+                                     uint32_t *backbuffers)
+{
+    const ddraw_guest_desc_t *desc = (const ddraw_guest_desc_t *)ddsd;
+
+    if (desc->ddSize == sizeof(ddraw_guest_desc1_t)) {
+        const ddraw_guest_desc1_t *desc1 = (const ddraw_guest_desc1_t *)ddsd;
+        *caps = desc1->ddCaps;
+        *width = desc1->lWidth;
+        *height = desc1->lHeight;
+        *backbuffers = desc1->dwBackBufferCount;
+    } else {
+        *caps = desc->ddsCaps.dwCaps;
+        *width = desc->dwWidth;
+        *height = desc->dwHeight;
+        *backbuffers = desc->dwBackBufferCount;
+    }
+}
+
+static HRESULT ddraw_create_flip_chain_surface(my_dd_t *dd, uint32_t width,
+                                               uint32_t height,
+                                               uint32_t backbuffers,
+                                               uint32_t caps,
+                                               my_surface_t **primary_out,
+                                               my_surface_t **backbuffer_out,
+                                               void **lplpDDSurface)
+{
+    rb_surface_t rb_primary = 0;
+    rb_surface_t rb_backbuffer = 0;
+    my_surface_t *primary = NULL;
+    my_surface_t *backbuffer = NULL;
+    ddraw_backend_window_state *wnd;
+
+    if (!rb_surface_create_flip_chain)
+        return DDERR_UNSUPPORTED;
+
+    rb_primary = rb_surface_create_flip_chain(dd->rb_window, (int)width,
+                                              (int)height,
+                                              ddraw_bpp_to_format(dd->current_mode_bpp),
+                                              0, (int)backbuffers);
+    if (!rb_primary)
+        return DDERR_OUTOFMEMORY;
+
+    primary = ddraw_alloc_surface(dd, rb_primary, caps);
+    if (!primary)
+        return DDERR_OUTOFMEMORY;
+
+    wnd = ddraw_get_backend_window(dd->rb_window);
+    rb_backbuffer = wnd ? wnd->backbuffer : 0;
+    DEBUG("ddraw: flip chain primary=%u wnd=%p backend_backbuffer=%u",
+          (unsigned int)rb_primary, (void *)wnd, (unsigned int)rb_backbuffer);
+
+    if (!rb_backbuffer && wnd && rb_surface_create) {
+        rb_backbuffer = rb_surface_create((int)width, (int)height,
+                                          ddraw_bpp_to_format(dd->current_mode_bpp),
+                                          0, RB_SURFACE_BACK);
+        if (rb_backbuffer)
+            wnd->backbuffer = rb_backbuffer;
+        DEBUG("ddraw: created fallback backbuffer=%u", (unsigned int)rb_backbuffer);
+    }
+
+    if (rb_backbuffer) {
+        backbuffer = ddraw_alloc_surface(dd, rb_backbuffer,
+                                         DDSCAPS_BACKBUFFER | DDSCAPS_FLIP);
+        if (!backbuffer) {
+            ddraw_free(primary);
+            if (rb_primary && rb_surface_destroy)
+                rb_surface_destroy(rb_primary);
+            return DDERR_OUTOFMEMORY;
+        }
+        primary->next = backbuffer;
+    }
+
+    dd->primary_surface = primary;
+    primary->ref_count++;
+
+    *primary_out = primary;
+    *backbuffer_out = backbuffer;
+    *lplpDDSurface = FORCE_PTR_RETURN(primary);
+    return DD_OK;
+}
+
+static HRESULT ddraw_create_regular_surface(my_dd_t *dd, uint32_t width,
+                                            uint32_t height, uint32_t caps,
+                                            my_surface_t **primary_out,
+                                            void **lplpDDSurface)
+{
+    uint32_t rb_flags = 0;
+    rb_surface_t rb_primary = 0;
+    my_surface_t *primary;
+
+    if (caps & DDSCAPS_PRIMARYSURFACE)
+        rb_flags |= RB_SURFACE_PRIMARY;
+    if (caps & DDSCAPS_OFFSCREENPLAIN)
+        rb_flags |= RB_SURFACE_OFFSCREEN;
+
+    if (!rb_surface_create)
+        return DDERR_UNSUPPORTED;
+
+    rb_primary = rb_surface_create((int)width, (int)height,
+                                   ddraw_bpp_to_format(dd->current_mode_bpp),
+                                   0, rb_flags);
+    if (!rb_primary)
+        return DDERR_OUTOFMEMORY;
+
+    primary = ddraw_alloc_surface(dd, rb_primary, caps);
+    if (!primary) {
+        if (rb_primary && rb_surface_destroy)
+            rb_surface_destroy(rb_primary);
+        return DDERR_OUTOFMEMORY;
+    }
+
+    if (caps & DDSCAPS_PRIMARYSURFACE) {
+        dd->primary_surface = primary;
+        primary->ref_count++;
+    }
+
+    *primary_out = primary;
+    *lplpDDSurface = FORCE_PTR_RETURN(primary);
+    return DD_OK;
 }
 
 static void ddraw_unlink_surface_from_owner(my_surface_t *surf)
@@ -366,7 +616,7 @@ static HRESULT KERNEL32_STUB ddraw_GetMonitorFrequency(void *this_ptr, uint32_t 
 {
     (void)this_ptr;
     ddraw_debug_counter("GetMonitorFrequency");
-    if (dwFreq)
+    if (ddraw_guest_ptr_valid(dwFreq))
         *dwFreq = 60;
     return DD_OK;
 }
@@ -408,8 +658,13 @@ static HRESULT KERNEL32_STUB ddraw_GetFourCCCodes(void *this_ptr, uint32_t *lpNu
                                                   uint32_t *lpCodes)
 {
     (void)this_ptr;
-    if (lpNumCodes)
+    /* Writes 0 codes. Guest vtable has 2 params (lpNumCodes, lpCodes) matching
+     * the real Windows DDraw interface. Guard the write to lpNumCodes in case
+     * of legacy callers that still pass only 1 param. */
+    if (ddraw_guest_ptr_valid(lpNumCodes))
         *lpNumCodes = 0;
+    if (lpCodes && !ddraw_guest_ptr_valid(lpCodes))
+        return DDERR_INVALIDPARAMS;
     (void)lpCodes;
     return DD_OK;
 }
@@ -418,7 +673,9 @@ static HRESULT KERNEL32_STUB ddraw_GetGDISurface(void *this_ptr, void **lpSurfac
 {
     my_dd_t *dd = (my_dd_t *)this_ptr;
 
-    if (!dd || !lpSurface)
+    if (!dd)
+        return DDERR_INVALIDPARAMS;
+    if (!ddraw_guest_ptr_valid(lpSurface))
         return DDERR_INVALIDPARAMS;
 
     *lpSurface = NULL;
@@ -433,6 +690,8 @@ static HRESULT KERNEL32_STUB ddraw_GetGDISurface(void *this_ptr, void **lpSurfac
 static HRESULT KERNEL32_STUB ddraw_Initialize(void *this_ptr, GUID *lpGUID)
 {
     (void)this_ptr;
+    if (lpGUID && !ddraw_guest_ptr_valid(lpGUID))
+        return DDERR_INVALIDPARAMS;
     (void)lpGUID;
     return DD_OK;
 }
@@ -464,7 +723,9 @@ static HRESULT KERNEL32_STUB ddraw_GetDisplayMode(void *this_ptr, void *ddsd)
     my_dd_t *dd = (my_dd_t *)this_ptr;
     ddraw_guest_desc_t *desc = (ddraw_guest_desc_t *)ddsd;
 
-    if (!dd || !desc)
+    if (!dd)
+        return DDERR_INVALIDPARAMS;
+    if (!ddraw_guest_ptr_valid(ddsd))
         return DDERR_INVALIDPARAMS;
 
     memset(desc, 0, sizeof(*desc));
@@ -478,6 +739,12 @@ static HRESULT KERNEL32_STUB ddraw_GetDisplayMode(void *this_ptr, void *ddsd)
 }
 
 static HRESULT KERNEL32_STUB ddraw_RestoreDisplayMode(void *this_ptr)
+{
+    (void)this_ptr;
+    return DD_OK;
+}
+
+static HRESULT KERNEL32_STUB ddraw_RestoreAllSurfaces(void *this_ptr)
 {
     (void)this_ptr;
     return DD_OK;
@@ -511,6 +778,8 @@ static HRESULT KERNEL32_STUB ddraw_SetDisplayMode(void *this_ptr, uint32_t width
 
     if (!dd)
         return DDERR_INVALIDPARAMS;
+    if (width == 0 || height == 0 || width > 8192 || height > 8192 || bpp > 32)
+        return DDERR_UNSUPPORTEDMODE;
     if (!dd->cooperative_hwnd)
         dd->cooperative_level = DDSCL_NORMAL;
     if (!ddraw_ensure_backend())
@@ -540,118 +809,64 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
                                                  void **lplpDDSurface, void *unk)
 {
     my_dd_t *dd = (my_dd_t *)this_ptr;
-    ddraw_guest_desc_t *desc = (ddraw_guest_desc_t *)ddsd;
-    my_surface_t *primary = NULL;
-    my_surface_t *backbuffer = NULL;
-    rb_surface_t rb_primary = 0;
-    rb_surface_t rb_backbuffer = 0;
-    uint32_t caps;
+    uint32_t caps = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t backbuffers = 0;
 
     (void)unk;
 
-    if (!dd || !desc || !lplpDDSurface)
+    if (!dd || !ddsd || !lplpDDSurface)
         return DDERR_INVALIDPARAMS;
     if (!ddraw_ensure_backend())
         return DDERR_UNSUPPORTED;
 
-    caps = desc->ddsCaps.dwCaps;
-    if (desc->dwWidth == 0)
-        desc->dwWidth = dd->current_mode_w;
-    if (desc->dwHeight == 0)
-        desc->dwHeight = dd->current_mode_h;
+    ddraw_parse_surface_desc(ddsd, &caps, &width, &height, &backbuffers);
+
+    if (width == 0)
+        width = dd->current_mode_w;
+    if (height == 0)
+        height = dd->current_mode_h;
 
     if ((caps & DDSCAPS_PRIMARYSURFACE) && !dd->rb_window)
         return DDERR_NOCOOPERATIVELEVELSET;
 
     DEBUG("ddraw: CreateSurface caps=0x%x size=%ux%u backbuffers=%u",
-          caps, desc->dwWidth, desc->dwHeight, desc->dwBackBufferCount);
+          caps, width, height, backbuffers);
 
     if ((caps & DDSCAPS_PRIMARYSURFACE) && (caps & DDSCAPS_FLIP)) {
-        ddraw_backend_window_state *wnd;
+        my_surface_t *primary = NULL;
+        my_surface_t *backbuffer = NULL;
+        HRESULT hr;
 
-        if (!rb_surface_create_flip_chain)
-            return DDERR_UNSUPPORTED;
+        hr = ddraw_create_flip_chain_surface(dd, width, height, backbuffers,
+                                             caps, &primary, &backbuffer, lplpDDSurface);
+        if (hr != DD_OK)
+            return hr;
 
-        rb_primary = rb_surface_create_flip_chain(dd->rb_window, (int)desc->dwWidth,
-                                                  (int)desc->dwHeight,
-                                                  ddraw_bpp_to_format(dd->current_mode_bpp),
-                                                  0, (int)desc->dwBackBufferCount);
-        if (!rb_primary)
-            return DDERR_OUTOFMEMORY;
-
-        primary = ddraw_alloc_surface(dd, rb_primary, caps);
-        if (!primary)
-            goto out_of_memory;
-
-        wnd = ddraw_get_backend_window(dd->rb_window);
-        rb_backbuffer = wnd ? wnd->backbuffer : 0;
-        DEBUG("ddraw: flip chain primary=%u wnd=%p backend_backbuffer=%u",
-              (unsigned int)rb_primary, (void *)wnd, (unsigned int)rb_backbuffer);
-        if (!rb_backbuffer && wnd && rb_surface_create) {
-            rb_backbuffer = rb_surface_create((int)desc->dwWidth, (int)desc->dwHeight,
-                                              ddraw_bpp_to_format(dd->current_mode_bpp),
-                                              0, RB_SURFACE_BACK);
-            if (rb_backbuffer)
-                wnd->backbuffer = rb_backbuffer;
-            DEBUG("ddraw: created fallback backbuffer=%u", (unsigned int)rb_backbuffer);
+        primary->width = width;
+        primary->height = height;
+        primary->pitch = (int32_t)width;
+        if (backbuffer) {
+            backbuffer->width = width;
+            backbuffer->height = height;
+            backbuffer->pitch = (int32_t)width;
         }
-        if (rb_backbuffer) {
-            backbuffer = ddraw_alloc_surface(dd, rb_backbuffer,
-                                             DDSCAPS_BACKBUFFER | DDSCAPS_FLIP);
-            if (!backbuffer)
-                goto out_of_memory;
-            primary->next = backbuffer;
-        }
-
-        dd->primary_surface = primary;
-        primary->ref_count++;
     } else {
-        uint32_t rb_flags = 0;
+        my_surface_t *primary = NULL;
+        HRESULT hr;
 
-        if (caps & DDSCAPS_PRIMARYSURFACE)
-            rb_flags |= RB_SURFACE_PRIMARY;
-        if (caps & DDSCAPS_OFFSCREENPLAIN)
-            rb_flags |= RB_SURFACE_OFFSCREEN;
+        hr = ddraw_create_regular_surface(dd, width, height, caps,
+                                          &primary, lplpDDSurface);
+        if (hr != DD_OK)
+            return hr;
 
-        if (!rb_surface_create)
-            return DDERR_UNSUPPORTED;
-
-        rb_primary = rb_surface_create((int)desc->dwWidth, (int)desc->dwHeight,
-                                       ddraw_bpp_to_format(dd->current_mode_bpp),
-                                       0, rb_flags);
-        if (!rb_primary)
-            return DDERR_OUTOFMEMORY;
-
-        primary = ddraw_alloc_surface(dd, rb_primary, caps);
-        if (!primary)
-            goto out_of_memory;
-
-        if (caps & DDSCAPS_PRIMARYSURFACE) {
-            dd->primary_surface = primary;
-            primary->ref_count++;
-        }
+        primary->width = width;
+        primary->height = height;
+        primary->pitch = (int32_t)width;
     }
 
-    primary->width = desc->dwWidth;
-    primary->height = desc->dwHeight;
-    primary->pitch = (int32_t)desc->dwWidth;
-    if (backbuffer) {
-        backbuffer->width = desc->dwWidth;
-        backbuffer->height = desc->dwHeight;
-        backbuffer->pitch = (int32_t)desc->dwWidth;
-    }
-
-    *lplpDDSurface = FORCE_PTR_RETURN(primary);
     return DD_OK;
-
-out_of_memory:
-    if (backbuffer)
-        ddraw_free(backbuffer);
-    if (primary)
-        ddraw_free(primary);
-    if (rb_primary && rb_surface_destroy)
-        rb_surface_destroy(rb_primary);
-    return DDERR_OUTOFMEMORY;
 }
 
 static HRESULT KERNEL32_STUB ddraw_CreatePalette(void *this_ptr, uint32_t flags,
@@ -762,6 +977,7 @@ const IDirectDrawVtbl ddraw_vtbl = {
     .GetVerticalBlankStatus = ddraw_GetVerticalBlankStatus,
     .Initialize = ddraw_Initialize,
     .RestoreDisplayMode = ddraw_RestoreDisplayMode,
+    .RestoreAllSurfaces = ddraw_RestoreAllSurfaces,
     .SetCooperativeLevel = ddraw_SetCooperativeLevel,
     .SetDisplayMode = ddraw_SetDisplayMode,
     .WaitForVerticalBlank = ddraw_WaitForVerticalBlank,

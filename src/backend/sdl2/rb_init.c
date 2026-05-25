@@ -98,7 +98,7 @@ typedef struct {
 
 static int rb_sdl_init_video_events(uint32_t flags)
 {
-    const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
+    const char *requested_video_driver = rb_host_getenv("SDL_VIDEODRIVER");
     int try_x11_fallback = 0;
 
     /*
@@ -106,14 +106,14 @@ static int rb_sdl_init_video_events(uint32_t flags)
      * environment. SDL windows created under that state may keep a busy
      * cursor over the window even after the app is responsive.
      */
-    unsetenv("DESKTOP_STARTUP_ID");
-    unsetenv("XDG_ACTIVATION_TOKEN");
+    rb_host_unsetenv("DESKTOP_STARTUP_ID");
+    rb_host_unsetenv("XDG_ACTIVATION_TOKEN");
 
     if (requested_video_driver == NULL || strcmp(requested_video_driver, "wayland") == 0)
         try_x11_fallback = 1;
 
-    if (getenv("DISPLAY") && try_x11_fallback)
-        setenv("SDL_VIDEODRIVER", "x11", 1);
+    if (rb_host_getenv("DISPLAY") && try_x11_fallback)
+        rb_host_setenv("SDL_VIDEODRIVER", "x11");
 
     rb_install_x11_error_handler();
     if (SDL_Init(flags) == 0) {
@@ -122,9 +122,9 @@ static int rb_sdl_init_video_events(uint32_t flags)
     }
 
     rb_install_x11_error_handler();
-    if (getenv("DISPLAY") && try_x11_fallback) {
+    if (rb_host_getenv("DISPLAY") && try_x11_fallback) {
         SDL_Quit();
-        setenv("SDL_VIDEODRIVER", "x11", 1);
+        rb_host_setenv("SDL_VIDEODRIVER", "x11");
         if (SDL_Init(flags) == 0) {
             rb_install_x11_error_handler();
             return 0;
@@ -137,7 +137,7 @@ static int rb_sdl_init_video_events(uint32_t flags)
 
 static int rb_sdl_init_audio_default_or_fallback(void)
 {
-    const char *requested_audio_driver = getenv("SDL_AUDIODRIVER");
+    const char *requested_audio_driver = rb_host_getenv("SDL_AUDIODRIVER");
     static const char *preferred_drivers[] = {
         "pipewire",
         "pulseaudio",
@@ -298,10 +298,22 @@ static uintptr_t rb_event_pump_thread_stop_host_call(void *arg)
     return 0;
 }
 
+static uintptr_t rb_event_pump_thread_pause_host_call(void *arg)
+{
+    (void)arg;
+
+    if (!__atomic_load_n(&g_event_pump_thread_running, __ATOMIC_ACQUIRE))
+        return 0;
+
+    __atomic_store_n(&g_event_pump_thread_running, 0, __ATOMIC_RELEASE);
+    (void)pthread_join(g_event_pump_thread, NULL);
+    return 0;
+}
+
 int rb_init(void)
 {
-    const char *requested_video_driver = getenv("SDL_VIDEODRIVER");
-    const char *requested_audio_driver = getenv("SDL_AUDIODRIVER");
+    const char *requested_video_driver = rb_host_getenv("SDL_VIDEODRIVER");
+    const char *requested_audio_driver = rb_host_getenv("SDL_AUDIODRIVER");
 
     if (g_initialized) {
         return 0;
@@ -318,15 +330,18 @@ int rb_init(void)
         return RB_FAIL;
     }
 
-    rb_sdl_backend_info backend_info;
-    memset(&backend_info, 0, sizeof(backend_info));
-    rb_call_on_host_stack(rb_sdl_get_backend_info_call, &backend_info);
-    fprintf(stderr,
-            "WARNING: SDL backends requested video=%s audio=%s active video=%s audio=%s\n",
-            requested_video_driver ? requested_video_driver : "auto",
-            requested_audio_driver ? requested_audio_driver : "auto",
-            backend_info.active_video_driver[0] ? backend_info.active_video_driver : "unknown",
-            backend_info.active_audio_driver[0] ? backend_info.active_audio_driver : "unknown");
+    rb_sdl_backend_info *backend_info = rb_host_malloc(sizeof(*backend_info));
+    if (backend_info) {
+        memset(backend_info, 0, sizeof(*backend_info));
+        rb_call_on_host_stack(rb_sdl_get_backend_info_call, backend_info);
+        fprintf(stderr,
+                "WARNING: SDL backends requested video=%s audio=%s active video=%s audio=%s\n",
+                requested_video_driver ? requested_video_driver : "auto",
+                requested_audio_driver ? requested_audio_driver : "auto",
+                backend_info->active_video_driver[0] ? backend_info->active_video_driver : "unknown",
+                backend_info->active_audio_driver[0] ? backend_info->active_audio_driver : "unknown");
+        rb_host_free(backend_info);
+    }
 
     g_audio.device_id = 0;
     g_audio.opened = 0;
@@ -343,6 +358,19 @@ int rb_init(void)
 
     g_initialized = 1;
     return RB_OK;
+}
+
+int rb_event_pump_pause(void)
+{
+    (void)rb_call_on_host_stack(rb_event_pump_thread_pause_host_call, NULL);
+    return RB_OK;
+}
+
+int rb_event_pump_resume(void)
+{
+    if (__atomic_load_n(&g_event_pump_thread_running, __ATOMIC_ACQUIRE))
+        return RB_OK;
+    return (int)rb_call_on_host_stack(rb_event_pump_thread_start_host_call, NULL);
 }
 
 void rb_shutdown(void)

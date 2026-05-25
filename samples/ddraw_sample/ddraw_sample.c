@@ -35,62 +35,87 @@ typedef struct _IDirectDraw IDirectDraw;
 typedef struct _IDirectDrawSurface IDirectDrawSurface;
 typedef struct _IDirectDrawPalette IDirectDrawPalette;
 
+/* IDirectDrawVtbl — must match the host vtable layout exactly.
+ * Each slot offset and parameter count must match the host IDirectDrawVtbl
+ * so that calling through the guest struct hits the right host function. */
 typedef struct _IDirectDrawVtbl {
-    HRESULT (WINAPI *QueryInterface)(IDirectDraw *, const DDGUID *, void **);
-    ULONG (WINAPI *AddRef)(IDirectDraw *);
-    ULONG (WINAPI *Release)(IDirectDraw *);
-    HRESULT (WINAPI *Compact)(IDirectDraw *);
-    HRESULT (WINAPI *GetMonitorHandle)(IDirectDraw *, void *);
-    HRESULT (WINAPI *GetAvailableVidMem)(IDirectDraw *, void *);
-    HRESULT (WINAPI *GetMonitorFrequency)(IDirectDraw *, DWORD *);
-    HRESULT (WINAPI *GetFourCCCodes)(IDirectDraw *, DWORD *);
-    HRESULT (WINAPI *GetSurfaceFromDC)(IDirectDraw *, void *, void **);
-    HRESULT (WINAPI *EnumDisplayModes)(DWORD, void *, void *, void *);
-    HRESULT (WINAPI *GetDisplayMode)(IDirectDraw *, void *);
-    HRESULT (WINAPI *RestoreDisplayMode)(IDirectDraw *);
-    HRESULT (WINAPI *RestoreAllSurfaces)(IDirectDraw *);
-    HRESULT (WINAPI *SetCooperativeLevel)(IDirectDraw *, void *, DWORD);
-    HRESULT (WINAPI *SetDisplayMode)(IDirectDraw *, DWORD, DWORD, DWORD);
-    HRESULT (WINAPI *CreateSurface)(IDirectDraw *, void *, void **, void *);
-    HRESULT (WINAPI *GetDC)(IDirectDraw *, void *);
-    HRESULT (WINAPI *ReleaseDC)(IDirectDraw *, void *);
-    HRESULT (WINAPI *CreatePalette)(IDirectDraw *, DWORD, void *, void **, void *);
+    /*  0 */ HRESULT (WINAPI *QueryInterface)(void *, const void *, void **);
+    /*  1 */ ULONG (WINAPI *AddRef)(void *);
+    /*  2 */ ULONG (WINAPI *Release)(void *);
+    /*  3 */ HRESULT (WINAPI *Compact)(void *);
+    /*  4 */ HRESULT (WINAPI *CreateClipper)(void *, DWORD, void **, void *);
+    /*  5 */ HRESULT (WINAPI *CreatePalette)(void *, DWORD, void *, void **, void *);
+    /*  6 */ HRESULT (WINAPI *CreateSurface)(void *, void *, void **, void *);
+    /*  7 */ HRESULT (WINAPI *DuplicateSurface)(void *, void *, void **);
+    /*  8 */ HRESULT (WINAPI *EnumDisplayModes)(void *, DWORD, void *, void *, void *);
+    /*  9 */ HRESULT (WINAPI *EnumSurfaces)(void *, DWORD, void *, void *, void *);
+    /* 10 */ HRESULT (WINAPI *FlipToGDISurface)(void *);
+    /* 11 */ HRESULT (WINAPI *GetCaps)(void *, void *, void *);
+    /* 12 */ HRESULT (WINAPI *GetDisplayMode)(void *, void *);
+    /* 13 */ HRESULT (WINAPI *GetFourCCCodes)(void *, DWORD *, DWORD *);
+    /* 14 */ HRESULT (WINAPI *GetGDISurface)(void *, void **);
+    /* 15 */ HRESULT (WINAPI *GetMonitorFrequency)(void *, DWORD *);
+    /* 16 */ HRESULT (WINAPI *GetScanLine)(void *, DWORD *);
+    /* 17 */ HRESULT (WINAPI *GetVerticalBlankStatus)(void *, DWORD *);
+    /* 18 */ HRESULT (WINAPI *Initialize)(void *, void *);
+    /* 19 */ HRESULT (WINAPI *RestoreDisplayMode)(void *);
+    /* 20 */ HRESULT (WINAPI *RestoreAllSurfaces)(void *);
+    /* 21 */ HRESULT (WINAPI *SetCooperativeLevel)(void *, void *, DWORD);
+    /* 22 */ HRESULT (WINAPI *SetDisplayMode)(void *, DWORD, DWORD, DWORD);
+    /* 23 */ HRESULT (WINAPI *WaitForVerticalBlank)(void *, DWORD, void *);
 } IDirectDrawVtbl;
 
+/* IDirectDrawSurfaceVtbl — must match the host vtable layout exactly.
+ * Each slot offset must match the host IDirectDrawSurfaceVtbl
+ * so that calling through the guest struct hits the right host function. */
 typedef struct _IDirectDrawSurfaceVtbl {
-    HRESULT (WINAPI *QueryInterface)(IDirectDrawSurface *, const DDGUID *, void **);
-    ULONG (WINAPI *AddRef)(IDirectDrawSurface *);
-    ULONG (WINAPI *Release)(IDirectDrawSurface *);
-    HRESULT (WINAPI *AddAttachedSurface)(IDirectDrawSurface *, void *);
-    HRESULT (WINAPI *Blt)(IDirectDrawSurface *, void *, void *, void *, DWORD, void *);
-    HRESULT (WINAPI *BltBatch)(IDirectDrawSurface *, void *, DWORD, DWORD);
-    HRESULT (WINAPI *BltFast)(IDirectDrawSurface *, DWORD, DWORD, void *, void *, DWORD);
-    HRESULT (WINAPI *DeleteAttachedSurface)(IDirectDrawSurface *, DWORD, void *);
-    HRESULT (WINAPI *Flip)(IDirectDrawSurface *, void *, DWORD);
-    HRESULT (WINAPI *GetAttachedSurface)(IDirectDrawSurface *, void *, void **);
-    HRESULT (WINAPI *GetBltStatus)(IDirectDrawSurface *, DWORD, DWORD);
-    HRESULT (WINAPI *GetDC)(IDirectDrawSurface *, void **);
-    HRESULT (WINAPI *GetFlipStatus)(IDirectDrawSurface *, DWORD, DWORD);
-    HRESULT (WINAPI *GetOverlayPosition)(IDirectDrawSurface *, LONG *, LONG *);
-    HRESULT (WINAPI *GetPalette)(IDirectDrawSurface *, void **);
-    HRESULT (WINAPI *GetSurfaceDesc)(IDirectDrawSurface *, void *);
-    HRESULT (WINAPI *IsLost)(IDirectDrawSurface *);
-    HRESULT (WINAPI *Lock)(IDirectDrawSurface *, void *, void **, void *, DWORD, void *);
-    HRESULT (WINAPI *ReleaseDC)(IDirectDrawSurface *, void *);
-    HRESULT (WINAPI *Restore)(IDirectDrawSurface *);
-    HRESULT (WINAPI *SetClipper)(IDirectDrawSurface *, void *);
-    HRESULT (WINAPI *SetColorKey)(IDirectDrawSurface *, DWORD, void *);
-    HRESULT (WINAPI *SetOverlayPosition)(IDirectDrawSurface *, LONG, LONG);
-    HRESULT (WINAPI *SetPalette)(IDirectDrawSurface *, void *);
-    HRESULT (WINAPI *Unlock)(IDirectDrawSurface *, void *);
+    /*  0 */ HRESULT (WINAPI *QueryInterface)(void *, const void *, void **);
+    /*  1 */ ULONG (WINAPI *AddRef)(void *);
+    /*  2 */ ULONG (WINAPI *Release)(void *);
+    /*  3 */ HRESULT (WINAPI *AddAttachedSurface)(void *, void *);
+    /*  4 */ HRESULT (WINAPI *AddOverlayDirtyRect)(void *, void *);
+    /*  5 */ HRESULT (WINAPI *Blt)(void *, void *, void *, void *, DWORD, void *);
+    /*  6 */ HRESULT (WINAPI *BltBatch)(void *, void *, DWORD, DWORD);
+    /*  7 */ HRESULT (WINAPI *BltFast)(void *, DWORD, DWORD, void *, void *, DWORD);
+    /*  8 */ HRESULT (WINAPI *DeleteAttachedSurface)(void *, DWORD, void *);
+    /*  9 */ HRESULT (WINAPI *EnumAttachedSurfaces)(void *, void *, void *);
+    /* 10 */ HRESULT (WINAPI *EnumOverlayZOrders)(void *, DWORD, void *, void *);
+    /* 11 */ HRESULT (WINAPI *Flip)(void *, void *, DWORD);
+    /* 12 */ HRESULT (WINAPI *GetAttachedSurface)(void *, void *, void **);
+    /* 13 */ HRESULT (WINAPI *GetBltStatus)(void *, DWORD);
+    /* 14 */ HRESULT (WINAPI *GetCaps)(void *, void *);
+    /* 15 */ HRESULT (WINAPI *GetClipper)(void *, void **);
+    /* 16 */ HRESULT (WINAPI *GetColorKey)(void *, DWORD, void *);
+    /* 17 */ HRESULT (WINAPI *GetDC)(void *, void **);
+    /* 18 */ HRESULT (WINAPI *GetFlipStatus)(void *, DWORD);
+    /* 19 */ HRESULT (WINAPI *GetOverlayPosition)(void *, LONG *, LONG *);
+    /* 20 */ HRESULT (WINAPI *GetPalette)(void *, void **);
+    /* 21 */ HRESULT (WINAPI *GetPixelFormat)(void *, void *);
+    /* 22 */ HRESULT (WINAPI *GetSurfaceDesc)(void *, void *);
+    /* 23 */ HRESULT (WINAPI *Initialize)(void *, void *, void *);
+    /* 24 */ HRESULT (WINAPI *IsLost)(void *);
+    /* 25 */ HRESULT (WINAPI *Lock)(void *, void *, void *, DWORD, void *);
+    /* 26 */ HRESULT (WINAPI *ReleaseDC)(void *, void *);
+    /* 27 */ HRESULT (WINAPI *Restore)(void *);
+    /* 28 */ HRESULT (WINAPI *SetClipper)(void *, void *);
+    /* 29 */ HRESULT (WINAPI *SetColorKey)(void *, DWORD, void *);
+    /* 30 */ HRESULT (WINAPI *SetOverlayPosition)(void *, LONG, LONG);
+    /* 31 */ HRESULT (WINAPI *SetPalette)(void *, void *);
+    /* 32 */ HRESULT (WINAPI *Unlock)(void *, void *);
+    /* 33 */ HRESULT (WINAPI *UpdateOverlay)(void *, void *, void *, void *, DWORD, void *);
+    /* 34 */ HRESULT (WINAPI *UpdateOverlayDisplay)(void *, DWORD);
+    /* 35 */ HRESULT (WINAPI *UpdateOverlayZOrder)(void *, DWORD, void *);
 } IDirectDrawSurfaceVtbl;
 
+/* IDirectDrawPaletteVtbl — must match the host vtable layout exactly */
 typedef struct _IDirectDrawPaletteVtbl {
-    HRESULT (WINAPI *QueryInterface)(IDirectDrawPalette *, const DDGUID *, void **);
-    ULONG (WINAPI *AddRef)(IDirectDrawPalette *);
-    ULONG (WINAPI *Release)(IDirectDrawPalette *);
-    HRESULT (WINAPI *GetEntries)(IDirectDrawPalette *, void *, DWORD, DWORD, void *);
-    HRESULT (WINAPI *SetEntries)(IDirectDrawPalette *, void *, DWORD, DWORD, void *);
+    /*  0 */ HRESULT (WINAPI *QueryInterface)(void *, const void *, void **);
+    /*  1 */ ULONG (WINAPI *AddRef)(void *);
+    /*  2 */ ULONG (WINAPI *Release)(void *);
+    /*  3 */ HRESULT (WINAPI *GetCaps)(void *, DWORD *);
+    /*  4 */ HRESULT (WINAPI *GetEntries)(void *, void *, DWORD, DWORD, void *);
+    /*  5 */ HRESULT (WINAPI *Initialize)(void *, void *, DWORD, void *);
+    /*  6 */ HRESULT (WINAPI *SetEntries)(void *, void *, DWORD, DWORD, void *);
 } IDirectDrawPaletteVtbl;
 
 struct _IDirectDraw { IDirectDrawVtbl *lpVtbl; };
@@ -112,7 +137,7 @@ __declspec(dllimport) HRESULT WINAPI DirectDrawCreate(const DDGUID *guid,
 #define DDERR_INVALIDPARAMS 0x8876000DL
 #define DDERR_CANTLOCKSURFACE 0x88760104L
 
-#define DDPCAPS_8BIT 0x00000001L
+#define DDPCAPS_8BIT 0x00000004L
 #define DDPCAPS_INITIALIZE 0x00000008L
 
 #define DDSD_CAPS 0x00000001L
@@ -120,9 +145,9 @@ __declspec(dllimport) HRESULT WINAPI DirectDrawCreate(const DDGUID *guid,
 #define DDSD_WIDTH 0x00000004L
 #define DDSD_BACKBUFFERCOUNT 0x00000020L
 
-#define DDSCAPS_PRIMARYSURFACE 0x00000001L
-#define DDSCAPS_BACKBUFFER 0x00000002L
-#define DDSCAPS_FLIP 0x00000004L
+#define DDSCAPS_PRIMARYSURFACE 0x00000200L
+#define DDSCAPS_BACKBUFFER 0x00000004L
+#define DDSCAPS_FLIP 0x00000010L
 #define DDSCAPS_COMPLEX 0x00000008L
 #define DDSCAPS_OFFSCREENPLAIN 0x00000040L
 
@@ -143,9 +168,12 @@ static HRESULT fill_surface(IDirectDrawSurface *surf, BYTE value)
 
     ZeroMemory(&desc, sizeof(desc));
     desc.ddSize = sizeof(desc);
-    if (surf->lpVtbl->Lock(surf, NULL, (void **)&pixels, &desc, 0, NULL) != DD_OK)
+    /* Host Lock takes (this, rect, ddsd, flags, event) — 5 params.
+     * Pixel data is returned in ddsd->lpSurface field. */
+    if (surf->lpVtbl->Lock(surf, NULL, &desc, 0, NULL) != DD_OK)
         return DDERR_CANTLOCKSURFACE;
 
+    pixels = (BYTE *)(uintptr_t)desc.lpSurface;
     if (pixels) {
         DWORD y;
         for (y = 0; y < 200; y++)

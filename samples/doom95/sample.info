@@ -1,4 +1,6 @@
 type=graphical
-skip=true
-skip_reason=unsupported
 archive=doom95.zip
+window_title=DOOM95
+timeout=60
+skip=true
+skip_reason=out of scope — not a standard sample
