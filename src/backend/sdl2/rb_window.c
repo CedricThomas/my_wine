@@ -193,8 +193,9 @@ static uintptr_t rb_sdl_window_set_fullscreen_call(void *arg)
     if (!a->window)
         return 0;
 
-    if (!SDL_SetWindowFullscreen(a->window, a->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0))
-        return 0;
+    if (!SDL_SetWindowFullscreen(a->window, a->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0)) {
+        fprintf(stderr, "WARNING: fullscreen not supported: %s\n", SDL_GetError());
+    }
     SDL_SetWindowSize(a->window, a->width, a->height);
     SDL_ShowWindow(a->window);
     SDL_RaiseWindow(a->window);
@@ -502,8 +503,7 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
         .width = width,
         .height = height,
     };
-    if (!rb_call_on_host_stack(rb_sdl_window_set_fullscreen_call, &args))
-        return RB_FAIL;
+    (void)rb_call_on_host_stack(rb_sdl_window_set_fullscreen_call, &args);
 
     if (rb_window_refresh_ids(wnd) != RB_OK)
         return RB_FAIL;
