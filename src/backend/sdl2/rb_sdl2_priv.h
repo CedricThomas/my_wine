@@ -151,6 +151,7 @@ typedef struct rb_audio_state {
     int buffer_size;
     rb_audio_buf *buffers;
     int buffer_count;
+    int callback_invoked;   /* 1 = audio callback has fired at least once */
 } rb_audio_state;
 
 /* ---- Private cursor state ---- */

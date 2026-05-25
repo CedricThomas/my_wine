@@ -626,6 +626,14 @@ int rb_audio_buffer_is_playing(rb_audio_buf_t buf)
 
     rb_audio_lock_device();
     playing = audio_buf->playing;
+    if (playing > 0 && !audio_buf->loop) {
+        int total = rb_audio_frame_count(audio_buf);
+        uint64_t end_fp = (uint64_t)total << RB_AUDIO_CURSOR_SHIFT;
+        if (audio_buf->cursor_fp >= end_fp) {
+            audio_buf->playing = 0;
+            playing = 0;
+        }
+    }
     rb_audio_unlock_device();
     return playing ? 1 : 0;
 }
@@ -635,6 +643,7 @@ void rb_audio_callback(void *userdata, uint8_t *stream, int len)
     rb_audio_buf *buf;
 
     (void)userdata;
+    g_audio.callback_invoked = 1;
 
     if (g_audio.bits_per_sample <= 8) {
         memset(stream, 128, (size_t)len);
