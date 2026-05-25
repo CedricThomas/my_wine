@@ -26,6 +26,8 @@ RUN dpkg --add-architecture i386 && \
         libsdl2-2.0-0:i386 \
         libfluidsynth3 \
         libfluidsynth3:i386 \
+        libfluidsynth-dev \
+        libfluidsynth-dev:i386 \
         gdb \
         gdb-multiarch \
         imagemagick \

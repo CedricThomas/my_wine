@@ -62,6 +62,20 @@ static inline void real_free(void *ptr)
 extern wine_loader_state_t g_loader __attribute__((weak));
 extern void *unix_stack_ptr_val __attribute__((weak));
 
+/*
+ * Reentrancy counter for host stack switching.
+ *
+ * On 32-bit Linux, the host FS selector is often 0 (the process starts
+ * before glibc sets up TLS). This makes FS-based detection of "am I on
+ * the host stack?" useless: rb_host_context_is_active() would always
+ * return true, causing the reentrancy guard to bypass the stack switch
+ * entirely and run SDL on the guest stack.
+ *
+ * The __thread counter tracks nesting depth of rb_call_on_host_stack()
+ * so the guard works regardless of FS values.
+ */
+static __thread int g_rb_on_host_stack = 0;
+
 /* ---- Handle type constants ---- */
 /* Defined in handle_manager.h; listed here for reference:
  *   HANDLE_TYPE_HWIN       0x60
@@ -200,23 +214,17 @@ typedef uintptr_t (*rb_host_call_fn)(void *);
 
 static inline int rb_host_context_is_active(void)
 {
-#if defined(__x86_64__)
     if (&g_loader == 0)
         return 1;
 
+#if defined(__i386__)
+    /* On 32-bit, host FS is often 0, making FS-based detection useless.
+     * Use the thread-local counter instead. */
+    return g_rb_on_host_stack > 0;
+#elif defined(__x86_64__)
     uintptr_t current_gs = 0;
     __asm__ volatile("rdgsbase %0" : "=r"(current_gs));
     return current_gs == loader_get_host_gs_base();
-#elif defined(__i386__)
-    if (&g_loader == 0)
-        return 1;
-
-    uint16_t host_fs = loader_get_host_fs_selector();
-    uint16_t current_fs = 0;
-    if (host_fs == 0)
-        return 1;
-    __asm__ volatile("mov %%fs, %0" : "=r"(current_fs));
-    return current_fs == host_fs;
 #else
     return 1;
 #endif
@@ -232,6 +240,7 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
         return (uintptr_t)fn(arg);
 
 #if defined(__x86_64__)
+    __attribute__((unused)) int saved_depth = ++g_rb_on_host_stack;
     uintptr_t ret;
     uintptr_t old_rsp;
     uintptr_t saved_gs = rb_host_context_enter();
@@ -239,6 +248,7 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
     if (&unix_stack_ptr_val == 0 || !unix_stack_ptr_val) {
         ret = fn(arg);
         rb_host_context_leave(saved_gs);
+        g_rb_on_host_stack = saved_depth - 1;
         return ret;
     }
 
@@ -255,8 +265,13 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
         : "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11", "memory", "cc");
 
     rb_host_context_leave(saved_gs);
+    g_rb_on_host_stack = saved_depth - 1;
     return ret;
 #elif defined(__i386__)
+    /* Increment reentrancy counter before the host call. This must
+     * happen before any function call so nested rb_call_on_host_stack
+     * calls see the counter > 0 and take the guard path. */
+    __attribute__((unused)) int saved_depth = ++g_rb_on_host_stack;
     uintptr_t ret;
     uintptr_t old_esp;
     uintptr_t saved_fs = rb_host_context_enter();
@@ -264,6 +279,7 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
     if (&unix_stack_ptr_val == 0 || !unix_stack_ptr_val) {
         ret = fn(arg);
         rb_host_context_leave(saved_fs);
+        g_rb_on_host_stack = saved_depth - 1;
         return ret;
     }
 
@@ -292,9 +308,13 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
     );
 
     rb_host_context_leave(saved_fs);
+    g_rb_on_host_stack = saved_depth - 1;
     return ret;
 #else
-    return fn(arg);
+    __attribute__((unused)) int saved_depth = ++g_rb_on_host_stack;
+    uintptr_t ret = fn(arg);
+    g_rb_on_host_stack = saved_depth - 1;
+    return ret;
 #endif
 }
 
