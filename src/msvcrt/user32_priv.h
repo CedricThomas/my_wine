@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "include/user32_types.h"
 #include "include/wine_abi.h"
 #include "include/handle_manager.h"
@@ -166,5 +167,11 @@ int user32_dialog_run_modal(HWND hwnd, void *lpDialogFunc);
 BOOL user32_dialog_end(HWND hDlg, intptr_t nResult);
 LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 LONG_PTR user32_dialog_get_window_long_ptr(HWND hWnd, int nIndex);
+const WNDCLASSA *user32_find_registered_class(const char *name, ATOM *atom_out);
+void user32_set_foreground_focus(HWND target, int send_messages);
+void user32_activate_window_direct(uintptr_t hwnd);
+void user32_update_window_ownership_after_destroy(HWND destroyed_hwnd);
+KERNEL32_STUB BOOL GetWindowRect(HWND hwnd, RECT *lpRect);
+KERNEL32_STUB BOOL GetClientRect(HWND hwnd, RECT *lpRect);
 
 #endif /* MY_WINE_USER32_PRIV_H */

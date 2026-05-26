@@ -13,7 +13,6 @@
  * to match the calling convention of guest PE binaries.
  */
 
-#include <stdlib.h>
 #include <stdint.h>
 
 #include "user32_priv.h"
@@ -24,7 +23,6 @@
 #include "include/kernel32.h"
 #endif
 
-extern void rb_event_set_active_window(uintptr_t hwnd);
 extern int rb_window_attach_guest_hwnd(rb_window_t win, uintptr_t hwnd);
 KERNEL32_STUB BOOL AdjustWindowRectEx(RECT *lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle);
 KERNEL32_STUB HCURSOR LoadCursorA(HINSTANCE hInstance, const char *lpCursorName);
@@ -63,23 +61,6 @@ static void user32_free(void *ptr)
 #endif
 }
 
-static char *user32_strdup(const char *src)
-{
-    size_t len;
-    char *copy;
-
-    if (!src)
-        return NULL;
-
-    len = user32_strlen(src) + 1;
-    copy = user32_alloc(len);
-    if (!copy)
-        return NULL;
-
-    user32_memcpy(copy, src, len);
-    return copy;
-}
-
 /* ── Additional user32 constants not in user32_types.h ──────── */
 
 #define LPRECT       RECT*
@@ -104,211 +85,12 @@ static int user32_ensure_backend(void)
     return g_user32_backend_available;
 }
 
-/* SWP_ flags for SetWindowPos */
-#define SWP_NOSIZE           0x0001
-#define SWP_NOMOVE           0x0002
-#define SWP_NOZORDER         0x0004
-#define SWP_NOREDRAW         0x0008
-#define SWP_NOACTIVATE       0x0010
-#define SWP_FRAMECHANGED     0x0020
-#define SWP_SHOWWINDOW       0x0040
-#define SWP_HIDEWINDOW       0x0080
-#define SWP_NOCOPYBITS       0x0100
-#define SWP_NOOWNERZORDER    0x0200
-#define SWP_NOSENDCHANGING   0x0400
-#define SWP_DRAWFRAME        SWP_FRAMECHANGED
-
-/* Special HWND values */
-#define HWND_TOP             ((void *)0)
-#define HWND_BOTTOM          ((void *)1)
-#define HWND_TOPMOST         ((void *)-1)
-#define HWND_NOTOPMOST       ((void *)-2)
-#define USER32_DESKTOP_HWND  ((HWND)(uintptr_t)0x7fffff00u)
-
-/* ── Class table (linear search by strcmp) ─────────────────── */
-
-/*
- * class_table: stores registered WNDCLASSA entries.
- * Atom = index + 1 (0 means unregistered / invalid).
- *
- * NOTE: No lock — PE32 is single-threaded, and DOOM95 does not
- * use multithreading. Add a spinlock if multithreading is needed.
- */
 int g_user32_live_windows = 0;
 int g_user32_window_create_attempted = 0;
-HWND g_user32_active_window = 0;
-HWND g_user32_focus_window = 0;
-typedef struct {
-    WNDCLASSA wndclass;
-} user32_class_entry;
-
-static user32_class_entry *g_class_registry = NULL;
-static int g_class_count = 0;
-static int g_class_capacity = 0;
-
-static user32_class_entry *get_class_entry(int idx)
-{
-    if (idx < 0 || idx >= g_class_count)
-        return NULL;
-    return &g_class_registry[idx];
-}
-
-static HWND user32_find_replacement_window(HWND exclude)
-{
-    uint32_t handle;
-
-    for (handle = 1; handle <= HANDLE_TABLE_SIZE; handle++) {
-        if ((HWND)(uintptr_t)handle == exclude)
-            continue;
-        if (wine_handle_get_type(handle) == HANDLE_TYPE_HWIN &&
-            wine_handle_get(handle) != NULL)
-            return (HWND)(uintptr_t)handle;
-    }
-
-    return 0;
-}
-
-static void user32_update_window_ownership_after_destroy(HWND destroyed_hwnd)
-{
-    HWND replacement = user32_find_replacement_window(destroyed_hwnd);
-
-    if (g_user32_active_window == destroyed_hwnd)
-        g_user32_active_window = replacement;
-    if (g_user32_focus_window == destroyed_hwnd)
-        g_user32_focus_window = replacement;
-    rb_event_set_active_window((uintptr_t)user32_get_active_window());
-}
-
-static void user32_send_focus_transition(HWND previous, HWND target)
-{
-    wine_window_entry *prev_entry = get_window_entry(previous);
-    wine_window_entry *target_entry = get_window_entry(target);
-
-    if (previous == target)
-        return;
-
-    if (prev_entry && prev_entry->wnd_proc) {
-        user32_call_wndproc((WNDPROC)prev_entry->wnd_proc, previous,
-                            WM_ACTIVATE, WA_INACTIVE, (LPARAM)(uintptr_t)target);
-        user32_call_wndproc((WNDPROC)prev_entry->wnd_proc, previous,
-                            WM_KILLFOCUS, (WPARAM)(uintptr_t)target, 0);
-    }
-
-    if (target_entry && target_entry->wnd_proc) {
-        user32_call_wndproc((WNDPROC)target_entry->wnd_proc, target,
-                            WM_ACTIVATE, WA_ACTIVE, (LPARAM)(uintptr_t)previous);
-        user32_call_wndproc((WNDPROC)target_entry->wnd_proc, target,
-                            WM_SETFOCUS, (WPARAM)(uintptr_t)previous, 0);
-    }
-}
-
-static void user32_set_foreground_focus(HWND target, int send_messages)
-{
-    HWND previous_focus = user32_get_focus_window();
-    HWND previous_active = user32_get_active_window();
-
-    user32_set_focus_window(target);
-    user32_set_active_window(target);
-    rb_event_set_active_window((uintptr_t)target);
-
-    if (send_messages) {
-        HWND previous = previous_focus ? previous_focus : previous_active;
-        user32_send_focus_transition(previous, target);
-    }
-}
-
-void user32_activate_window_direct(uintptr_t hwnd)
-{
-    HWND target = (HWND)(uintptr_t)hwnd;
-
-    if (!get_window_entry(target))
-        return;
-    user32_set_foreground_focus(target, 1);
-}
-
-static int ensure_class_capacity(int needed_count)
-{
-    user32_class_entry *new_registry;
-    int new_capacity;
-
-    if (needed_count <= g_class_capacity)
-        return TRUE;
-
-    new_capacity = g_class_capacity ? g_class_capacity * 2 : 16;
-    while (new_capacity < needed_count)
-        new_capacity *= 2;
-
-    new_registry = user32_alloc((size_t)new_capacity * sizeof(*new_registry));
-    if (!new_registry)
-        return FALSE;
-
-    if (g_class_registry && g_class_count > 0)
-        user32_memcpy(new_registry, g_class_registry,
-                      (size_t)g_class_count * sizeof(*new_registry));
-
-    user32_free(g_class_registry);
-    g_class_registry = new_registry;
-    g_class_capacity = new_capacity;
-    return TRUE;
-}
-
-/* Helper: find a registered class by name. Returns index >= 0 or -1. */
-static int find_class(const char *name)
-{
-    int i;
-    for (i = 0; i < g_class_count; i++) {
-        const char *class_name = g_class_registry[i].wndclass.lpszClassName;
-
-        if (class_name && user32_strcmp(class_name, name) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
 
 /* ═══════════════════════════════════════════════════════════
  * 28 exported window functions
  * ═══════════════════════════════════════════════════════════ */
-
-/* ── 1. RegisterClassA ─────────────────────────────────────── */
-/*
- * Linear search class_table[16] by strcmp on lpszClassName.
- * Copies the WNDCLASSA struct and returns an ATOM (index+1).
- * Returns 0 on failure (full table or no name).
- */
-KERNEL32_STUB
-ATOM RegisterClassA(const WNDCLASSA *lpWndClass)
-{
-    char *class_name_copy;
-    user32_class_entry *entry;
-    int idx;
-
-    DEBUG_LEVEL(1, "user32: RegisterClassA class=%s wndproc=%p",
-                (lpWndClass && lpWndClass->lpszClassName) ? lpWndClass->lpszClassName : "(null)",
-                lpWndClass ? lpWndClass->lpfnWndProc : NULL);
-    if (!lpWndClass || !lpWndClass->lpszClassName)
-        return 0;
-
-    /* Check for duplicate — return existing atom */
-    idx = find_class(lpWndClass->lpszClassName);
-    if (idx >= 0)
-        return (ATOM)(idx + 1);
-
-    if (!ensure_class_capacity(g_class_count + 1))
-        return 0;
-
-    class_name_copy = user32_strdup(lpWndClass->lpszClassName);
-    if (!class_name_copy)
-        return 0;
-
-    entry = &g_class_registry[g_class_count];
-    user32_memcpy(&entry->wndclass, lpWndClass, sizeof(entry->wndclass));
-    entry->wndclass.lpszClassName = class_name_copy;
-
-    g_class_count++;
-    DEBUG_LEVEL(1, "user32: RegisterClassA success atom=%d", g_class_count);
-    return (ATOM)g_class_count;
-}
 
 static LONG_PTR user32_get_window_long_ptr(wine_window_entry *entry, int nIndex)
 {
@@ -401,16 +183,10 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     if (!user32_ensure_backend())
         return FORCE_HANDLE_RETURN(0, HWND);
 
-    int cidx = find_class(lpClassName);
-    if (cidx < 0)
+    ATOM class_atom = 0;
+    const WNDCLASSA *wc = user32_find_registered_class(lpClassName, &class_atom);
+    if (!wc)
         return FORCE_HANDLE_RETURN(0, HWND);
-
-    user32_class_entry *class_entry = get_class_entry(cidx);
-    const WNDCLASSA *wc;
-
-    if (!class_entry)
-        return FORCE_HANDLE_RETURN(0, HWND);
-    wc = &class_entry->wndclass;
 
     /* Allocate our wrapper entry */
     wine_window_entry *entry = user32_alloc(sizeof(*entry));
@@ -426,7 +202,7 @@ HWND CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
     entry->parent = hWndParent;
     entry->menu = hMenu;
     entry->class_cursor = wc->hCursor;
-    entry->class_atom = (ATOM)(cidx + 1);
+    entry->class_atom = class_atom;
     user32_strncpy(entry->title, lpWindowName ? lpWindowName : "", sizeof(entry->title) - 1);
     entry->title[sizeof(entry->title) - 1] = '\0';
     if (entry->class_cursor == 0)
@@ -558,153 +334,6 @@ BOOL DestroyWindow(HWND hwnd)
     return TRUE;
 }
 
-/* ── 4. ShowWindow ─────────────────────────────────────────── */
-/*
- * Maps nCmdShow to rb_window_show.
- */
-KERNEL32_STUB
-BOOL ShowWindow(HWND hwnd, int nCmdShow)
-{
-    wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry)
-        return FALSE;
-
-    switch (nCmdShow) {
-    case SW_HIDE:
-        rb_window_show(entry->sdl_window, 0);
-        return TRUE;
-    case SW_SHOWNORMAL:
-    case SW_SHOW:
-    case SW_SHOWNA:
-    case SW_SHOWDEFAULT:
-        rb_window_show(entry->sdl_window, 1);
-        user32_set_foreground_focus(hwnd, 1);
-        return TRUE;
-    case SW_RESTORE:
-        rb_window_restore(entry->sdl_window);
-        user32_set_foreground_focus(hwnd, 1);
-        return TRUE;
-    case SW_SHOWMINIMIZED:
-    case SW_MINIMIZE:
-        rb_window_minimize(entry->sdl_window);
-        return TRUE;
-    case SW_SHOWMAXIMIZED:
-        rb_window_maximize(entry->sdl_window);
-        user32_set_foreground_focus(hwnd, 1);
-        return TRUE;
-    default:
-        rb_window_show(entry->sdl_window, 1);
-        user32_set_foreground_focus(hwnd, 1);
-        return TRUE;
-    }
-}
-
-/* ── 5. SetWindowPos ───────────────────────────────────────── */
-/*
- * Calls rb_window_set_position and/or rb_window_set_size based on
- * the SWP_ flags. hWndInsertAfter is ignored.
- */
-KERNEL32_STUB
-BOOL SetWindowPos(HWND hwnd, HWND hWndInsertAfter,
-                  int x, int y, int cx, int cy, UINT uFlags)
-{
-    (void)hWndInsertAfter;
-    wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry)
-        return FALSE;
-
-    if (!(uFlags & SWP_NOMOVE))
-        rb_window_set_position(entry->sdl_window, x, y);
-    if (!(uFlags & SWP_NOSIZE))
-        rb_window_set_size(entry->sdl_window, cx, cy);
-    if (uFlags & SWP_HIDEWINDOW)
-        rb_window_show(entry->sdl_window, 0);
-    if (uFlags & SWP_SHOWWINDOW)
-        rb_window_show(entry->sdl_window, 1);
-    if (!(uFlags & SWP_NOACTIVATE) && !(uFlags & SWP_HIDEWINDOW))
-        user32_set_foreground_focus(hwnd, 1);
-    return TRUE;
-}
-
-/* ── 6. MoveWindow ─────────────────────────────────────────── */
-/*
- * Calls rb_window_set_position + rb_window_set_size.
- * bRepaint is ignored (repaint handled by SDL).
- */
-KERNEL32_STUB
-BOOL MoveWindow(HWND hwnd, int x, int y, int nWidth, int nHeight, BOOL bRepaint)
-{
-    (void)bRepaint;
-    wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry)
-        return FALSE;
-
-    rb_window_set_position(entry->sdl_window, x, y);
-    rb_window_set_size(entry->sdl_window, nWidth, nHeight);
-    return TRUE;
-}
-
-/* ── 7. SetWindowTextA ─────────────────────────────────────── */
-/*
- * Copies lpString into entry->title and calls rb_window_set_title.
- */
-KERNEL32_STUB
-BOOL SetWindowTextA(HWND hwnd, const char *lpString)
-{
-    wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry)
-        return FALSE;
-
-    user32_strncpy(entry->title, lpString ? lpString : "", sizeof(entry->title) - 1);
-    entry->title[sizeof(entry->title) - 1] = '\0';
-    rb_window_set_title(entry->sdl_window, entry->title);
-    return TRUE;
-}
-
-/* ── 8. GetWindowRect ──────────────────────────────────────── */
-/*
- * Calls rb_window_get_rect and writes into *lpRect.
- */
-KERNEL32_STUB
-BOOL GetWindowRect(HWND hwnd, RECT *lpRect)
-{
-    wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry || !lpRect)
-        return FALSE;
-
-    rb_rect_t r;
-    if (rb_window_get_rect(entry->sdl_window, &r) != RB_OK)
-        return FALSE;
-
-    lpRect->left   = r.x;
-    lpRect->top    = r.y;
-    lpRect->right  = r.x + r.w;
-    lpRect->bottom = r.y + r.h;
-    return TRUE;
-}
-
-/* ── 9. GetClientRect ──────────────────────────────────────── */
-/*
- * Calls rb_window_get_client_rect (which sets x=0, y=0) and writes
- * into *lpRect. Client rect is always (0, 0, w, h).
- */
-KERNEL32_STUB
-BOOL GetClientRect(HWND hwnd, RECT *lpRect)
-{
-    wine_window_entry *entry = get_window_entry(hwnd);
-    if (!entry || !lpRect)
-        return FALSE;
-
-    rb_rect_t r;
-    if (rb_window_get_client_rect(entry->sdl_window, &r) != RB_OK)
-        return FALSE;
-
-    lpRect->left   = 0;
-    lpRect->top    = 0;
-    lpRect->right  = r.w;
-    lpRect->bottom = r.h;
-    return TRUE;
-}
 
 /* ── 10. GetWindowLongA ────────────────────────────────────── */
 /*
@@ -762,94 +391,6 @@ LONG_PTR SetWindowLongPtrA(HWND hwnd, int nIndex, LONG_PTR dwNewLong)
         return 0;
 
     return user32_set_window_long_ptr(entry, nIndex, dwNewLong);
-}
-
-/* ── 12. IsWindow ──────────────────────────────────────────── */
-/*
- * Checks if the handle is of type HANDLE_TYPE_HWIN.
- */
-KERNEL32_STUB
-BOOL IsWindow(HWND hwnd)
-{
-    if (!hwnd)
-        return FALSE;
-    return wine_handle_get_type((uint32_t)hwnd) == HANDLE_TYPE_HWIN;
-}
-
-/* ── 13. EnableWindow ──────────────────────────────────────── */
-/* Stub: always returns TRUE. */
-KERNEL32_STUB
-BOOL EnableWindow(HWND hwnd, BOOL bEnable)
-{
-    (void)hwnd;
-    (void)bEnable;
-    return TRUE;
-}
-
-/* ── 14. GetDesktopWindow ──────────────────────────────────── */
-/* Stub: returns a sentinel non-zero value (not a real handle). */
-KERNEL32_STUB
-HWND GetDesktopWindow(void)
-{
-    return FORCE_HANDLE_RETURN(USER32_DESKTOP_HWND, HWND);
-}
-
-/* ── 15. GetActiveWindow ───────────────────────────────────── */
-/* Stub: returns a sentinel non-zero value. */
-KERNEL32_STUB
-HWND GetActiveWindow(void)
-{
-    return FORCE_HANDLE_RETURN(user32_get_active_window(), HWND);
-}
-
-/* ── 16. GetFocus ──────────────────────────────────────────── */
-/* Stub: returns a sentinel non-zero value. */
-KERNEL32_STUB
-HWND GetFocus(void)
-{
-    return FORCE_HANDLE_RETURN(user32_get_focus_window(), HWND);
-}
-
-/* ── 17. SetFocus ──────────────────────────────────────────── */
-/* Stub: returns a sentinel non-zero value. */
-KERNEL32_STUB
-HWND SetFocus(HWND hwnd)
-{
-    HWND prev = user32_get_focus_window();
-    HWND target = get_window_entry(hwnd) ? hwnd : 0;
-
-    user32_set_foreground_focus(target, 1);
-    return FORCE_HANDLE_RETURN(prev, HWND);
-}
-
-/* ── 18. UpdateWindow ──────────────────────────────────────── */
-/* Stub: always returns TRUE. */
-KERNEL32_STUB
-BOOL UpdateWindow(HWND hwnd)
-{
-    (void)hwnd;
-    return TRUE;
-}
-
-/* ── 19. InvalidateRect ────────────────────────────────────── */
-/* Stub: always returns TRUE. */
-KERNEL32_STUB
-BOOL InvalidateRect(HWND hwnd, const RECT *lpRect, BOOL bErase)
-{
-    (void)hwnd;
-    (void)lpRect;
-    (void)bErase;
-    return TRUE;
-}
-
-/* ── 20. ValidateRect ──────────────────────────────────────── */
-/* Stub: always returns TRUE. */
-KERNEL32_STUB
-BOOL ValidateRect(HWND hwnd, const RECT *lpRect)
-{
-    (void)hwnd;
-    (void)lpRect;
-    return TRUE;
 }
 
 /* ── 21. BeginPaint ────────────────────────────────────────── */

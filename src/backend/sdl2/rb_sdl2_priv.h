@@ -416,12 +416,32 @@ static inline int scancode_to_vk(SDL_Scancode scancode)
 /* ---- Event system helpers ---- */
 void rb_keyboard_note_key_event(int vk, int is_down, int is_repeat);
 void rb_event_install_watch(void);
+int rb_event_watch(void *userdata, SDL_Event *event);
 void rb_event_set_active_window(uintptr_t hwnd);
 void rb_event_activate_window(uintptr_t hwnd);
 uintptr_t rb_event_get_active_window(void);
+int rb_event_is_system_key_event(const SDL_KeyboardEvent *key);
+void rb_event_note_alt_keydown(SDL_Keycode sym);
+void rb_event_note_alt_keyup(SDL_Keycode sym);
+void rb_event_clear_alt_state(void);
+int rb_event_translate_focus_window_event(const SDL_WindowEvent *window,
+                                          uintptr_t event_hwnd,
+                                          rb_msg_t *msg);
+int rb_event_translate_keyboard_or_text(SDL_Event *sdl, rb_msg_t *msg);
+int rb_event_translate_window_or_mouse(SDL_Event *sdl, uintptr_t event_hwnd,
+                                       rb_msg_t *msg);
 int rb_event_bind_window(uintptr_t hwnd, rb_window_t win);
 void rb_event_unbind_window(uintptr_t hwnd);
 uint32_t rb_event_get_sdl_window_id(uintptr_t hwnd);
+uintptr_t rb_event_resolve_hwnd_from_sdl_window(uint32_t window_id);
+uintptr_t rb_event_resolve_hwnd_from_native_window(uintptr_t native_window_id);
+rb_window *rb_event_resolve_backend_window(uintptr_t hwnd);
+size_t rb_event_window_route_capacity(void);
+uintptr_t rb_event_window_route_hwnd_at(size_t idx);
+int rb_event_push_synthetic(const rb_msg_t *msg);
+int rb_event_pop_synthetic(rb_msg_t *msg);
+void rb_event_begin_shutdown(void);
+int rb_event_translate_shutdown(rb_msg_t *out_msg);
 uintptr_t rb_x11_consume_bad_window(void);
 int rb_runtime_consume_shutdown_request(void);
 int rb_runtime_shutdown_requested(void);

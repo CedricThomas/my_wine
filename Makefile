@@ -37,7 +37,7 @@ GENERATED_REQUIRED = src/syscall/dispatcher_generated.c
 ROOT_SRC     = $(filter-out src/wrapper_main.c, $(sort $(shell find src/   -maxdepth 1 -name '*.c')))
 STUBS_SRC    = $(filter-out src/msvcrt/crt_32_stub.c, \
 		$(sort $(shell find src/msvcrt   -maxdepth 1 -name '*.c')))
-LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c | grep -v pe32_process.c))
+LOADER_SRC   = $(sort $(shell find src/loader  -maxdepth 1 -name '*.c' | grep -v pe32_entry.c | grep -v pe32_process.c | grep -v pe32_guest_launch.c | grep -v pe32_bootstrap.c))
 SYSCALL_SRC  = $(sort $(shell find src/syscall -maxdepth 1 -name '*.c' | grep -v dispatcher_generated.c))
 HEAP_SRC     = $(sort $(shell find src/heap    -maxdepth 1 -name '*.c'))
 CRT_SRC      = $(sort $(shell find src/crt     -maxdepth 1 -name '*.c'))
@@ -86,6 +86,10 @@ MY_WINE32_OBJS = \
 	$(BUILDDIR32)/image_mapper.o \
 	$(BUILDDIR32)/module_list.o \
 	$(BUILDDIR32)/peb_ldr.o \
+	$(BUILDDIR32)/pe32_bootstrap.o \
+	$(BUILDDIR32)/pe32_doom95_compat.o \
+	$(BUILDDIR32)/pe32_entry_resolve.o \
+	$(BUILDDIR32)/pe32_guest_launch.o \
 	$(BUILDDIR32)/relocations.o \
 	$(BUILDDIR32)/pe_symbols.o \
 	$(BUILDDIR32)/thunk_gen.o \
@@ -121,13 +125,13 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/dll_path.o $(BUILDDIR)/dll_loader.o
 
 # Shared objects used by import-resolution and teb_peb tests.
-TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
+TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
 	$(CRT_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o $(BUILDDIR)/clone64.o
 
 # Non-crt stubs (syscall dispatch test does not need the CRT stubs).
-STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS))
+STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS))
 
 # kernel32_module.c depends on loader functions not available in syscall test,
 # so exclude it from the non-CRT stubs used here.
@@ -149,10 +153,11 @@ TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o 
 	$(BUILDDIR)/debug.o $(PE_OBJS) $(BUILDDIR)/common.o
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $(BUILDDIR)/crt_watcom.o $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_offset_discovery.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/common.o $(BUILDDIR)/debug.o
-TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/debug.o
+TEST_doom95_paths_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/debug.o
+TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/debug.o
 TEST_dsound_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/dsound_interface.o $(BUILDDIR)/dsound_buffer.o $(BUILDDIR)/debug.o
-TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
-TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
@@ -191,6 +196,7 @@ all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test
 	$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 	$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
 	$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols \
+	$(BUILDDIR)/test_doom95_paths $(BUILDDIR)/test_pe32_launch \
 	$(BUILDDIR)/test_ddraw $(BUILDDIR)/test_dsound \
 	$(BUILDDIR)/test_sdl2_backend $(BUILDDIR)/test_user32_handle_ownership \
 	$(BUILDDIR)/test_user32_message_dispatch \
@@ -275,15 +281,20 @@ my_wine32: $(MY_WINE32_OBJS)
 # ── Test Targets ────────────────────────────────────────────────
 # Test binaries (native ELF) plus the hello_world sample .exe they exercise.
 SHELL.EXE = samples/hello_world/hello_world.exe
+ENTRY_TEST_32_EXE = samples/entry_test_32/entry_test_32.exe
 
 $(SHELL.EXE):
 	@bash scripts/samples.sh build hello_world
 
-tests: my_wine64 $(SHELL.EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
+$(ENTRY_TEST_32_EXE):
+	@bash scripts/samples.sh build entry_test_32
+
+tests: my_wine64 my_wine32 $(SHELL.EXE) $(ENTRY_TEST_32_EXE) $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
 		$(BUILDDIR)/test_teb_peb $(BUILDDIR)/test_syscall_dispatch \
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
 		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols \
+		$(BUILDDIR)/test_doom95_paths $(BUILDDIR)/test_pe32_launch \
 		$(BUILDDIR)/test_ddraw $(BUILDDIR)/test_dsound \
 		$(BUILDDIR)/test_sdl2_backend $(BUILDDIR)/test_user32_handle_ownership \
 		$(BUILDDIR)/test_user32_message_dispatch \
@@ -312,7 +323,9 @@ $(eval $(call TEST_RULE,module_registry,$(TEST_module_registry_OBJS)))
 $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 $(eval $(call TEST_RULE,pe32,$(TEST_pe32_OBJS)))
 $(eval $(call TEST_RULE,entry_symbols,$(TEST_entry_symbols_OBJS)))
+$(eval $(call TEST_RULE,doom95_paths,$(TEST_doom95_paths_OBJS)))
 $(eval $(call TEST_RULE,syscall_safe_utils,))
+$(eval $(call TEST_RULE,pe32_launch,))
 
 # ── SDL2 Backend Library ────────────────────────────────────────
 backend: $(BACKEND_OBJS)

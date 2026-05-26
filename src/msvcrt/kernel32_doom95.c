@@ -1,3 +1,11 @@
+/*
+ * kernel32_doom95.c
+ *
+ * Compatibility-heavy kernel32 behavior used primarily by Doom95 and related
+ * sample flows. This file still mixes generic path/process helpers with
+ * Doom95-specific policy and is a planned split target during cleanup.
+ */
+
 #define _GNU_SOURCE
 
 #include <stdint.h>
@@ -104,6 +112,11 @@ static long wine_syscall2(long nr, long a0, long a1)
 }
 
 static char g_process_current_directory[1024];
+
+void wine_reset_current_directory_cache(void)
+{
+    g_process_current_directory[0] = '\0';
+}
 
 static void wine_copy_cstr(char *dst, size_t dst_size, const char *src)
 {

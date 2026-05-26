@@ -50,5 +50,6 @@ typedef struct {
 int wine_resolve_path(const char *src, char *dst, size_t dst_size);
 const char *wine_get_current_directory(void);
 int wine_set_current_directory(const char *path);
+void wine_reset_current_directory_cache(void);
 
 #endif /* MY_WINE_KERNEL32_PRIV_H */
