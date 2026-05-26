@@ -12,69 +12,14 @@
 
 #include <assert.h>
 #include <stdlib.h>
-#include <string.h>
-#include <dlfcn.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 #include "render_backend.h"
 #include "handle_manager.h"
 #include "src/loader/loader_state.h"
 
-/*
- * In 32-bit loader mode, the PLT redirects malloc/calloc/free to the
- * my_wine mmap heap. To allocate on the REAL host heap, we resolve
- * the actual glibc functions via dlsym(RTLD_DEFAULT, ...) which
- * bypasses the PLT. These pointers are cached after first resolution.
- */
-static inline void *real_malloc(size_t size)
-{
-    static void *(*fn)(size_t) = NULL;
-    if (!fn)
-        fn = dlsym(RTLD_DEFAULT, "malloc");
-    return fn ? fn(size) : NULL;
-}
-
-static inline void *real_calloc(size_t nmemb, size_t size)
-{
-    static void *(*fn)(size_t, size_t) = NULL;
-    if (!fn)
-        fn = dlsym(RTLD_DEFAULT, "calloc");
-    return fn ? fn(nmemb, size) : NULL;
-}
-
-static inline void real_free(void *ptr)
-{
-    static void (*fn)(void *) = NULL;
-    if (!fn)
-        fn = dlsym(RTLD_DEFAULT, "free");
-    if (fn && ptr)
-        fn(ptr);
-}
-
-/* 32-bit: use mmap(MAP_32BIT) for host allocations so returned pointers
- * stay within the 32-bit address space. The guest truncates host pointers
- * to 32 bits; glibc malloc may return addresses >2GB which truncate to
- * garbage (e.g. 0x80450004 -> 0x4). */
-#if defined(__i386__)
-#include "src/syscall/syscalls_inline.h"
-#endif
-
 extern wine_loader_state_t g_loader __attribute__((weak));
 extern void *unix_stack_ptr_val __attribute__((weak));
-
-/*
- * Reentrancy counter for host stack switching.
- *
- * On 32-bit Linux, the host FS selector is often 0 (the process starts
- * before glibc sets up TLS). This makes FS-based detection of "am I on
- * the host stack?" useless: rb_host_context_is_active() would always
- * return true, causing the reentrancy guard to bypass the stack switch
- * entirely and run SDL on the guest stack.
- *
- * The __thread counter tracks nesting depth of rb_call_on_host_stack()
- * so the guard works regardless of FS values.
- */
-static __thread int g_rb_on_host_stack = 0;
 
 /* ---- Handle type constants ---- */
 /* Defined in handle_manager.h; listed here for reference:
@@ -108,6 +53,7 @@ typedef struct rb_window {
 typedef struct rb_surface {
     SDL_Surface *surface;
     uint8_t *own_buf;       /* malloc'd pixel buffer we own */
+    int own_buf_low32;      /* backing buffer allocated in low 32-bit VA space */
     rb_palette_t palette;   /* palette handle bound to this surface */
     int dirty;              /* flag: surface contents changed, needs update */
     rb_window_t window;     /* which window this surface is bound to */
@@ -215,17 +161,23 @@ typedef uintptr_t (*rb_host_call_fn)(void *);
 
 static inline int rb_host_context_is_active(void)
 {
+#if defined(__x86_64__)
     if (&g_loader == 0)
         return 1;
 
-#if defined(__i386__)
-    /* On 32-bit, host FS is often 0, making FS-based detection useless.
-     * Use the thread-local counter instead. */
-    return g_rb_on_host_stack > 0;
-#elif defined(__x86_64__)
     uintptr_t current_gs = 0;
     __asm__ volatile("rdgsbase %0" : "=r"(current_gs));
     return current_gs == loader_get_host_gs_base();
+#elif defined(__i386__)
+    if (&g_loader == 0)
+        return 1;
+
+    uint16_t host_fs = loader_get_host_fs_selector();
+    uint16_t current_fs = 0;
+    if (host_fs == 0)
+        return 1;
+    __asm__ volatile("mov %%fs, %0" : "=r"(current_fs));
+    return current_fs == host_fs;
 #else
     return 1;
 #endif
@@ -233,15 +185,7 @@ static inline int rb_host_context_is_active(void)
 
 static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
 {
-    /* Reentrancy guard: if already on host stack (correct FS/GS),
-     * call the function directly without stack switching. This prevents
-     * nested stack-pointer manipulation when host-stack wrappers are
-     * called from inside rb_call_on_host_stack() callbacks. */
-    if (rb_host_context_is_active())
-        return (uintptr_t)fn(arg);
-
 #if defined(__x86_64__)
-    __attribute__((unused)) int saved_depth = ++g_rb_on_host_stack;
     uintptr_t ret;
     uintptr_t old_rsp;
     uintptr_t saved_gs = rb_host_context_enter();
@@ -249,7 +193,6 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
     if (&unix_stack_ptr_val == 0 || !unix_stack_ptr_val) {
         ret = fn(arg);
         rb_host_context_leave(saved_gs);
-        g_rb_on_host_stack = saved_depth - 1;
         return ret;
     }
 
@@ -266,13 +209,8 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
         : "rcx", "rdx", "rsi", "r8", "r9", "r10", "r11", "memory", "cc");
 
     rb_host_context_leave(saved_gs);
-    g_rb_on_host_stack = saved_depth - 1;
     return ret;
 #elif defined(__i386__)
-    /* Increment reentrancy counter before the host call. This must
-     * happen before any function call so nested rb_call_on_host_stack
-     * calls see the counter > 0 and take the guard path. */
-    __attribute__((unused)) int saved_depth = ++g_rb_on_host_stack;
     uintptr_t ret;
     uintptr_t old_esp;
     uintptr_t saved_fs = rb_host_context_enter();
@@ -280,7 +218,6 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
     if (&unix_stack_ptr_val == 0 || !unix_stack_ptr_val) {
         ret = fn(arg);
         rb_host_context_leave(saved_fs);
-        g_rb_on_host_stack = saved_depth - 1;
         return ret;
     }
 
@@ -309,41 +246,11 @@ static inline uintptr_t rb_call_on_host_stack(rb_host_call_fn fn, void *arg)
     );
 
     rb_host_context_leave(saved_fs);
-    g_rb_on_host_stack = saved_depth - 1;
     return ret;
 #else
-    __attribute__((unused)) int saved_depth = ++g_rb_on_host_stack;
-    uintptr_t ret = fn(arg);
-    g_rb_on_host_stack = saved_depth - 1;
-    return ret;
+    return fn(arg);
 #endif
 }
-
-#if defined(__i386__)
-/* 32-bit: use real glibc malloc/calloc/free resolved via dlsym to bypass
- * the PLT redirect to my_wine's mmap heap. */
-static inline uintptr_t rb_host_malloc_call(void *arg)
-{
-    return (uintptr_t)real_malloc(*(size_t *)arg);
-}
-
-typedef struct {
-    size_t nmemb;
-    size_t size;
-} rb_host_calloc_args;
-
-static inline uintptr_t rb_host_calloc_call(void *arg)
-{
-    rb_host_calloc_args *a = arg;
-    return (uintptr_t)real_calloc(a->nmemb, a->size);
-}
-
-static inline uintptr_t rb_host_free_call(void *arg)
-{
-    real_free(arg);
-    return 0;
-}
-#else
 
 static inline uintptr_t rb_host_malloc_call(void *arg)
 {
@@ -366,7 +273,6 @@ static inline uintptr_t rb_host_free_call(void *arg)
     free(arg);
     return 0;
 }
-#endif /* __i386__ */
 
 static inline uintptr_t rb_host_getenv_call(void *arg)
 {
@@ -393,33 +299,6 @@ static inline void rb_host_free(void *ptr)
 static inline const char *rb_host_getenv(const char *name)
 {
     return (const char *)rb_call_on_host_stack(rb_host_getenv_call, (void *)name);
-}
-
-typedef struct {
-    const char *name;
-    const char *value;
-} rb_host_setenv_args;
-
-static inline uintptr_t rb_host_setenv_call(void *arg)
-{
-    rb_host_setenv_args *a = arg;
-    return (uintptr_t)setenv(a->name, a->value, 1);
-}
-
-static inline int rb_host_setenv(const char *name, const char *value)
-{
-    rb_host_setenv_args args = { name, value };
-    return (int)rb_call_on_host_stack(rb_host_setenv_call, &args);
-}
-
-static inline uintptr_t rb_host_unsetenv_call(void *arg)
-{
-    return (uintptr_t)unsetenv((const char *)arg);
-}
-
-static inline void rb_host_unsetenv(const char *name)
-{
-    (void)rb_call_on_host_stack(rb_host_unsetenv_call, (void *)name);
 }
 
 /* ---- Global audio state ---- */

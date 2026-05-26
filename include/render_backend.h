@@ -37,8 +37,6 @@ typedef struct {
 /* ---- Initialization / Shutdown ---- */
 int rb_init(void);
 void rb_shutdown(void);
-int rb_event_pump_pause(void);
-int rb_event_pump_resume(void);
 
 /* ---- Window Lifecycle ---- */
 rb_window_t rb_window_create(const char *title,

@@ -249,7 +249,7 @@ static int midi_find_soundfont(char *out_path, size_t out_size)
         "/usr/share/soundfonts/FluidR3_GM.sf2",
         "/usr/share/soundfonts/FluidR3_GS.sf2"
     };
-    const char *env_path = rb_host_getenv("MY_WINE_SOUNDFONT");
+    const char *env_path = getenv("MY_WINE_SOUNDFONT");
     size_t i;
 
     if (out_path == NULL || out_size == 0u)
@@ -276,7 +276,7 @@ static int midi_backend_open_local(midi_fluidsynth_backend_t *backend, uint32_t 
     fluid_settings_t *settings = NULL;
     fluid_synth_t *synth = NULL;
     fluid_audio_driver_t *driver = NULL;
-    const char *driver_override = rb_host_getenv("MY_WINE_FLUID_DRIVER");
+    const char *driver_override = getenv("MY_WINE_FLUID_DRIVER");
     const char *driver_name = NULL;
     size_t i;
     int soundfont_id = -1;

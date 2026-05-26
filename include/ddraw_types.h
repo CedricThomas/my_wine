@@ -599,15 +599,14 @@ typedef struct _IDirectDrawVtbl {
         int *lpInVerticalBlank);
     /* 18 */ HRESULT (KERNEL32_STUB *Initialize)(void *this_ptr, GUID *lpGUID);
     /* 19 */ HRESULT (KERNEL32_STUB *RestoreDisplayMode)(void *this_ptr);
-    /* 20 */ HRESULT (KERNEL32_STUB *RestoreAllSurfaces)(void *this_ptr);
-    /* 21 */ HRESULT (KERNEL32_STUB *SetCooperativeLevel)(
+    /* 20 */ HRESULT (KERNEL32_STUB *SetCooperativeLevel)(
         void *this_ptr, void *hwnd, uint32_t flags);
-    /* 22 */ HRESULT (KERNEL32_STUB *SetDisplayMode)(
+    /* 21 */ HRESULT (KERNEL32_STUB *SetDisplayMode)(
         void *this_ptr,
         uint32_t width,
         uint32_t height,
         uint32_t bpp);
-    /* 23 */ HRESULT (KERNEL32_STUB *WaitForVerticalBlank)(
+    /* 22 */ HRESULT (KERNEL32_STUB *WaitForVerticalBlank)(
         void *this_ptr,
         uint32_t flags,
         void *hEvent);

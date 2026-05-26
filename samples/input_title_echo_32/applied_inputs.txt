@@ -1,6 +1,8 @@
 # Verify key events by observing deterministic window title updates.
 focus
-sleep 100
+sleep 250
+click 40 40
+sleep 150
 key w
 key i
 key n

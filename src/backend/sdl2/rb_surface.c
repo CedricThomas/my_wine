@@ -2,39 +2,56 @@
 #include "debug.h"
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
+#if defined(__x86_64__)
 #include <errno.h>
+#include <sys/mman.h>
+#endif
 
-/*
- * rb_alloc_32bit — allocate memory in the lower 32-bit address range.
- *
- * Used for DDraw surface pixel buffers that are referenced by 32-bit pointers
- * in the DDSURFACEDESC v1 format. The guest stores the surface data address
- * in a 32-bit lpSurface field, so the buffer must be below 0x100000000.
- */
-static uint8_t *rb_alloc_32bit(size_t size)
+#if defined(__x86_64__)
+static uint8_t *rb_surface_alloc_buf(size_t size, int *used_low32)
 {
-    uint8_t *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
-    if (ptr == MAP_FAILED) {
-        DEBUG("rb: mmap MAP_32BIT failed: %s, falling back to malloc", strerror(errno));
-        return rb_host_malloc(size);
+    void *ptr;
+
+    if (used_low32)
+        *used_low32 = 0;
+
+    ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    if (ptr != MAP_FAILED) {
+        if (used_low32)
+            *used_low32 = 1;
+        return (uint8_t *)ptr;
     }
-    return ptr;
+
+    DEBUG("rb_surface: MAP_32BIT allocation failed: %s", strerror(errno));
+    return rb_host_malloc(size);
 }
 
-static void rb_free_32bit(uint8_t *ptr, size_t size)
+static void rb_surface_free_buf(uint8_t *buf, size_t size, int used_low32)
 {
-    if (!ptr)
+    if (!buf)
         return;
-    if (size > 0) {
-        if (mprotect(ptr, size, PROT_READ | PROT_WRITE) == 0 &&
-            munmap(ptr, size) == 0)
-            return;
+    if (used_low32) {
+        (void)munmap(buf, size);
+        return;
     }
-    /* Fall back to host free if this wasn't mmap'd (e.g., from fallback path). */
-    rb_host_free(ptr);
+    rb_host_free(buf);
 }
+#else
+static uint8_t *rb_surface_alloc_buf(size_t size, int *used_low32)
+{
+    if (used_low32)
+        *used_low32 = 0;
+    return rb_host_malloc(size);
+}
+
+static void rb_surface_free_buf(uint8_t *buf, size_t size, int used_low32)
+{
+    (void)size;
+    (void)used_low32;
+    rb_host_free(buf);
+}
+#endif
 
 static inline rb_surface *get_surface(rb_surface_t surf)
 {
@@ -281,7 +298,8 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
 
     int pitch = rb_surface_pitch_for_bpp(w, bpp);
     int buf_size = pitch * h;
-    uint8_t *buf = rb_alloc_32bit(buf_size);
+    int used_low32 = 0;
+    uint8_t *buf = rb_surface_alloc_buf((size_t)buf_size, &used_low32);
     if (!buf)
         return 0;
     memset(buf, 0, buf_size);
@@ -293,7 +311,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
         rb_sdl_surface_create_args mask_args = { .bpp = 0 };
         int mask_ret = (int)rb_call_on_host_stack(rb_sdl_pixel_format_masks_call, &mask_args);
         if (!mask_ret) {
-            rb_free_32bit(buf, buf_size);
+            rb_surface_free_buf(buf, (size_t)buf_size, used_low32);
             return 0;
         }
         rmask = mask_args.rmask;
@@ -310,7 +328,7 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     };
     SDL_Surface *surface = (SDL_Surface *)rb_call_on_host_stack(rb_sdl_create_surface_from_call, &create_args);
     if (!surface) {
-        rb_free_32bit(buf, buf_size);
+        rb_surface_free_buf(buf, (size_t)buf_size, used_low32);
         return 0;
     }
 
@@ -325,11 +343,12 @@ rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
     rb_surface *s = rb_host_malloc(sizeof(*s));
     if (!s) {
         rb_call_on_host_stack(rb_sdl_free_surface_call, surface);
-        rb_free_32bit(buf, buf_size);
+        rb_surface_free_buf(buf, (size_t)buf_size, used_low32);
         return 0;
     }
     s->surface = surface;
     s->own_buf = buf;
+    s->own_buf_low32 = used_low32;
     s->palette = palette;
     s->dirty = 0;
     s->window = 0;
@@ -424,14 +443,8 @@ int rb_surface_destroy(rb_surface_t surf)
         }
     }
 
-    int buf_size = 0;
-    if (s->surface) {
-        buf_size = s->pitch * s->surface->h;
-    }
     rb_call_on_host_stack(rb_sdl_free_surface_call, s->surface);
-    if (s->own_buf) {
-        rb_free_32bit(s->own_buf, buf_size);
-    }
+    rb_surface_free_buf(s->own_buf, (size_t)(s->pitch * s->surface->h), s->own_buf_low32);
     rb_host_free(s);
     wine_handle_free((uint32_t)surf);
     return RB_OK;

@@ -59,10 +59,9 @@ typedef struct _IDirectDrawVtbl {
     /* 17 */ HRESULT (WINAPI *GetVerticalBlankStatus)(void *, DWORD *);
     /* 18 */ HRESULT (WINAPI *Initialize)(void *, void *);
     /* 19 */ HRESULT (WINAPI *RestoreDisplayMode)(void *);
-    /* 20 */ HRESULT (WINAPI *RestoreAllSurfaces)(void *);
-    /* 21 */ HRESULT (WINAPI *SetCooperativeLevel)(void *, void *, DWORD);
-    /* 22 */ HRESULT (WINAPI *SetDisplayMode)(void *, DWORD, DWORD, DWORD);
-    /* 23 */ HRESULT (WINAPI *WaitForVerticalBlank)(void *, DWORD, void *);
+    /* 20 */ HRESULT (WINAPI *SetCooperativeLevel)(void *, void *, DWORD);
+    /* 21 */ HRESULT (WINAPI *SetDisplayMode)(void *, DWORD, DWORD, DWORD);
+    /* 22 */ HRESULT (WINAPI *WaitForVerticalBlank)(void *, DWORD, void *);
 } IDirectDrawVtbl;
 
 /* IDirectDrawSurfaceVtbl — must match the host vtable layout exactly.

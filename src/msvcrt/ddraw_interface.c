@@ -744,12 +744,6 @@ static HRESULT KERNEL32_STUB ddraw_RestoreDisplayMode(void *this_ptr)
     return DD_OK;
 }
 
-static HRESULT KERNEL32_STUB ddraw_RestoreAllSurfaces(void *this_ptr)
-{
-    (void)this_ptr;
-    return DD_OK;
-}
-
 static HRESULT KERNEL32_STUB ddraw_SetCooperativeLevel(void *this_ptr, void *hwnd, uint32_t flags)
 {
     my_dd_t *dd = (my_dd_t *)this_ptr;
@@ -977,7 +971,6 @@ const IDirectDrawVtbl ddraw_vtbl = {
     .GetVerticalBlankStatus = ddraw_GetVerticalBlankStatus,
     .Initialize = ddraw_Initialize,
     .RestoreDisplayMode = ddraw_RestoreDisplayMode,
-    .RestoreAllSurfaces = ddraw_RestoreAllSurfaces,
     .SetCooperativeLevel = ddraw_SetCooperativeLevel,
     .SetDisplayMode = ddraw_SetDisplayMode,
     .WaitForVerticalBlank = ddraw_WaitForVerticalBlank,
