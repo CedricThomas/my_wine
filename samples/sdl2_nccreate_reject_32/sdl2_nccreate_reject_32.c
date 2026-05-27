@@ -16,19 +16,18 @@
 
 #include <windows.h>
 
+#include "../harness.h"
+
 /* ── Class that rejects WM_NCCREATE ────────────────────────── */
 LRESULT CALLBACK RejectNCCreateProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    switch (msg) {
-    case WM_NCCREATE:
-        return FALSE;  /* veto creation */
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProcA(hwnd, msg, wParam, lParam);
-    }
-    return 0;
+    (void)hwnd;
+    (void)wParam;
+    (void)lParam;
+
+    if (msg == WM_NCCREATE)
+        return FALSE;
+    return TRUE;
 }
 
 /* ── Class that accepts WM_NCCREATE (default path) ────────── */
@@ -38,13 +37,17 @@ LRESULT CALLBACK AcceptNCCreateProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     (void)lParam;
 
     switch (msg) {
+    case WM_NCCREATE:
+        return TRUE;
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
-        break;
+        return 0;
     default:
         return DefWindowProcA(hwnd, msg, wParam, lParam);
     }
-    return 0;
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
@@ -70,7 +73,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     /* Attempt to create a window with the rejecting class — must fail */
     HWND rejected = CreateWindowExA(0, "RejectNCCreateClass", "Rejected",
-                                    WS_VISIBLE | WS_OVERLAPPEDWINDOW,
+                                    WS_OVERLAPPEDWINDOW,
                                     0, 0, 320, 200,
                                     NULL, NULL, hInstance, NULL);
     if (rejected != NULL) {
@@ -86,6 +89,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                                     NULL, NULL, hInstance, NULL);
     if (!accepted)
         return 1;
+
+    harness_signal("READY accept");
 
     /* Run message loop for the accepted window */
     MSG msg;

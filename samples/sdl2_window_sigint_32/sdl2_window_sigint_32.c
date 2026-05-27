@@ -1,5 +1,7 @@
 #include <windows.h>
 
+#include "../harness.h"
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
@@ -34,6 +36,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                            NULL, NULL, hInstance, NULL);
     if (!hwnd)
         return 1;
+
+    harness_signal("READY sigint-window");
 
     while (GetMessageA(&msg, 0, 0, 0)) {
         TranslateMessage(&msg);

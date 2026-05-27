@@ -7,6 +7,7 @@
 
 #include "rb_sdl2_priv.h"
 #include "include/debug.h"
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,6 +47,16 @@ static uintptr_t rb_sdl_pump_events_call(void *arg)
     (void)arg;
     SDL_PumpEvents();
     return 0;
+}
+
+static uint64_t rb_event_monotonic_ms(void)
+{
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
+
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
 }
 
 static uintptr_t rb_event_get_window_hwnd(SDL_Event *sdl)
@@ -147,6 +158,26 @@ void rb_event_pump_host(void)
     rb_call_on_host_stack(rb_sdl_pump_events_call, NULL);
 }
 
+void rb_event_maybe_pump_host(uint32_t min_interval_ms)
+{
+    static uint64_t last_pump_ms = 0;
+    static int pump_in_progress = 0;
+    uint64_t now_ms;
+
+    if (pump_in_progress)
+        return;
+
+    now_ms = rb_event_monotonic_ms();
+    if (min_interval_ms != 0 && last_pump_ms != 0 &&
+        now_ms != 0 && now_ms - last_pump_ms < (uint64_t)min_interval_ms)
+        return;
+
+    pump_in_progress = 1;
+    rb_event_pump_host();
+    last_pump_ms = (now_ms != 0) ? now_ms : rb_event_monotonic_ms();
+    pump_in_progress = 0;
+}
+
 int rb_event_wait(rb_msg_t *out_msg)
 {
     SDL_Event sdl_ev;
@@ -175,6 +206,7 @@ int rb_event_peek(rb_msg_t *out_msg)
 {
     SDL_Event sdl_ev;
 
+    rb_event_maybe_pump_host(1);
     if (rb_event_pop_synthetic(out_msg))
         return 1;
     if (rb_runtime_consume_shutdown_request())

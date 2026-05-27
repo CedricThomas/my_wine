@@ -1,5 +1,7 @@
 #include <windows.h>
 
+#include "../harness.h"
+
 /* RejectClass — returns FALSE on WM_NCCREATE to abort creation.
    Returns TRUE for all other messages (no further processing needed). */
 LRESULT CALLBACK RejectProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -74,6 +76,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                            NULL, NULL, hInstance, NULL);
     if (!hwnd)
         return 1;
+
+    harness_signal("READY accept");
 
     /* (c) Standard message loop on the accepted window. */
     while (GetMessageA(&msg, NULL, 0, 0)) {

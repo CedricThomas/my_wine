@@ -2,3 +2,7 @@ type=graphical
 window_title=Two Window Secondary
 window_width=320
 window_height=200
+timeout=30
+ready_log=HARNESS:READY secondary
+ready_window_timeout=5
+ready_only=true

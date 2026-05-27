@@ -541,6 +541,8 @@ int rb_surface_flip(rb_surface_t surf)
     static uint32_t flip_count;
     if (!s || !s->surface) return RB_FAIL;
 
+    rb_event_maybe_pump_host(2);
+
     if (!s->window) {
         s->dirty = 0;
         return RB_OK;

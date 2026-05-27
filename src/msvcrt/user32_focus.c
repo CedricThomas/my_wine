@@ -16,7 +16,7 @@ static HWND user32_find_replacement_window(HWND exclude)
 {
     uint32_t handle;
 
-    for (handle = 1; handle <= HANDLE_TABLE_SIZE; handle++) {
+    for (handle = 1; handle < HANDLE_TABLE_SIZE; handle++) {
         if ((HWND)(uintptr_t)handle == exclude)
             continue;
         if (wine_handle_get_type(handle) == HANDLE_TYPE_HWIN &&

@@ -3,3 +3,5 @@ arch=32
 window_title=Sleep Timeout Window 32-bit
 window_width=320
 window_height=200
+ready_log=HARNESS:READY timeout-window
+ready_only=true

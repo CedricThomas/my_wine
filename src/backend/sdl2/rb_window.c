@@ -327,7 +327,6 @@ rb_window_t rb_window_create(const char *title,
         rb_host_free(win);
         return 0;
     }
-
     rb_window_set_default_cursor(win);
 
     return (rb_window_t)wine_handle_alloc(HANDLE_TYPE_RB_WINDOW, win);

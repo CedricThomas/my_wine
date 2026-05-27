@@ -125,13 +125,13 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/dll_path.o $(BUILDDIR)/dll_loader.o
 
 # Shared objects used by import-resolution and teb_peb tests.
-TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
+TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
 	$(CRT_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o $(BUILDDIR)/clone64.o
 
 # Non-crt stubs (syscall dispatch test does not need the CRT stubs).
-STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS))
+STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS))
 
 # kernel32_module.c depends on loader functions not available in syscall test,
 # so exclude it from the non-CRT stubs used here.
@@ -154,10 +154,10 @@ TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o 
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $(BUILDDIR)/crt_watcom.o $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_offset_discovery.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/common.o $(BUILDDIR)/debug.o
 TEST_doom95_paths_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/debug.o
-TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/debug.o
+TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/debug.o
 TEST_dsound_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/dsound_interface.o $(BUILDDIR)/dsound_buffer.o $(BUILDDIR)/debug.o
-TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
-TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests

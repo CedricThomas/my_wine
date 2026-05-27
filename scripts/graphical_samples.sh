@@ -2,9 +2,9 @@
 #
 # graphical_samples.sh — Run graphical sample scenarios under Xvfb + openbox.
 #
-# Each sample runs inside Docker with a virtual X display and openbox window
-# manager. Window interaction is driven by xdotool and per-sample
-# applied_inputs.txt scripts.
+# Each sample runs inside Docker with its own Xvfb + openbox session.
+# Window interaction is driven by xdotool, and samples can optionally emit
+# HARNESS: markers to stdout for readiness milestones.
 #
 # Usage:
 #   scripts/graphical_samples.sh list
@@ -91,30 +91,40 @@ select_window_id() {
     ids="$1"
     title="${2:-}"
     pid="${3:-}"
-    local pgid best_id best_score id score candidate_title candidate_pid
+    local pgid best_id best_score best_match id score matched candidate_title candidate_pid
     pgid=""
     best_id=""
     best_score=-1
+    best_match=0
     [ -n "$ids" ] || return 1
     [ -n "$pid" ] && pgid="$(process_group_id "$pid")"
 
     while IFS= read -r id; do
         score=0
+        matched=0
         candidate_title=""
         candidate_pid=""
         [ -n "$id" ] || continue
         candidate_title="$(xdotool getwindowname "$id" 2>/dev/null || true)"
         candidate_pid="$(window_pid "$id")"
-        [ "$candidate_title" = "$title" ] && score=$((score + 8))
+        if [ -n "$title" ] && [ "$candidate_title" = "$title" ]; then
+            score=$((score + 8))
+            matched=1
+        fi
         if [ -n "$pid" ] && [ "$candidate_pid" = "$pid" ]; then
             score=$((score + 16))
+            matched=1
         elif pid_in_process_group "$pgid" "$candidate_pid"; then
             score=$((score + 12))
+            matched=1
         fi
         window_has_delete_protocol "$id" && score=$((score + 4))
-        [ "$score" -gt "$best_score" ] && { best_id="$id"; best_score=$score; }
+        [ "$score" -gt "$best_score" ] && { best_id="$id"; best_score=$score; best_match=$matched; }
     done <<< "$ids"
     [ -n "$best_id" ] || return 1
+    if { [ -n "$title" ] || [ -n "$pid" ]; } && [ "$best_match" -ne 1 ]; then
+        return 1
+    fi
     echo "$best_id"
 }
 
@@ -137,6 +147,28 @@ wait_for_window_id() {
         [ -z "$ids" ] && ids="$(xdotool search --all --name "$title" 2>/dev/null || true)"
         if [ -n "$ids" ]; then
             win_id="$(select_window_id "$ids" "$title" "$pid" || true)"
+            [ -n "$win_id" ] && { echo "$win_id"; return 0; }
+        fi
+        sleep 0.2
+    done || true
+    return 1
+}
+
+wait_for_window_pid() {
+    local pid="$1"
+    local timeout_sec="$2"
+    local deadline ids win_id
+
+    deadline=$((SECONDS + timeout_sec))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        ids="$(xdotool search --all --onlyvisible --name '.*' 2>/dev/null || true)"
+        if [ -n "$ids" ]; then
+            win_id="$(select_window_id "$ids" "" "$pid" || true)"
+            [ -n "$win_id" ] && { echo "$win_id"; return 0; }
+        fi
+        ids="$(xdotool search --all --name '.*' 2>/dev/null || true)"
+        if [ -n "$ids" ]; then
+            win_id="$(select_window_id "$ids" "" "$pid" || true)"
             [ -n "$win_id" ] && { echo "$win_id"; return 0; }
         fi
         sleep 0.2
@@ -186,12 +218,9 @@ start_graphical_session() {
     local name
     name="$1"
 
-    if [ "${GRAPHICAL_SHARED_X11:-0}" = "1" ]; then
-        return 0
-    fi
-
     local xvfb_log
     xvfb_log="/tmp/my_wine_xvfb_${name}.log"
+    rm -f "/tmp/.X${DISPLAY#*:}-lock" "/tmp/.X11-unix/X${DISPLAY#*:}" >/dev/null 2>&1 || true
     Xvfb "$DISPLAY" -screen 0 1024x768x24 -nolisten tcp >"$xvfb_log" 2>&1 &
     GRAPHICAL_XVFB_PID=$!
     openbox >/dev/null 2>&1 &
@@ -216,8 +245,27 @@ start_graphical_session() {
 stop_graphical_session() {
     [ -n "${GRAPHICAL_WM_PID:-}" ] && kill "$GRAPHICAL_WM_PID" >/dev/null 2>&1 || true
     [ -n "${GRAPHICAL_XVFB_PID:-}" ] && kill "$GRAPHICAL_XVFB_PID" >/dev/null 2>&1 || true
+    [ -n "${GRAPHICAL_WM_PID:-}" ] && wait "$GRAPHICAL_WM_PID" 2>/dev/null || true
+    [ -n "${GRAPHICAL_XVFB_PID:-}" ] && wait "$GRAPHICAL_XVFB_PID" 2>/dev/null || true
     GRAPHICAL_WM_PID=""
     GRAPHICAL_XVFB_PID=""
+}
+
+wait_for_log_marker() {
+    local log_file="$1"
+    local marker="$2"
+    local timeout_sec="${3:-2}"
+    local deadline
+
+    deadline=$((SECONDS + timeout_sec))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if [ -f "$log_file" ] && grep -Fq "$marker" "$log_file" 2>/dev/null; then
+            return 0
+        fi
+        sleep 0.1
+    done
+
+    [ -f "$log_file" ] && grep -Fq "$marker" "$log_file" 2>/dev/null
 }
 
 wait_for_window_title() {
@@ -237,6 +285,20 @@ wait_for_window_title() {
     [ "$current_title" = "$expected" ]
 }
 
+wait_for_window_delete_protocol() {
+    local win_id="$1"
+    local timeout_sec="${2:-2}"
+    local deadline
+
+    deadline=$((SECONDS + timeout_sec))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        window_has_delete_protocol "$win_id" && return 0
+        sleep 0.1
+    done
+
+    window_has_delete_protocol "$win_id"
+}
+
 # ── Input script ────────────────────────────────────────────────────
 
 apply_graphical_inputs() {
@@ -246,6 +308,10 @@ apply_graphical_inputs() {
     pid="$3"
     log_file="$4"
     inputs_file="$SAMPLES_DIR/$name/applied_inputs.txt"
+    local info_file expect_title_timeout
+    info_file="$SAMPLES_DIR/$name/sample.info"
+    expect_title_timeout="$(parse_sample_info expect_title_timeout "$info_file")"
+    expect_title_timeout="${expect_title_timeout:-2}"
     GRAPHICAL_INPUT_USED_SIGINT=0
     GRAPHICAL_INPUT_REQUESTED_CLOSE=0
     GRAPHICAL_INPUT_WAITED=0
@@ -277,14 +343,17 @@ apply_graphical_inputs() {
                 sleep "$(awk "BEGIN { printf \"%.3f\", $rest / 1000 }")"
                 ;;
             focus)
+                [ -n "$win_id" ] || { echo "ERR: $inputs_file:$line_no focus requires a window"; return 1; }
                 xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
                 ;;
             key)
                 [ -z "$rest" ] && { echo "ERR: $inputs_file:$line_no key expects an xdotool key name"; return 1; }
+                [ -n "$win_id" ] || { echo "ERR: $inputs_file:$line_no key requires a window"; return 1; }
                 xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
                 xdotool key --window "$win_id" --clearmodifiers "$rest"
                 ;;
             type)
+                [ -n "$win_id" ] || { echo "ERR: $inputs_file:$line_no type requires a window"; return 1; }
                 xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
                 xdotool type --window "$win_id" --clearmodifiers --delay 10 "$rest"
                 ;;
@@ -292,12 +361,14 @@ apply_graphical_inputs() {
                 read -r x y extra <<< "$rest"
                 [[ "${x:-}" =~ ^-?[0-9]+$ && "${y:-}" =~ ^-?[0-9]+$ && -z "${extra:-}" ]] || \
                     { echo "ERR: $inputs_file:$line_no ${command} expects: ${command} X Y"; return 1; }
+                [ -n "$win_id" ] || { echo "ERR: $inputs_file:$line_no ${command} requires a window"; return 1; }
                 xdotool mousemove --window "$win_id" "$x" "$y"
                 [ "$command" = "click" ] && xdotool click 1
                 ;;
             expect_title)
                 [ -n "$rest" ] || { echo "ERR: $inputs_file:$line_no expect_title expects window text"; return 1; }
-                if ! wait_for_window_title "$win_id" "$rest" 2; then
+                [ -n "$win_id" ] || { echo "ERR: $inputs_file:$line_no expect_title requires a window"; return 1; }
+                if ! wait_for_window_title "$win_id" "$rest" "$expect_title_timeout"; then
                     echo "ERR: $inputs_file:$line_no expected title '$rest', got '$(xdotool getwindowname "$win_id" 2>/dev/null || true)'"
                     return 1
                 fi
@@ -305,11 +376,17 @@ apply_graphical_inputs() {
             status) ;;
             altf4)
                 GRAPHICAL_INPUT_REQUESTED_CLOSE=1
+                [ -n "$win_id" ] || { echo "ERR: $inputs_file:$line_no altf4 requires a window"; return 1; }
                 xdotool getwindowname "$win_id" >/dev/null 2>&1 && xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
                 xdotool key --clearmodifiers Alt+F4 >/dev/null 2>&1 || true
                 ;;
             closewindow)
                 GRAPHICAL_INPUT_REQUESTED_CLOSE=1
+                [ -n "$win_id" ] || { echo "ERR: $inputs_file:$line_no closewindow requires a window"; return 1; }
+                wait_for_window_delete_protocol "$win_id" 2 || {
+                    echo "ERR: $inputs_file:$line_no closewindow requires WM_DELETE_WINDOW"
+                    return 1
+                }
                 wmctrl -i -c "$win_id" || true
                 ;;
             sigint)
@@ -346,17 +423,24 @@ run_container_sample() {
     [ ! -f "$exe" ] && { echo "ERR: $exe is missing. Run 'make samples SAMPLE=$name' first."; return 1; }
 
     local expected_exit timeout_sec title expected_w expected_h arch launcher
+    local ready_log ready_only ready_window_timeout close_timeout
     expected_exit="$(parse_sample_info graphical_exit "$info")"
     expected_exit="${expected_exit:-$(parse_sample_info exit "$info")}"
     timeout_sec="$(parse_sample_info timeout "$info")"
     title="$(parse_sample_info window_title "$info")"
     expected_w="$(parse_sample_info window_width "$info")"
     expected_h="$(parse_sample_info window_height "$info")"
+    ready_log="$(parse_sample_info ready_log "$info")"
+    ready_only="$(parse_sample_info ready_only "$info")"
+    ready_window_timeout="$(parse_sample_info ready_window_timeout "$info")"
+    close_timeout="$(parse_sample_info close_timeout "$info")"
     arch="$(parse_sample_info arch "$info")"
     expected_exit="${expected_exit:-0}"
     timeout_sec="${timeout_sec:-10}"
     title="${title:-$name}"
     arch="${arch:-64}"
+    ready_window_timeout="${ready_window_timeout:-2}"
+    close_timeout="${close_timeout:-3}"
     launcher="/project/my_wine"
     [ "$arch" = "32" ] && launcher="/project/my_wine32"
 
@@ -374,28 +458,43 @@ run_container_sample() {
     setsid bash -c 'trap - INT TERM; exec "$1" "$2"' _ "$launcher" "$exe" >"$output_file" 2>"${output_file}.err" &
     pid=$!
 
-    win_id="$(wait_for_window_id "$title" "$timeout_sec" "$pid" || true)"
-    if [ -z "$win_id" ]; then
+    if [ -n "$ready_log" ] && wait_for_log_marker "$output_file" "$ready_log" "$timeout_sec"; then
+        if [ "$ready_only" = "true" ] || [ "$ready_only" = "1" ] || [ "$ready_only" = "yes" ]; then
+            win_id=""
+        else
+            win_id="$(wait_for_window_pid "$pid" "$ready_window_timeout" || true)"
+            [ -z "$win_id" ] && win_id="$(wait_for_window_id "$title" "$ready_window_timeout" "$pid" || true)"
+        fi
+    else
+        win_id="$(wait_for_window_pid "$pid" "$timeout_sec" || true)"
+        [ -z "$win_id" ] && win_id="$(wait_for_window_id "$title" "$timeout_sec" "$pid" || true)"
+    fi
+    if [ -z "$win_id" ] && ! { [ "$ready_only" = "true" ] || [ "$ready_only" = "1" ] || [ "$ready_only" = "yes" ]; }; then
         stop_process "$pid"
         echo "FAIL  $name (no window)"
         return 1
     fi
 
     local geometry width height
-    if ! xdotool getwindowgeometry --shell "$win_id" >/dev/null 2>&1; then
+    if [ -n "$win_id" ] && ! xdotool getwindowgeometry --shell "$win_id" >/dev/null 2>&1; then
         win_id="$(resolve_window_id "$title" "$pid" || true)"
         [ -z "$win_id" ] && { stop_process "$pid"; echo "FAIL  $name (could not resolve window)"; return 1; }
     fi
-    geometry="$(xdotool getwindowgeometry --shell "$win_id" 2>/dev/null || true)"
-    width="$(printf '%s\n' "$geometry" | awk -F= '$1 == "WIDTH" { print $2 }')"
-    height="$(printf '%s\n' "$geometry" | awk -F= '$1 == "HEIGHT" { print $2 }')"
+    geometry=""
+    width=""
+    height=""
+    if [ -n "$win_id" ]; then
+        geometry="$(xdotool getwindowgeometry --shell "$win_id" 2>/dev/null || true)"
+        width="$(printf '%s\n' "$geometry" | awk -F= '$1 == "WIDTH" { print $2 }')"
+        height="$(printf '%s\n' "$geometry" | awk -F= '$1 == "HEIGHT" { print $2 }')"
+    fi
 
-    if [ -n "$expected_w" ] && [ "$width" != "$expected_w" ]; then
+    if [ -n "$win_id" ] && [ -n "$expected_w" ] && [ "$width" != "$expected_w" ]; then
         stop_process "$pid"
         echo "FAIL  $name (window width=$width, expected=$expected_w)"
         return 1
     fi
-    if [ -n "$expected_h" ] && [ "$height" != "$expected_h" ]; then
+    if [ -n "$win_id" ] && [ -n "$expected_h" ] && [ "$height" != "$expected_h" ]; then
         stop_process "$pid"
         echo "FAIL  $name (window height=$height, expected=$expected_h)"
         return 1
@@ -407,7 +506,7 @@ run_container_sample() {
         return 1
     fi
 
-    if process_is_running "$pid" && [ "${GRAPHICAL_INPUT_REQUESTED_CLOSE:-0}" != "1" ]; then
+    if process_is_running "$pid" && [ -n "$win_id" ] && [ "${GRAPHICAL_INPUT_REQUESTED_CLOSE:-0}" != "1" ]; then
         if xdotool getwindowname "$win_id" >/dev/null 2>&1; then
             xdotool windowfocus "$win_id" >/dev/null 2>&1 || true
             xdotool key --clearmodifiers Alt+F4 >/dev/null 2>&1 || true
@@ -415,7 +514,7 @@ run_container_sample() {
     fi
 
     local deadline
-    deadline=$((SECONDS + timeout_sec))
+    deadline=$((SECONDS + close_timeout))
     while process_is_running "$pid" && [ "$SECONDS" -lt "$deadline" ]; do sleep 0.2; done
     if process_is_running "$pid"; then
         stop_process "$pid"
@@ -454,7 +553,6 @@ run_in_graphical_container() {
 
     ensure_image
     docker run --rm \
-        -e GRAPHICAL_SHARED_X11=1 \
         -e MY_WINE_DEBUG_LEVEL="${MY_WINE_DEBUG_LEVEL:-}" \
         -e WINEDEBUG="${WINEDEBUG:--all}" \
         -v "$PROJECT_DIR:/project" \
@@ -464,23 +562,13 @@ run_in_graphical_container() {
             export DISPLAY=:99
             export SDL_VIDEODRIVER=x11
             export SDL_AUDIODRIVER=dummy
-            Xvfb :99 -screen 0 1024x768x24 -nolisten tcp >/dev/null 2>&1 &
-            XVFB_PID=$!
-            openbox >/dev/null 2>&1 &
-            WM_PID=$!
-            trap "kill $WM_PID $XVFB_PID >/dev/null 2>&1 || true" EXIT
-            for _try in 1 2 3 4 5; do
-                xprop -root _NET_SUPPORTING_WM_CHECK >/dev/null 2>&1 && break
-                sleep 0.2
-            done
-            sleep 0.2
             bash scripts/graphical_samples.sh "$1" "$2"
         ' _ "$mode" "$target"
 }
 
 run_graphical_samples_all() {
     local samples_arr=("$@")
-    run_in_graphical_container run-many "${samples_arr[*]}"
+    run_graphical_samples_many "${samples_arr[@]}"
 }
 
 run_graphical_samples_many() {
@@ -490,7 +578,7 @@ run_graphical_samples_many() {
         local pass=0 fail=0
         local name
         for name in "${samples_arr[@]}"; do
-            if bash scripts/graphical_samples.sh run-container "$name"; then
+            if run_single_graphical_sample "$name"; then
                 pass=$((pass + 1))
             else
                 fail=$((fail + 1))

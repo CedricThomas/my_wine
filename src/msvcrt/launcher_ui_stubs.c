@@ -95,7 +95,7 @@ KERNEL32_STUB HWND FindWindowA(const char *lpClassName, const char *lpWindowName
 {
     uint32_t handle;
 
-    for (handle = 1; handle <= HANDLE_TABLE_SIZE; handle++) {
+    for (handle = 1; handle < HANDLE_TABLE_SIZE; handle++) {
         wine_window_entry *entry;
 
         if (wine_handle_get_type(handle) != HANDLE_TYPE_HWIN)

@@ -30,8 +30,7 @@ Execution rules:
 Verification loop after every meaningful change:
 
 - `make run-tests`
-- `./my_wine32 samples/hello_world_32/hello_world_32.exe`
-- `./my_wine32 samples/entry_test_32/entry_test_32.exe`
+- `make run-samples-scenarios`
 - `env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=x11 timeout 5 ./my_wine32 ./samples/unpacked/doom95/DOOM95.EXE`
 
 Expected Doom95 result in the agent environment:

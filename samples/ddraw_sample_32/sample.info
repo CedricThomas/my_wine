@@ -4,3 +4,6 @@ libs=ddraw
 window_title=DDraw Sample 32-bit
 window_width=320
 window_height=200
+expect_title_timeout=8
+ready_log=HARNESS:READY ddraw
+close_timeout=20

@@ -168,6 +168,29 @@ BOOL user32_dialog_end(HWND hDlg, intptr_t nResult);
 LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 LONG_PTR user32_dialog_get_window_long_ptr(HWND hWnd, int nIndex);
 const WNDCLASSA *user32_find_registered_class(const char *name, ATOM *atom_out);
+BOOL user32_ensure_backend(void);
+void *user32_heap_alloc(size_t size);
+void user32_heap_free(void *ptr);
+void user32_init_window_entry(wine_window_entry *entry, const WNDCLASSA *wc,
+                              ATOM class_atom, DWORD dwExStyle, DWORD dwStyle,
+                              HWND hWndParent, HMENU hMenu,
+                              HINSTANCE hInstance, const char *lpWindowName);
+rb_window_t user32_create_backend_window(const wine_window_entry *entry,
+                                         DWORD dwStyle, int x, int y,
+                                         int nWidth, int nHeight);
+void user32_fill_create_struct(CREATESTRUCTA *create_struct, void *lpParam,
+                               HINSTANCE hInstance, HMENU hMenu,
+                               HWND hWndParent, int px, int py, int pw, int ph,
+                               DWORD dwStyle, DWORD dwExStyle,
+                               const char *lpWindowName,
+                               const char *lpClassName);
+void user32_cleanup_failed_create(wine_window_entry *entry, rb_window_t rb_win,
+                                  uint64_t handle, int decrement_live_windows);
+BOOL user32_finish_window_create(wine_window_entry *entry,
+                                 const CREATESTRUCTA *create_struct,
+                                 DWORD dwStyle, int px, int py, int pw, int ph,
+                                 uint64_t *handle_out);
+BOOL user32_finish_window_destroy(HWND hwnd, wine_window_entry *entry);
 void user32_set_foreground_focus(HWND target, int send_messages);
 void user32_activate_window_direct(uintptr_t hwnd);
 void user32_update_window_ownership_after_destroy(HWND destroyed_hwnd);

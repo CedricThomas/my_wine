@@ -1,5 +1,7 @@
 #include <windows.h>
 
+#include "../harness.h"
+
 static HWND g_primary = NULL;
 static HWND g_secondary = NULL;
 
@@ -64,6 +66,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         DestroyWindow(g_primary);
         return 1;
     }
+
+    harness_signal("READY secondary");
 
     MSG msg;
     while (GetMessageA(&msg, 0, 0, 0)) {

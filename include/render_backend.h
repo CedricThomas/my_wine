@@ -109,6 +109,7 @@ typedef struct {
 int rb_event_wait(rb_msg_t *out_msg);   /* Blocking. Returns 0 on WM_QUIT. */
 int rb_event_peek(rb_msg_t *out_msg);   /* Non-blocking. 1=available, 0=empty. */
 int rb_event_push(rb_msg_t *msg);       /* Push message into queue. */
+void rb_event_maybe_pump_host(uint32_t min_interval_ms);
 
 /* ---- Audio ---- */
 typedef struct {

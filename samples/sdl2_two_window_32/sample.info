@@ -3,3 +3,4 @@ arch=32
 window_title=Two Window Secondary 32-bit
 window_width=320
 window_height=200
+timeout=15

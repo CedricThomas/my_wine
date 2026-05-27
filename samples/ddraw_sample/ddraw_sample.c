@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <string.h>
 
+#include "../harness.h"
+
 typedef struct _DDGUID {
     DWORD Data1;
     WORD Data2;
@@ -348,6 +350,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     hr = run_ddraw(hwnd);
     SetWindowTextA(hwnd, hr == DD_OK ? k_window_title_ok : k_window_title_fail);
+    harness_signal("READY ddraw");
 
     while (GetMessageA(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);

@@ -1,5 +1,7 @@
 #include <windows.h>
 
+#include "../harness.h"
+
 static HWND g_window_a = NULL;
 static HWND g_window_b = NULL;
 
@@ -68,6 +70,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         g_window_a = NULL;
         return 1;
     }
+
+    harness_signal("READY window-a");
 
     while (GetMessageA(&msg, 0, 0, 0)) {
         TranslateMessage(&msg);

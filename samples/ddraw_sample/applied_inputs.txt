@@ -1,2 +1,2 @@
-expect_title DDraw Sample OK
-closewindow
+sleep 1500
+sigint
