@@ -33,17 +33,6 @@ int IsTNT(void)
     return 0;
 }
 
-KERNEL32_STUB
-void *TlsGetValue(uint32_t dwTlsIndex)
-{
-    extern uint32_t g_tls_bitmap;
-    extern void *g_tls_values[];
-
-    if (dwTlsIndex >= 64 || (g_tls_bitmap & (1u << dwTlsIndex)) == 0)
-        return FORCE_PTR_RETURN(NULL);
-    return FORCE_PTR_RETURN(g_tls_values[dwTlsIndex]);
-}
-
 /* ── GetCommandLineA ───────────────────────────────────────── */
 /*
  * Returns the command-line string for the current process.

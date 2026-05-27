@@ -1,15 +1,59 @@
 #define _GNU_SOURCE
 
+#include <dirent.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+
 #include "kernel32_priv.h"
 #include "msvcrt_priv.h"
 
 #define AT_FDCWD ((long)-100)
+#define FILE_ATTRIBUTE_DIRECTORY 0x10
+#define FILE_ATTRIBUTE_NORMAL    0x80
+#define FILE_TYPE_DISK           1
+#define FILE_TYPE_CHAR           2
+#define FILE_BEGIN               0
+#define FILE_CURRENT             1
+#define FILE_END                 2
 
 /* 32-bit CreateFileA fallback handle storage. */
 #if defined(__i386__)
 int createfile_fds_32[64] = {0};
 int createfile_fd_count_32 = 0;
 #endif
+
+static long wine_syscall3(long nr, long a0, long a1, long a2)
+{
+#if defined(__i386__)
+    long ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(nr), "b"(a0), "c"(a1), "d"(a2)
+                     : "cc", "memory");
+    return ret;
+#else
+    long ret;
+    __asm__ volatile("syscall"
+                     : "=a"(ret)
+                     : "a"(nr), "D"(a0), "S"(a1), "d"(a2)
+                     : "rcx", "r11", "cc", "memory");
+    return ret;
+#endif
+}
+
+static void wine_unix_time_to_filetime(int64_t sec, int64_t nsec, FILETIME *out_ft)
+{
+    uint64_t value;
+
+    if (!out_ft)
+        return;
+
+    value = (uint64_t)sec * 10000000ULL + (uint64_t)(nsec / 100);
+    value += 116444736000000000ULL;
+    out_ft->dwLowDateTime = (uint32_t)value;
+    out_ft->dwHighDateTime = (uint32_t)(value >> 32);
+}
 
 KERNEL32_STUB
 int CloseHandle(void *hObject)
@@ -122,4 +166,162 @@ int DeleteFileA(const char *lpFileName)
     }
 
     return 1;
+}
+
+KERNEL32_STUB
+int DeviceIoControl(void *hDevice, uint32_t dwIoControlCode, void *lpInBuffer,
+                    uint32_t nInBufferSize, void *lpOutBuffer, uint32_t nOutBufferSize,
+                    uint32_t *lpBytesReturned, void *lpOverlapped)
+{
+    (void)hDevice;
+    (void)dwIoControlCode;
+    (void)lpInBuffer;
+    (void)nInBufferSize;
+    (void)lpOutBuffer;
+    (void)nOutBufferSize;
+    (void)lpOverlapped;
+    if (lpBytesReturned)
+        *lpBytesReturned = 0;
+    return 0;
+}
+
+KERNEL32_STUB
+uint32_t GetFileType(void *hFile)
+{
+    uint64_t handle = (uint64_t)(uintptr_t)hFile;
+
+    if (handle == STDIN_HANDLE || handle == STDOUT_HANDLE || handle == STDERR_HANDLE || handle <= 2)
+        return FILE_TYPE_CHAR;
+    return FILE_TYPE_DISK;
+}
+
+KERNEL32_STUB
+uint32_t GetFileSize(void *hFile, uint32_t *lpFileSizeHigh)
+{
+    struct stat st;
+    int fd = handle_to_fd((uint64_t)(uintptr_t)hFile);
+
+    if (fd < 0 || INLINE_SYSCALL_FSTAT(fd, &st) != 0)
+        return 0xffffffffu;
+
+    if (lpFileSizeHigh)
+        *lpFileSizeHigh = (uint32_t)(((uint64_t)st.st_size) >> 32);
+    return (uint32_t)st.st_size;
+}
+
+KERNEL32_STUB
+int GetFileTime(void *hFile, FILETIME *creation, FILETIME *access, FILETIME *write)
+{
+    struct stat st;
+    int fd = handle_to_fd((uint64_t)(uintptr_t)hFile);
+
+    if (fd < 0 || INLINE_SYSCALL_FSTAT(fd, &st) != 0)
+        return 0;
+
+    if (creation)
+        wine_unix_time_to_filetime(st.st_ctim.tv_sec, st.st_ctim.tv_nsec, creation);
+    if (access)
+        wine_unix_time_to_filetime(st.st_atim.tv_sec, st.st_atim.tv_nsec, access);
+    if (write)
+        wine_unix_time_to_filetime(st.st_mtim.tv_sec, st.st_mtim.tv_nsec, write);
+    return 1;
+}
+
+KERNEL32_STUB
+uint32_t SetFilePointer(void *hFile, int32_t lDistanceToMove, int32_t *lpDistanceToMoveHigh,
+                        uint32_t dwMoveMethod)
+{
+    int fd = handle_to_fd((uint64_t)(uintptr_t)hFile);
+    int whence = SEEK_SET;
+    long long distance = (uint32_t)lDistanceToMove;
+    long long pos;
+
+    if (lpDistanceToMoveHigh)
+        distance |= ((long long)*lpDistanceToMoveHigh) << 32;
+
+    if (fd < 0)
+        return 0xffffffffu;
+
+    if (dwMoveMethod == FILE_CURRENT)
+        whence = SEEK_CUR;
+    else if (dwMoveMethod == FILE_END)
+        whence = SEEK_END;
+
+    pos = wine_syscall3(__NR_lseek, fd, (long)distance, whence);
+    if (pos < 0)
+        return 0xffffffffu;
+
+    if (lpDistanceToMoveHigh)
+        *lpDistanceToMoveHigh = (int32_t)(((uint64_t)pos) >> 32);
+    return (uint32_t)pos;
+}
+
+KERNEL32_STUB
+int FindNextFileA(void *hFindFile, void *lpFindFileData)
+{
+    wine_find_handle *find;
+    DIR *dir;
+    struct dirent *entry;
+    char full_path[1400];
+    struct stat st;
+    uint32_t handle = (uint32_t)(uintptr_t)hFindFile;
+    WIN32_FIND_DATAA_WINE *data = (WIN32_FIND_DATAA_WINE *)lpFindFileData;
+
+    if (wine_handle_get_type(handle) != HANDLE_TYPE_HGLOBAL || data == NULL)
+        return 0;
+
+    find = (wine_find_handle *)wine_handle_get(handle);
+    if (find == NULL || find->dir == NULL)
+        return 0;
+
+    dir = (DIR *)find->dir;
+    while ((entry = readdir(dir)) != NULL) {
+        const char *pattern = find->pattern;
+        const char *text = entry->d_name;
+        int star = 0;
+        int matched = 1;
+
+        while (*pattern != '\0') {
+            if (*pattern == '*') {
+                star = 1;
+                pattern++;
+                if (*pattern == '\0') {
+                    matched = 1;
+                    break;
+                }
+                while (*text != '\0' &&
+                       (((unsigned char)*pattern | 32) != ((unsigned char)*text | 32))) {
+                    text++;
+                }
+                continue;
+            }
+            if (*text == '\0') {
+                matched = 0;
+                break;
+            }
+            if (*pattern != '?' &&
+                (((unsigned char)*pattern | 32) != ((unsigned char)*text | 32))) {
+                matched = 0;
+                break;
+            }
+            pattern++;
+            text++;
+        }
+        if (!matched || (!star && *text != '\0'))
+            continue;
+        snprintf(full_path, sizeof(full_path), "%s/%s", find->directory, entry->d_name);
+        if (stat(full_path, &st) != 0)
+            continue;
+        memset(data, 0, sizeof(*data));
+        data->dwFileAttributes = S_ISDIR(st.st_mode) ?
+            FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+        data->nFileSizeLow = (uint32_t)st.st_size;
+        data->nFileSizeHigh = (uint32_t)(((uint64_t)st.st_size) >> 32);
+        strncpy(data->cFileName, entry->d_name, sizeof(data->cFileName) - 1);
+        if (strcasestr(find->pattern, "wad"))
+            fprintf(stderr, "FindNextFileA('%s') -> '%s'\n", find->pattern, data->cFileName);
+        return 1;
+    }
+
+    return 0;
 }

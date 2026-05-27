@@ -75,3 +75,35 @@ void Sleep(uint32_t dwMilliseconds)
     /* Call nanosleep syscall directly (avoids ABI mismatch with libc wrapper) */
     (void)INLINE_SYSCALL_NANOSLEEP(&ts, (const void *)0);
 }
+
+KERNEL32_STUB
+void *CreateThread(void *lpThreadAttributes, uintptr_t dwStackSize, void *lpStartAddress,
+                   void *lpParameter, uint32_t dwCreationFlags, uint32_t *lpThreadId)
+{
+    uint32_t handle;
+    (void)lpThreadAttributes;
+    (void)dwStackSize;
+    (void)lpStartAddress;
+    (void)lpParameter;
+    (void)dwCreationFlags;
+
+    if (debug_level_at_least(1)) {
+        DEBUG("kernel32: CreateThread start=%p param=%p stack=%lu flags=0x%x",
+              lpStartAddress, lpParameter, (unsigned long)dwStackSize, dwCreationFlags);
+    }
+
+    handle = (uint32_t)wine_handle_alloc(HANDLE_TYPE_THREAD, NULL);
+    if (lpThreadId)
+        *lpThreadId = handle;
+    return FORCE_PTR_RETURN((void *)(uintptr_t)handle);
+}
+
+KERNEL32_STUB
+__attribute__((noreturn)) void ExitThread(uint32_t dwExitCode)
+{
+#ifdef MY_WINE32
+    INLINE_SYSCALL_EXIT((int)dwExitCode);
+#else
+    _exit((int)dwExitCode);
+#endif
+}

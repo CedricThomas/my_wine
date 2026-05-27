@@ -8,7 +8,7 @@ trust most historical markdown in `docs/` or `samples/doom95/docs/`.
 
 ## Current Scope
 
-- Runtime source files: 85 C files, 6 assembly files.
+- Runtime source files: 86 C files, 6 assembly files.
 - Public/shared headers: 20 files under `include/`.
 - Native test sources: 28 C files under `tests/`.
 - Host scripts: 7 top-level files under `scripts/`.
@@ -100,11 +100,11 @@ launcher helpers, and DOOM95-specific compatibility behavior.
 | CRT startup/state | `crt_startup.c`, `crt_32_stub.c`, `crt_globals.c`, `crt_refptrs.c`, `crt_offset_discovery.c`, `crt_file.c`, `crt_stdio.c`, `crt_stdlib.c`, `crt_misc.c` | Mixed generic CRT emulation plus architecture-specific compatibility. |
 | Handle and object state | `handle_manager.c`, `ntdll_handle.c`, `ntdll_objects.c` | Core guest object model; shared across subsystems. |
 | ntdll syscall handlers | `ntdll_io.c`, `ntdll_memory.c`, `ntdll_process.c`, `ntdll_synchronization.c`, `ntdll_time.c` | Guest-callable, expected to stay syscall-safe. |
-| kernel32 generic APIs | `kernel32_console.c`, `kernel32_misc.c`, `kernel32_module.c`, `kernel32_process.c`, `kernel32_sync.c` | Broad Win32 surface; `kernel32_misc.c` is a large catch-all. |
-| USER32 | `user32_window.c`, `user32_message.c`, `user32_input.c`, `user32_dialog.c`, `user32_weak_stub.c`, `user32_priv.h` | Window/message/input implementation tied to SDL2 backend and host/guest selector switching. |
-| DirectDraw | `ddraw_interface.c`, `ddraw_priv.h` | Minimal maintained path focused on DOOM95 and samples. |
+| kernel32 generic APIs | `kernel32_console.c`, `kernel32_file.c`, `kernel32_memory.c`, `kernel32_misc.c`, `kernel32_module.c`, `kernel32_path.c`, `kernel32_process.c`, `kernel32_resource.c`, `kernel32_sync.c`, `kernel32_system.c`, `kernel32_time.c`, `kernel32_tls.c` | Broad Win32 surface; `kernel32_misc.c` is a shrinking catch-all, while `kernel32_path.c` owns current-directory/path normalization/path-oriented exports, `kernel32_file.c` owns generic file-handle metadata/seek/directory-enumeration helpers, `kernel32_resource.c` owns the resource-wrapper export surface, `kernel32_tls.c` owns file-local TLS slot state, and `kernel32_system.c` owns generic process/system/codepage wrappers. |
+| USER32 | `user32_window.c`, `user32_window_lifecycle.c`, `user32_window_ops.c`, `user32_window_state.c`, `user32_paint.c`, `user32_class_registry.c`, `user32_focus.c`, `user32_message.c`, `user32_message_dispatch.c`, `user32_message_hook.c`, `user32_message_queue.c`, `user32_message_priv.h`, `user32_input.c`, `user32_dialog.c`, `user32_weak_stub.c`, `user32_priv.h` | Window/message/input implementation tied to SDL2 backend and host/guest selector switching, with message dispatch separated from queue/filter/quit state and keyboard-hook state/export handling kept in a narrow helper file. |
+| DirectDraw | `ddraw_backend.c`, `ddraw_core.c`, `ddraw_interface.c`, `ddraw_clipper.c`, `ddraw_mode.c`, `ddraw_palette.c`, `ddraw_surface.c`, `ddraw_surface_desc.c`, `ddraw_surface_ops.c`, `ddraw_priv.h` | Minimal maintained path focused on DOOM95 and samples, with backend initialization and backend-surface allocation helpers in `ddraw_backend.c`, DirectDraw object allocation/reference/lifetime core in `ddraw_core.c`, guest `DDSURFACEDESC` translation, palette support, clipper object/surface-attachment helpers, surface object lifetime/owner-list mechanics, surface COM/backend operation methods, and narrow query/status helpers split from the remaining DirectDraw exports plus cooperative-level/display-mode/surface-create orchestration in `ddraw_interface.c`. |
 | DirectSound | `dsound_interface.c`, `dsound_buffer.c`, `dsound_priv.h` | Guest-facing audio buffers plus backend glue. |
-| DOOM95-specific shims | `kernel32_doom95.c`, `gdi32_doom95.c`, `winmm_doom95.c`, `launcher_ui_stubs.c`, `launcher_kernel32_stubs.c`, `dplay_stub.c`, `advapi32_registry.c`, `resource_win32.c` | Compatibility surface that should be isolated during future cleanup. |
+| DOOM95-specific shims | `kernel32_doom95.c`, `gdi32_doom95.c`, `winmm_doom95.c`, `launcher_ui_stubs.c`, `launcher_kernel32_stubs.c`, `dplay_stub.c`, `advapi32_registry.c`, `resource_win32.c` | Compatibility surface that should be isolated during future cleanup. `kernel32_doom95.c` is now an intentionally empty seam reserved for any future Doom95-only `kernel32` behavior rather than a home for generic runtime helpers. |
 
 ### Heap (`src/heap/`)
 

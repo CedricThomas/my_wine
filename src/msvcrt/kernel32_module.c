@@ -245,6 +245,35 @@ void *_GetModuleHandleA(const char *lpModuleName)
 }
 
 KERNEL32_STUB
+uint32_t GetModuleFileNameA(void *hModule, char *lpFilename, uint32_t nSize)
+{
+    const char *src = NULL;
+    loaded_module_t *mod;
+    uint32_t len = 0;
+
+    if (!lpFilename || nSize == 0)
+        return 0;
+
+    if (!hModule || hModule == g_loader.image_base)
+        src = g_loader.pe_path;
+    else {
+        mod = find_module_by_addr(hModule);
+        if (mod)
+            src = mod->name;
+    }
+
+    if (!src)
+        src = g_loader.pe_path;
+
+    while (src[len] && len + 1 < nSize) {
+        lpFilename[len] = src[len];
+        len++;
+    }
+    lpFilename[len] = '\0';
+    return len;
+}
+
+KERNEL32_STUB
 void *GetModuleHandleW(const uint16_t *lpModuleName)
 {
     char narrow[260];

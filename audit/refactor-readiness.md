@@ -32,7 +32,7 @@ carry the concrete sequence.
 | P1 | `src/backend/sdl2/rb_event.c` | Central translation point between SDL2 and guest messages. | Split event decoding from message delivery/state side effects. |
 | P1 | `src/loader/import_table.c` | Large static registry and lookup logic with PE32/PE32+ divergence. | Separate generated/static import data from lookup policy and mutation helpers. |
 | P1 | `src/msvcrt/winmm_doom95.c` | Deep sample-specific multimedia logic living beside generic stubs. | Move under a clearly named sample-compatibility area before deeper cleanup. |
-| P1 | `src/msvcrt/kernel32_doom95.c` | Generic process/file/path behavior mixed with sample-oriented compatibility code. | Separate generic helpers from DOOM95-specific policy. |
+| P1 | `src/msvcrt/kernel32_doom95.c` | Ownership cleanup there is effectively complete for now; the file is just a named seam. | Do not spend more time here unless new Doom95-only `kernel32` behavior appears. |
 | P2 | `src/loader/loader_state.h` | Wide mutable global state makes dependencies implicit. | Introduce narrower accessor groups or subsystem state structs before attempting full inversion. |
 
 ## Target Directory Shape

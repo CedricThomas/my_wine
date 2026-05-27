@@ -20,7 +20,7 @@ stable while the project is cleaned up.
 | Backend bridge | `src/msvcrt/user32_*`, `ddraw_*`, `dsound_*`, `src/backend/sdl2/*` | Translate guest window/input/graphics/audio semantics to SDL2 and host APIs. | Host-library calls must go through explicit host-context boundaries. |
 | Heap | `src/heap/*` | Back guest allocations and Win32 heap APIs. | Must remain independent of guest API policy above it. |
 | CRT policy | `src/crt/*` | Detect CRT flavor and apply startup/BSS/refptr rules. | Setup-only concern; avoid leaking into generic loader or guest API layers. |
-| Sample compatibility | `kernel32_doom95.c`, `gdi32_doom95.c`, `winmm_doom95.c`, launcher stubs, registry/resource helpers | DOOM95- and sample-driven behavior not yet generalized. | Should not become the default home for generic runtime behavior. |
+| Sample compatibility | `kernel32_doom95.c`, `gdi32_doom95.c`, `winmm_doom95.c`, launcher stubs, registry/resource helpers | DOOM95- and sample-driven behavior not yet generalized. Generic path/current-directory policy now lives in `kernel32_path.c` instead of this layer. | Should not become the default home for generic runtime behavior. |
 
 ## Dependency Rules
 
@@ -91,7 +91,7 @@ should guide the cleanup plan.
 | `pe32_entry.c` owns too much | File combines PE32 setup, env handling, CRT seeding, entry discovery, DOOM95 argument shaping, selector switch logic, and guest launch. | Hard to test or split PE32 behavior incrementally. |
 | Loader/global state is wide | `loader_state.h` centralizes image path/base, module registry, selector state, and architecture flags. | Cross-module coupling encourages hidden dependencies. |
 | Backend bridge is partially implicit | Backend code uses weak globals and selector helpers from `rb_sdl2_priv.h`. | Host/guest context boundaries are correct but scattered and hard to enforce. |
-| Generic vs sample-specific policy is blurred | `kernel32_doom95.c`, `winmm_doom95.c`, `gdi32_doom95.c`, `crt_watcom.c`, and launcher stubs coexist with generic runtime code. | Future sample work risks contaminating generic runtime layers. |
+| Generic vs sample-specific policy is blurred | `kernel32_doom95.c`, `winmm_doom95.c`, `gdi32_doom95.c`, `crt_watcom.c`, and launcher stubs coexist with generic runtime code, although path/current-directory helpers were extracted to `kernel32_path.c`. | Future sample work risks contaminating generic runtime layers. |
 | Large catch-all files remain | `kernel32_misc.c`, `user32_window.c`, `ddraw_interface.c`, `rb_event.c`, `import_table.c`. | Size reflects mixed responsibility and weak ownership seams. |
 
 ## Refactor-Safe Seams

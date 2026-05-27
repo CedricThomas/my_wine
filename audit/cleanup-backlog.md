@@ -78,11 +78,105 @@ Use this document as the working queue for the next refactor series.
   procedure responsibilities into `src/msvcrt/user32_message_dispatch.c`,
   leaving `src/msvcrt/user32_message.c` focused on the message pump, queueing,
   quit state, and hook handling.
-- Next: continue splitting `user32_message.c` only after the shared graphical
-  sample harness is made less flaky, or shift to a hotspot whose verification
-  does not depend on the unstable shared-window scenarios.
+- Done: extracted generic current-directory, DOS-path normalization,
+  case-insensitive host lookup, and path-oriented `kernel32` exports from
+  `src/msvcrt/kernel32_doom95.c` into `src/msvcrt/kernel32_path.c`, making the
+  Doom95 compatibility file own less generic runtime policy.
+- Done: extracted generic file-handle metadata, seek helpers, and directory
+  enumeration (`GetFileType`, `GetFileSize`, `GetFileTime`,
+  `SetFilePointer`, `FindNextFileA`) from `src/msvcrt/kernel32_doom95.c` into
+  `src/msvcrt/kernel32_file.c`, leaving the Doom95 compatibility file narrower
+  and consolidating filesystem ownership.
+- Done: extracted generic resource-wrapper exports (`FindResourceA`,
+  `SizeofResource`, `LoadResource`, `LockResource`) from
+  `src/msvcrt/kernel32_doom95.c` into `src/msvcrt/kernel32_resource.c`,
+  making the compatibility file less of a generic `kernel32` dumping ground.
+- Done: extracted the TLS cluster (`TlsAlloc`, `TlsFree`, `TlsSetValue`,
+  `TlsGetValue`) into `src/msvcrt/kernel32_tls.c`, removing the last cross-file
+  TLS globals from `kernel32_doom95.c`/`kernel32_misc.c` and making TLS state
+  file-local.
+- Done: extracted generic process/system/codepage wrappers
+  (`GetCurrentThreadId`, `GetCurrentProcessId`, `GetCurrentThread`,
+  `GetSystemInfo`, `GetVersion`, `GetTimeZoneInformation`, `GetCPInfo`,
+  `GetEnvironmentStrings`) into `src/msvcrt/kernel32_system.c`.
+- Done: moved `GetTickCount` into `src/msvcrt/kernel32_time.c`.
+- Done: moved `GetModuleFileNameA` into `src/msvcrt/kernel32_module.c`.
+- Done: moved `LocalAlloc`, `GlobalAlloc`, and `LocalFree` into
+  `src/msvcrt/kernel32_memory.c`.
+- Done: moved DOS/filetime conversion helpers into `src/msvcrt/kernel32_time.c`.
+- Done: moved console wrappers (`GetConsoleMode`, `SetConsoleMode`,
+  `SetStdHandle`, `WriteConsoleA`, `ReadConsoleInputA`) into
+  `src/msvcrt/kernel32_console.c`.
+- Done: moved `CreateThread` / `ExitThread` into
+  `src/msvcrt/kernel32_process.c` and `DeviceIoControl` into
+  `src/msvcrt/kernel32_file.c`, leaving `src/msvcrt/kernel32_doom95.c` as an
+  empty compatibility seam instead of a generic-runtime dumping ground.
+- Done: continued `user32_message.c` cleanup by extracting queue/filter/quit
+  state plus keyboard-hook helpers and related exports (`PostMessageA`,
+  `PostQuitMessage`, hook wrappers, `SystemParametersInfoA`) into
+  `src/msvcrt/user32_message_queue.c`, leaving
+  `src/msvcrt/user32_message.c` focused on `GetMessageA`, `PeekMessageA`, and
+  `TranslateMessage`.
+- Done: started `src/msvcrt/ddraw_interface.c` cleanup by extracting guest
+  `DDSURFACEDESC` layout translation, normalization, and parse/fill helpers
+  into `src/msvcrt/ddraw_surface_desc.c`, leaving the main DirectDraw
+  interface file focused more tightly on COM object behavior and backend
+  orchestration.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting
+  palette-object allocation, backend color packing, and `IDirectDrawPalette`
+  COM lifetime/entry access into `src/msvcrt/ddraw_palette.c`, leaving
+  `ddraw_interface.c` with a thin `CreatePalette` wrapper and surface-side
+  palette attachment through shared helpers.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting the
+  narrow clipper-object allocation and `IDirectDrawClipper` COM
+  lifetime/`HWND` access path into `src/msvcrt/ddraw_clipper.c`, leaving
+  `ddraw_interface.c` with a thin `CreateClipper` wrapper plus
+  surface-side clipper attachment/get access through shared helpers.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting the
+  surface-side clipper attachment/get/detach helpers into
+  `src/msvcrt/ddraw_clipper.c`, leaving `ddraw_interface.c` with thin
+  `IDirectDrawSurface::SetClipper` / `GetClipper` wrappers while keeping the
+  surface vtable and broader surface behavior in place.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting surface
+  object allocation, owner-list teardown, and COM lifetime/release mechanics
+  into `src/msvcrt/ddraw_surface.c`, leaving `ddraw_interface.c` with thin
+  `IDirectDrawSurface::AddRef` / `Release` wrappers while keeping the surface
+  vtable, lock/blit/flip behavior, and create-path orchestration in place.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting the
+  narrow DirectDraw query/status helper cluster into `src/msvcrt/ddraw_mode.c`,
+  including fake vertical-blank timing, scanline/frequency queries,
+  caps/display-mode/GDI-surface queries, while keeping state-changing display
+  setup (`SetCooperativeLevel`, `SetDisplayMode`) in `ddraw_interface.c`.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting the
+  `IDirectDrawSurface` behavior cluster into `src/msvcrt/ddraw_surface_ops.c`,
+  including rect translation, attached-surface wrappers, blit/flip/lock/
+  unlock, palette access, and the surface vtable, leaving `ddraw_interface.c`
+  focused on DirectDraw object creation, mode/setup orchestration, and surface
+  creation paths.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting the
+  DirectDraw object allocation/reference/lifetime core into
+  `src/msvcrt/ddraw_core.c`, including shared `g_ddraw_instance` ownership,
+  default object initialization, and COM `QueryInterface`/`AddRef`/`Release`
+  helpers, while keeping `DirectDrawCreate`, the `IDirectDraw` vtable, and the
+  mode/surface orchestration exports in `ddraw_interface.c`.
+- Done: continued `src/msvcrt/ddraw_interface.c` cleanup by extracting the
+  backend bootstrap and backend-surface allocation helper cluster into
+  `src/msvcrt/ddraw_backend.c`, including one-time backend initialization,
+  backend pixel-format mapping, and flip-chain/regular-surface allocation,
+  while keeping the `IDirectDraw` exports, cooperative-level/display-mode
+  state changes, and `CreateSurface` orchestration in `ddraw_interface.c`.
+- Next: stop further `ddraw_interface.c` splitting for now and move to the
+  next hotspot unless a later pass identifies another similarly narrow seam.
+- Done: moved USER32 keyboard-hook state and hook exports
+  (`SetWindowsHookExA`, `UnhookWindowsHookEx`, `CallNextHookEx`,
+  `user32_call_keyboard_hook`, `user32_call_keyboard_hook_direct`) from
+  `src/msvcrt/user32_message_queue.c` into
+  `src/msvcrt/user32_message_hook.c`, leaving
+  `user32_message_queue.c` focused on posted/translated queue storage,
+  filter matching, quit synthesis, and `PostMessageA`/`PostQuitMessage`.
 
-Latest verification on 2026-05-27 after the `user32_paint.c` extraction:
+Latest verification on 2026-05-27 after extracting USER32 keyboard-hook state
+and hook exports into `src/msvcrt/user32_message_hook.c`:
 
 - `make run-tests`
 - `make run-samples-scenarios`
@@ -90,10 +184,59 @@ Latest verification on 2026-05-27 after the `user32_paint.c` extraction:
 
 Observed result:
 
-- All native tests passed.
-- All console and graphical sample scenarios passed.
-- DOOM95 reached WAD discovery/startup and then timed out in the expected loop;
-  ALSA/fluidsynth warnings remained environment noise only.
+- `make run-tests` passed: 16 passed, 0 failed, 0 skipped.
+- `make run-samples-scenarios` passed: console scenarios 25 passed, 0 failed,
+  1 skipped; graphical scenarios 20 passed, 0 failed; unified result passed.
+- The Doom95 smoke again reached WAD discovery/startup
+  (`GetFileAttributesA('DOOM1.WAD')` and `FindFirstFileA('*.WAD')` resolving
+  `DOOM1.WAD`) and then timed out with exit status `124` from `timeout 5`;
+  ALSA/fluidsynth warnings remained expected environment noise only.
+
+Follow-up note:
+
+- `src/msvcrt/ddraw_interface.c` still does not present another similarly
+  narrow low-risk extraction seam; this pass intentionally moved to the
+  separate USER32 message cluster instead of continuing DirectDraw splits.
+
+Latest verification on 2026-05-27 after extracting backend bootstrap and
+backend-surface allocation helpers into `src/msvcrt/ddraw_backend.c`:
+
+- `make run-tests`
+- `make run-samples-scenarios`
+- `env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=x11 timeout 5 ./my_wine32 ./samples/unpacked/doom95/DOOM95.EXE`
+
+Observed result:
+
+- `make run-tests` passed: 16 passed, 0 failed, 0 skipped.
+- `make run-samples-scenarios` passed: console scenarios 25 passed, 0 failed,
+  1 skipped; graphical scenarios 20 passed, 0 failed; unified result passed.
+- The Doom95 smoke again reached WAD discovery/startup (`GetFileAttributesA`
+  and `FindFirstFileA` resolving `DOOM1.WAD`) and then timed out with exit
+  status `124` from `timeout 5`; ALSA/fluidsynth warnings remained expected
+  environment noise only.
+
+Follow-up note:
+
+- No behavior blocker was hit after the extraction. `ddraw_interface.c` now
+  mostly owns the `IDirectDraw` export shell, cooperative-level/display-mode
+  state changes, and `CreateSurface` orchestration, so a further split should
+  wait for a later pass unless another similarly isolated seam appears.
+
+Latest verification on 2026-05-27 after extracting DirectDraw query/status
+helpers into `src/msvcrt/ddraw_mode.c`:
+
+- `make run-tests`
+- `make run-samples-scenarios`
+- `env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=x11 timeout 5 ./my_wine32 ./samples/unpacked/doom95/DOOM95.EXE`
+
+Observed result:
+
+- `make run-tests` passed: 16 passed, 0 failed, 0 skipped.
+- `make run-samples-scenarios` passed: console scenarios 25 passed, 0 failed,
+  1 skipped; graphical scenarios 20 passed, 0 failed; unified result passed.
+- The plain Doom95 smoke again reached the expected WAD discovery/startup path
+  and then timed out with exit status `124` from `timeout 5`; ALSA/fluidsynth
+  warnings remained environment noise only.
 
 Follow-up note:
 
@@ -115,10 +258,56 @@ Follow-up note:
   scenario with `altf4` instead of `closewindow`; the close-chain behavior is
   still exercised, but this avoids an unstable X11 window-manager close path in
   the 32-bit graphical harness.
-- Current blocker note: `make run-samples-scenarios` can still rotate between
-  unrelated graphical startup/discovery failures (for example `sdl2_two_window`
-  reporting `no window`) even when the same sample passes immediately in
-  isolation. Treat the shared graphical harness as noisy until it is tightened.
+- Current blocker note: no blocker was hit during this verification pass. The
+  remaining risk is architectural rather than environmental: palette,
+  clipper, surface-desc, surface-lifetime, and query/status helper paths now
+  own the narrowest object-local helpers, so the next DDraw cleanup slice
+  should only proceed if another similarly isolated cluster can move without
+  widening the current COM/backend coupling.
+
+Latest verification on 2026-05-27 after extracting `IDirectDrawSurface`
+behavior into `src/msvcrt/ddraw_surface_ops.c`:
+
+- `make run-tests`
+- `make run-samples-scenarios`
+- `env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=x11 timeout 5 ./my_wine32 ./samples/unpacked/doom95/DOOM95.EXE`
+
+Observed result:
+
+- `make run-tests` passed: 16 passed, 0 failed, 0 skipped.
+- `make run-samples-scenarios` passed: console scenarios 25 passed, 0 failed,
+  1 skipped; graphical scenarios 20 passed, 0 failed; unified result passed.
+- The plain Doom95 smoke again reached the expected WAD discovery/startup path
+  (`GetFileAttributesA('DOOM1.WAD')`, repeated `FindFirstFileA('*.WAD')`
+  discovery) and then timed out with exit status `124` from `timeout 5`;
+  ALSA/fluidsynth warnings remained environment noise only.
+
+Latest verification on 2026-05-27 after extracting DirectDraw object core
+helpers into `src/msvcrt/ddraw_core.c`:
+
+- `make run-tests`
+- `make run-samples-scenarios`
+- `env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=x11 timeout 5 ./my_wine32 ./samples/unpacked/doom95/DOOM95.EXE`
+
+Observed result:
+
+- `make run-tests` passed: 16 passed, 0 failed, 0 skipped.
+- `make run-samples-scenarios` passed: console scenarios 25 passed, 0 failed,
+  1 skipped; graphical scenarios 20 passed, 0 failed; unified result passed.
+- The Doom95 smoke again reached WAD discovery/startup through
+  `GetFileAttributesA('DOOM1.WAD')` plus repeated `FindFirstFileA('*.WAD')`
+  discovery and then timed out with exit status `124` from `timeout 5`;
+  ALSA/fluidsynth warnings remained environment noise only.
+
+Follow-up note:
+
+- This pass also required one mechanical build-graph update: `Makefile` now
+  links `build/test_ddraw` against `ddraw_core.o` because the DirectDraw core
+  COM helpers moved out of `ddraw_interface.c`.
+- After this extraction, `ddraw_interface.c` still owns backend init
+  availability checks, cooperative/display-mode setup, and the surface-create
+  orchestration helpers; those seams remain more tightly coupled to backend
+  window state than the now-extracted object core.
 
 ## Operating Rules
 

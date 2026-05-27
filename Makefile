@@ -60,7 +60,7 @@ OBJS = $(ROOT_OBJS) $(STUBS_OBJS) $(LOADER_OBJS) $(SYSCALL_OBJS) $(HEAP_OBJS) $(
 # 32-bit stubs: handler_Nt* providers + kernel32 module loading + handle_manager.
 # Exclude crt_*.c (64-bit CRT emulation, not needed in standalone 32-bit child),
 # but re-include the CRT infra needed by crt_mingw.c for the 32-bit CRT module path.
-MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c $(if $(SDL2_LIBS_32),,src/msvcrt/user32_window.c src/msvcrt/user32_message.c src/msvcrt/user32_input.c), \
+MY_WINE32_STUBS_SRC = $(filter-out src/msvcrt/crt_%.c $(if $(SDL2_LIBS_32),,src/msvcrt/user32_window.c src/msvcrt/user32_message.c src/msvcrt/user32_message_hook.c src/msvcrt/user32_input.c), \
 	$(sort $(shell find src/msvcrt -maxdepth 1 -name '*.c'))) \
 	src/msvcrt/crt_32_stub.c \
 	src/msvcrt/crt_globals.c \
@@ -125,13 +125,13 @@ IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/dll_path.o $(BUILDDIR)/dll_loader.o
 
 # Shared objects used by import-resolution and teb_peb tests.
-TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
+TEST_IMPORT_OBJS = $(PE_OBJS) $(IMPORT_LOADER_OBJS) $(filter-out $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS)) $(HEAP_OBJS) \
 	$(CRT_OBJS) \
 	$(BUILDDIR)/thunk_gen.o $(BUILDDIR)/dispatcher_entry.o $(BUILDDIR)/abi_wrappers.o \
 	$(BUILDDIR)/gs_base.o $(BUILDDIR)/common.o $(BUILDDIR)/clone64.o
 
 # Non-crt stubs (syscall dispatch test does not need the CRT stubs).
-STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS))
+STUBS_NO_CRT_OBJS = $(filter-out $(BUILDDIR)/crt_%.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o, $(STUBS_OBJS))
 
 # kernel32_module.c depends on loader functions not available in syscall test,
 # so exclude it from the non-CRT stubs used here.
@@ -154,10 +154,10 @@ TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o 
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $(BUILDDIR)/crt_watcom.o $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_offset_discovery.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/common.o $(BUILDDIR)/debug.o
 TEST_doom95_paths_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/debug.o
-TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/debug.o
+TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_backend.o $(BUILDDIR)/ddraw_core.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/ddraw_clipper.o $(BUILDDIR)/ddraw_mode.o $(BUILDDIR)/ddraw_palette.o $(BUILDDIR)/ddraw_surface.o $(BUILDDIR)/ddraw_surface_desc.o $(BUILDDIR)/ddraw_surface_ops.o $(BUILDDIR)/debug.o
 TEST_dsound_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/dsound_interface.o $(BUILDDIR)/dsound_buffer.o $(BUILDDIR)/debug.o
-TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
-TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
@@ -180,6 +180,7 @@ CFLAGS_winmm_doom95.o = $(filter-out -mno-sse,$(SPECIAL_CFLAGS)) -mstackrealign
 # disable stack protector to avoid false positive canary corruption.
 CFLAGS_user32_window.o = $(SPECIAL_CFLAGS)
 CFLAGS_user32_message.o = $(SPECIAL_CFLAGS)
+CFLAGS_user32_message_hook.o = $(SPECIAL_CFLAGS)
 CFLAGS_user32_input.o = $(SPECIAL_CFLAGS)
 
 # pe32plus_musl_malloc_backend needs extra include paths for stubs and musl source.
@@ -381,15 +382,20 @@ $(BUILDDIR32)/test_dsound: tests/test_dsound.c $(TEST_dsound32_OBJS)
 # programs that exercise the loader like a user-visible PE application.
 # See: scripts/samples.sh
 #
-#   make samples                             build all sample binaries
-#   make samples SAMPLE=foo                  build one sample binary
+#   make samples                             build all sample binaries and unpack registered archives
+#   make samples SAMPLE=foo                  build one sample binary and unpack its archive if registered
 #   make graphical-samples SAMPLE=foo        build one graphical sample binary
 #   make run-samples-scenarios SAMPLE=foo    unified console/graphical scenario runner
+#   make unpack-samples SAMPLE=foo           unpack one registered sample archive
 #   make screenshot-doom95                   capture Doom95 via Docker/Xvfb
 SAMPLE ?=
 
 samples:
 	@bash scripts/samples.sh build $(SAMPLE)
+	@bash scripts/unpack_samples.sh $(SAMPLE)
+
+unpack-samples:
+	@bash scripts/unpack_samples.sh $(SAMPLE)
 
 run-samples-scenarios: my_wine my_wine64 my_wine32
 	@bash scripts/run_samples.sh $(SAMPLE)
@@ -426,4 +432,4 @@ re: fclean
 -include $(wildcard $(BACKEND_OBJS:.o=.d))
 -include $(wildcard $(MY_WINE32_OBJS:.o=.d))
 
-.PHONY: all clean fclean re tests run-tests debug-tests samples run-samples-scenarios graphical-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)
+.PHONY: all clean fclean re tests run-tests debug-tests samples unpack-samples run-samples-scenarios graphical-samples build-docker-image gen gen-dispatcher check-generated backend $(BUILDDIR) $(BUILDDIR32)

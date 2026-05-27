@@ -28,6 +28,51 @@ void *GetStdHandle(int nStdHandle)
     }
 }
 
+KERNEL32_STUB
+int GetConsoleMode(void *hConsoleHandle, uint32_t *lpMode)
+{
+    (void)hConsoleHandle;
+    if (lpMode)
+        *lpMode = 0;
+    return 1;
+}
+
+KERNEL32_STUB
+int SetConsoleMode(void *hConsoleHandle, uint32_t dwMode)
+{
+    (void)hConsoleHandle;
+    (void)dwMode;
+    return 1;
+}
+
+KERNEL32_STUB
+int SetStdHandle(uint32_t nStdHandle, void *hHandle)
+{
+    (void)nStdHandle;
+    (void)hHandle;
+    return 1;
+}
+
+KERNEL32_STUB
+int WriteConsoleA(void *hConsoleOutput, const void *lpBuffer, uint32_t nNumberOfCharsToWrite,
+                  uint32_t *lpNumberOfCharsWritten, void *lpReserved)
+{
+    return WriteFile(hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
+                     lpNumberOfCharsWritten, lpReserved);
+}
+
+KERNEL32_STUB
+int ReadConsoleInputA(void *hConsoleInput, void *lpBuffer, uint32_t nLength,
+                      uint32_t *lpNumberOfEventsRead)
+{
+    (void)hConsoleInput;
+    (void)lpBuffer;
+    (void)nLength;
+    if (lpNumberOfEventsRead)
+        *lpNumberOfEventsRead = 0;
+    return 1;
+}
+
 /* ── WriteFile ──────────────────────────────────────────────── */
 /*
  * Do NOT call handler_NtWriteFile from here.  handler_NtWriteFile is

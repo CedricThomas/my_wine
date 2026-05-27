@@ -2,6 +2,9 @@
 
 #include "kernel32_priv.h"
 
+#define LMEM_FIXED 0x0000
+#define GMEM_FIXED 0x0000
+
 /* VirtualAlloc tracking for VirtualFree(MEM_RELEASE, size=0). */
 #define MAX_VM_ALLOCS 64
 
@@ -52,6 +55,28 @@ typedef struct {
     uint32_t Type;
     uint32_t __unused2;
 } MEMORY_BASIC_INFORMATION;
+
+KERNEL32_STUB
+void *LocalAlloc(uint32_t uFlags, uintptr_t uBytes)
+{
+    (void)uFlags;
+    return FORCE_PTR_RETURN(HeapAlloc(GetProcessHeap(), LMEM_FIXED, uBytes));
+}
+
+KERNEL32_STUB
+void *GlobalAlloc(uint32_t uFlags, uintptr_t uBytes)
+{
+    (void)uFlags;
+    return FORCE_PTR_RETURN(HeapAlloc(GetProcessHeap(), GMEM_FIXED, uBytes));
+}
+
+KERNEL32_STUB
+void *LocalFree(void *hMem)
+{
+    if (!hMem)
+        return FORCE_PTR_RETURN(NULL);
+    return FORCE_PTR_RETURN(HeapFree(GetProcessHeap(), 0, hMem) ? NULL : hMem);
+}
 
 KERNEL32_STUB
 int VirtualProtect(void *lpAddress, uint32_t dwSize, uint32_t flNewProtect, uint32_t *lpflOldProtect)

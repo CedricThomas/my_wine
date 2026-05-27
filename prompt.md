@@ -1,10 +1,5 @@
-# Cleanup Workflow Prompt
-
-Use this workflow for `my_wine` cleanup and refactor work.
-
-## Prompt
-
 Work on the current `my_wine` codebase cleanup as far as you can in one pass.
+Use audit/cleanup-backlog.md as tracking file
 
 Goals:
 
@@ -24,7 +19,6 @@ Execution rules:
 3. Update the audit docs as you go, not only at the end.
 4. After every meaningful code change, run the full verification loop.
 5. Keep going autonomously until you hit a real blocker.
-6. Do not use git operations for comparison or rollback. If comparison is needed, use plain `diff` against `refs/working`.
 7. Treat code in `src/` as source of truth; markdown docs may be stale unless updated in the same pass.
 
 Verification loop after every meaningful change:
