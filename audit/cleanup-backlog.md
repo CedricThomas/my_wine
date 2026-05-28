@@ -13,7 +13,7 @@ Those belong in command output and git history.
 
 Tomorrow's focus:
 
-- Move to `src/loader/import_table.c` unless a smaller lower-risk seam appears
+- Move to `src/msvcrt/winmm_doom95.c` unless a smaller lower-risk seam appears
   nearby.
 - Prefer one helper/file extraction only.
 - Preserve behavior and public exports.
@@ -48,6 +48,12 @@ Stable enough to leave alone unless new evidence appears:
   `src/loader/pe32_doom95_command.c`, leaving
   `src/loader/pe32_doom95_compat.c` focused on runtime slot seeding plus
   command-helper orchestration.
+- `src/loader/import_flat.c` now owns flat import enumeration plus pass-2
+  thunk patch strategies, leaving `src/loader/import_table.c` focused on the
+  static import entry table and its initialization helpers.
+- `src/loader/import_lookup.c` now owns loader-side import symbol lookup and
+  its no-glibc debug logging, leaving `src/loader/import_resolve.c` focused on
+  import-descriptor walking plus IAT patching.
 - USER32 window and message code is already separated into lifecycle/state,
   paint/focus/class-registry, dispatch, queue, and hook files.
 - DirectDraw is already split across backend/core/clipper/mode/palette/surface
@@ -78,10 +84,8 @@ Stable enough to leave alone unless new evidence appears:
 
 Priority order:
 
-1. `src/loader/import_table.c`
-2. `src/loader/import_resolve.c`
-3. `src/msvcrt/winmm_doom95.c`
-4. `src/backend/sdl2/rb_window.c`
+1. `src/msvcrt/winmm_doom95.c`
+2. `src/backend/sdl2/rb_window.c`
 
 Selection bias:
 

@@ -15,6 +15,7 @@
 #include "include/common.h"
 #include "include/nt_constants.h"
 #include "loader_priv.h"
+#include "import_lookup.h"
 #include "export_table.h"
 #include "module_list.h"
 #include "peb_ldr.h"
@@ -24,31 +25,6 @@
 #include "dll_loader.h"
 
 #define MAX_IMPORT_DEPTH 8
-
-#if defined(MY_WINE32)
-static int import_name_equal(const char *a, const char *b)
-{
-    unsigned char ua, ub;
-
-    if (a == NULL || b == NULL)
-        return 0;
-
-    while (*a != '\0' && *b != '\0') {
-        ua = (unsigned char)*a;
-        ub = (unsigned char)*b;
-        if (ua >= 'A' && ua <= 'Z')
-            ua = (unsigned char)(ua - 'A' + 'a');
-        if (ub >= 'A' && ub <= 'Z')
-            ub = (unsigned char)(ub - 'A' + 'a');
-        if (ua != ub)
-            return 0;
-        a++;
-        b++;
-    }
-
-    return *a == '\0' && *b == '\0';
-}
-#endif
 
 static int image_cstr_valid(void *base, IMAGE_NT_HEADERS *nt, uint32_t rva)
 {
@@ -75,105 +51,6 @@ void *find_text_thunk(void *image_base, IMAGE_NT_HEADERS *nt,
     return find_rip_relative_jump_to(image_base, nt, sections,
                                       pe_section_count(nt),
                                       target_addr);
-}
-
-static void *resolve_import(const char *dll_name, const char *func_name)
-{
-    /* Tier 1: lookup in our stub import table */
-    import_entry_t *entry = NULL;
-#if defined(MY_WINE32)
-    /* 32-bit: linear scan (avoid sort/bsearch dependency issues).
-     * Match both DLL and function name because many Win32 exports share the
-     * same symbol across DLL spellings / duplicate table entries. */
-    for (size_t i = 0; i < import_table_count; i++) {
-        if (!import_name_equal(dll_name, import_table[i].dll_name))
-            continue;
-        if (import_cmp_by_name(func_name, &import_table[i]) == 0) {
-            entry = &import_table[i];
-            break;
-        }
-    }
-#else
-    /* 64-bit: hand-rolled binary search */
-    size_t lo = 0, hi = import_table_count;
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-        int cmp = import_cmp_by_name(func_name, &import_table[mid]);
-        if (cmp < 0) {
-            hi = mid;
-        } else if (cmp > 0) {
-            lo = mid + 1;
-        } else {
-            entry = &import_table[mid];
-            break;
-        }
-    }
-#endif
-    if (entry != NULL && entry->address != NULL) {
-        if (g_debug_level >= 2)
-        { char buf[256]; int i = 0;
-          const char *p;
-          for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
-          for (p = dll_name; *p && i < 250; ) buf[i++] = *p++;
-          if (i < 250) buf[i++] = '!';
-          for (p = func_name; *p && i < 250; ) buf[i++] = *p++;
-          if (i < 250) buf[i++] = ' ';
-          if (i < 250) buf[i++] = '-';
-          if (i < 250) buf[i++] = '>';
-          if (i < 250) buf[i++] = ' ';
-          if (i < 250) buf[i++] = '0';
-          if (i < 250) buf[i++] = 'x';
-          syscall_safe_format_hex(buf + i, (uintptr_t)entry->address, 8); i += 8;
-          if (i < 255) buf[i++] = '\n';
-          INLINE_SYSCALL_WRITE(2, buf, i);
-        }
-        return entry->address;
-    }
-
-    /* Tier 2: lookup in loaded module exports */
-    loaded_module_t *mod = find_module_by_name(dll_name);
-    if (mod != NULL && mod->export_cache.number_of_names > 0) {
-        void *addr = lookup_export(mod, func_name);
-        if (addr != NULL) {
-            if (g_debug_level >= 2)
-            { char buf[256]; int i = 0;
-              const char *p;
-              for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
-              for (p = dll_name; *p && i < 250; ) buf[i++] = *p++;
-              if (i < 250) buf[i++] = '!';
-              for (p = func_name; *p && i < 250; ) buf[i++] = *p++;
-              if (i < 250) buf[i++] = ' ';
-              if (i < 250) buf[i++] = '-';
-              if (i < 250) buf[i++] = '>';
-              if (i < 250) buf[i++] = ' ';
-              if (i < 250) buf[i++] = '0';
-              if (i < 250) buf[i++] = 'x';
-              syscall_safe_format_hex(buf + i, (uintptr_t)addr, 8); i += 8;
-              if (i < 255) buf[i++] = '\n';
-              INLINE_SYSCALL_WRITE(2, buf, i);
-            }
-            return addr;
-        }
-    }
-
-    /* Tier 3: not found */
-    if (g_debug_level >= 2)
-    { char buf[256]; int i = 0;
-      const char *p;
-      for (p = "resolve_import: "; *p && i < 250; ) buf[i++] = *p++;
-      for (p = dll_name; *p && i < 250; ) buf[i++] = *p++;
-      if (i < 250) buf[i++] = '!';
-      for (p = func_name; *p && i < 250; ) buf[i++] = *p++;
-      if (i < 250) buf[i++] = ' ';
-      if (i < 250) buf[i++] = '-';
-      if (i < 250) buf[i++] = '>';
-      if (i < 250) buf[i++] = ' ';
-      const char *notf = "(null)";
-      for (p = notf; *p && i < 255; ) buf[i++] = *p++;
-      if (i < 255) buf[i++] = '\n';
-      INLINE_SYSCALL_WRITE(2, buf, i);
-    }
-    return NULL;
 }
 
 /**
@@ -248,7 +125,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                 uint16_t ordinal = (uint16_t)(thunk_val & 0xFFFF);
                 const char *func_name = ordinal_lookup(dll_name, ordinal);
                 if (func_name != NULL) {
-                    addr = resolve_import(dll_name, func_name);
+                    addr = resolve_loader_import(dll_name, func_name);
                     DEBUG_LEVEL(2, "resolve_import ordinal: %s#%u -> %s (%p)",
                                 dll_name, (unsigned)ordinal, func_name, addr);
                 } else {
@@ -270,7 +147,7 @@ static int resolve_import_pass1(void *base, IMAGE_NT_HEADERS *nt)
                                   sizeof(IMAGE_IMPORT_BY_NAME));
                 if (imp_name == NULL)
                     return -1;
-                addr = resolve_import(dll_name, (const char *)imp_name->Name);
+                addr = resolve_loader_import(dll_name, (const char *)imp_name->Name);
             }
 
             if (addr != NULL) {

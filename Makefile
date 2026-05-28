@@ -105,6 +105,8 @@ MY_WINE32_OBJS = \
 	$(BUILDDIR32)/dll_path.o \
 	$(BUILDDIR32)/dll_loader.o \
 	$(BUILDDIR32)/common.o \
+	$(BUILDDIR32)/import_flat.o \
+	$(BUILDDIR32)/import_lookup.o \
 	$(BUILDDIR32)/import_table.o \
 	$(BUILDDIR32)/import_init.o \
 	$(BUILDDIR32)/ordinal_table.o \
@@ -120,7 +122,7 @@ MY_WINE32_OBJS = \
 PE_OBJS = $(BUILDDIR)/pe_headers.o $(BUILDDIR)/pe_imports.o \
 	$(BUILDDIR)/pe_symbols.o $(BUILDDIR)/pe_rip_scan.o
 
-IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_table.o \
+IMPORT_LOADER_OBJS = $(BUILDDIR)/image_mapper.o $(BUILDDIR)/import_flat.o $(BUILDDIR)/import_lookup.o $(BUILDDIR)/import_table.o \
 	$(BUILDDIR)/import_resolve.o $(BUILDDIR)/import_init.o $(BUILDDIR)/ordinal_table.o \
 	$(BUILDDIR)/relocations.o $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o \
 	$(BUILDDIR)/dll_path.o $(BUILDDIR)/dll_loader.o
