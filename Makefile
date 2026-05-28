@@ -194,7 +194,7 @@ CFLAGS_pe32plus_musl_malloc_backend.o = $(SPECIAL_CFLAGS) -Isrc/heap/musl_stubs 
 # Backend files that use rb_call_on_host_stack need -fno-stack-protector
 # because the inline asm switches to a different stack and the canary
 # can be corrupted by the host function calling back to guest memory.
-$(foreach f,rb_audio.o rb_event.o rb_init.o rb_input.o rb_palette.o rb_surface.o rb_surface_present.o rb_window.o rb_window_host.o rb_window_state.o,$(eval CFLAGS_backend/sdl2/$(f) = $(SPECIAL_CFLAGS) $(SDL2_CFLAGS)))
+$(foreach f,rb_audio.o rb_event.o rb_event_queue.o rb_init.o rb_input.o rb_palette.o rb_surface.o rb_surface_present.o rb_window.o rb_window_host.o rb_window_state.o,$(eval CFLAGS_backend/sdl2/$(f) = $(SPECIAL_CFLAGS) $(SDL2_CFLAGS)))
 
 # ── Default Target ──────────────────────────────────────────────
 all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test_import_resolution \
