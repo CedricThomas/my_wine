@@ -27,6 +27,13 @@ sudo apt install libsdl2-dev libsdl2-dev:i386
 
 The 32-bit SDL2 package (`libsdl2-dev:i386`) is required if you want `my_wine32` to include the graphical backend. Without it, `my_wine32` builds without SDL2 support.
 
+On Debian or Ubuntu, enable multiarch before installing `:i386` packages:
+
+```bash
+sudo dpkg --add-architecture i386
+sudo apt update
+```
+
 **Optional — FluidSynth** (for MIDI support in DOOM95):
 
 ```bash
@@ -80,7 +87,7 @@ This runs only the specified test binary.
 | Binary | PE Support | Build | Entry | Description |
 |---|---|---|---|---|
 | `my_wine` | Both (detects) | `make my_wine` | `src/wrapper_main.c` | Wrapper: reads a PE file, detects PE32 vs PE32+, then `exec`s the matching backend. Resolves its own directory via `/proc/self/exe` to find siblings. |
-| `my_wine64` | PE32+ (64-bit) | `make my_wine64` | `src/entry.c` | Native 64-bit ELF that loads PE32+ images directly. Dynamically linked, linked against `libSDL2` (if available). |
+| `my_wine64` | PE32+ (64-bit) | `make my_wine64` | `src/main.c` | Native 64-bit ELF that loads PE32+ images directly. Dynamically linked, linked against `libSDL2` (if available). |
 | `my_wine32` | PE32 (32-bit) | `make my_wine32` | `src/loader/pe32_entry.c` | Standalone 32-bit ELF (`-m32`) that loads PE32 images. Dynamically linked with glibc CRT. Linked against 32-bit `libSDL2` (if available). |
 
 ### Usage
@@ -162,10 +169,10 @@ SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null || echo "-lSDL2")
 
 | Directory | Contents |
 |---|---|
-| `build/` | 64-bit object files (`my_wine`, `my_wine64`, test binaries) |
-| `build32/` | 32-bit object files (`my_wine32`) |
+| `build/` | 64-bit object files and native test binaries |
+| `build32/` | 32-bit object files and optional 32-bit backend test binaries |
 
-Object files are organized to mirror source paths (e.g., `src/loader/entry.c` → `build/loader/entry.o`). Auto-generated `.d` header dependency files are included via `-MMD -MP` and `-include` at the bottom of the Makefile.
+Most object files are flattened by basename (for example, `src/loader/entry.c` becomes `build/entry.o`). Backend objects keep their relative path under `build/backend/`. Auto-generated `.d` dependency files are included via `-MMD -MP` and `-include` at the bottom of the Makefile.
 
 ---
 

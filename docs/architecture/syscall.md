@@ -1,19 +1,22 @@
 # NT Syscall Dispatcher
 
-The syscall subsystem (`src/syscall/`) intercepts Windows NT syscalls from guest PE code and routes them to C handler implementations in `src/msvcrt/ntdll_*.c`. This document details the dispatch pipeline, from the guest's `syscall` instruction to the final handler.
+The syscall subsystem (`src/syscall/`) provides the low-level NT dispatch machinery and routes calls to C handler implementations in `src/msvcrt/ntdll_*.c`. In the current codebase, many guest-facing `ntdll.dll` imports resolve directly to `handler_Nt*` functions through `src/loader/import_table.c`, while the generated thunk and dispatcher path remains available as shared infrastructure.
 
 ---
 
 ## Architecture
 
-Guest PE code invokes NT kernel functions (e.g. `NtAllocateVirtualMemory`, `NtCreateEvent`) using the `syscall` instruction with a Windows-specific syscall number. The loader patches these instructions at load time so that instead of hitting the Linux kernel, the instruction sequence jumps to my_wine's dispatcher.
+There are two relevant call paths today:
 
-The pipeline has four stages:
+1. Imported `ntdll.dll` functions such as `NtAllocateVirtualMemory` or `NtWriteFile` resolve directly to `handler_Nt*` functions via `src/loader/import_table.c`.
+2. The thunk and dispatcher path generated in `src/syscall/` is prepared during guest setup and remains the shared NT dispatch mechanism for code that uses it.
+
+The dispatcher pipeline itself has four stages:
 
 ```
-PE binary                  my_wine runtime
-─────────                  ─────────────────
- syscall NtXXX          →  thunk (generated)
+guest call site             my_wine runtime
+───────────────             ─────────────────
+ thunk / stub path       →  thunk (generated)
                         →  __wine_dispatcher (asm)
                         →  c_dispatch_syscall (C)
                         →  handler_NtXXX (C, src/msvcrt/)
@@ -21,11 +24,9 @@ PE binary                  my_wine runtime
 
 ### Syscall Number Assignment
 
-All NT syscall numbers defined in `include/nt_syscalls.def` fall in the range **0x03–0x5E** — the same numeric range used by the Linux kernel for its own syscalls. There is no magic boundary (e.g. `0xF000`) that separates them.
+The NT syscall numbers defined in `include/nt_syscalls.def` currently fall in the range **0x03–0x5E**. They are Windows NT numbers used as dispatcher keys inside `dispatcher_generated.c`.
 
-The loader identifies which `syscall` instructions to patch by matching the syscall number against the entries in `nt_syscalls.def`. During PE loading, every `syscall` instruction (opcode `0x0F 0x05`) is scanned; if the syscall number extracted from the surrounding code or the PE's import table matches a known NT syscall number, it is replaced with a direct call to the generated thunk for that entry.
-
-Native Linux syscalls never need interception: they only execute in the loader's own code (C runtime, `mmap`, etc.), which never runs inside the guest PE address space. PE code exclusively contains Windows NT syscalls.
+In the current implementation, these numbers matter to generated thunks and the named constants in `include/nt_constants.h`. The codebase does not currently rewrite every guest `syscall` instruction during PE loading.
 
 ---
 
@@ -55,7 +56,7 @@ call: handler_NtAllocateVirtualMemory(arg1, &h_baseAddr, arg3, &h_regionSz, STAC
   - `stack N as h_name` — extra argument read from the guest stack at index N
 - **call:** the expanded handler invocation referencing `argN`, `&h_name`, `STACK(N)`, or `raw`
 
-The `nt_syscalls.def` file currently defines **26 NT syscalls** for Windows 10+ x86_64.
+The `nt_syscalls.def` file currently defines **26 NT syscalls** for the generated dispatcher switch body.
 
 ### Generator: `scripts/gen_dispatcher.py`
 
@@ -143,20 +144,22 @@ The `handler_NtXXX()` functions live in `src/msvcrt/ntdll_*.c`:
 
 | File | Handlers |
 |---|---|
-| `ntdll_memory.c` | NtAllocateVirtualMemory, NtFreeVirtualMemory, NtMapViewOfSection, NtUnmapViewOfSection |
+| `ntdll_memory.c` | NtAllocateVirtualMemory, NtFreeVirtualMemory, NtCreateSection, NtMapViewOfSection, NtUnmapViewOfSection |
 | `ntdll_io.c` | NtReadFile, NtWriteFile, NtOpenFile |
-| `ntdll_objects.c` | NtCreateEvent, NtCreateSection, NtCreateMutex, NtCreateSemaphore |
-| `ntdll_process.c` | NtTerminateProcess, NtCreateThreadEx, NtGetContextThread, NtSetContextThread, NtCallbackReturn, NtQueryInformationProcess |
-| `ntdll_synchronization.c` | NtSetEvent, NtResetEvent, NtWaitForSingleObject, NtReleaseMutex |
+| `ntdll_objects.c` | NtCreateEvent, NtCreateThreadEx, NtGetContextThread, NtSetContextThread |
+| `ntdll_process.c` | NtTerminateProcess, NtCallbackReturn, NtQueryInformationProcess |
+| `ntdll_synchronization.c` | NtCreateMutex, NtCreateSemaphore, NtSetEvent, NtResetEvent, NtWaitForSingleObject, NtReleaseMutex |
 | `ntdll_time.c` | NtQuerySystemTime, NtDelayExecution, NtQueryPerformanceCounter, NtQueryPerformanceFrequency |
 | `ntdll_handle.c` | NtClose |
+
+`thunk_gen.c` currently emits thunks for 25 syscall numbers from `nt_constants.h`. `NtCreateSemaphore` is present in `nt_syscalls.def` and the generated dispatcher, but it is not currently included in the thunk generator's static list.
 
 
 ---
 
 ## Thunk Generation
 
-Thunk generation replaces the PE's original `syscall` instructions with direct calls to the dispatcher. Each thunk is a small block of machine code that sets up the syscall number and calls `__wine_dispatcher`.
+Thunk generation allocates a reusable block of small machine-code entry points. Each thunk sets up the syscall number and calls `__wine_dispatcher`.
 
 ### Source File: `src/syscall/thunk_gen.c`
 
@@ -197,7 +200,7 @@ On x86, EAX carries the dispatcher address (32-bit fits), EDX carries the syscal
 
 ### Lookup
 
-`lookup_thunk(syscall_number)` returns the thunk function pointer from the `thunk_array` (size 0x60) or NULL if not registered. The loader calls this during PE patching to get the replacement address.
+`lookup_thunk(syscall_number)` returns the thunk function pointer from the `thunk_array` (size `0x60`) or NULL if not registered. In the current tree, kernel32 stubs mainly use this as an availability check before proceeding with direct handlers or inline syscalls.
 
 ---
 

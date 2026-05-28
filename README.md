@@ -97,7 +97,7 @@ Unpack the bundled archive and run directly:
 
 ## Samples
 
-The project ships with ~48 sample programs (both 32-bit and 64-bit variants):
+The project ships with 47 sample directories, covering both 32-bit and 64-bit variants:
 
 | Sample | Description |
 |---|---|
@@ -119,7 +119,7 @@ my_wine/
 ├── Dockerfile              # Cross-compilation environment for samples
 ├── include/                # 19 header files (PE format, NT constants, types)
 ├── src/
-│   ├── main.c              # Entry point (PE32+)
+│   ├── main.c              # PE32+ loader orchestrator
 │   ├── wrapper_main.c      # Format detection wrapper
 │   ├── loader/             # PE image mapping, import resolution, TEB/PEB
 │   ├── syscall/            # Syscall dispatcher, thunk generation

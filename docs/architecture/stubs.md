@@ -49,11 +49,11 @@ because the syscall dispatcher calls them from generated thunk code.
 |------|----------|
 | [`ntdll_handle.c`](../../src/msvcrt/ntdll_handle.c) | Handle table infrastructure: `handle_to_fd()`, `fd_to_handle()`, `free_handle()`, `NtClose`. Maps Windows handle indices to Linux file descriptors. Handles STDIN/STDOUT/STDERR pseudo-handles (0, 1, 2). |
 | [`ntdll_io.c`](../../src/msvcrt/ntdll_io.c) | `NtWriteFile`, `NtReadFile`, `NtOpenFile`. Translate Windows desired_access flags to Linux open flags. Write/read via `INLINE_SYSCALL_WRITE`/`READ`. |
-| [`ntdll_memory.c`](../../src/msvcrt/ntdll_memory.c) | `NtAllocateVirtualMemory`, `NtFreeVirtualMemory`, `NtCreateSection`, `NtMapViewOfSection`, `NtUnmapViewOfSection`, `NtProtectVirtualMemory`. Map `PAGE_*` to `PROT_*`, `mmap`/`munmap`/`mprotect`. Defines `g_ko` (kernel objects global). |
+| [`ntdll_memory.c`](../../src/msvcrt/ntdll_memory.c) | `NtAllocateVirtualMemory`, `NtFreeVirtualMemory`, `NtCreateSection`, `NtMapViewOfSection`, `NtUnmapViewOfSection`. Maps `PAGE_*` to `PROT_*` and uses `mmap`/`munmap`/`mprotect` where needed. Defines `g_ko` (kernel objects global). |
 | [`ntdll_process.c`](../../src/msvcrt/ntdll_process.c) | `NtTerminateProcess`, `NtCallbackReturn`, `NtQueryInformationProcess`. `NtTerminateProcess` uses `INLINE_SYSCALL_EXIT_GROUP` (not `sys_exit`) to tear down all threads. Returns `PROCESS_BASIC_INFORMATION` for QI. |
-| [`ntdll_synchronization.c`](../../src/msvcrt/ntdll_synchronization.c) | `NtSetEvent`, `NtResetEvent`, `NtWaitForSingleObject`, `NtCreateMutex`, `NtReleaseMutex`, `NtCreateSemaphore`, `NtReleaseSemaphore`. Uses `g_ko` event/mutex/semaphore tables with spinlock protection. `WaitForSingleObject` supports timeout via `nanosleep`. |
+| [`ntdll_synchronization.c`](../../src/msvcrt/ntdll_synchronization.c) | `NtSetEvent`, `NtResetEvent`, `NtWaitForSingleObject`, `NtCreateMutex`, `NtReleaseMutex`, `NtCreateSemaphore`. Uses `g_ko` event/mutex/semaphore tables with spinlock protection. `WaitForSingleObject` supports timeout via `nanosleep`. |
 | [`ntdll_time.c`](../../src/msvcrt/ntdll_time.c) | `NtQuerySystemTime`, `NtQueryPerformanceCounter`, `NtQueryPerformanceFrequency`, `NtDelayExecution`. `QuerySystemTime` converts Unix epoch to Windows FILETIME (100ns since 1601). `QueryPerformanceCounter` uses `CLOCK_MONOTONIC`. |
-| [`ntdll_objects.c`](../../src/msvcrt/ntdll_objects.c) | `NtCreateEvent`, `NtCreateThreadEx`, `NtGetContextThread`, `NtSetContextThread`. `NtCreateThreadEx` creates a pthread via shared memory page for args. Event creation allocated from `g_ko` event table. |
+| [`ntdll_objects.c`](../../src/msvcrt/ntdll_objects.c) | `NtCreateEvent`, `NtCreateThreadEx`, `NtGetContextThread`, `NtSetContextThread`. `NtCreateThreadEx` uses the inline `clone` path with a small shared argument page. Event creation allocates from the `g_ko` event table. |
 
 **Shared state:** `ntdll_priv.h` declares `g_ko` (kernel objects: sections, views, events, mutexes, semaphores, threads), `handle_to_fd()`, `fd_to_handle()`, `free_handle()`, `map_protect()`, `find_view()`.
 
@@ -62,7 +62,7 @@ because the syscall dispatcher calls them from generated thunk code.
 ## kernel32 — Process, File, Memory, Console, String, Sync
 
 All exported functions use `KERNEL32_STUB` (stdcall/ms_abi). The private header
-`kernel32_priv.h` declares `g_last_error` (thread-local last error), helper
+`kernel32_priv.h` declares `g_last_error` (process-global last-error state), helper
 functions, and `WIN32_FIND_DATAA_WINE`.
 
 ### Console

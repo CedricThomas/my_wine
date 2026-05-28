@@ -9,7 +9,7 @@ Code standards, source layout, testing conventions, and practical advice for con
 ### Clone and Build
 
 ```bash
-git clone https://github.com/.../my_wine.git
+git clone <repo-url> my_wine
 cd my_wine
 make
 make run-tests
@@ -42,7 +42,7 @@ sudo apt install libsdl2-dev libsdl2-dev:i386
 sudo apt install libfluidsynth-dev libfluidsynth-dev:i386
 ```
 
-See [build.md](build.md) for full build system reference.
+See [Build System Reference](./build.md) for the full build guide.
 
 ---
 
@@ -97,12 +97,11 @@ MY_WINE32_CFLAGS = $(CFLAGS) -DMY_WINE32 -mno-red-zone -fno-stack-protector \
 
 ### Style Conventions
 
-- **No C++** — pure C99
-- **K&R-style** function definitions (opening brace on its own line)
+- **No C++** — pure C
+- **Brace style** — function opening braces go on their own line
 - **`#include "..."`** for project headers, `#include <...>` for system headers
-- Public headers in `include/`; internal headers co-located with source or in `src/pe_priv.h`
-- No raw `malloc`/`free` — use `wine_heap_*` APIs
-- No SSE intrinsics in any file compiled with `-mno-sse`
+- Public headers live in `include/`; internal headers stay near the implementation
+- Loader and stub code should not rely on SSE in files compiled with `-mno-sse`
 
 ---
 
@@ -111,12 +110,12 @@ MY_WINE32_CFLAGS = $(CFLAGS) -DMY_WINE32 -mno-red-zone -fno-stack-protector \
 ```
 my_wine/
 ├── src/                      # Core loader source
-│   ├── main.c                # Host entry point
+│   ├── main.c                # PE32+ loader entry point
 │   ├── common.c              # Shared utilities (logging, string helpers)
 │   ├── debug.c               # Debug infrastructure
 │   ├── run_guest.S           # Assembly entry for guest transitions
 │   ├── wrapper_main.c        # Wrapper process entry
-│   ├── pe_*.c                # PE parsing, imports, relocations, RIP scanning
+│   ├── pe_*.c                # PE header, import, symbol, and RIP-scan helpers
 │   ├── pe_priv.h             # Internal PE types and helpers
 │   ├── loader/               # PE loading and execution
 │   │   ├── pe32_entry.c      # 32-bit PE entry point
@@ -124,8 +123,6 @@ my_wine/
 │   │   ├── pe32_bootstrap.c  # Bootstrap sequence
 │   │   ├── pe32_guest_launch.c
 │   │   ├── pe32_doom95_*.c   # DOOM95-specific compatibility
-│   │   ├── dispatcher.c      # Syscall dispatcher
-│   │   ├── thunk_gen.c       # Thunk code generation
 │   │   ├── module_list.c     # Module tracking
 │   │   ├── image_mapper.c    # mmap-based image mapping
 │   │   ├── teb_peb.c         # TEB/PEB construction
@@ -133,23 +130,25 @@ my_wine/
 │   │   ├── crash_handlers.c  # SEH / signal handlers
 │   │   └── ...
 │   ├── syscall/              # Syscall dispatcher infrastructure
+│   │   ├── dispatcher.c      # Syscall dispatcher
 │   │   ├── dispatcher_generated.c  # Auto-generated from nt_syscalls.def
-│   │   ├── safe_utils.c      # Syscall safety utilities
+│   │   ├── thunk_gen.c       # Thunk code generation
+│   │   ├── abi_wrappers.c    # ABI translation helpers
 │   │   └── ...
 │   ├── heap/                 # Memory allocation
 │   │   ├── wine_heap.c       # Wine-compatible heap API
 │   │   ├── pe32_mmap_heap_backend.c  # mmap-based allocator for 32-bit
 │   │   └── ...
 │   ├── crt/                  # C runtime
-│   │   ├── crt_globals.c     # Global CRT state
-│   │   ├── crt_offset_discovery.c
-│   │   ├── crt_refptrs.c     # Reference counting
+│   │   ├── crt.c             # Module registry and public CRT API
+│   │   ├── crt_mingw.c       # MinGW-specific CRT support
+│   │   ├── crt_watcom.c      # Watcom-specific CRT support
 │   │   └── ...
 │   ├── msvcrt/               # API stubs (msvcrt, kernel32, user32, etc.)
-│   │   ├── crt_32_stub.c     # 32-bit CRT stub
-│   │   ├── kernel32_*.c      # kernel32.dll function stubs
-│   │   ├── user32_*.c        # user32.dll function stubs
-│   │   ├── msvcrt_*.c        # msvcrt.dll function stubs
+│   │   ├── crt_*.c           # CRT shims and support code
+│   │   ├── kernel32_*.c      # kernel32.dll function groups
+│   │   ├── user32_*.c        # user32.dll windowing and dialog groups
+│   │   ├── ntdll_*.c         # Nt* syscall-facing stubs
 │   │   ├── ddraw_*.c         # DirectDraw stubs
 │   │   ├── dsound_*.c        # DirectSound stubs
 │   │   └── ...
@@ -169,11 +168,11 @@ my_wine/
 │   ├── test_syscall_dispatch.c
 │   ├── test_teb_peb.c
 │   ├── test_handle_manager.c
-│   └── ... (27 test files total)
+│   └── ... (33 test files total)
 ├── samples/                  # End-to-end scenarios
 │   ├── hello_world/          # Minimal PE sample
 │   ├── doom95/               # DOOM95 game
-│   └── ... (43 samples total)
+│   └── ... (47 sample directories total, including `unpacked/`)
 ├── scripts/                  # Build/dev tooling
 │   ├── unpack_samples.sh     # Unpack game archives
 │   └── ...
@@ -184,32 +183,32 @@ my_wine/
 
 ### Adding New Stub Files
 
-New API stubs go in `src/msvcrt/` following the naming pattern `<dllname>_<functionname>.c`:
+New API stubs go in `src/msvcrt/`, usually grouped by subsystem rather than one file per exported function. Follow the existing naming patterns such as `kernel32_file.c`, `kernel32_memory.c`, or `user32_message.c`.
 
 ```c
-// src/msvcrt/kernel32_CreateFileA.c
+// src/msvcrt/kernel32_file.c
 #include "pe_priv.h"
 #include "kernel32.h"
 
-DECLSPEC_IMPORT BOOL CreateFileA(
+HANDLE CreateFileA(
     const char *path, unsigned access, unsigned share,
     void *security, unsigned disp, unsigned attrs,
-    void *template)
+    HANDLE template_file)
 {
     stub_entry("CreateFileA", 7);
-    return (void *)0xFFFFFFFF;
+    return INVALID_HANDLE_VALUE;
 }
 ```
 
 - Use `stub_entry()` for logging
-- Return the appropriate sentinel value for unimplemented functions
+- Keep related APIs together unless there is a clear reason to split a new file out
 - The Makefile auto-discovers new `.c` files — no manual edits needed
 
 ### Documentation
 
 - Keep docs in `docs/guides/` — they are the developer-facing reference
 - Any architectural change should update `docs/` before or with the code
-- `docs/` is **stale by default** — always verify against `src/` and `git log`
+- If you update behavior, make the corresponding doc change in the same branch
 
 ---
 
@@ -306,8 +305,8 @@ make samples SAMPLE=hello_world
 ### Documentation Updates
 
 **Always** update `docs/` alongside code changes:
-- New subsystems → add to [build.md](build.md) and [debugging.md](debugging.md)
-- New samples → update [samples.md](samples.md)
+- New subsystems → update [Build System Reference](./build.md) and [Debugging](./debugging.md) when relevant
+- New samples → update [Samples](./samples.md)
 - API changes → update relevant guide or add a new one
 
 ---
@@ -341,5 +340,5 @@ Before submitting changes, run the full build and test suite on the same platfor
 
 - **SSE instructions in loader code:** `-mno-sse` is enforced. If the compiler emits SSE, the guest will crash. Use `volatile` or barriers when passing data across the host/guest boundary.
 - **Red zone violations:** Files using `SPECIAL_CFLAGS` must never assume the red zone is preserved. Manual stack operations are expected.
-- **Missing 32-bit libraries:** `gcc-multilib` is required for `my_wine32`. Without it, the Makefile skips 32-bit targets silently in some configurations — check `build32/` after building.
+- **Missing 32-bit libraries:** `gcc-multilib` is required for `my_wine32`. If 32-bit SDL2 or FluidSynth support is needed, enable multiarch and install the matching `:i386` dev packages.
 - **Generated files:** `src/syscall/dispatcher_generated.c` is auto-generated from `include/nt_syscalls.def`. Never edit it directly — update the `.def` file and rebuild.

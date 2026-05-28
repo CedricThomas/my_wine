@@ -13,7 +13,6 @@ so they compile to no-ops when the backend isn't present.
 
 ```
 src/backend/sdl2/
-├── render_backend.h            # Public API (in include/ — shared header)
 ├── rb_sdl2_priv.h              # Private structs, helper declarations, host-context macros
 │
 ├── rb_init.c                   # SDL2 init/shutdown, display-size query
@@ -44,7 +43,7 @@ src/backend/sdl2/
 ```
 
 All `.c` files include `rb_sdl2_priv.h` as their single private header. The public
-API surface is `render_backend.h` (in `include/`), which declares every backend
+API surface is `include/render_backend.h`, which declares every backend
 function using opaque `uintptr_t` handle types.
 
 ---
@@ -87,14 +86,9 @@ Backend `.c` files that use `rb_call_on_host_stack` are compiled with
 `-fno-stack-protector`. The GCC stack protector places a canary on the current
 stack frame; when `rb_call_on_host_stack` switches to the host stack and calls back
 into host functions (like `malloc`), the canary value is read from the *guest* stack,
-causing a false-positive abort. The Makefile rule for backend objects always adds
-`-fno-stack-protector`:
-
-```makefile
-$(BUILDDIR)/backend/%.o: %.c
-	$(CC) $(filter-out -mno-sse,$(CFLAGS)) -mstackrealign -fno-stack-protector \
-		$(SDL2_CFLAGS) -c $< -o $@
-```
+causing a false-positive abort. In the current Makefile, the backend files that need
+host-stack callbacks are built with `SPECIAL_CFLAGS` plus `$(SDL2_CFLAGS)`, which
+includes `-fno-stack-protector`.
 
 **Why `-mstackrealign`, not `-mno-sse`?** Unlike the stub files (which are called
 directly from guest code and must disable SSE because guest registers may hold SSE

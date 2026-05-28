@@ -163,9 +163,9 @@ The PE32 backend exists solely because the 32-bit child process cannot use musl.
 | Address space | Efficient (arena pools) | Wasteful for small frequent allocs |
 | Complexity | ~2000 lines of musl + stubs | ~80 lines of self-contained code |
 
-The mmap approach is acceptable because PE32 child processes allocate very few objects
-(the child is a thin bootstrap layer that loads the PE, sets up the entry point, and
-transitions to the 64-bit loader).
+The mmap approach is acceptable because the current PE32 runtime allocates relatively
+few heap objects compared with the PE32+ path, and simplicity matters more here than
+allocator sophistication.
 
 ### `#if defined(__i386__)` Guard
 

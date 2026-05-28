@@ -12,7 +12,7 @@ Samples are **PE executables** (compiled with mingw-w64 via Docker) that test my
 - **`sample.info`** — metadata file declaring type, build config, and scenario expectations
 - **`applied_inputs.txt`** (optional) — scripted interaction for graphical scenarios
 
-The build system discovers samples convention-driven (no hardcoded names): every subdirectory of `samples/` that contains source files is a candidate. Running `make samples` cross-compiles all samples to PE `.exe` binaries inside a Docker container.
+The build system discovers samples by convention rather than a hardcoded registry: every subdirectory of `samples/` that contains sample sources is a candidate. Running `make samples` cross-compiles all samples to PE `.exe` binaries inside a Docker container.
 
 As of this writing, the repository has **47 sample directories** spanning console, graphical, and edge-case scenarios. Many samples have both PE32+ (default) and PE32 (`_32` suffix) variants to validate architecture-specific loader paths.
 
@@ -276,9 +276,6 @@ This scenario:
    ```
 
 2. **Write the C source:**
-   ```bash
-   nano samples/my_sample/my_sample.c
-   ```
    ```c
    #include <windows.h>
    int main(void) {
@@ -390,7 +387,7 @@ For samples that require external files (like DOOM95):
    timeout=60
    ```
 
-2. **The unpack script** (`scripts/unpack_samples.sh`) reads `samples/<name>/sample.info` and extracts `samples/archives/<archive>` to `samples/unpacked/<name>/` when `make samples` runs.
+2. **The unpack script** (`scripts/unpack_samples.sh`) reads `samples/<name>/sample.info` and extracts `samples/<name>/<archive>` to `samples/unpacked/<name>/` when `make samples` runs.
 
 ---
 
@@ -435,7 +432,7 @@ unpacked
 | Total sample directories | 47 |
 | Console samples | ~21 |
 | Graphical samples (type=graphical) | 21 |
-| PE32-only (`arch=32`) | 24 |
+| PE32-only (`_32` suffix) | 23 |
 | Skipped | 1 (`doom95`) |
 
 ### PE32/PE32+ Pairs

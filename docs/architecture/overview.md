@@ -43,9 +43,8 @@ for Windows API translation, heap management, and rendering.
 - **Source:** `src/main.c`
 - **Role:** Full PE32+ loader in a single 64-bit process.
 - **Architecture:** Maps the PE image into the host address space, resolves imports,
-  sets up TEB/PEB, allocates a *separate* guest stack, installs the syscall dispatcher
-  trampoline, and jumps to the entry point. After the jump, GS points at the guest TEB
-  and the syscall dispatcher intercepts native syscalls.
+  sets up TEB/PEB, allocates a *separate* guest stack, prepares NT dispatch support,
+  and jumps to the entry point. After the jump, GS points at the guest TEB.
 - **Rejection:** If a PE32 image is passed, unmaps it and prints an error.
 
 ### my_wine32 — PE32 Loader
@@ -101,8 +100,8 @@ Both `my_wine32` and `my_wine64` follow the same logical pipeline, though the
   └──────┬───────┘
          ▼
   ┌──────────────┐
-  │ install      │  write syscall dispatcher trampoline into guest address space
-  │  dispatcher  │  (generated thunks for each syscall number)
+  │ prepare NT   │  generate thunk and dispatcher support used by the NT handler path
+  │  dispatch    │
   └──────┬───────┘
          ▼
   ┌──────────────┐
@@ -118,7 +117,7 @@ Both `my_wine32` and `my_wine64` follow the same logical pipeline, though the
 | Subsystem | Source | Purpose |
 |-----------|--------|---------|
 | **loader/** | `src/loader/` | Image mapping, section loading, import resolution, TEB/PEB setup, entry point resolution, crash handlers, guest stack setup. Shared code for both PE32 and PE32+. PE32-specific bootstrap in `pe32_*` files. See [Loader Architecture](./loader.md) for a deep dive. |
-| **syscall/** | `src/syscall/` | Syscall dispatcher and thunk generator. Translates guest syscalls (int 0x80 / syscall) into host equivalents. Contains generated thunk table (`dispatcher_generated.c`), ABI wrappers, and the trampoline ASM entry point. See [Syscall Dispatcher](./syscall.md) for a deep dive. |
+| **syscall/** | `src/syscall/` | NT dispatch infrastructure: generated switch body, thunk generator, ABI wrappers, and the trampoline ASM entry point. The current tree mixes direct `handler_Nt*` imports with thunk-based dispatch support. See [Syscall Dispatcher](./syscall.md) for a deep dive. |
 | **msvcrt/** | `src/msvcrt/` | Windows API stub implementations (~80 files). Covers kernel32 (file, process, memory, sync, string, console), user32 (windows, messages, dialogs, input), ntdll (objects, memory, time), ddraw, dsound, gdi32, winmm, and CRT functions (stdio, stdlib, file I/O). See [Windows API Stubs](./stubs.md) for a deep dive. |
 | **heap/** | `src/heap/` | Heap allocation backends. `wine_heap.c` implements the Windows Heap API (`HeapCreate`, `HeapAlloc`, etc.). Two backends: musl malloc (PE32+) and a custom mmap-based allocator (PE32). See [Heap Management](./heap.md) for a deep dive. |
 | **crt/** | `src/crt/` | C runtime detection and patching. Modules for MinGW (`crt_mingw.c`) and Watcom (`crt_watcom.c`). Handles .refptr patching, BSS offset discovery, entry symbol resolution, and `.bss` variable seeding (argc/argv/envp). See [CRT Handling](./crt.md) for a deep dive. |
@@ -180,7 +179,7 @@ PE .EXE file
 │              Guest Code Execution                     │
 │                                                      │
 │  guest calls Win32 API ──→ msvcrt/ stubs             │
-│  guest makes syscall  ──→ syscall/ dispatcher         │
+│  guest reaches Nt* path ──→ direct handler or syscall/ dispatcher │
 │  guest allocs memory  ──→ heap/ backends              │
 │  guest draws frame    ──→ backend/sdl2/               │
 │                                                      │

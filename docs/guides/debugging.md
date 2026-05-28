@@ -109,7 +109,7 @@ To debug a guest binary under GDB, **bypass the `my_wine` wrapper** and run the 
 
 ```bash
 # For PE32+ binaries:
-gdb --args ./my_wine64 samples/hello_world_64/hello_world_64.exe
+gdb --args ./my_wine64 samples/hello_world/hello_world.exe
 
 # For PE32 binaries:
 gdb --args ./my_wine32 samples/hello_world_32/hello_world_32.exe

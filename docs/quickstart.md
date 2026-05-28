@@ -26,6 +26,13 @@ sudo apt install libsdl2-dev
 
 SDL2 is not required for console samples or building the loader itself.
 
+If you want 32-bit SDL2 or FluidSynth support on Debian or Ubuntu, enable multiarch first:
+
+```bash
+sudo dpkg --add-architecture i386
+sudo apt update
+```
+
 ---
 
 ## Build the Loader
@@ -132,5 +139,5 @@ Examples:
 
 ## Next Steps
 
-- [README.md](./README.md) — full project overview
-- [glossary.md](./glossary.md) — terminology and key concepts
+- [Project README](../README.md) — full project overview
+- [Glossary](./glossary.md) — terminology and key concepts
