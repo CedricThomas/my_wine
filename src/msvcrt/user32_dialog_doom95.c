@@ -14,6 +14,7 @@
 typedef void (*DOOM95_REFRESH_MAPS_FN)(HWND);
 
 extern LRESULT KERNEL32_ABI SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+extern BOOL KERNEL32_ABI DestroyWindow(HWND hWnd);
 
 void user32_dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
                                         const char *lpTemplateName, void *lpDialogFunc)
@@ -109,4 +110,16 @@ void user32_dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
     DEBUG_LEVEL(1, "user32: Doom95 launcher autostart click start");
     ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_COMMAND, (WPARAM)0x3f1u,
                                  (LPARAM)(uintptr_t)start_hwnd);
+
+    /*
+     * The launcher is modeless in our current USER32 stub path, so clicking
+     * Start may leave the dialog alive instead of exiting it through the
+     * normal modal lifecycle. If that happens, explicitly destroy it so the
+     * game window can take over cleanly.
+     */
+    if (hwnd != 0) {
+        DEBUG_LEVEL(1, "user32: Doom95 launcher autostart destroy dialog hwnd=0x%lx",
+                    (unsigned long)(uintptr_t)hwnd);
+        DestroyWindow(hwnd);
+    }
 }

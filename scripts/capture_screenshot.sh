@@ -17,7 +17,7 @@ IMAGE_NAME="${SCREENSHOT_IMAGE:-my_wine-samples}"
 
 TITLE="Doom 95"
 DELAY_SEC="8"
-TIMEOUT_SEC="25"
+TIMEOUT_SEC="40"
 DEBUG_LEVEL="${MY_WINE_DEBUG_LEVEL:-1}"
 BUILD32="${SCREENSHOT_BUILD32:-1}"
 CAPTURE_ROOT="${SCREENSHOT_CAPTURE_ROOT:-1}"
@@ -38,7 +38,7 @@ Options:
   --title TITLE       Window title regex/name to wait for. Default: Doom 95
   --out PATH          Window PNG path. Relative paths are project-relative.
   --delay SEC         Seconds to wait after finding the window. Default: 8
-  --timeout SEC       Seconds to wait for the window. Default: 25
+  --timeout SEC       Seconds to wait for the window. Default: 40
   --debug LEVEL       MY_WINE_DEBUG_LEVEL inside the container. Default: 1
   --no-build32        Do not rebuild my_wine32 inside the container first.
   --no-root           Do not also capture the root display.
@@ -163,8 +163,60 @@ docker run --rm -i \
     -v "$PROJECT_DIR:/project" \
     -w /project \
     "$IMAGE_NAME" \
-    bash -s -- "${CMD[@]}" <<'INNER'
+bash -s -- "${CMD[@]}" <<'INNER'
 set -euo pipefail
+
+window_area() {
+    local wid="$1"
+    local geom width height
+
+    geom="$(xdotool getwindowgeometry --shell "$wid" 2>/dev/null || true)"
+    width="$(printf '%s\n' "$geom" | awk -F= '$1 == "WIDTH" { print $2 }')"
+    height="$(printf '%s\n' "$geom" | awk -F= '$1 == "HEIGHT" { print $2 }')"
+    if [[ "$width" =~ ^[0-9]+$ && "$height" =~ ^[0-9]+$ ]]; then
+        echo $((width * height))
+    else
+        echo 0
+    fi
+}
+
+pick_best_window() {
+    local ids="$1"
+    local best_id="" best_area=0 wid area
+
+    while read -r wid; do
+        [ -n "$wid" ] || continue
+        area="$(window_area "$wid")"
+        if [ "$area" -gt "$best_area" ]; then
+            best_area="$area"
+            best_id="$wid"
+        fi
+    done <<EOF
+$ids
+EOF
+
+    if [ -n "$best_id" ] && [ "$best_area" -ge 4096 ]; then
+        echo "$best_id"
+    fi
+}
+
+find_title_window() {
+    local title="$1"
+    local ids
+
+    ids="$(xdotool search --onlyvisible --name "$title" 2>/dev/null || true)"
+    [ -z "$ids" ] && ids="$(xdotool search --name "$title" 2>/dev/null || true)"
+    pick_best_window "$ids"
+}
+
+pick_pid_window() {
+    local pid="$1"
+    local ids
+
+    ids="$(xdotool search --onlyvisible --pid "$pid" 2>/dev/null || true)"
+    [ -z "$ids" ] && ids="$(xdotool search --pid "$pid" 2>/dev/null || true)"
+    pick_best_window "$ids"
+}
 
 cmd=("$@")
 export DISPLAY=:99
@@ -203,14 +255,35 @@ guest_pid=$!
 win=""
 deadline=$((SECONDS + SCREENSHOT_TIMEOUT))
 while [ "$SECONDS" -lt "$deadline" ]; do
-    win="$(xdotool search --onlyvisible --name "$SCREENSHOT_TITLE" 2>/dev/null | tail -1 || true)"
-    [ -z "$win" ] && win="$(xdotool search --name "$SCREENSHOT_TITLE" 2>/dev/null | tail -1 || true)"
+    win="$(find_title_window "$SCREENSHOT_TITLE" || true)"
+    [ -z "$win" ] && win="$(pick_pid_window "$guest_pid" || true)"
     [ -n "$win" ] && break
     sleep 0.25
 done
 
 if [ -z "$win" ]; then
+    win="$(pick_pid_window "$guest_pid" || true)"
+fi
+
+if [ -z "$win" ]; then
     echo "ERR: no window matched '$SCREENSHOT_TITLE'" >&2
+    echo "visible_windows:" >&2
+    xdotool search --onlyvisible --name '.*' 2>/dev/null | while read -r wid; do
+        [ -n "$wid" ] || continue
+        printf '  %s %s\n' "$wid" "$(xdotool getwindowname "$wid" 2>/dev/null || true)" >&2
+    done || true
+    echo "all_windows:" >&2
+    xdotool search --name '.*' 2>/dev/null | while read -r wid; do
+        [ -n "$wid" ] || continue
+        printf '  %s %s\n' "$wid" "$(xdotool getwindowname "$wid" 2>/dev/null || true)" >&2
+    done || true
+    if [ "${SCREENSHOT_CAPTURE_ROOT:-1}" = "1" ]; then
+        import -window root "$SCREENSHOT_ROOT_OUT" || true
+        if [ -s "$SCREENSHOT_ROOT_OUT" ]; then
+            echo "fallback_root_capture:"
+            identify "$SCREENSHOT_ROOT_OUT" || true
+        fi
+    fi
     tail -120 /tmp/my_wine_screenshot.err >&2 || true
     exit 1
 fi
@@ -218,7 +291,23 @@ fi
 xdotool windowfocus "$win" >/dev/null 2>&1 || true
 sleep "$SCREENSHOT_DELAY"
 
-import -window "$win" "$SCREENSHOT_OUT"
+capture_ok=0
+for _try in $(seq 1 8); do
+    retry_win="$(find_title_window "$SCREENSHOT_TITLE" || true)"
+    [ -z "$retry_win" ] && retry_win="$(pick_pid_window "$guest_pid" || true)"
+    [ -n "$retry_win" ] && win="$retry_win"
+    if import -window "$win" "$SCREENSHOT_OUT"; then
+        capture_ok=1
+        break
+    fi
+    sleep 0.25
+done
+
+if [ "$capture_ok" != "1" ]; then
+    echo "ERR: failed to capture window '$win'" >&2
+    exit 1
+fi
+
 if [ "${SCREENSHOT_CAPTURE_ROOT:-1}" = "1" ]; then
     import -window root "$SCREENSHOT_ROOT_OUT"
 fi

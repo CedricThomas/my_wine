@@ -382,7 +382,7 @@ void *setup_stack(IMAGE_NT_HEADERS *nt)
     /* 32-bit: use MAP_FIXED at a fixed address below the my_wine32
      * binary (0x080xxxxx). The guest stack at 0x00500000 is:
      * - above the PE image (0x004xxxxx)
-     * - below the UNIX stack (0x00600000)
+     * - below the UNIX stack (dynamic, placed after PE image)
      * - below the signal stack (0x00800000)
      * MAP_STACK is omitted — it forces high-range (0xf7xxxxxx) allocation
      * which overlaps with host libc and causes SIGSEGV on dispatch. */

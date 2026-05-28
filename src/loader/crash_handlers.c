@@ -399,9 +399,10 @@ void install_crash_signal_handlers(void)
      * potentially-corrupted current stack.
      */
 #ifdef MY_WINE32
-    /* 32-bit: use MAP_FIXED at 0x00800000 (above UNIX stack at 0x00620000).
-     * This address is high enough for sigaltstack to accept (tested),
-     * and well below 3GB, keeping it away from host libc (0xf7xxxxxx). */
+    /* 32-bit: use MAP_FIXED at 0x00800000 (above UNIX stack, which is placed
+     * dynamically after the PE image). This address is high enough for
+     * sigaltstack to accept (tested), and well below 3GB, keeping it away
+     * from host libc (0xf7xxxxxx). */
     void *sigstack_mem = INLINE_SYSCALL_MMAP((void *)0x00800000, SIG_STACK_SIZE,
                               PROT_READ|PROT_WRITE,
                               MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
