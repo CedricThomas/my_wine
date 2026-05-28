@@ -179,6 +179,7 @@ $(foreach obj,$(notdir $(HEAP_OBJS)),$(eval CFLAGS_$(obj) = $(SPECIAL_CFLAGS)))
 # winmm_doom95 uses host multimedia libraries and keeps stack realignment enabled
 # for the 32-bit guest-facing build.
 CFLAGS_winmm_doom95.o = $(filter-out -mno-sse,$(SPECIAL_CFLAGS)) -mstackrealign
+CFLAGS_winmm_doom95_midi_backend.o = $(filter-out -mno-sse,$(SPECIAL_CFLAGS)) -mstackrealign
 
 # user32_window calls rb_call_on_host_stack which switches to host stack;
 # disable stack protector to avoid false positive canary corruption.
@@ -246,6 +247,10 @@ $(BUILDDIR32)/%.o: %.c | $(BUILDDIR32)
 	@$(MY_WINE32_CC) $(MY_WINE32_CFLAGS) -c $< -o $@
 
 $(BUILDDIR32)/winmm_doom95.o: src/msvcrt/winmm_doom95.c | $(BUILDDIR32)
+	@echo "  CC32 $<"
+	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) -mstackrealign -c $< -o $@
+
+$(BUILDDIR32)/winmm_doom95_midi_backend.o: src/msvcrt/winmm_doom95_midi_backend.c | $(BUILDDIR32)
 	@echo "  CC32 $<"
 	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) -mstackrealign -c $< -o $@
 

@@ -36,6 +36,10 @@ Why this is the top goal:
   exports in `src/msvcrt/user32_dialog_items.c`, and Doom95 autostart policy in
   `src/msvcrt/user32_dialog_doom95.c`.
 - Loader/import work is now the next intended frontier despite the higher risk.
+- Doom95 winmm MIDI backend ownership is now split: guest-facing stream state
+  and exports remain in `src/msvcrt/winmm_doom95.c`, while FluidSynth
+  soundfont/device/backend helpers live in
+  `src/msvcrt/winmm_doom95_midi_backend.c`.
 
 ## Current Position
 
@@ -79,6 +83,8 @@ Stable enough to leave alone unless new evidence appears:
   `src/backend/sdl2/rb_surface_present.c`.
 - SDL backend-local window state ownership now lives in
   `src/backend/sdl2/rb_window_state.c`.
+- Doom95 winmm FluidSynth backend ownership now lives in
+  `src/msvcrt/winmm_doom95_midi_backend.c`.
 
 ## Active Queue
 

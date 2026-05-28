@@ -2,14 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 #include <pthread.h>
-
-#include <fluidsynth.h>
 
 #include "kernel32_priv.h"
 #include "include/handle_manager.h"
 #include "src/backend/sdl2/rb_sdl2_priv.h"
+#include "winmm_doom95_priv.h"
 
 extern int rb_joy_count(void) __attribute__((weak));
 extern int rb_joy_get_caps(int idx, char *name, int name_len,
@@ -83,52 +81,6 @@ typedef struct {
     uint32_t dwTimeDiv;
 } MIDIPROPTIMEDIV_WINE;
 
-typedef enum {
-    MIDI_EVENT_SHORT = 0,
-    MIDI_EVENT_TEMPO = 1,
-    MIDI_EVENT_SYSEX = 2
-} midi_event_type_t;
-
-typedef struct midi_event {
-    struct midi_event *next;
-    uint32_t delta_ticks;
-    midi_event_type_t type;
-    uint32_t short_msg;
-    uint32_t tempo;
-    uint8_t *sysex;
-    uint32_t sysex_len;
-} midi_event_t;
-
-typedef struct {
-    fluid_settings_t *settings;
-    fluid_synth_t *synth;
-    fluid_audio_driver_t *driver;
-    char soundfont_path[256];
-    int soundfont_id;
-    int ready;
-} midi_fluidsynth_backend_t;
-
-typedef struct {
-    uint32_t stream_handle;
-    uint32_t time_div;
-    uint32_t tempo_us_per_qn;
-    uint32_t volume;
-    int app_active;
-    int playing;
-    int worker_active;
-    volatile int stop_worker;
-    volatile uint32_t generation;
-    volatile int lock;
-    pthread_t worker_thread;
-    midi_event_t *head;
-    midi_event_t *tail;
-    midi_fluidsynth_backend_t backend;
-} midi_stream_state_t;
-
-typedef struct {
-    midi_stream_state_t *state;
-} midi_stream_state_args_t;
-
 static midi_stream_state_t g_midi_stream = {
     .stream_handle = 0,
     .time_div = 96u,
@@ -201,14 +153,6 @@ static uint64_t midi_ticks_to_ns(uint32_t ticks, uint32_t tempo_us_per_qn, uint3
     return ((uint64_t)ticks * (uint64_t)tempo_us_per_qn * 1000ULL) / (uint64_t)time_div;
 }
 
-static float midi_stream_gain_from_volume(uint32_t dwVolume)
-{
-    uint32_t left = dwVolume & 0xFFFFu;
-    uint32_t right = (dwVolume >> 16) & 0xFFFFu;
-
-    return (float)(left + right) / (float)(2u * 65535u);
-}
-
 static void midi_event_free_local(midi_event_t *event)
 {
     if (!event)
@@ -243,197 +187,6 @@ static void midi_queue_clear_local(midi_stream_state_t *state)
     }
 }
 
-static int midi_find_soundfont(char *out_path, size_t out_size)
-{
-    static const char *fallbacks[] = {
-        "/usr/share/soundfonts/FluidR3_GM.sf2",
-        "/usr/share/soundfonts/FluidR3_GS.sf2"
-    };
-    const char *env_path = getenv("MY_WINE_SOUNDFONT");
-    size_t i;
-
-    if (out_path == NULL || out_size == 0u)
-        return 0;
-
-    if (env_path && env_path[0] != '\0' && access(env_path, R_OK) == 0) {
-        snprintf(out_path, out_size, "%s", env_path);
-        return 1;
-    }
-
-    for (i = 0; i < sizeof(fallbacks) / sizeof(fallbacks[0]); i++) {
-        if (access(fallbacks[i], R_OK) == 0) {
-            snprintf(out_path, out_size, "%s", fallbacks[i]);
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
-static int midi_backend_open_local(midi_fluidsynth_backend_t *backend, uint32_t volume)
-{
-    static const char *driver_candidates[] = { "pulseaudio", "pipewire", "alsa" };
-    fluid_settings_t *settings = NULL;
-    fluid_synth_t *synth = NULL;
-    fluid_audio_driver_t *driver = NULL;
-    const char *driver_override = getenv("MY_WINE_FLUID_DRIVER");
-    const char *driver_name = NULL;
-    size_t i;
-    int soundfont_id = -1;
-
-    if (!backend)
-        return 0;
-    if (backend->ready)
-        return 1;
-    if (!midi_find_soundfont(backend->soundfont_path, sizeof(backend->soundfont_path))) {
-        DEBUG_LEVEL(1, "winmm: no readable soundfont found");
-        return 0;
-    }
-
-    for (i = 0; ; i++) {
-        settings = new_fluid_settings();
-        if (!settings)
-            break;
-
-        if (driver_override && driver_override[0] != '\0')
-            driver_name = driver_override;
-        else if (i < sizeof(driver_candidates) / sizeof(driver_candidates[0]))
-            driver_name = driver_candidates[i];
-        else
-            driver_name = NULL;
-
-        if (driver_name != NULL)
-            (void)fluid_settings_setstr(settings, "audio.driver", driver_name);
-        (void)fluid_settings_setnum(settings, "synth.gain", (double)midi_stream_gain_from_volume(volume));
-
-        synth = new_fluid_synth(settings);
-        if (!synth) {
-            delete_fluid_settings(settings);
-            settings = NULL;
-            break;
-        }
-
-        soundfont_id = fluid_synth_sfload(synth, backend->soundfont_path, 1);
-        if (soundfont_id < 0) {
-            delete_fluid_synth(synth);
-            delete_fluid_settings(settings);
-            synth = NULL;
-            settings = NULL;
-            if (driver_override && driver_override[0] != '\0')
-                break;
-            continue;
-        }
-
-        driver = new_fluid_audio_driver(settings, synth);
-        if (driver) {
-            backend->settings = settings;
-            backend->synth = synth;
-            backend->driver = driver;
-            backend->soundfont_id = soundfont_id;
-            backend->ready = 1;
-            DEBUG_LEVEL(1, "winmm: FluidSynth ready driver=%s soundfont=%s",
-                        driver_name ? driver_name : "default",
-                        backend->soundfont_path);
-            return 1;
-        }
-
-        delete_fluid_synth(synth);
-        delete_fluid_settings(settings);
-        synth = NULL;
-        settings = NULL;
-        if (driver_override && driver_override[0] != '\0')
-            break;
-    }
-
-    DEBUG_LEVEL(1, "winmm: failed to start FluidSynth backend");
-    return 0;
-}
-
-static void midi_backend_close_local(midi_fluidsynth_backend_t *backend)
-{
-    if (!backend)
-        return;
-    if (backend->driver)
-        delete_fluid_audio_driver(backend->driver);
-    if (backend->synth)
-        delete_fluid_synth(backend->synth);
-    if (backend->settings)
-        delete_fluid_settings(backend->settings);
-    memset(backend, 0, sizeof(*backend));
-}
-
-static void midi_backend_reset_local(midi_fluidsynth_backend_t *backend)
-{
-    if (!backend || !backend->ready || !backend->synth)
-        return;
-    (void)fluid_synth_system_reset(backend->synth);
-}
-
-static void midi_backend_apply_volume_local(midi_stream_state_t *state)
-{
-    float gain;
-
-    if (!state || !state->backend.ready || !state->backend.synth)
-        return;
-
-    gain = midi_stream_gain_from_volume(__atomic_load_n(&state->volume, __ATOMIC_ACQUIRE));
-    fluid_synth_set_gain(state->backend.synth, gain);
-}
-
-static void midi_backend_send_short_local(midi_fluidsynth_backend_t *backend, uint32_t packed_msg)
-{
-    uint8_t status = (uint8_t)(packed_msg & 0xFFu);
-    uint8_t data1 = (uint8_t)((packed_msg >> 8) & 0x7Fu);
-    uint8_t data2 = (uint8_t)((packed_msg >> 16) & 0x7Fu);
-    int channel = status & 0x0Fu;
-    int command = status & 0xF0u;
-
-    if (!backend || !backend->ready || !backend->synth)
-        return;
-
-    switch (command) {
-    case 0x80:
-        (void)fluid_synth_noteoff(backend->synth, channel, data1);
-        break;
-    case 0x90:
-        if (data2 == 0u)
-            (void)fluid_synth_noteoff(backend->synth, channel, data1);
-        else
-            (void)fluid_synth_noteon(backend->synth, channel, data1, data2);
-        break;
-    case 0xA0:
-        (void)fluid_synth_key_pressure(backend->synth, channel, data1, data2);
-        break;
-    case 0xB0:
-        (void)fluid_synth_cc(backend->synth, channel, data1, data2);
-        break;
-    case 0xC0:
-        (void)fluid_synth_program_change(backend->synth, channel, data1);
-        break;
-    case 0xD0:
-        (void)fluid_synth_channel_pressure(backend->synth, channel, data1);
-        break;
-    case 0xE0:
-        (void)fluid_synth_pitch_bend(backend->synth, channel,
-                                     (int)data1 | ((int)data2 << 7));
-        break;
-    default:
-        break;
-    }
-}
-
-static void midi_backend_send_sysex_local(midi_fluidsynth_backend_t *backend,
-                                          const uint8_t *data, uint32_t len)
-{
-    int handled = 0;
-
-    if (!backend || !backend->ready || !backend->synth || !data || len == 0u)
-        return;
-
-    (void)fluid_synth_sysex(backend->synth, (const char *)data, (int)len,
-                            NULL, NULL, &handled, 0);
-}
-
 static void *midi_stream_worker_thread(void *arg)
 {
     midi_stream_state_t *state = (midi_stream_state_t *)arg;
@@ -455,12 +208,13 @@ static void *midi_stream_worker_thread(void *arg)
         }
 
         if (!state->backend.ready) {
-            if (!midi_backend_open_local(&state->backend,
-                                         __atomic_load_n(&state->volume, __ATOMIC_ACQUIRE))) {
+            if (!winmm_doom95_midi_backend_open(
+                    &state->backend,
+                    __atomic_load_n(&state->volume, __ATOMIC_ACQUIRE))) {
                 midi_sleep_ns(500000000ULL);
                 continue;
             }
-            midi_backend_apply_volume_local(state);
+            winmm_doom95_midi_backend_apply_volume(state);
         }
 
         midi_lock(&state->lock);
@@ -515,21 +269,22 @@ static void *midi_stream_worker_thread(void *arg)
 
         switch (event->type) {
         case MIDI_EVENT_SHORT:
-            midi_backend_send_short_local(&state->backend, event->short_msg);
+            winmm_doom95_midi_backend_send_short(&state->backend, event->short_msg);
             break;
         case MIDI_EVENT_TEMPO:
             __atomic_store_n(&state->tempo_us_per_qn, event->tempo, __ATOMIC_RELEASE);
             break;
         case MIDI_EVENT_SYSEX:
-            midi_backend_send_sysex_local(&state->backend, event->sysex, event->sysex_len);
+            winmm_doom95_midi_backend_send_sysex(&state->backend, event->sysex,
+                                                 event->sysex_len);
             break;
         }
 
         midi_event_free_local(event);
     }
 
-    midi_backend_reset_local(&state->backend);
-    midi_backend_close_local(&state->backend);
+    winmm_doom95_midi_backend_reset(&state->backend);
+    winmm_doom95_midi_backend_close(&state->backend);
     return NULL;
 }
 
@@ -565,7 +320,7 @@ static uintptr_t midi_stream_stop_worker_host_call(void *arg)
 
 static uintptr_t midi_backend_apply_volume_host_call(void *arg)
 {
-    midi_backend_apply_volume_local((midi_stream_state_t *)arg);
+    winmm_doom95_midi_backend_apply_volume((midi_stream_state_t *)arg);
     return 0u;
 }
 
@@ -813,8 +568,7 @@ uint32_t joyGetPosEx(uint32_t uJoyID, JOYINFOEX_WINE *info)
 KERNEL32_STUB
 uint32_t midiOutGetNumDevs(void)
 {
-    char soundfont_path[256];
-    int num_devs = midi_find_soundfont(soundfont_path, sizeof(soundfont_path)) ? 1 : 0;
+    int num_devs = winmm_doom95_midi_backend_has_device() ? 1 : 0;
 
     DEBUG_LEVEL(1, "winmm: midiOutGetNumDevs -> %d", num_devs);
     return (uint32_t)num_devs;
