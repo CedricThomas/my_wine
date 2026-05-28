@@ -45,7 +45,7 @@ const char *pe32_resolve_path_or_null(int argc, char **argv)
 {
     if (argc > 1)
         return argv[1];
-    return pe32_getenv("WINE32_PE_PATH");
+    return NULL;
 }
 
 void pe32_init_runtime_debug_level(void)

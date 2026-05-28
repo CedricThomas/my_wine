@@ -158,7 +158,6 @@ make CFLAGS_EXTRA="-g" my_wine64
 |----------|-----------|---------|
 | `MY_WINE_DEBUG_LEVEL` | `main.c` (PE32+), `pe32_bootstrap.c` (PE32) | Set debug output level 0-3 |
 | `WINE_DLL_PATH` | `main.c` | Override DLL search path for imports |
-| `WINE32_PE_PATH` | `pe32_bootstrap.c` | PE path when no argv[1] provided |
 
 The `my_wine` wrapper passes the full environment through `execvp`, so all variables are visible to the backend. Set them on the wrapper command line:
 

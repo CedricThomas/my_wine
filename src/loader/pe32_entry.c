@@ -5,7 +5,7 @@
  * my_wine wrapper for PE32 images.
  *
  * The 32-bit backend is a standalone process that independently:
- *   1. Reads the PE file path from argv[1], with WINE32_PE_PATH as a fallback
+ *   1. Reads the PE file path from argv[1]
  *   2. Opens and maps the PE image at the preferred (or default 0x00400000) base
  *   3. Allocates TEB at fixed address 0x7FFDE000 and PEB at 0x7FFDF000
  *   4. Initializes TEB/PEB (self-references, PEB pointer, image base)

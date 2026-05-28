@@ -55,7 +55,7 @@ for Windows API translation, heap management, and rendering.
 - **Architecture:** Runs in a separate 32-bit process with glibc CRT. Uses `int $0x80`
   syscalls. Sets FS → TEB via `set_thread_area` (syscall 243) because
   `arch_prctl(ARCH_SET_FS)` returns `EINVAL` in 32-bit mode on a 64-bit kernel.
-- **Path resolution:** Reads PE path from `argv[1]` with `WINE32_PE_PATH` as fallback.
+- **Path resolution:** Reads PE path from `argv[1]`.
 
 ---
 

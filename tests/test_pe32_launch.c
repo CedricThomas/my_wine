@@ -16,7 +16,7 @@ static int g_failures = 0;
         }                                                                      \
     } while (0)
 
-static int run_my_wine32(const char *pe_path, int use_env_fallback,
+static int run_my_wine32(const char *pe_path,
                          char *output, size_t output_size)
 {
     int pipefd[2];
@@ -36,20 +36,12 @@ static int run_my_wine32(const char *pe_path, int use_env_fallback,
 
     if (pid == 0) {
         char *const argv_direct[] = { "./my_wine32", (char *)pe_path, NULL };
-        char *const argv_env[] = { "./my_wine32", NULL };
-
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[0]);
         close(pipefd[1]);
 
-        if (use_env_fallback) {
-            setenv("WINE32_PE_PATH", pe_path, 1);
-            execv("./my_wine32", argv_env);
-        } else {
-            unsetenv("WINE32_PE_PATH");
-            execv("./my_wine32", argv_direct);
-        }
+        execv("./my_wine32", argv_direct);
 
         dprintf(STDERR_FILENO, "execv failed: %s\n", strerror(errno));
         _exit(127);
@@ -77,11 +69,11 @@ static int run_my_wine32(const char *pe_path, int use_env_fallback,
     return -1;
 }
 
-static void test_pe32_launch_mode(const char *label, int use_env_fallback)
+static void test_pe32_launch_mode(const char *label)
 {
     static const char *pe_path = "samples/entry_test_32/entry_test_32.exe";
     char output[8192];
-    int rc = run_my_wine32(pe_path, use_env_fallback, output, sizeof(output));
+    int rc = run_my_wine32(pe_path, output, sizeof(output));
 
     T(rc == 0, label);
     T(strstr(output, "Entry test: OK") != NULL,
@@ -92,8 +84,7 @@ static void test_pe32_launch_mode(const char *label, int use_env_fallback)
 
 int main(void)
 {
-    test_pe32_launch_mode("my_wine32 launch via argv failed", 0);
-    test_pe32_launch_mode("my_wine32 launch via WINE32_PE_PATH fallback failed", 1);
+    test_pe32_launch_mode("my_wine32 launch via argv failed");
 
     if (g_failures == 0)
         printf("PASS: pe32 launch path selection and command line seeding\n");
