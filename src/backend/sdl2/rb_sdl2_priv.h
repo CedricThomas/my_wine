@@ -106,6 +106,9 @@ typedef struct rb_cursor {
 } rb_cursor;
 
 int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg);
+void rb_surface_apply_palette(rb_surface *surface_state);
+int rb_surface_present_window(rb_window *wnd, rb_surface *primary,
+                              rb_surface *backbuffer, uint32_t flip_count);
 
 /*
  * Guest-facing USER32 stubs enter the SDL backend with GS (64-bit) / FS (32-bit)

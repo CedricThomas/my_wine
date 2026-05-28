@@ -9,7 +9,8 @@ behavior.
 
 The tactical execution backlog lives in
 `audit/cleanup-backlog.md`. This file stays high-level; the backlog should
-carry the concrete sequence.
+carry the concrete sequence. Keep it planning-only: queue, rationale, and
+stable ownership state. Do not use it as a running verification ledger.
 
 ## Current Health
 
@@ -73,7 +74,20 @@ Interpretation:
 - Loader internals should be grouped by responsibility rather than keeping all
   concerns flat under `src/loader/`.
 
-## Sequencing
+## Efficient Pass Model
+
+Use this execution model for each cleanup pass:
+
+1. Read `audit/cleanup-backlog.md`, then inspect only the current top target
+   plus directly adjacent helper/header files needed to judge a seam.
+2. Choose one behavior-preserving extraction with a clear ownership win.
+3. During editing, use cheap confidence checks first:
+   targeted object builds, a focused native test when one clearly covers the
+   seam, or a small diff against `refs/working` when useful.
+4. Run the full verification loop once after the extraction is complete.
+5. Update docs only where structure or next-pass sequencing changed.
+6. Keep exact verification results in the terminal report and git history
+   rather than appending them to `audit/cleanup-backlog.md`.
 
 ### Phase 1: Non-behavioral preparation
 

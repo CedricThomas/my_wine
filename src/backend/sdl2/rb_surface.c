@@ -140,7 +140,7 @@ static uintptr_t rb_sdl_set_surface_palette_call(void *arg)
     return (uintptr_t)SDL_SetSurfacePalette(a->surface, a->palette);
 }
 
-static void rb_surface_apply_palette(rb_surface *surface_state)
+void rb_surface_apply_palette(rb_surface *surface_state)
 {
     rb_palette *palette_state;
     rb_sdl_surface_palette_args args;
@@ -192,98 +192,6 @@ static uintptr_t rb_sdl_blt_surface_call(void *arg)
 {
     rb_sdl_blt_args *a = arg;
     return (uintptr_t)SDL_BlitSurface(a->src, &a->src_rect, a->dst, &a->dst_rect);
-}
-
-typedef struct {
-    SDL_Window *window;
-    SDL_Surface *surface;
-    uint32_t flip_count;
-} rb_sdl_window_surface_update_args;
-
-static uintptr_t rb_sdl_update_window_surface_call(void *arg)
-{
-    rb_sdl_window_surface_update_args *a = arg;
-    SDL_Surface *ws = SDL_GetWindowSurface(a->window);
-    SDL_Surface *src = a->surface;
-    SDL_Surface *converted = NULL;
-    int ret;
-    if (!ws)
-        return 0;
-
-    if (debug_level_at_least(1) && a->flip_count != 0 &&
-        (a->flip_count & (a->flip_count - 1)) == 0) {
-        const char *src_fmt = SDL_GetPixelFormatName(a->surface->format->format);
-        const char *dst_fmt = SDL_GetPixelFormatName(ws->format->format);
-        DEBUG("rb_surface: window flip=%u src_fmt=%s src_bpp=%u dst_fmt=%s dst_bpp=%u dst_palette=%d",
-              a->flip_count, src_fmt, a->surface->format->BitsPerPixel,
-              dst_fmt, ws->format->BitsPerPixel, ws->format->palette ? ws->format->palette->ncolors : 0);
-    }
-
-    if (a->surface->format->format != ws->format->format) {
-        converted = SDL_ConvertSurface(a->surface, ws->format, 0);
-        if (converted)
-            src = converted;
-    }
-
-    if (src->w != ws->w || src->h != ws->h) {
-        SDL_Rect dst = { 0, 0, ws->w, ws->h };
-        ret = SDL_BlitScaled(src, NULL, ws, &dst);
-    } else {
-        ret = SDL_BlitSurface(src, NULL, ws, NULL);
-    }
-    if (debug_level_at_least(1) && a->flip_count != 0 &&
-        (a->flip_count & (a->flip_count - 1)) == 0) {
-        DEBUG("rb_surface: present ret=%d err=%s", ret, SDL_GetError());
-    }
-    if (converted)
-        SDL_FreeSurface(converted);
-    SDL_UpdateWindowSurface(a->window);
-    return 1;
-}
-
-static void rb_debug_log_surface_sample(const char *tag, const rb_surface *s, uint32_t count)
-{
-    const uint8_t *pixels;
-    rb_palette *palette_state;
-    SDL_Color c0 = { 0, 0, 0, 0 };
-    SDL_Color c1 = { 0, 0, 0, 0 };
-    SDL_Color c255 = { 0, 0, 0, 0 };
-    int size;
-    int nonzero = 0;
-    int first_nonzero = -1;
-    int palette_colors = 0;
-
-    if (!debug_level_at_least(1) || !s || !s->surface || !s->surface->pixels)
-        return;
-    if ((count & (count - 1)) != 0)
-        return;
-
-    pixels = (const uint8_t *)s->surface->pixels;
-    size = s->surface->pitch * s->surface->h;
-    for (int i = 0; i < size; i++) {
-        if (pixels[i] != 0) {
-            nonzero++;
-            if (first_nonzero < 0)
-                first_nonzero = i;
-        }
-    }
-
-    palette_state = get_palette(s->palette);
-    if (palette_state && palette_state->palette) {
-        palette_colors = palette_state->palette->ncolors;
-        if (palette_colors > 0)
-            c0 = palette_state->palette->colors[0];
-        if (palette_colors > 1)
-            c1 = palette_state->palette->colors[1];
-        if (palette_colors > 255)
-            c255 = palette_state->palette->colors[255];
-    }
-
-    DEBUG("rb_surface: %s flip=%u size=%dx%d pitch=%d nonzero=%d first=%d palette=%u colors=%d c0=%u,%u,%u c1=%u,%u,%u c255=%u,%u,%u dirty=%d",
-          tag, count, s->surface->w, s->surface->h, s->surface->pitch,
-          nonzero, first_nonzero, (uint32_t)s->palette, palette_colors,
-          c0.r, c0.g, c0.b, c1.r, c1.g, c1.b, c255.r, c255.g, c255.b,
-          s->dirty);
 }
 
 rb_surface_t rb_surface_create(int w, int h, rb_pixel_format_t format,
@@ -559,36 +467,9 @@ int rb_surface_flip(rb_surface_t surf)
         return RB_FAIL;
 
     backbuffer = get_surface(wnd->backbuffer);
-    if (backbuffer && backbuffer->surface) {
-        flip_count++;
-        rb_debug_log_surface_sample("present-backbuffer", backbuffer, flip_count);
-        rb_sdl_window_surface_update_args args = { wnd->window, backbuffer->surface, flip_count };
-        rb_call_on_host_stack(rb_sdl_update_window_surface_call, &args);
-
-        {
-            uint8_t *tmp_pixels = primary->surface->pixels;
-            uint8_t *tmp_buf = primary->own_buf;
-            rb_palette_t tmp_palette = primary->palette;
-
-            primary->surface->pixels = backbuffer->surface->pixels;
-            backbuffer->surface->pixels = tmp_pixels;
-
-            primary->own_buf = backbuffer->own_buf;
-            backbuffer->own_buf = tmp_buf;
-
-            primary->palette = backbuffer->palette;
-            backbuffer->palette = tmp_palette;
-        }
-
-        rb_surface_apply_palette(primary);
-        rb_surface_apply_palette(backbuffer);
-        backbuffer->dirty = 0;
-    } else {
-        flip_count++;
-        rb_debug_log_surface_sample("present-primary", primary, flip_count);
-        rb_sdl_window_surface_update_args args = { wnd->window, primary->surface, flip_count };
-        rb_call_on_host_stack(rb_sdl_update_window_surface_call, &args);
-    }
+    flip_count++;
+    if (rb_surface_present_window(wnd, primary, backbuffer, flip_count) != RB_OK)
+        return RB_FAIL;
 
     primary->dirty = 0;
     return RB_OK;
