@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include "kernel32_doom95.h"
 #include "user32_dialog_priv.h"
 #include "include/debug.h"
 
@@ -13,42 +14,6 @@
 typedef void (*DOOM95_REFRESH_MAPS_FN)(HWND);
 
 extern LRESULT KERNEL32_ABI SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
-extern const char *wine_get_current_directory(void);
-
-static void dialog_try_doom95_seed_basewad_state(HINSTANCE hInstance)
-{
-    uintptr_t module_base = (uintptr_t)hInstance;
-    uintptr_t *state_slot;
-    uintptr_t state;
-    char *basewad;
-    const char *cwd;
-    size_t cwd_len;
-
-    if (module_base == 0)
-        return;
-    state_slot = (uintptr_t *)(module_base + 0x131e0u);
-
-    state = *state_slot;
-    if (state == 0)
-        return;
-
-    basewad = (char *)(uintptr_t)(state + 0x23u);
-    cwd = wine_get_current_directory();
-    cwd_len = cwd ? user32_strlen(cwd) : 0;
-    if (cwd && cwd_len > 0 && cwd_len + 10 < 0x100u) {
-        user32_strncpy(basewad, cwd, 0xff);
-        if (basewad[cwd_len - 1] != '/') {
-            basewad[cwd_len++] = '/';
-            basewad[cwd_len] = '\0';
-        }
-        user32_strncpy(basewad + cwd_len, "DOOM1.WAD", 0xff - cwd_len);
-        basewad[0xff] = '\0';
-        return;
-    }
-
-    user32_strncpy(basewad, "DOOM1.WAD", 0xff);
-    basewad[0xff] = '\0';
-}
 
 void user32_dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
                                         const char *lpTemplateName, void *lpDialogFunc)
@@ -97,7 +62,7 @@ void user32_dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
         if (SendMessageA(wad_hwnd, CB_GETCOUNT, 0, 0) <= 0)
             SendMessageA(wad_hwnd, CB_ADDSTRING, 0, (LPARAM)(uintptr_t)"DOOM1.WAD");
         SendMessageA(wad_hwnd, WM_SETTEXT, 0, (LPARAM)(uintptr_t)"DOOM1.WAD");
-        dialog_try_doom95_seed_basewad_state(hInstance);
+        wine_doom95_seed_basewad_state((uintptr_t)hInstance);
         current_wad_idx = (int)SendMessageA(wad_hwnd, CB_GETCURSEL, 0, 0);
         if (current_wad_idx > 0) {
             wad_idx = current_wad_idx;

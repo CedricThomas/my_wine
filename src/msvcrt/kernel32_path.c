@@ -23,7 +23,12 @@
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
 #define FILE_ATTRIBUTE_NORMAL    0x80
 
-static char g_process_current_directory[1024];
+typedef struct {
+    char current_directory[1024];
+    int initialized;
+} wine_path_runtime_state;
+
+static wine_path_runtime_state g_path_runtime;
 
 static long wine_path_syscall2(long nr, long a0, long a1)
 {
@@ -46,7 +51,8 @@ static long wine_path_syscall2(long nr, long a0, long a1)
 
 void wine_reset_current_directory_cache(void)
 {
-    g_process_current_directory[0] = '\0';
+    g_path_runtime.current_directory[0] = '\0';
+    g_path_runtime.initialized = 0;
 }
 
 static void wine_copy_cstr(char *dst, size_t dst_size, const char *src)
@@ -67,37 +73,41 @@ static void wine_copy_cstr(char *dst, size_t dst_size, const char *src)
 
 static void wine_init_process_directory(void)
 {
+    wine_path_runtime_state *path_state = &g_path_runtime;
     const char *pe_path;
     const char *slash;
     char cwd[1024];
     size_t len;
 
-    if (g_process_current_directory[0] != '\0')
+    if (path_state->initialized)
         return;
 
     pe_path = g_loader.pe_path;
     if (!pe_path || pe_path[0] == '\0') {
-        g_process_current_directory[0] = '.';
-        g_process_current_directory[1] = '\0';
+        path_state->current_directory[0] = '.';
+        path_state->current_directory[1] = '\0';
+        path_state->initialized = 1;
         return;
     }
 
     slash = strrchr(pe_path, '/');
     if (!slash) {
-        g_process_current_directory[0] = '.';
-        g_process_current_directory[1] = '\0';
+        path_state->current_directory[0] = '.';
+        path_state->current_directory[1] = '\0';
+        path_state->initialized = 1;
         return;
     }
 
     len = (size_t)(slash - pe_path);
     if (len == 0) {
-        g_process_current_directory[0] = '/';
-        g_process_current_directory[1] = '\0';
+        path_state->current_directory[0] = '/';
+        path_state->current_directory[1] = '\0';
+        path_state->initialized = 1;
         return;
     }
 
-    if (len >= sizeof(g_process_current_directory))
-        len = sizeof(g_process_current_directory) - 1;
+    if (len >= sizeof(path_state->current_directory))
+        len = sizeof(path_state->current_directory) - 1;
 
     /*
      * Normalize relative launch paths to an absolute host path so later
@@ -108,23 +118,25 @@ static void wine_init_process_directory(void)
 
         if (cwd_len > 0 && cwd[cwd_len - 1] == '/')
             cwd_len--;
-        if (cwd_len + 1 + len < sizeof(g_process_current_directory)) {
-            memcpy(g_process_current_directory, cwd, cwd_len);
-            g_process_current_directory[cwd_len] = '/';
-            memcpy(g_process_current_directory + cwd_len + 1, pe_path, len);
-            g_process_current_directory[cwd_len + 1 + len] = '\0';
+        if (cwd_len + 1 + len < sizeof(path_state->current_directory)) {
+            memcpy(path_state->current_directory, cwd, cwd_len);
+            path_state->current_directory[cwd_len] = '/';
+            memcpy(path_state->current_directory + cwd_len + 1, pe_path, len);
+            path_state->current_directory[cwd_len + 1 + len] = '\0';
+            path_state->initialized = 1;
             return;
         }
     }
 
-    memcpy(g_process_current_directory, pe_path, len);
-    g_process_current_directory[len] = '\0';
+    memcpy(path_state->current_directory, pe_path, len);
+    path_state->current_directory[len] = '\0';
+    path_state->initialized = 1;
 }
 
 const char *wine_get_current_directory(void)
 {
     wine_init_process_directory();
-    return g_process_current_directory;
+    return g_path_runtime.current_directory;
 }
 
 int wine_resolve_path(const char *src, char *dst, size_t dst_size)
@@ -168,6 +180,7 @@ int wine_resolve_path(const char *src, char *dst, size_t dst_size)
 
 int wine_set_current_directory(const char *path)
 {
+    wine_path_runtime_state *path_state = &g_path_runtime;
     char resolved[1024];
     struct stat st;
 
@@ -175,9 +188,12 @@ int wine_set_current_directory(const char *path)
         return 0;
     if (stat(resolved, &st) != 0 || !S_ISDIR(st.st_mode))
         return 0;
+    if (access(resolved, X_OK) != 0)
+        return 0;
 
-    wine_copy_cstr(g_process_current_directory, sizeof(g_process_current_directory), resolved);
-    return chdir(g_process_current_directory) == 0;
+    wine_copy_cstr(path_state->current_directory, sizeof(path_state->current_directory), resolved);
+    path_state->initialized = 1;
+    return 1;
 }
 
 static int wine_path_lookup_case_insensitive(const char *path, char *resolved, size_t resolved_size)

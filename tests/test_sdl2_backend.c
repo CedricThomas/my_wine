@@ -82,6 +82,7 @@ static int run_tests(void) {
   /* ---- Init ---- */
   printf("  init... ");
   T(rb_init() == RB_OK, "rb_init failed");
+  T(rb_init() == RB_OK, "rb_init second call failed");
   printf("OK\n");
 
   /* ---- Timer ---- */
@@ -425,6 +426,7 @@ static int run_tests(void) {
     rb_surface_destroy(surf);
   if (pal)
     rb_palette_destroy(pal);
+  rb_shutdown();
   rb_shutdown();
   printf("OK\n");
 

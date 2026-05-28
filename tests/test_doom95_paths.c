@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 
 #include "src/loader/loader_state.h"
+#include "src/msvcrt/kernel32_doom95.h"
 #include "src/msvcrt/kernel32_priv.h"
 
 static int g_failures = 0;
@@ -123,9 +124,36 @@ static void test_current_directory_resolution(void)
     T(chdir(original_cwd) == 0, "restore original cwd failed");
 }
 
+static void test_doom95_basewad_helper(void)
+{
+    char basewad[32];
+    char long_dir[64];
+    size_t i;
+
+    expect_str_eq("null directory falls back to bare WAD",
+                  ({ wine_build_doom95_basewad_path(basewad, sizeof(basewad), NULL); basewad; }),
+                  "DOOM1.WAD");
+
+    expect_str_eq("directory appends base WAD name",
+                  ({ wine_build_doom95_basewad_path(basewad, sizeof(basewad), "/opt/doom"); basewad; }),
+                  "/opt/doom/DOOM1.WAD");
+
+    expect_str_eq("trailing slash is preserved once",
+                  ({ wine_build_doom95_basewad_path(basewad, sizeof(basewad), "/opt/doom/"); basewad; }),
+                  "/opt/doom/DOOM1.WAD");
+
+    for (i = 0; i + 1 < sizeof(long_dir); i++)
+        long_dir[i] = 'a';
+    long_dir[sizeof(long_dir) - 1] = '\0';
+    expect_str_eq("oversized directory falls back to bare WAD",
+                  ({ wine_build_doom95_basewad_path(basewad, sizeof(basewad), long_dir); basewad; }),
+                  "DOOM1.WAD");
+}
+
 int main(void)
 {
     test_current_directory_resolution();
+    test_doom95_basewad_helper();
 
     if (g_failures == 0)
         printf("PASS: doom95 path helpers\n");

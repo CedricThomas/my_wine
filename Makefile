@@ -157,11 +157,13 @@ TEST_export_parsing_OBJS = $(BUILDDIR)/export_table.o $(BUILDDIR)/module_list.o 
 TEST_pe32_OBJS = $(PE_OBJS) $(BUILDDIR)/relocations.o $(BUILDDIR)/debug.o
 TEST_entry_symbols_OBJS = $(PE_OBJS) $(BUILDDIR)/crt.o $(BUILDDIR)/crt_mingw.o $(BUILDDIR)/crt_watcom.o $(BUILDDIR)/crt_globals.o $(BUILDDIR)/crt_offset_discovery.o $(BUILDDIR)/crt_refptrs.o $(BUILDDIR)/common.o $(BUILDDIR)/debug.o
 TEST_doom95_paths_OBJS = $(TEST_IMPORT_OBJS) $(BUILDDIR)/peb_ldr.o $(BUILDDIR)/debug.o
-TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_backend.o $(BUILDDIR)/ddraw_core.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/ddraw_clipper.o $(BUILDDIR)/ddraw_mode.o $(BUILDDIR)/ddraw_palette.o $(BUILDDIR)/ddraw_surface.o $(BUILDDIR)/ddraw_surface_create.o $(BUILDDIR)/ddraw_surface_desc.o $(BUILDDIR)/ddraw_surface_ops.o $(BUILDDIR)/debug.o
-TEST_dsound_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/dsound_interface.o $(BUILDDIR)/dsound_buffer.o $(BUILDDIR)/dsound_buffer_create.o $(BUILDDIR)/dsound_buffer_control.o $(BUILDDIR)/debug.o
-TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
-TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
-TEST_user32_dialog_OBJS = $(TEST_user32_handle_ownership_OBJS) $(BUILDDIR)/user32_dialog_create.o $(BUILDDIR)/user32_dialog_items.o $(BUILDDIR)/user32_dialog_lifecycle.o $(BUILDDIR)/user32_dialog_message.o $(BUILDDIR)/user32_dialog_modal.o $(BUILDDIR)/user32_dialog_state.o $(BUILDDIR)/user32_dialog_controls.o $(BUILDDIR)/user32_dialog_doom95.o $(BUILDDIR)/resource_win32.o $(BUILDDIR)/kernel32_path.o $(BUILDDIR)/common.o
+HANDLE_MANAGER_TEST_OBJS = $(BUILDDIR)/handle_manager.o $(BUILDDIR)/handle_manager_runtime.o
+HANDLE_MANAGER_TEST32_OBJS = $(BUILDDIR32)/handle_manager.o $(BUILDDIR32)/handle_manager_runtime.o
+TEST_ddraw_OBJS = $(BACKEND_OBJS) $(HANDLE_MANAGER_TEST_OBJS) $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/ddraw_backend.o $(BUILDDIR)/ddraw_core.o $(BUILDDIR)/ddraw_interface.o $(BUILDDIR)/ddraw_clipper.o $(BUILDDIR)/ddraw_mode.o $(BUILDDIR)/ddraw_palette.o $(BUILDDIR)/ddraw_surface.o $(BUILDDIR)/ddraw_surface_create.o $(BUILDDIR)/ddraw_surface_desc.o $(BUILDDIR)/ddraw_surface_ops.o $(BUILDDIR)/debug.o
+TEST_dsound_OBJS = $(BACKEND_OBJS) $(HANDLE_MANAGER_TEST_OBJS) $(BUILDDIR)/dsound_interface.o $(BUILDDIR)/dsound_buffer.o $(BUILDDIR)/dsound_buffer_create.o $(BUILDDIR)/dsound_buffer_control.o $(BUILDDIR)/debug.o
+TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(HANDLE_MANAGER_TEST_OBJS) $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(HANDLE_MANAGER_TEST_OBJS) $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_dialog_OBJS = $(TEST_user32_handle_ownership_OBJS) $(BUILDDIR)/user32_dialog_create.o $(BUILDDIR)/user32_dialog_items.o $(BUILDDIR)/user32_dialog_lifecycle.o $(BUILDDIR)/user32_dialog_message.o $(BUILDDIR)/user32_dialog_modal.o $(BUILDDIR)/user32_dialog_state.o $(BUILDDIR)/user32_dialog_controls.o $(BUILDDIR)/user32_dialog_doom95.o $(BUILDDIR)/resource_win32.o $(BUILDDIR)/kernel32_path.o $(BUILDDIR)/kernel32_doom95.o $(BUILDDIR)/common.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
@@ -304,7 +306,7 @@ tests: my_wine64 my_wine32 $(SHELL.EXE) $(ENTRY_TEST_32_EXE) $(BUILDDIR)/test_pa
 		$(BUILDDIR)/test_relocations $(BUILDDIR)/test_module_registry \
 		$(BUILDDIR)/test_export_parsing $(BUILDDIR)/test_pe32 \
 		$(BUILDDIR)/test_syscall_safe_utils $(BUILDDIR)/test_entry_symbols \
-		$(BUILDDIR)/test_doom95_paths $(BUILDDIR)/test_pe32_launch \
+		$(BUILDDIR)/test_doom95_paths $(BUILDDIR)/test_handle_manager $(BUILDDIR)/test_pe32_launch \
 		$(BUILDDIR)/test_ddraw $(BUILDDIR)/test_dsound \
 		$(BUILDDIR)/test_sdl2_backend $(BUILDDIR)/test_user32_handle_ownership \
 		$(BUILDDIR)/test_user32_message_dispatch $(BUILDDIR)/test_user32_dialog \
@@ -334,6 +336,7 @@ $(eval $(call TEST_RULE,export_parsing,$(TEST_export_parsing_OBJS)))
 $(eval $(call TEST_RULE,pe32,$(TEST_pe32_OBJS)))
 $(eval $(call TEST_RULE,entry_symbols,$(TEST_entry_symbols_OBJS)))
 $(eval $(call TEST_RULE,doom95_paths,$(TEST_doom95_paths_OBJS)))
+$(eval $(call TEST_RULE,handle_manager,$(BUILDDIR)/handle_manager.o $(BUILDDIR)/handle_manager_runtime.o))
 $(eval $(call TEST_RULE,syscall_safe_utils,))
 $(eval $(call TEST_RULE,pe32_launch,))
 
@@ -342,7 +345,7 @@ backend: $(BACKEND_OBJS)
 	@echo "==== SDL2 backend objects built ===="
 
 # SDL2 backend test
-TEST_sdl2_backend_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/debug.o
+TEST_sdl2_backend_OBJS = $(BACKEND_OBJS) $(HANDLE_MANAGER_TEST_OBJS) $(BUILDDIR)/debug.o
 $(BUILDDIR)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend_OBJS)
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
@@ -379,12 +382,12 @@ $(BUILDDIR32)/backend/%.o: %.c | $(BUILDDIR32)
 	@$(MY_WINE32_CC) $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) -mstackrealign -fno-stack-protector $(SDL2_CFLAGS) -c $< -o $@
 
 # SDL2 backend test (32-bit)
-TEST_sdl2_backend32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o
+TEST_sdl2_backend32_OBJS = $(BACKEND32_OBJS) $(HANDLE_MANAGER_TEST32_OBJS)
 $(BUILDDIR32)/test_sdl2_backend: tests/test_sdl2_backend.c $(TEST_sdl2_backend32_OBJS)
 	@echo "  LD32 $@"
 	@$(MY_WINE32_CC) -no-pie $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS_32)
 
-TEST_dsound32_OBJS = $(BACKEND32_OBJS) $(BUILDDIR32)/handle_manager.o $(BUILDDIR32)/dsound_interface.o $(BUILDDIR32)/dsound_buffer.o $(BUILDDIR32)/debug.o
+TEST_dsound32_OBJS = $(BACKEND32_OBJS) $(HANDLE_MANAGER_TEST32_OBJS) $(BUILDDIR32)/dsound_interface.o $(BUILDDIR32)/dsound_buffer.o $(BUILDDIR32)/debug.o
 $(BUILDDIR32)/test_dsound: tests/test_dsound.c $(TEST_dsound32_OBJS)
 	@echo "  LD32 $@"
 	@$(MY_WINE32_CC) -no-pie $(filter-out -mno-sse,$(MY_WINE32_CFLAGS)) $(SDL2_CFLAGS) -I include -o $@ $^ $(SDL2_LIBS_32)

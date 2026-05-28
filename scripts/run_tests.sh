@@ -147,6 +147,9 @@ run_test test_entry_symbols
 # test_doom95_paths
 run_test test_doom95_paths
 
+# test_handle_manager
+run_test test_handle_manager
+
 # test_pe32_launch
 run_test test_pe32_launch
 

@@ -107,6 +107,18 @@ typedef struct rb_cursor {
     SDL_Cursor *cursor;
 } rb_cursor;
 
+typedef struct rb_backend_driver_info {
+    char requested_video_driver[64];
+    char requested_audio_driver[64];
+    char active_video_driver[64];
+    char active_audio_driver[64];
+} rb_backend_driver_info;
+
+typedef struct rb_sdl_init_args {
+    uint32_t flags;
+    void (*install_x11_error_handler)(void);
+} rb_sdl_init_args;
+
 int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg);
 int rb_audio_frame_count(const rb_audio_buf *buf);
 void rb_audio_mix_buffer(uint8_t *stream, int len, rb_audio_buf *buf);
@@ -473,7 +485,16 @@ int rb_event_pop_synthetic(rb_msg_t *msg);
 void rb_event_begin_shutdown(void);
 int rb_event_translate_shutdown(rb_msg_t *out_msg);
 uintptr_t rb_x11_consume_bad_window(void);
+void rb_runtime_note_bad_window(uintptr_t native_window_id);
+void rb_runtime_note_shutdown_request(void);
 int rb_runtime_consume_shutdown_request(void);
 int rb_runtime_shutdown_requested(void);
+int rb_runtime_is_initialized(void);
+void rb_runtime_set_initialized(int initialized);
+void rb_runtime_install_signal_handlers(void);
+void rb_runtime_restore_signal_handlers(void);
+void rb_backend_capture_requested_drivers(rb_backend_driver_info *info);
+uintptr_t rb_backend_init_sdl_call(void *arg);
+uintptr_t rb_backend_capture_active_drivers_call(void *arg);
 
 #endif /* RB_SDL2_PRIV_H */
