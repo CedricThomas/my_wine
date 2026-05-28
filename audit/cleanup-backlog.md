@@ -14,7 +14,7 @@ Those belong in command output and git history.
 Tomorrow's focus:
 
 - Inspect the remainder of `src/msvcrt/user32_dialog.c` for the next safest
-  narrow extraction after dialog item-state ownership moved out.
+  narrow extraction after dialog modal/class ownership moved out.
 - Prefer one helper/file extraction only.
 - Preserve behavior and public exports.
 - Keep PE32 vs PE32+ boundaries explicit.
@@ -26,8 +26,9 @@ Why this is the top goal:
   helpers live in `src/backend/sdl2/rb_window_state.c`.
 - `src/msvcrt/user32_dialog.c` is now the next least-coupled oversized file in
   the active queue, although dialog control-message handling now lives in
-  `src/msvcrt/user32_dialog_controls.c` and dialog item-state ownership now
-  lives in `src/msvcrt/user32_dialog_state.c`.
+  `src/msvcrt/user32_dialog_controls.c`, dialog item-state ownership now lives
+  in `src/msvcrt/user32_dialog_state.c`, and dialog modal/class ownership now
+  lives in `src/msvcrt/user32_dialog_modal.c`.
 - Loader/import work still remains higher-risk than another guest/backend-local
   helper extraction.
 
@@ -47,6 +48,8 @@ Stable enough to leave alone unless new evidence appears:
   `src/msvcrt/dsound_buffer.c`.
 - Doom95 dialog autostart behavior already lives in
   `src/msvcrt/user32_dialog_doom95.c`.
+- USER32 dialog modal/class ownership now lives in
+  `src/msvcrt/user32_dialog_modal.c`.
 - SDL surface presentation now lives in
   `src/backend/sdl2/rb_surface_present.c`.
 - SDL backend-local window state ownership now lives in

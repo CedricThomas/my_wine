@@ -6,70 +6,14 @@
 #include "include/common.h"
 #include "include/syscall_safe_utils.h"
 
-#define WM_INITDIALOG 0x0110
-#define WM_COMMAND 0x0111
-#define WM_CLOSE 0x0010
-#define IDOK 1
-
-extern LRESULT KERNEL32_ABI DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
-extern ATOM KERNEL32_ABI RegisterClassA(const WNDCLASSA *lpWndClass);
 extern BOOL KERNEL32_ABI DestroyWindow(HWND hWnd);
 extern HWND KERNEL32_ABI CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
                                          const char *lpWindowName, DWORD dwStyle, int X, int Y,
                                          int nWidth, int nHeight, HWND hWndParent, HMENU hMenu,
                                          HINSTANCE hInstance, void *lpParam);
 
-static int g_dialog_class_registered = 0;
-
-typedef struct {
-    HWND dialog;
-    void *dlgproc;
-    intptr_t result;
-    int ended;
-} dialog_modal_state;
-
-static dialog_modal_state g_dialog_modals[16];
-
 KERNEL32_STUB HWND GetDlgItem(HWND hDlg, int nIDDlgItem);
 KERNEL32_STUB BOOL SetDlgItemTextA(HWND hDlg, int nIDDlgItem, const char *lpString);
-
-static void user32_dialog_ensure_class(void)
-{
-    WNDCLASSA cls;
-
-    if (g_dialog_class_registered)
-        return;
-
-    DEBUG_LEVEL(1, "user32: dialog ensure class begin");
-    memset(&cls, 0, sizeof(cls));
-    cls.lpszClassName = "MY_WINE_DIALOG";
-    cls.lpfnWndProc = (WNDPROC)DefWindowProcA;
-    DEBUG_LEVEL(1, "user32: dialog ensure class register class=%s wndproc=%p",
-                cls.lpszClassName, cls.lpfnWndProc);
-    if (RegisterClassA(&cls) != 0)
-        g_dialog_class_registered = 1;
-    DEBUG_LEVEL(1, "user32: dialog ensure class registered=%d", g_dialog_class_registered);
-}
-
-static dialog_modal_state *dialog_find_modal(HWND dialog, int create)
-{
-    int i;
-
-    for (i = 0; i < 16; i++) {
-        if (g_dialog_modals[i].dialog == dialog)
-            return &g_dialog_modals[i];
-    }
-    if (!create)
-        return NULL;
-    for (i = 0; i < 16; i++) {
-        if (g_dialog_modals[i].dialog == 0) {
-            user32_memset(&g_dialog_modals[i], 0, sizeof(g_dialog_modals[i]));
-            g_dialog_modals[i].dialog = dialog;
-            return &g_dialog_modals[i];
-        }
-    }
-    return NULL;
-}
 
 KERNEL32_STUB
 HWND CreateDialogParamA(HINSTANCE hInstance, const char *lpTemplateName, HWND hWndParent,
@@ -90,11 +34,8 @@ HWND CreateDialogParamA(HINSTANCE hInstance, const char *lpTemplateName, HWND hW
     user32_dialog_ensure_class();
     hwnd = CreateWindowExA(0, "MY_WINE_DIALOG", "Dialog", WS_POPUP | WS_CAPTION,
                            0, 0, 320, 200, hWndParent, 0, hInstance, NULL);
-    if (hwnd) {
-        dialog_modal_state *modal = dialog_find_modal(hwnd, 1);
-        if (modal)
-            modal->dlgproc = lpDialogFunc;
-    }
+    if (hwnd)
+        user32_dialog_set_modal_dlgproc(hwnd, lpDialogFunc);
     if (hwnd && lpDialogFunc) {
         DEBUG_LEVEL(1, "user32: CreateDialogParamA init hwnd=0x%lx",
                     (unsigned long)(uintptr_t)hwnd);
@@ -106,14 +47,9 @@ HWND CreateDialogParamA(HINSTANCE hInstance, const char *lpTemplateName, HWND hW
 
 BOOL user32_dialog_end(HWND hDlg, intptr_t nResult)
 {
-    dialog_modal_state *modal = dialog_find_modal(hDlg, 0);
-
     DEBUG_LEVEL(1, "user32: EndDialog hwnd=0x%lx result=%ld",
                 (unsigned long)(uintptr_t)hDlg, (long)nResult);
-    if (modal) {
-        modal->ended = 1;
-        modal->result = nResult;
-    }
+    user32_dialog_mark_modal_end(hDlg, nResult);
     if (hDlg != 0)
         DestroyWindow(hDlg);
     return TRUE;
@@ -121,46 +57,32 @@ BOOL user32_dialog_end(HWND hDlg, intptr_t nResult)
 
 int user32_dialog_run_modal(HWND hwnd, void *lpDialogFunc)
 {
-    dialog_modal_state *modal = dialog_find_modal(hwnd, 0);
     intptr_t result = 0;
+    int ended = 0;
 
-    if (!hwnd)
+    if (!user32_dialog_run_modal_lifecycle(hwnd, lpDialogFunc, &result, &ended))
         return 0;
-    if (modal == NULL)
-        modal = dialog_find_modal(hwnd, 1);
-    if (modal == NULL)
-        return 0;
-
-    /*
-     * Minimal modal behavior: after WM_INITDIALOG, drive the default OK path
-     * so guest dialog procedures can perform their normal save/apply work
-     * before calling EndDialog().
-     */
-    if (!modal->ended && lpDialogFunc)
-        ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_COMMAND, (WPARAM)IDOK, 0);
-    if (!modal->ended && lpDialogFunc)
-        ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_CLOSE, 0, 0);
-    if (!modal->ended)
+    if (!ended)
         user32_dialog_end(hwnd, 0);
-
-    result = modal->result;
+    else
+        user32_dialog_mark_modal_end(hwnd, result);
     DEBUG_LEVEL(1, "user32: DialogBoxParamA hwnd=0x%lx result=%ld ended=%d",
-                (unsigned long)(uintptr_t)hwnd, (long)result, modal->ended);
-    user32_memset(modal, 0, sizeof(*modal));
+                (unsigned long)(uintptr_t)hwnd, (long)result, ended);
+    user32_dialog_clear_modal(hwnd);
     return (int)result;
 }
 
 KERNEL32_STUB
 BOOL IsDialogMessageA(HWND hDlg, MSG *lpMsg)
 {
-    dialog_modal_state *modal;
+    DLGPROC_WINE dlgproc;
     dialog_item_state *item;
 
     if (!hDlg || !lpMsg)
         return FALSE;
 
-    modal = dialog_find_modal(hDlg, 0);
-    if (!modal || !modal->dlgproc)
+    dlgproc = user32_dialog_get_modal_dlgproc(hDlg);
+    if (!dlgproc)
         return FALSE;
 
     if (lpMsg->hwnd != hDlg) {
@@ -169,8 +91,7 @@ BOOL IsDialogMessageA(HWND hDlg, MSG *lpMsg)
             return FALSE;
     }
 
-    if (((DLGPROC_WINE)modal->dlgproc)(hDlg, lpMsg->message,
-                                       lpMsg->wParam, lpMsg->lParam))
+    if (dlgproc(hDlg, lpMsg->message, lpMsg->wParam, lpMsg->lParam))
         return TRUE;
     return FALSE;
 }
