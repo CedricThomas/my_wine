@@ -87,6 +87,7 @@ MY_WINE32_OBJS = \
 	$(BUILDDIR32)/module_list.o \
 	$(BUILDDIR32)/peb_ldr.o \
 	$(BUILDDIR32)/pe32_bootstrap.o \
+	$(BUILDDIR32)/pe32_doom95_command.o \
 	$(BUILDDIR32)/pe32_doom95_compat.o \
 	$(BUILDDIR32)/pe32_entry_resolve.o \
 	$(BUILDDIR32)/pe32_guest_launch.o \

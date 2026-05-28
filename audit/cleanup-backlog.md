@@ -44,6 +44,10 @@ Stable enough to leave alone unless new evidence appears:
 - `src/msvcrt/kernel32_doom95.c` remains an empty compatibility seam.
 - `src/loader/pe32_entry.c` has already been split into PE32 bootstrap,
   resolve, guest-launch, and Doom95 compatibility helpers.
+- Doom95 guest argument shaping now lives in
+  `src/loader/pe32_doom95_command.c`, leaving
+  `src/loader/pe32_doom95_compat.c` focused on runtime slot seeding plus
+  command-helper orchestration.
 - USER32 window and message code is already separated into lifecycle/state,
   paint/focus/class-registry, dispatch, queue, and hook files.
 - DirectDraw is already split across backend/core/clipper/mode/palette/surface
