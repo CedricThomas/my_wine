@@ -113,6 +113,24 @@ void rb_audio_mix_buffer(uint8_t *stream, int len, rb_audio_buf *buf);
 void rb_surface_apply_palette(rb_surface *surface_state);
 int rb_surface_present_window(rb_window *wnd, rb_surface *primary,
                               rb_surface *backbuffer, uint32_t flip_count);
+SDL_Window *rb_window_host_create(const char *title, int x, int y, int w,
+                                  int h, uint32_t flags);
+void rb_window_host_destroy(SDL_Window *window);
+void rb_window_host_show_created(SDL_Window *window);
+void rb_window_host_pump_events(void);
+void rb_window_host_show(SDL_Window *window, int show);
+void rb_window_host_minimize(SDL_Window *window);
+void rb_window_host_maximize(SDL_Window *window);
+void rb_window_host_restore(SDL_Window *window);
+void rb_window_host_set_position(SDL_Window *window, int x, int y);
+void rb_window_host_set_size(SDL_Window *window, int width, int height);
+void rb_window_host_set_title(SDL_Window *window, const char *title);
+void rb_window_host_get_rect(SDL_Window *window, rb_rect_t *rect);
+void rb_window_host_get_client_rect(SDL_Window *window, rb_rect_t *rect);
+int rb_window_host_set_fullscreen(SDL_Window *old_window, SDL_Window **new_window,
+                                  int fullscreen, int width, int height);
+SDL_Surface *rb_window_host_get_surface(SDL_Window *window);
+void rb_window_host_warp_mouse(SDL_Window *window, int x, int y);
 int rb_window_refresh_ids(rb_window *wnd);
 void rb_window_set_default_cursor(rb_window *wnd);
 void rb_window_detach_surfaces(rb_window *wnd);

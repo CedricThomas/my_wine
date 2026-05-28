@@ -130,6 +130,7 @@ launcher helpers, and DOOM95-specific compatibility behavior.
 | `rb_init.c` | SDL init/shutdown, driver fallback, signal handling, event thread setup. | Host-library boundary. |
 | `rb_event.c` | SDL event translation to guest message flow. | Large message/backend seam. |
 | `rb_window.c` | Guest-facing window lifecycle entrypoints. | USER32 bridge. |
+| `rb_window_host.c` | Host-stack SDL window call shims for create/show/resize/fullscreen/surface access. | Backend-local host SDL boundary. |
 | `rb_window_state.c` | Backend-local window identity refresh, cursor ownership, surface detach, and guest rebind helpers. | USER32 bridge. |
 | `rb_surface.c` | Surface creation, ownership, lock/unlock, and blit. | DirectDraw bridge. |
 | `rb_surface_present.c` | Window-surface present path, flip-chain buffer swap, and present-side debug logging. | DirectDraw bridge. |
