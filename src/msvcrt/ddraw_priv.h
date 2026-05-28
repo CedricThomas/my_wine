@@ -137,6 +137,8 @@ HRESULT ddraw_create_regular_surface(my_dd_t *dd, uint32_t width,
                                      uint32_t height, uint32_t caps,
                                      my_surface_t **primary_out,
                                      void **lplpDDSurface);
+HRESULT ddraw_create_surface_from_desc(my_dd_t *dd, void *ddsd,
+                                       void **lplpDDSurface);
 
 /* ═══════════════════════════════════════════════════════════ */
 /* ── Surface-desc helpers ─────────────────────────────────── */

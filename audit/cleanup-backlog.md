@@ -9,17 +9,17 @@ ownership facts, and the next best target.
 
 Next pass:
 
-- Move to `src/msvcrt/ddraw_interface.c`.
+- Move to `src/backend/sdl2/rb_event.c`.
 - Prefer one helper/file extraction only.
 - Preserve behavior and public exports.
 - Keep PE32 vs PE32+ boundaries explicit.
 
 Why this is next:
 
-- `ddraw_interface.c` is now the next queued mixed-responsibility graphics file
-  after the SDL2 window host-call split.
-- The SDL2 backend window ownership is clearer now that host-stack SDL window
-  calls live in `src/backend/sdl2/rb_window_host.c`.
+- `ddraw_interface.c` now delegates guest `CreateSurface` orchestration to
+  `src/msvcrt/ddraw_surface_create.c`, leaving the export surface thinner.
+- `rb_event.c` is now the next queued mixed-responsibility SDL2 backend file
+  after the DirectDraw surface-create split.
 - Loader/import work still remains higher risk than a graphics-local
   extraction.
 
@@ -30,6 +30,8 @@ Leave these alone unless a narrower seam appears:
 - `src/backend/sdl2/rb_surface_present.c` owns SDL surface presentation.
 - `src/backend/sdl2/rb_window_host.c` owns SDL window host-stack call shims.
 - `src/backend/sdl2/rb_window_state.c` owns backend-local window state helpers.
+- `src/msvcrt/ddraw_surface_create.c` owns DirectDraw surface-create
+  orchestration after guest descriptor parsing.
 - `src/msvcrt/winmm_doom95.c` now keeps guest-facing stream state and exports.
 - `src/msvcrt/winmm_doom95_midi_backend.c` owns FluidSynth backend helpers.
 - Loader/import and PE32 Doom95 helper splits are stable enough for now.
@@ -38,8 +40,8 @@ Leave these alone unless a narrower seam appears:
 
 Priority order:
 
-1. `src/msvcrt/ddraw_interface.c`
-2. `src/backend/sdl2/rb_event.c`
+1. `src/backend/sdl2/rb_event.c`
+2. `src/msvcrt/dsound_interface.c`
 
 Selection bias:
 
@@ -53,6 +55,7 @@ Selection bias:
 
 Do not spend the next pass here unless a very narrow seam becomes obvious:
 
+- `src/msvcrt/ddraw_interface.c`
 - `src/msvcrt/kernel32_doom95.c`
 - loader/import files
 - the already-split PE32 bootstrap cluster

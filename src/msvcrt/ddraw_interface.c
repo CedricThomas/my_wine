@@ -231,64 +231,10 @@ static HRESULT KERNEL32_STUB ddraw_CreateSurface(void *this_ptr, void *ddsd,
                                                  void **lplpDDSurface, void *unk)
 {
     my_dd_t *dd = (my_dd_t *)this_ptr;
-    uint32_t caps = 0;
-    uint32_t width = 0;
-    uint32_t height = 0;
-    uint32_t backbuffers = 0;
 
     (void)unk;
 
-    if (!dd || !ddsd || !lplpDDSurface)
-        return DDERR_INVALIDPARAMS;
-    if (!ddraw_ensure_backend())
-        return DDERR_UNSUPPORTED;
-
-    ddraw_parse_surface_desc(ddsd, &caps, &width, &height, &backbuffers);
-
-    if (width == 0)
-        width = dd->current_mode_w;
-    if (height == 0)
-        height = dd->current_mode_h;
-
-    if ((caps & DDSCAPS_PRIMARYSURFACE) && !dd->rb_window)
-        return DDERR_NOCOOPERATIVELEVELSET;
-
-    DEBUG("ddraw: CreateSurface caps=0x%x size=%ux%u backbuffers=%u",
-          caps, width, height, backbuffers);
-
-    if ((caps & DDSCAPS_PRIMARYSURFACE) && (caps & DDSCAPS_FLIP)) {
-        my_surface_t *primary = NULL;
-        my_surface_t *backbuffer = NULL;
-        HRESULT hr;
-
-        hr = ddraw_create_flip_chain_surface(dd, width, height, backbuffers,
-                                             caps, &primary, &backbuffer, lplpDDSurface);
-        if (hr != DD_OK)
-            return hr;
-
-        primary->width = width;
-        primary->height = height;
-        primary->pitch = (int32_t)width;
-        if (backbuffer) {
-            backbuffer->width = width;
-            backbuffer->height = height;
-            backbuffer->pitch = (int32_t)width;
-        }
-    } else {
-        my_surface_t *primary = NULL;
-        HRESULT hr;
-
-        hr = ddraw_create_regular_surface(dd, width, height, caps,
-                                          &primary, lplpDDSurface);
-        if (hr != DD_OK)
-            return hr;
-
-        primary->width = width;
-        primary->height = height;
-        primary->pitch = (int32_t)width;
-    }
-
-    return DD_OK;
+    return ddraw_create_surface_from_desc(dd, ddsd, lplpDDSurface);
 }
 
 static HRESULT KERNEL32_STUB ddraw_CreatePalette(void *this_ptr, uint32_t flags,
