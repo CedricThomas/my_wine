@@ -13,7 +13,8 @@ Those belong in command output and git history.
 
 Tomorrow's focus:
 
-- Inspect `src/msvcrt/user32_dialog.c` for the next safest narrow extraction.
+- Inspect the remainder of `src/msvcrt/user32_dialog.c` for the next safest
+  narrow extraction after control-message handling.
 - Prefer one helper/file extraction only.
 - Preserve behavior and public exports.
 - Keep PE32 vs PE32+ boundaries explicit.
@@ -24,7 +25,8 @@ Why this is the top goal:
   while backend-local window identity, cursor, surface-detach, and guest-rebind
   helpers live in `src/backend/sdl2/rb_window_state.c`.
 - `src/msvcrt/user32_dialog.c` is now the next least-coupled oversized file in
-  the active queue.
+  the active queue, although dialog control-message handling has now been
+  split into a subsystem-local helper.
 - Loader/import work still remains higher-risk than another guest/backend-local
   helper extraction.
 

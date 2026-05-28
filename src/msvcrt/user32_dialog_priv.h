@@ -22,6 +22,7 @@ typedef struct {
 } dialog_item_state;
 
 dialog_item_state *user32_dialog_find_item(HWND dialog, uint32_t id, int create);
+dialog_item_state *user32_dialog_find_item_by_handle(HWND handle);
 int user32_dialog_find_string(dialog_item_state *item, uint32_t start_idx,
                               const char *needle, int exact);
 int user32_dialog_find_item_data_index(dialog_item_state *item, intptr_t needle);

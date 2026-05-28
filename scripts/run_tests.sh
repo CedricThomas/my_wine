@@ -162,6 +162,9 @@ run_test_env test_user32_handle_ownership SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=
 # test_user32_message_dispatch
 run_test_env test_user32_message_dispatch SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
 
+# test_user32_dialog
+run_test_env test_user32_dialog SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+
 # --- Summary ---
 TOTAL=$((PASS + FAIL + SKIP))
 echo ""

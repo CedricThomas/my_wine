@@ -158,6 +158,7 @@ TEST_ddraw_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user3
 TEST_dsound_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/dsound_interface.o $(BUILDDIR)/dsound_buffer.o $(BUILDDIR)/dsound_buffer_create.o $(BUILDDIR)/dsound_buffer_control.o $(BUILDDIR)/debug.o
 TEST_user32_handle_ownership_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
 TEST_user32_message_dispatch_OBJS = $(BACKEND_OBJS) $(BUILDDIR)/handle_manager.o $(BUILDDIR)/user32_class_registry.o $(BUILDDIR)/user32_focus.o $(BUILDDIR)/user32_window.o $(BUILDDIR)/user32_window_lifecycle.o $(BUILDDIR)/user32_window_ops.o $(BUILDDIR)/user32_window_state.o $(BUILDDIR)/user32_paint.o $(BUILDDIR)/user32_message.o $(BUILDDIR)/user32_message_dispatch.o $(BUILDDIR)/user32_message_hook.o $(BUILDDIR)/user32_message_queue.o $(BUILDDIR)/user32_input.o $(BUILDDIR)/debug.o
+TEST_user32_dialog_OBJS = $(TEST_user32_handle_ownership_OBJS) $(BUILDDIR)/user32_dialog.o $(BUILDDIR)/user32_dialog_controls.o $(BUILDDIR)/user32_dialog_doom95.o $(BUILDDIR)/resource_win32.o $(BUILDDIR)/kernel32_path.o $(BUILDDIR)/common.o
 
 # ── Search Paths And Per-target Flags ───────────────────────────
 vpath %.c src src/msvcrt src/loader src/syscall src/heap src/crt src/backend tests
@@ -200,7 +201,7 @@ all: my_wine my_wine64 my_wine32 samples $(BUILDDIR)/test_parse $(BUILDDIR)/test
 	$(BUILDDIR)/test_doom95_paths $(BUILDDIR)/test_pe32_launch \
 	$(BUILDDIR)/test_ddraw $(BUILDDIR)/test_dsound \
 	$(BUILDDIR)/test_sdl2_backend $(BUILDDIR)/test_user32_handle_ownership \
-	$(BUILDDIR)/test_user32_message_dispatch \
+	$(BUILDDIR)/test_user32_message_dispatch $(BUILDDIR)/test_user32_dialog \
 	$(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 # ── Generated Files ─────────────────────────────────────────────
@@ -298,7 +299,7 @@ tests: my_wine64 my_wine32 $(SHELL.EXE) $(ENTRY_TEST_32_EXE) $(BUILDDIR)/test_pa
 		$(BUILDDIR)/test_doom95_paths $(BUILDDIR)/test_pe32_launch \
 		$(BUILDDIR)/test_ddraw $(BUILDDIR)/test_dsound \
 		$(BUILDDIR)/test_sdl2_backend $(BUILDDIR)/test_user32_handle_ownership \
-		$(BUILDDIR)/test_user32_message_dispatch \
+		$(BUILDDIR)/test_user32_message_dispatch $(BUILDDIR)/test_user32_dialog \
 		$(if $(SDL2_LIBS_32),$(BUILDDIR32)/test_sdl2_backend,)
 
 run-tests: tests
@@ -351,6 +352,10 @@ $(BUILDDIR)/test_user32_handle_ownership: tests/test_user32_handle_ownership.c $
 	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
 
 $(BUILDDIR)/test_user32_message_dispatch: tests/test_user32_message_dispatch.c $(TEST_user32_message_dispatch_OBJS)
+	@echo "  LD $@"
+	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
+
+$(BUILDDIR)/test_user32_dialog: tests/test_user32_dialog.c $(TEST_user32_dialog_OBJS)
 	@echo "  LD $@"
 	@$(CC) $(CFLAGS) $(SDL2_CFLAGS) -o $@ $^ $(SDL2_LIBS) -lm
 
