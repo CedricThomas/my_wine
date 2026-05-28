@@ -585,7 +585,8 @@ static void midi_stream_reset_state(midi_stream_state_t *state)
 
 void winmm_doom95_set_application_active(int active)
 {
-    __atomic_store_n(&g_midi_stream.app_active, active ? 1 : 0, __ATOMIC_RELEASE);
+    if (active)
+        __atomic_store_n(&g_midi_stream.app_active, 1, __ATOMIC_RELEASE);
 }
 
 void winmm_doom95_shutdown(void)

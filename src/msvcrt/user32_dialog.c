@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "user32_priv.h"
+#include "user32_dialog_priv.h"
 #include "resource_win32.h"
 #include "include/common.h"
 #include "include/syscall_safe_utils.h"
@@ -42,35 +42,13 @@
 #define IDOK 1
 #define BST_CHECKED 1
 
-typedef intptr_t (KERNEL32_ABI *DLGPROC_WINE)(HWND, UINT, WPARAM, LPARAM);
-typedef void (*DOOM95_REFRESH_MAPS_FN)(HWND);
-
-extern void write_to_stderr(const char *msg);
 extern LRESULT KERNEL32_ABI DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 extern ATOM KERNEL32_ABI RegisterClassA(const WNDCLASSA *lpWndClass);
 extern BOOL KERNEL32_ABI DestroyWindow(HWND hWnd);
-extern LRESULT KERNEL32_ABI SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
-extern const char *wine_get_current_directory(void);
 extern HWND KERNEL32_ABI CreateWindowExA(DWORD dwExStyle, const char *lpClassName,
                                          const char *lpWindowName, DWORD dwStyle, int X, int Y,
                                          int nWidth, int nHeight, HWND hWndParent, HMENU hMenu,
                                          HINSTANCE hInstance, void *lpParam);
-
-typedef struct {
-    HWND dialog;
-    HWND handle;
-    uint32_t id;
-    uint32_t state;
-    int32_t cur_sel;
-    char text[128];
-    char items[32][128];
-    intptr_t item_data[32];
-    uint32_t item_count;
-    int32_t range_min;
-    int32_t range_max;
-    int32_t position;
-    HWND buddy;
-} dialog_item_state;
 
 static dialog_item_state g_dialog_items[64];
 static int g_dialog_class_registered = 0;
@@ -85,7 +63,6 @@ typedef struct {
 
 static dialog_modal_state g_dialog_modals[16];
 
-static dialog_item_state *dialog_find_item(HWND dialog, uint32_t id, int create);
 KERNEL32_STUB HWND GetDlgItem(HWND hDlg, int nIDDlgItem);
 KERNEL32_STUB BOOL SetDlgItemTextA(HWND hDlg, int nIDDlgItem, const char *lpString);
 
@@ -169,8 +146,8 @@ static int dialog_item_delete_string(dialog_item_state *item, uint32_t idx)
     return (int)item->item_count;
 }
 
-static int dialog_item_find_string(dialog_item_state *item, uint32_t start_idx,
-                                   const char *needle, int exact)
+int user32_dialog_find_string(dialog_item_state *item, uint32_t start_idx,
+                              const char *needle, int exact)
 {
     uint32_t i;
 
@@ -194,41 +171,6 @@ static int dialog_item_find_string(dialog_item_state *item, uint32_t start_idx,
     return -1;
 }
 
-static void dialog_try_doom95_seed_basewad_state(HINSTANCE hInstance)
-{
-    uintptr_t module_base = (uintptr_t)hInstance;
-    uintptr_t *state_slot;
-    uintptr_t state;
-    char *basewad;
-    const char *cwd;
-    size_t cwd_len;
-
-    if (module_base == 0)
-        return;
-    state_slot = (uintptr_t *)(module_base + 0x131e0u);
-
-    state = *state_slot;
-    if (state == 0)
-        return;
-
-    basewad = (char *)(uintptr_t)(state + 0x23u);
-    cwd = wine_get_current_directory();
-    cwd_len = cwd ? user32_strlen(cwd) : 0;
-    if (cwd && cwd_len > 0 && cwd_len + 10 < 0x100u) {
-        user32_strncpy(basewad, cwd, 0xff);
-        if (basewad[cwd_len - 1] != '/') {
-            basewad[cwd_len++] = '/';
-            basewad[cwd_len] = '\0';
-        }
-        user32_strncpy(basewad + cwd_len, "DOOM1.WAD", 0xff - cwd_len);
-        basewad[0xff] = '\0';
-        return;
-    }
-
-    user32_strncpy(basewad, "DOOM1.WAD", 0xff);
-    basewad[0xff] = '\0';
-}
-
 static void user32_dialog_ensure_class(void)
 {
     WNDCLASSA cls;
@@ -247,7 +189,7 @@ static void user32_dialog_ensure_class(void)
     DEBUG_LEVEL(1, "user32: dialog ensure class registered=%d", g_dialog_class_registered);
 }
 
-static dialog_item_state *dialog_find_item(HWND dialog, uint32_t id, int create)
+dialog_item_state *user32_dialog_find_item(HWND dialog, uint32_t id, int create)
 {
     int i;
 
@@ -281,7 +223,7 @@ static dialog_item_state *dialog_find_item_by_handle(HWND handle)
     return NULL;
 }
 
-static int dialog_find_item_data_index(dialog_item_state *item, intptr_t needle)
+int user32_dialog_find_item_data_index(dialog_item_state *item, intptr_t needle)
 {
     uint32_t i;
 
@@ -294,102 +236,6 @@ static int dialog_find_item_data_index(dialog_item_state *item, intptr_t needle)
     }
 
     return -1;
-}
-
-static void dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
-                                        const char *lpTemplateName, void *lpDialogFunc)
-{
-    dialog_item_state *provider_item;
-    dialog_item_state *wad_item;
-    dialog_item_state *map_item;
-    HWND provider_hwnd;
-    HWND wad_hwnd;
-    HWND map_hwnd;
-    HWND start_hwnd;
-    WPARAM notify_wparam;
-    int provider_idx;
-    DOOM95_REFRESH_MAPS_FN refresh_maps;
-
-    if ((uintptr_t)lpTemplateName != 0x72u || hwnd == 0 || lpDialogFunc == NULL)
-        return;
-
-    provider_item = dialog_find_item(hwnd, 0x3edu, 0);
-    if (!provider_item)
-        return;
-
-    provider_idx = dialog_find_item_data_index(provider_item, 1);
-    if (provider_idx < 0)
-        return;
-
-    provider_hwnd = provider_item->handle;
-    wad_item = dialog_find_item(hwnd, 0x3f4u, 1);
-    map_item = dialog_find_item(hwnd, 0x406u, 1);
-    wad_hwnd = wad_item ? wad_item->handle : 0;
-    map_hwnd = GetDlgItem(hwnd, 0x406);
-    start_hwnd = GetDlgItem(hwnd, 0x3f1);
-    refresh_maps = (DOOM95_REFRESH_MAPS_FN)((uintptr_t)hInstance + 0x8c30u);
-
-    DEBUG_LEVEL(1, "user32: Doom95 launcher autostart select provider idx=%d", provider_idx);
-    SendMessageA(provider_hwnd, CB_SETCURSEL, (WPARAM)provider_idx, 0);
-
-    notify_wparam = (WPARAM)(0x3edu | (9u << 16));
-    ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_COMMAND, notify_wparam,
-                                 (LPARAM)(uintptr_t)provider_hwnd);
-
-    if (wad_hwnd) {
-        int wad_idx = -1;
-        int current_wad_idx = -1;
-
-        if (SendMessageA(wad_hwnd, CB_GETCOUNT, 0, 0) <= 0)
-            SendMessageA(wad_hwnd, CB_ADDSTRING, 0, (LPARAM)(uintptr_t)"DOOM1.WAD");
-        SendMessageA(wad_hwnd, WM_SETTEXT, 0, (LPARAM)(uintptr_t)"DOOM1.WAD");
-        dialog_try_doom95_seed_basewad_state(hInstance);
-        current_wad_idx = (int)SendMessageA(wad_hwnd, CB_GETCURSEL, 0, 0);
-        if (current_wad_idx > 0) {
-            wad_idx = current_wad_idx;
-        } else if (wad_item && current_wad_idx == 0 &&
-                   wad_item->item_count == 1 &&
-                   user32_strcmp(wad_item->items[0], "(NONE)") != 0) {
-            wad_idx = current_wad_idx;
-        }
-        if (wad_idx < 0 && wad_item)
-            wad_idx = dialog_item_find_string(wad_item, 0, "DOOM1.WAD", 1);
-        if (wad_idx < 0 && wad_item)
-            wad_idx = dialog_item_find_string(wad_item, 0, "DOOM1", 1);
-        if (wad_idx < 0 && wad_item) {
-            uint32_t i;
-
-            for (i = 0; i < wad_item->item_count; i++) {
-                if (wad_item->item_data[i] != 0 &&
-                    user32_strcmp(wad_item->items[i], "(NONE)") != 0) {
-                    wad_idx = (int)i;
-                    break;
-                }
-            }
-        }
-        if (wad_idx < 0 && SendMessageA(wad_hwnd, CB_GETCOUNT, 0, 0) > 0)
-            wad_idx = 0;
-        if (wad_idx >= 0) {
-            SendMessageA(wad_hwnd, CB_SETCURSEL, (WPARAM)wad_idx, 0);
-            ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_COMMAND,
-                                         (WPARAM)(0x3f4u | (1u << 16)),
-                                         (LPARAM)(uintptr_t)wad_hwnd);
-        }
-        if (refresh_maps != NULL)
-            refresh_maps(hwnd);
-        if (map_item && SendMessageA(map_hwnd, CB_GETCOUNT, 0, 0) <= 0) {
-            SendMessageA(map_hwnd, CB_ADDSTRING, 0, (LPARAM)(uintptr_t)"E1M1");
-            SendMessageA(map_hwnd, CB_SETITEMDATA, 0, 0);
-        }
-        if (map_hwnd && SendMessageA(map_hwnd, CB_GETCOUNT, 0, 0) > 0)
-            SendMessageA(map_hwnd, CB_SETCURSEL, 0, 0);
-        SetDlgItemTextA(hwnd, 0x436, "0");
-        DEBUG_LEVEL(1, "user32: Doom95 launcher autostart seed base wad DOOM1.WAD");
-    }
-
-    DEBUG_LEVEL(1, "user32: Doom95 launcher autostart click start");
-    ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_COMMAND, (WPARAM)0x3f1u,
-                                 (LPARAM)(uintptr_t)start_hwnd);
 }
 
 static dialog_modal_state *dialog_find_modal(HWND dialog, int create)
@@ -440,7 +286,7 @@ HWND CreateDialogParamA(HINSTANCE hInstance, const char *lpTemplateName, HWND hW
         DEBUG_LEVEL(1, "user32: CreateDialogParamA init hwnd=0x%lx",
                     (unsigned long)(uintptr_t)hwnd);
         ((DLGPROC_WINE)lpDialogFunc)(hwnd, WM_INITDIALOG, 0, dwInitParam);
-        dialog_try_doom95_autostart(hInstance, hwnd, lpTemplateName, lpDialogFunc);
+        user32_dialog_try_doom95_autostart(hInstance, hwnd, lpTemplateName, lpDialogFunc);
     }
     return hwnd;
 }
@@ -519,7 +365,7 @@ BOOL IsDialogMessageA(HWND hDlg, MSG *lpMsg)
 KERNEL32_STUB
 HWND GetDlgItem(HWND hDlg, int nIDDlgItem)
 {
-    dialog_item_state *item = dialog_find_item(hDlg, (uint32_t)nIDDlgItem, 1);
+    dialog_item_state *item = user32_dialog_find_item(hDlg, (uint32_t)nIDDlgItem, 1);
     if (!item)
         return 0;
     DEBUG_LEVEL(2, "user32: GetDlgItem dialog=0x%lx id=0x%x -> handle=0x%lx",
@@ -531,7 +377,7 @@ HWND GetDlgItem(HWND hDlg, int nIDDlgItem)
 KERNEL32_STUB
 BOOL CheckDlgButton(HWND hDlg, int nIDButton, UINT uCheck)
 {
-    dialog_item_state *item = dialog_find_item(hDlg, (uint32_t)nIDButton, 1);
+    dialog_item_state *item = user32_dialog_find_item(hDlg, (uint32_t)nIDButton, 1);
     if (!item)
         return FALSE;
     item->state = uCheck;
@@ -541,14 +387,14 @@ BOOL CheckDlgButton(HWND hDlg, int nIDButton, UINT uCheck)
 KERNEL32_STUB
 UINT IsDlgButtonChecked(HWND hDlg, int nIDButton)
 {
-    dialog_item_state *item = dialog_find_item(hDlg, (uint32_t)nIDButton, 0);
+    dialog_item_state *item = user32_dialog_find_item(hDlg, (uint32_t)nIDButton, 0);
     return item ? item->state : 0;
 }
 
 KERNEL32_STUB
 BOOL SetDlgItemTextA(HWND hDlg, int nIDDlgItem, const char *lpString)
 {
-    dialog_item_state *item = dialog_find_item(hDlg, (uint32_t)nIDDlgItem, 1);
+    dialog_item_state *item = user32_dialog_find_item(hDlg, (uint32_t)nIDDlgItem, 1);
     if (!item)
         return FALSE;
     if (!lpString)
@@ -680,8 +526,8 @@ LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam, L
         return TRUE;
 
     case CB_FINDSTRING: {
-        int idx = dialog_item_find_string(item, (uint32_t)wParam,
-                                          (const char *)(uintptr_t)lParam, 0);
+        int idx = user32_dialog_find_string(item, (uint32_t)wParam,
+                                            (const char *)(uintptr_t)lParam, 0);
 
         DEBUG_LEVEL(2, "user32: dialog ctrl id=0x%x find start=%ld text='%s' -> %d",
                     (unsigned)item->id, (long)(int32_t)wParam,
@@ -691,8 +537,8 @@ LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam, L
     }
 
     case LB_FINDSTRINGEXACT: {
-        int idx = dialog_item_find_string(item, (uint32_t)wParam,
-                                          (const char *)(uintptr_t)lParam, 1);
+        int idx = user32_dialog_find_string(item, (uint32_t)wParam,
+                                            (const char *)(uintptr_t)lParam, 1);
 
         DEBUG_LEVEL(2, "user32: dialog ctrl id=0x%x find exact start=%ld text='%s' -> %d",
                     (unsigned)item->id, (long)(int32_t)wParam,
@@ -703,8 +549,8 @@ LRESULT user32_dialog_send_control_message(HWND hWnd, UINT Msg, WPARAM wParam, L
 
     case CB_SELECTSTRING:
     case LB_SELECTSTRING: {
-        int idx = dialog_item_find_string(item, (uint32_t)wParam,
-                                          (const char *)(uintptr_t)lParam, 0);
+        int idx = user32_dialog_find_string(item, (uint32_t)wParam,
+                                            (const char *)(uintptr_t)lParam, 0);
 
         if (idx < 0)
             return -1;

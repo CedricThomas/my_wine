@@ -57,6 +57,27 @@ uint32_t dsound_ds_addref(my_ds_t *ds);
 uint32_t dsound_ds_release(my_ds_t *ds);
 HRESULT KERNEL32_STUB dsound_buffer_create(void *this_ptr, const DSBUFFERDESC *desc,
                                            void **out_buffer, void *outer_unknown);
+HRESULT KERNEL32_STUB dsound_buffer_GetCurrentPosition(void *this_ptr,
+                                                       DWORD *play_cursor,
+                                                       DWORD *write_cursor);
+HRESULT KERNEL32_STUB dsound_buffer_GetStatus(void *this_ptr, DWORD *status);
+HRESULT KERNEL32_STUB dsound_buffer_Lock(void *this_ptr, DWORD write_cursor,
+                                         DWORD write_bytes, void **ptr1,
+                                         DWORD *bytes1, void **ptr2,
+                                         DWORD *bytes2, DWORD flags);
+HRESULT KERNEL32_STUB dsound_buffer_Play(void *this_ptr, DWORD reserved1,
+                                         DWORD priority, DWORD flags);
+HRESULT KERNEL32_STUB dsound_buffer_SetCurrentPosition(void *this_ptr,
+                                                       DWORD new_position);
+HRESULT KERNEL32_STUB dsound_buffer_SetFormat(void *this_ptr,
+                                              const WAVEFORMATEX *format);
+HRESULT KERNEL32_STUB dsound_buffer_SetVolume(void *this_ptr, LONG volume);
+HRESULT KERNEL32_STUB dsound_buffer_SetPan(void *this_ptr, LONG pan);
+HRESULT KERNEL32_STUB dsound_buffer_SetFrequency(void *this_ptr, DWORD freq);
+HRESULT KERNEL32_STUB dsound_buffer_Stop(void *this_ptr);
+HRESULT KERNEL32_STUB dsound_buffer_Unlock(void *this_ptr, void *ptr1,
+                                           DWORD bytes1, void *ptr2,
+                                           DWORD bytes2);
 
 static inline void *dsound_alloc_mem(size_t size)
 {
