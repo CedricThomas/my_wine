@@ -113,6 +113,11 @@ void rb_audio_mix_buffer(uint8_t *stream, int len, rb_audio_buf *buf);
 void rb_surface_apply_palette(rb_surface *surface_state);
 int rb_surface_present_window(rb_window *wnd, rb_surface *primary,
                               rb_surface *backbuffer, uint32_t flip_count);
+int rb_window_refresh_ids(rb_window *wnd);
+void rb_window_set_default_cursor(rb_window *wnd);
+void rb_window_detach_surfaces(rb_window *wnd);
+void rb_window_rebind_guest(rb_window *wnd, rb_window_t win);
+int rb_window_set_cursor_handle(rb_cursor_t cur);
 
 /*
  * Guest-facing USER32 stubs enter the SDL backend with GS (64-bit) / FS (32-bit)

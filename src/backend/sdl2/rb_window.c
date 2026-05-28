@@ -28,35 +28,10 @@ typedef struct {
     uint32_t flags;
 } rb_sdl_create_window_args;
 
-typedef struct {
-    SDL_Window *window;
-    uint32_t window_id;
-    uintptr_t native_window_id;
-} rb_sdl_window_ids_args;
-
 static uintptr_t rb_sdl_create_window_call(void *arg)
 {
     rb_sdl_create_window_args *a = arg;
     return (uintptr_t)SDL_CreateWindow(a->title, a->x, a->y, a->w, a->h, a->flags);
-}
-
-static uintptr_t rb_sdl_window_get_ids_call(void *arg)
-{
-    rb_sdl_window_ids_args *a = arg;
-    SDL_SysWMinfo info;
-
-    a->window_id = 0;
-    a->native_window_id = 0;
-    if (!a->window)
-        return 0;
-
-    a->window_id = SDL_GetWindowID(a->window);
-    SDL_VERSION(&info.version);
-    if (SDL_GetWindowWMInfo(a->window, &info) &&
-        info.subsystem == SDL_SYSWM_X11) {
-        a->native_window_id = (uintptr_t)info.info.x11.window;
-    }
-    return 1;
 }
 
 static uintptr_t rb_sdl_destroy_window_call(void *arg)
@@ -219,19 +194,6 @@ typedef struct {
     SDL_Cursor *cursor;
 } rb_sdl_cursor_args;
 
-static uintptr_t rb_sdl_set_cursor_call(void *arg)
-{
-    rb_sdl_cursor_args *a = arg;
-    SDL_SetCursor(a->cursor);
-    return 0;
-}
-
-static uintptr_t rb_sdl_get_default_cursor_call(void *arg)
-{
-    (void)arg;
-    return (uintptr_t)SDL_GetDefaultCursor();
-}
-
 typedef struct {
     SDL_Window *window;
     int x;
@@ -243,40 +205,6 @@ static uintptr_t rb_sdl_warp_mouse_call(void *arg)
     rb_sdl_warp_mouse_args *a = arg;
     SDL_WarpMouseInWindow(a->window, a->x, a->y);
     return 0;
-}
-
-static int rb_window_refresh_ids(rb_window *wnd)
-{
-    rb_sdl_window_ids_args args;
-
-    if (!wnd || !wnd->window)
-        return RB_FAIL;
-
-    args.window = wnd->window;
-    args.window_id = 0;
-    args.native_window_id = 0;
-    if (!rb_call_on_host_stack(rb_sdl_window_get_ids_call, &args))
-        return RB_FAIL;
-
-    wnd->sdl_window_id = args.window_id;
-    wnd->native_window_id = args.native_window_id;
-    return args.window_id ? RB_OK : RB_FAIL;
-}
-
-static void rb_window_set_default_cursor(rb_window *wnd)
-{
-    SDL_Cursor *cursor;
-    rb_sdl_cursor_args args;
-
-    if (!wnd || !wnd->window)
-        return;
-
-    cursor = (SDL_Cursor *)rb_call_on_host_stack(rb_sdl_get_default_cursor_call, NULL);
-    if (!cursor)
-        return;
-
-    args.cursor = cursor;
-    rb_call_on_host_stack(rb_sdl_set_cursor_call, &args);
 }
 
 /* ---- 13 window lifecycle functions ---- */
@@ -341,27 +269,7 @@ int rb_window_destroy(rb_window_t win)
     DEBUG_WRITE_ERR("rb_window: destroy\n",
                     sizeof("rb_window: destroy\n") - 1);
 
-    if (w->primary_surface) {
-        rb_surface *primary = NULL;
-
-        if (wine_handle_get_type((uint32_t)w->primary_surface) == HANDLE_TYPE_RB_SURFACE)
-            primary = (rb_surface *)wine_handle_get((uint32_t)w->primary_surface);
-        if (primary)
-            primary->window = 0;
-        w->primary_surface = 0;
-    }
-
-    /* Clean up flip-chain backbuffer owned by this window. */
-    if (w->backbuffer) {
-        rb_surface *backbuffer = NULL;
-
-        if (wine_handle_get_type((uint32_t)w->backbuffer) == HANDLE_TYPE_RB_SURFACE)
-            backbuffer = (rb_surface *)wine_handle_get((uint32_t)w->backbuffer);
-        if (backbuffer)
-            backbuffer->window = 0;
-        rb_surface_destroy(w->backbuffer);
-        w->backbuffer = 0;
-    }
+    rb_window_detach_surfaces(w);
 
     if (w->guest_hwnd)
         rb_event_unbind_window(w->guest_hwnd);
@@ -492,8 +400,6 @@ int rb_window_get_client_rect(rb_window_t win, rb_rect_t *rect)
 
 int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int height, int bpp)
 {
-    extern void user32_activate_window_direct(uintptr_t hwnd)
-        __attribute__((weak));
     (void)bpp;
     rb_window *wnd = get_window(win);
     if (!wnd)
@@ -513,12 +419,7 @@ int rb_window_set_fullscreen(rb_window_t win, int fullscreen, int width, int hei
     if (rb_window_refresh_ids(wnd) != RB_OK)
         return RB_FAIL;
     rb_window_set_default_cursor(wnd);
-    if (wnd->guest_hwnd) {
-        rb_event_bind_window(wnd->guest_hwnd, win);
-        rb_event_activate_window(wnd->guest_hwnd);
-        if (user32_activate_window_direct)
-            user32_activate_window_direct(wnd->guest_hwnd);
-    }
+    rb_window_rebind_guest(wnd, win);
     return RB_OK;
 }
 
@@ -560,15 +461,7 @@ int rb_window_set_cursor(rb_window_t win, rb_cursor_t cur)
     if (!wnd)
         return RB_FAIL;
 
-    if (wine_handle_get_type((uint32_t)cur) != HANDLE_TYPE_RB_CURSOR)
-        return RB_FAIL;
-
-    rb_cursor *c = (rb_cursor *)wine_handle_get((uint32_t)cur);
-    if (c && c->cursor) {
-        rb_sdl_cursor_args args = { c->cursor };
-        rb_call_on_host_stack(rb_sdl_set_cursor_call, &args);
-    }
-    return RB_OK;
+    return rb_window_set_cursor_handle(cur);
 }
 
 int rb_window_warp_mouse(rb_window_t win, int x, int y)

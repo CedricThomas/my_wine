@@ -13,20 +13,19 @@ Those belong in command output and git history.
 
 Tomorrow's focus:
 
-- Inspect `src/backend/sdl2/rb_window.c` for the next safest narrow extraction.
+- Inspect `src/msvcrt/user32_dialog.c` for the next safest narrow extraction.
 - Prefer one helper/file extraction only.
 - Preserve behavior and public exports.
 - Keep PE32 vs PE32+ boundaries explicit.
 
 Why this is the top goal:
 
-- `src/backend/sdl2/rb_audio.c` now owns device lifecycle, handle lookup,
-  buffer list ownership, and guest-facing buffer controls, while
-  `src/backend/sdl2/rb_audio_mix.c` carries sample decode, cursor advance, and
-  stream mixing.
-- `src/backend/sdl2/rb_window.c` is now the next oversized backend-local file
-  with no loader/import coupling.
-- Loader/import work still remains higher-risk than another backend-local
+- `src/backend/sdl2/rb_window.c` now keeps the guest-facing window entrypoints,
+  while backend-local window identity, cursor, surface-detach, and guest-rebind
+  helpers live in `src/backend/sdl2/rb_window_state.c`.
+- `src/msvcrt/user32_dialog.c` is now the next least-coupled oversized file in
+  the active queue.
+- Loader/import work still remains higher-risk than another guest/backend-local
   helper extraction.
 
 ## Current Position
@@ -47,16 +46,18 @@ Stable enough to leave alone unless new evidence appears:
   `src/msvcrt/user32_dialog_doom95.c`.
 - SDL surface presentation now lives in
   `src/backend/sdl2/rb_surface_present.c`.
+- SDL backend-local window state ownership now lives in
+  `src/backend/sdl2/rb_window_state.c`.
 
 ## Active Queue
 
 Priority order:
 
-1. `src/backend/sdl2/rb_window.c`
-2. `src/msvcrt/user32_dialog.c`
-3. `src/loader/import_table.c`
-4. `src/loader/import_resolve.c`
-5. `src/msvcrt/winmm_doom95.c`
+1. `src/msvcrt/user32_dialog.c`
+2. `src/loader/import_table.c`
+3. `src/loader/import_resolve.c`
+4. `src/msvcrt/winmm_doom95.c`
+5. `src/backend/sdl2/rb_window.c`
 
 Selection bias:
 
