@@ -14,8 +14,6 @@ typedef void (*DOOM95_REFRESH_MAPS_FN)(HWND);
 
 extern LRESULT KERNEL32_ABI SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 extern const char *wine_get_current_directory(void);
-extern HWND KERNEL32_ABI GetDlgItem(HWND hDlg, int nIDDlgItem);
-extern BOOL KERNEL32_ABI SetDlgItemTextA(HWND hDlg, int nIDDlgItem, const char *lpString);
 
 static void dialog_try_doom95_seed_basewad_state(HINSTANCE hInstance)
 {
@@ -81,8 +79,8 @@ void user32_dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
     wad_item = user32_dialog_find_item(hwnd, 0x3f4u, 1);
     map_item = user32_dialog_find_item(hwnd, 0x406u, 1);
     wad_hwnd = wad_item ? wad_item->handle : 0;
-    map_hwnd = GetDlgItem(hwnd, 0x406);
-    start_hwnd = GetDlgItem(hwnd, 0x3f1);
+    map_hwnd = user32_dialog_get_item_handle(hwnd, 0x406);
+    start_hwnd = user32_dialog_get_item_handle(hwnd, 0x3f1);
     refresh_maps = (DOOM95_REFRESH_MAPS_FN)((uintptr_t)hInstance + 0x8c30u);
 
     DEBUG_LEVEL(1, "user32: Doom95 launcher autostart select provider idx=%d", provider_idx);
@@ -139,7 +137,7 @@ void user32_dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
         }
         if (map_hwnd && SendMessageA(map_hwnd, CB_GETCOUNT, 0, 0) > 0)
             SendMessageA(map_hwnd, CB_SETCURSEL, 0, 0);
-        SetDlgItemTextA(hwnd, 0x436, "0");
+        user32_dialog_set_item_text(hwnd, 0x436, "0");
         DEBUG_LEVEL(1, "user32: Doom95 launcher autostart seed base wad DOOM1.WAD");
     }
 

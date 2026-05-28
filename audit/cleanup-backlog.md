@@ -13,8 +13,8 @@ Those belong in command output and git history.
 
 Tomorrow's focus:
 
-- Inspect the remainder of `src/msvcrt/user32_dialog.c` for the next safest
-  narrow extraction after dialog resource/UI utility ownership moved out.
+- Move to `src/loader/import_table.c` unless a smaller lower-risk seam appears
+  nearby.
 - Prefer one helper/file extraction only.
 - Preserve behavior and public exports.
 - Keep PE32 vs PE32+ boundaries explicit.
@@ -24,15 +24,18 @@ Why this is the top goal:
 - `src/backend/sdl2/rb_window.c` now keeps the guest-facing window entrypoints,
   while backend-local window identity, cursor, surface-detach, and guest-rebind
   helpers live in `src/backend/sdl2/rb_window_state.c`.
-- `src/msvcrt/user32_dialog.c` is now the next least-coupled oversized file in
-  the active queue, although dialog control-message handling now lives in
-  `src/msvcrt/user32_dialog_controls.c`, dialog item-state ownership now lives
-  in `src/msvcrt/user32_dialog_state.c`, dialog modal/class ownership now
-  lives in `src/msvcrt/user32_dialog_modal.c`, and resource-backed
-  `LoadStringA`/`MessageBoxA` utilities now live in
-  `src/msvcrt/user32_dialog_resources.c`.
-- Loader/import work still remains higher-risk than another guest/backend-local
-  helper extraction.
+- The previous `src/msvcrt/user32_dialog.c` umbrella file is gone: dialog
+  creation now lives in `src/msvcrt/user32_dialog_create.c`, modal completion
+  in `src/msvcrt/user32_dialog_lifecycle.c`, dialog control-message handling in
+  `src/msvcrt/user32_dialog_controls.c`, dialog item-state ownership in
+  `src/msvcrt/user32_dialog_state.c`, dialog modal/class ownership in
+  `src/msvcrt/user32_dialog_modal.c`, dialog message routing in
+  `src/msvcrt/user32_dialog_message.c`, resource-backed
+  `LoadStringA`/`MessageBoxA` utilities in
+  `src/msvcrt/user32_dialog_resources.c`, dialog item lookup/button/text
+  exports in `src/msvcrt/user32_dialog_items.c`, and Doom95 autostart policy in
+  `src/msvcrt/user32_dialog_doom95.c`.
+- Loader/import work is now the next intended frontier despite the higher risk.
 
 ## Current Position
 
@@ -50,10 +53,18 @@ Stable enough to leave alone unless new evidence appears:
   `src/msvcrt/dsound_buffer.c`.
 - Doom95 dialog autostart behavior already lives in
   `src/msvcrt/user32_dialog_doom95.c`.
+- USER32 dialog creation now lives in
+  `src/msvcrt/user32_dialog_create.c`.
+- USER32 dialog modal completion/teardown now lives in
+  `src/msvcrt/user32_dialog_lifecycle.c`.
 - USER32 dialog modal/class ownership now lives in
   `src/msvcrt/user32_dialog_modal.c`.
+- USER32 dialog message routing now lives in
+  `src/msvcrt/user32_dialog_message.c`.
 - USER32 dialog resource/UI utility exports now live in
   `src/msvcrt/user32_dialog_resources.c`.
+- USER32 dialog item lookup/button/text exports now live in
+  `src/msvcrt/user32_dialog_items.c`.
 - SDL surface presentation now lives in
   `src/backend/sdl2/rb_surface_present.c`.
 - SDL backend-local window state ownership now lives in
@@ -63,11 +74,10 @@ Stable enough to leave alone unless new evidence appears:
 
 Priority order:
 
-1. `src/msvcrt/user32_dialog.c`
-2. `src/loader/import_table.c`
-3. `src/loader/import_resolve.c`
-4. `src/msvcrt/winmm_doom95.c`
-5. `src/backend/sdl2/rb_window.c`
+1. `src/loader/import_table.c`
+2. `src/loader/import_resolve.c`
+3. `src/msvcrt/winmm_doom95.c`
+4. `src/backend/sdl2/rb_window.c`
 
 Selection bias:
 

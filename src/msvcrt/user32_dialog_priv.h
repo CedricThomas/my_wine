@@ -38,7 +38,10 @@ BOOL user32_dialog_mark_modal_end(HWND hDlg, intptr_t nResult);
 int user32_dialog_run_modal_lifecycle(HWND hwnd, void *lpDialogFunc,
                                       intptr_t *result_out, int *ended_out);
 void user32_dialog_clear_modal(HWND dialog);
+BOOL user32_dialog_dispatch_message(HWND hDlg, MSG *lpMsg);
 void user32_dialog_try_doom95_autostart(HINSTANCE hInstance, HWND hwnd,
                                         const char *lpTemplateName, void *lpDialogFunc);
+HWND user32_dialog_get_item_handle(HWND hDlg, int nIDDlgItem);
+BOOL user32_dialog_set_item_text(HWND hDlg, int nIDDlgItem, const char *lpString);
 
 #endif /* MY_WINE_USER32_DIALOG_PRIV_H */
