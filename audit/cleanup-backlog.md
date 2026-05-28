@@ -13,16 +13,18 @@ Those belong in command output and git history.
 
 Tomorrow's focus:
 
-- Inspect `src/backend/sdl2/rb_audio.c` for the next safest narrow extraction.
+- Inspect `src/backend/sdl2/rb_window.c` for the next safest narrow extraction.
 - Prefer one helper/file extraction only.
 - Preserve behavior and public exports.
 - Keep PE32 vs PE32+ boundaries explicit.
 
 Why this is the top goal:
 
-- `src/backend/sdl2/rb_surface.c` has now been reduced to surface creation,
-  ownership, lock/unlock, and blit orchestration.
-- `src/backend/sdl2/rb_audio.c` is now the next oversized backend-local file
+- `src/backend/sdl2/rb_audio.c` now owns device lifecycle, handle lookup,
+  buffer list ownership, and guest-facing buffer controls, while
+  `src/backend/sdl2/rb_audio_mix.c` carries sample decode, cursor advance, and
+  stream mixing.
+- `src/backend/sdl2/rb_window.c` is now the next oversized backend-local file
   with no loader/import coupling.
 - Loader/import work still remains higher-risk than another backend-local
   helper extraction.
@@ -50,12 +52,11 @@ Stable enough to leave alone unless new evidence appears:
 
 Priority order:
 
-1. `src/backend/sdl2/rb_audio.c`
-2. `src/backend/sdl2/rb_window.c`
-3. `src/msvcrt/user32_dialog.c`
-4. `src/loader/import_table.c`
-5. `src/loader/import_resolve.c`
-6. `src/msvcrt/winmm_doom95.c`
+1. `src/backend/sdl2/rb_window.c`
+2. `src/msvcrt/user32_dialog.c`
+3. `src/loader/import_table.c`
+4. `src/loader/import_resolve.c`
+5. `src/msvcrt/winmm_doom95.c`
 
 Selection bias:
 

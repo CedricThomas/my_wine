@@ -133,7 +133,7 @@ launcher helpers, and DOOM95-specific compatibility behavior.
 | `rb_surface.c` | Surface creation, ownership, lock/unlock, and blit. | DirectDraw bridge. |
 | `rb_surface_present.c` | Window-surface present path, flip-chain buffer swap, and present-side debug logging. | DirectDraw bridge. |
 | `rb_palette.c` | Palette management. | DirectDraw bridge. |
-| `rb_audio.c` | Audio device and audio buffer mixing. | DirectSound bridge. |
+| `rb_audio.c`, `rb_audio_mix.c` | Audio device lifecycle, backend buffer ownership, and isolated sample mixing/cursor helpers. | DirectSound bridge. |
 | `rb_input.c` | Input state and cursor glue. | USER32 bridge. |
 | `rb_sdl2_priv.h` | Shared backend-private structs and host-context switching helpers. | Critical backend seam. |
 

@@ -18,6 +18,8 @@
 #include "handle_manager.h"
 #include "src/loader/loader_state.h"
 
+#define RB_AUDIO_CURSOR_SHIFT 32U
+
 extern wine_loader_state_t g_loader __attribute__((weak));
 extern void *unix_stack_ptr_val __attribute__((weak));
 
@@ -106,6 +108,8 @@ typedef struct rb_cursor {
 } rb_cursor;
 
 int rb_event_translate_sdl_event(SDL_Event *sdl, rb_msg_t *msg);
+int rb_audio_frame_count(const rb_audio_buf *buf);
+void rb_audio_mix_buffer(uint8_t *stream, int len, rb_audio_buf *buf);
 void rb_surface_apply_palette(rb_surface *surface_state);
 int rb_surface_present_window(rb_window *wnd, rb_surface *primary,
                               rb_surface *backbuffer, uint32_t flip_count);
