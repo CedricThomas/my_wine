@@ -30,21 +30,21 @@ The `my_wine` wrapper auto-detects the PE format:
 │  1. Map PE image into memory (image_mapper)                  │
 │  2. Resolve imports → stub implementations (pe_imports)      │
 │  3. Patch .refptr CRT globals (crt_refptrs)                  │
-│  4. Set up TEB/PEB + GS or FS base (teb_peb)                │
+│  4. Set up TEB/PEB + GS or FS base (teb_peb)                 │
 │  5. Generate syscall thunks (thunk_gen)                      │
 │  6. Jump to entry point on guest stack (run_guest)           │
 │                                                              │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐  │
-│  │  Stub APIs   │  │  Syscall     │  │  SDL2 Backend      │  │
-│  │  kernel32   │  │  Dispatcher  │  │  (DirectDraw/      │  │
-│  │  user32     │  │  ~25 NT      │  │   DirectSound)     │  │
-│  │  ntdll      │  │  Handlers    │  │                    │  │
-│  │  msvcrt     │  │              │  │                    │  │
-│  │  ddraw      │  │              │  │                    │  │
-│  │  dsound     │  │              │  │                    │  │
-│  │  gdi32      │  │              │  │                    │  │
-│  │  winmm      │  │              │  │                    │  │
-│  └─────────────┘  └──────────────┘  └────────────────────┘  │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐   │
+│  │  Stub APIs  │  │  Syscall     │  │  SDL2 Backend      │   │
+│  │  kernel32   │  │  Dispatcher  │  │  (DirectDraw/      │   │
+│  │  user32     │  │  ~25 NT      │  │   DirectSound)     │   │
+│  │  ntdll      │  │  Handlers    │  │                    │   │
+│  │  msvcrt     │  │              │  │                    │   │
+│  │  ddraw      │  │              │  │                    │   │
+│  │  dsound     │  │              │  │                    │   │
+│  │  gdi32      │  │              │  │                    │   │
+│  │  winmm      │  │              │  │                    │   │
+│  └─────────────┘  └──────────────┘  └────────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
