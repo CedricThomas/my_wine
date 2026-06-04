@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "rb_sdl2_priv.h"
+#include "include/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
@@ -82,12 +83,12 @@ int rb_init(void)
     }
 
     rb_call_on_host_stack(rb_backend_capture_active_drivers_call, &driver_info);
-    fprintf(stderr,
-            "WARNING: SDL backends requested video=%s audio=%s active video=%s audio=%s\n",
-            driver_info.requested_video_driver[0] ? driver_info.requested_video_driver : "auto",
-            driver_info.requested_audio_driver[0] ? driver_info.requested_audio_driver : "auto",
-            driver_info.active_video_driver[0] ? driver_info.active_video_driver : "unknown",
-            driver_info.active_audio_driver[0] ? driver_info.active_audio_driver : "unknown");
+    DEBUG_LEVEL(1,
+                "SDL backends requested video=%s audio=%s active video=%s audio=%s",
+                driver_info.requested_video_driver[0] ? driver_info.requested_video_driver : "auto",
+                driver_info.requested_audio_driver[0] ? driver_info.requested_audio_driver : "auto",
+                driver_info.active_video_driver[0] ? driver_info.active_video_driver : "unknown",
+                driver_info.active_audio_driver[0] ? driver_info.active_audio_driver : "unknown");
 
     g_audio.device_id = 0;
     g_audio.opened = 0;

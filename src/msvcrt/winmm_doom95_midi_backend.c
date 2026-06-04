@@ -2,9 +2,66 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "kernel32_priv.h"
 #include "winmm_doom95_priv.h"
+
+static void midi_fluidsynth_log_silent(int level, const char *message, void *data)
+{
+    (void)level;
+    (void)message;
+    (void)data;
+}
+
+static void midi_fluidsynth_configure_logging(void)
+{
+    static int configured = 0;
+
+    if (__atomic_exchange_n(&configured, 1, __ATOMIC_ACQ_REL))
+        return;
+
+    fluid_set_log_function(FLUID_WARN, midi_fluidsynth_log_silent, NULL);
+    fluid_set_log_function(FLUID_INFO, midi_fluidsynth_log_silent, NULL);
+    fluid_set_log_function(FLUID_DBG, midi_fluidsynth_log_silent, NULL);
+}
+
+static int midi_stderr_quiet_begin(int *saved_stderr_fd)
+{
+    int devnull_fd;
+    int old_stderr_fd;
+
+    if (!saved_stderr_fd)
+        return 0;
+
+    devnull_fd = open("/dev/null", O_WRONLY);
+    if (devnull_fd < 0)
+        return 0;
+
+    old_stderr_fd = dup(STDERR_FILENO);
+    if (old_stderr_fd < 0) {
+        close(devnull_fd);
+        return 0;
+    }
+    if (dup2(devnull_fd, STDERR_FILENO) < 0) {
+        close(old_stderr_fd);
+        close(devnull_fd);
+        return 0;
+    }
+
+    close(devnull_fd);
+    *saved_stderr_fd = old_stderr_fd;
+    return 1;
+}
+
+static void midi_stderr_quiet_end(int saved_stderr_fd)
+{
+    if (saved_stderr_fd < 0)
+        return;
+
+    (void)dup2(saved_stderr_fd, STDERR_FILENO);
+    close(saved_stderr_fd);
+}
 
 static float midi_stream_gain_from_volume(uint32_t dwVolume)
 {
@@ -51,7 +108,7 @@ int winmm_doom95_midi_backend_has_device(void)
 int winmm_doom95_midi_backend_open(midi_fluidsynth_backend_t *backend,
                                    uint32_t volume)
 {
-    static const char *driver_candidates[] = { "pulseaudio", "pipewire", "alsa" };
+    static const char *driver_candidates[] = { "pipewire", "pulseaudio", "alsa" };
     fluid_settings_t *settings = NULL;
     fluid_synth_t *synth = NULL;
     fluid_audio_driver_t *driver = NULL;
@@ -59,12 +116,16 @@ int winmm_doom95_midi_backend_open(midi_fluidsynth_backend_t *backend,
     const char *driver_name = NULL;
     size_t i;
     int soundfont_id = -1;
+    int saved_stderr_fd = -1;
 
     if (!backend)
         return 0;
     if (backend->ready)
         return 1;
+    midi_fluidsynth_configure_logging();
+    (void)midi_stderr_quiet_begin(&saved_stderr_fd);
     if (!midi_find_soundfont(backend->soundfont_path, sizeof(backend->soundfont_path))) {
+        midi_stderr_quiet_end(saved_stderr_fd);
         DEBUG_LEVEL(1, "winmm: no readable soundfont found");
         return 0;
     }
@@ -114,6 +175,7 @@ int winmm_doom95_midi_backend_open(midi_fluidsynth_backend_t *backend,
             DEBUG_LEVEL(1, "winmm: FluidSynth ready driver=%s soundfont=%s",
                         driver_name ? driver_name : "default",
                         backend->soundfont_path);
+            midi_stderr_quiet_end(saved_stderr_fd);
             return 1;
         }
 
@@ -125,6 +187,7 @@ int winmm_doom95_midi_backend_open(midi_fluidsynth_backend_t *backend,
             break;
     }
 
+    midi_stderr_quiet_end(saved_stderr_fd);
     DEBUG_LEVEL(1, "winmm: failed to start FluidSynth backend");
     return 0;
 }

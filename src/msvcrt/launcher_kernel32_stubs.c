@@ -272,8 +272,6 @@ KERNEL32_STUB void *FindFirstFileA(const char *lpFileName, void *lpFindFileData)
 
     if (!lpFileName || !lpFindFileData)
         return FORCE_PTR_RETURN((void *)(uintptr_t)-1);
-    if (lpFileName && strcasestr(lpFileName, "wad"))
-        fprintf(stderr, "FindFirstFileA('%s')\n", lpFileName);
     if (!wine_resolve_path(lpFileName, resolved, sizeof(resolved)))
         return FORCE_PTR_RETURN((void *)(uintptr_t)-1);
 
@@ -301,10 +299,6 @@ KERNEL32_STUB void *FindFirstFileA(const char *lpFileName, void *lpFindFileData)
             free(find);
             return FORCE_PTR_RETURN((void *)(uintptr_t)-1);
         }
-        if (lpFileName && strcasestr(lpFileName, "wad")) {
-            WIN32_FIND_DATAA_WINE *data = (WIN32_FIND_DATAA_WINE *)lpFindFileData;
-            fprintf(stderr, "FindFirstFileA -> '%s'\n", data->cFileName);
-        }
         handle = (uint32_t)wine_handle_alloc(HANDLE_TYPE_HGLOBAL, find);
         if (handle == 0) {
             closedir(dir);
@@ -321,10 +315,6 @@ KERNEL32_STUB void *FindFirstFileA(const char *lpFileName, void *lpFindFileData)
     }
 
     fill_find_data(resolved, &st, (WIN32_FIND_DATAA_WINE *)lpFindFileData);
-    if (lpFileName && strcasestr(lpFileName, "wad")) {
-        WIN32_FIND_DATAA_WINE *data = (WIN32_FIND_DATAA_WINE *)lpFindFileData;
-        fprintf(stderr, "FindFirstFileA -> '%s'\n", data->cFileName);
-    }
     snprintf(find->directory, sizeof(find->directory), "%s", resolved);
     find->exact_done = 1;
     handle = (uint32_t)wine_handle_alloc(HANDLE_TYPE_HGLOBAL, find);

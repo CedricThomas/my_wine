@@ -349,16 +349,11 @@ uint32_t GetFileAttributesA(const char *lpFileName)
 
     if (!lpFileName || lpFileName[0] == '\0')
         return 0xffffffffu;
-    if (strcasestr(lpFileName, "wad"))
-        fprintf(stderr, "GetFileAttributesA('%s')\n", lpFileName);
-
     if (!wine_resolve_path(lpFileName, path, sizeof(path)))
         return 0xffffffffu;
 
     if (!wine_path_lookup_case_insensitive(path, resolved, sizeof(resolved)))
         return 0xffffffffu;
-    if (strcasestr(lpFileName, "wad"))
-        fprintf(stderr, "GetFileAttributesA -> '%s'\n", resolved);
 
     rc = stat(resolved, &st);
     if (rc != 0)
