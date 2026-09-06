@@ -203,8 +203,7 @@ On x86, EAX carries the dispatcher address (32-bit fits), EDX carries the syscal
 `lookup_thunk(syscall_number)` returns the thunk function pointer from the `thunk_array` (size `0x60`) or NULL if not registered. In the current tree, kernel32 stubs mainly use this as an availability check before proceeding with direct handlers or inline syscalls.
 
 ---
-
-## ABI Translation
+fi## ABI Translation
 
 The full path from guest code to handler involves careful ABI management across three domains: the guest PE's calling convention, the Linux kernel's syscall ABI, and the C handler's native ABI.
 
