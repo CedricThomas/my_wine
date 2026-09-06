@@ -2,1598 +2,410 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>my_wine — du loader à la compatibilité Windows sur Linux</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Objectif DOOM — un exécutable Windows, un processus Linux</title>
 <link rel="icon" href="../slides/favicon.svg" type="image/svg+xml">
 <style>
-  :root {
-    --bg: #0b1220;
-    --surface: #121c2f;
-    --surface-2: #17243b;
-    --surface-3: #1c2d49;
-    --line: #28405f;
-    --text: #e7edf7;
-    --muted: #9db0ca;
-    --accent: #4fd1c5;
-    --accent-2: #ffb454;
-    --accent-3: #ff7a90;
-    --good: #7bd88f;
-    --code-bg: #0f1728;
-  }
-
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  html, body {
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-    background:
-      radial-gradient(circle at top right, rgba(79,209,197,0.12), transparent 30%),
-      radial-gradient(circle at bottom left, rgba(255,180,84,0.10), transparent 30%),
-      linear-gradient(180deg, #09101c, #0b1220 32%, #0b1220);
-    color: var(--text);
-  }
-
-  .deck {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-  }
-
-  .slide {
-    position: absolute;
-    inset: 0;
-    padding: 38px 64px 46px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateX(34px);
-    transition: opacity 0.34s ease, transform 0.34s ease;
-  }
-
-  .slide.active {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateX(0);
-  }
-
-  .slide.exit {
-    opacity: 0;
-    transform: translateX(-34px);
-  }
-
-  .slide.dense {
-    padding-top: 26px;
-    padding-bottom: 34px;
-  }
-
-  .slide.dense h2 {
-    font-size: 2.05rem;
-    margin-bottom: 0.6rem;
-  }
-
-  .slide.dense .section-note {
-    margin-bottom: 0.8rem;
-  }
-
-  h1 {
-    font-size: 3.3rem;
-    line-height: 1.08;
-    letter-spacing: -0.03em;
-    font-weight: 800;
-    text-align: center;
-  }
-
-  h2 {
-    font-size: 2.28rem;
-    line-height: 1.15;
-    letter-spacing: -0.02em;
-    font-weight: 750;
-    color: var(--accent);
-    margin-bottom: 0.95rem;
-    text-align: center;
-  }
-
-  h3 {
-    font-size: 1.08rem;
-    line-height: 1.35;
-    color: var(--text);
-    margin-bottom: 0.55rem;
-  }
-
-  p, li, td, th {
-    font-size: 1.08rem;
-    line-height: 1.58;
-    color: var(--text);
-  }
-
-  .title-slide {
-    text-align: center;
-  }
-
-  .eyebrow {
-    display: inline-block;
-    margin-bottom: 1rem;
-    padding: 7px 12px;
-    border: 1px solid rgba(79,209,197,0.28);
-    border-radius: 999px;
-    color: var(--accent);
-    font-size: 0.88rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    background: rgba(79,209,197,0.06);
-  }
-
-  .subtitle {
-    max-width: 980px;
-    margin-top: 1rem;
-    font-size: 1.38rem;
-    line-height: 1.55;
-    color: var(--muted);
-    text-align: center;
-  }
-
-  .tagline {
-    margin-top: 1.7rem;
-    color: var(--muted);
-    font-size: 1rem;
-  }
-
-  .section-note {
-    max-width: 980px;
-    color: var(--muted);
-    text-align: center;
-    margin-bottom: 1.35rem;
-  }
-
-  .accent-line {
-    width: 120px;
-    height: 4px;
-    border-radius: 999px;
-    margin-top: 1.1rem;
-    background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
-  }
-
-  .emoji-big {
-    font-size: 3.6rem;
-    margin-bottom: 0.9rem;
-  }
-
-  .cols-2 {
-    width: 100%;
-    max-width: 1140px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    align-items: stretch;
-  }
-
-  .cols-3 {
-    width: 100%;
-    max-width: 1160px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 18px;
-  }
-
-  .cols-4 {
-    width: 100%;
-    max-width: 1160px;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 18px;
-  }
-
-  .panel {
-    background:
-      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015)),
-      var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 20px 22px;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
-  }
-
-  .panel.soft {
-    background:
-      linear-gradient(180deg, rgba(79,209,197,0.05), rgba(255,255,255,0.01)),
-      var(--surface);
-  }
-
-  .panel.warn {
-    background:
-      linear-gradient(180deg, rgba(255,180,84,0.05), rgba(255,255,255,0.01)),
-      var(--surface);
-  }
-
-  .panel.risk {
-    background:
-      linear-gradient(180deg, rgba(255,122,144,0.05), rgba(255,255,255,0.01)),
-      var(--surface);
-  }
-
-  .panel-title {
-    margin-bottom: 0.8rem;
-    color: var(--muted);
-    font-size: 0.84rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  ul {
-    list-style: none;
-    max-width: 760px;
-  }
-
-  li {
-    position: relative;
-    padding: 0.28rem 0 0.28rem 1.2rem;
-  }
-
-  li::before {
-    content: "▸";
-    position: absolute;
-    left: 0;
-    color: var(--accent);
-  }
-
-  code {
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    background: var(--code-bg);
-    color: var(--accent-2);
-    padding: 0.13em 0.42em;
-    border-radius: 4px;
-    font-size: 0.92em;
-  }
-
-  pre {
-    width: 100%;
-    overflow-x: auto;
-    background: var(--code-bg);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 18px 20px;
-  }
-
-  pre code {
-    background: none;
-    color: var(--text);
-    padding: 0;
-    font-size: 0.9rem;
-    line-height: 1.58;
-  }
-
-  .terminal {
-    width: 100%;
-    background: #05070d;
-    border: 1px solid #243247;
-    border-radius: 12px;
-    padding: 16px 20px;
-    box-shadow: 0 12px 28px rgba(0,0,0,0.28);
-  }
-
-  .terminal-head {
-    display: flex;
-    gap: 6px;
-    padding-bottom: 11px;
-    margin-bottom: 11px;
-    border-bottom: 1px solid #223043;
-  }
-
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-  }
-
-  .dot.red { background: #ff5f56; }
-  .dot.yellow { background: #ffbd2e; }
-  .dot.green { background: #27c93f; }
-
-  .terminal-line {
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 0.92rem;
-    line-height: 1.6;
-    white-space: pre-wrap;
-  }
-
-  .evidence-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .evidence-shot {
-    width: 100%;
-    height: 320px;
-    object-fit: cover;
-    object-position: center;
-    border: 1px solid #304764;
-    border-radius: 12px;
-    image-rendering: pixelated;
-    box-shadow: 0 12px 28px rgba(0,0,0,0.24);
-  }
-
-  .evidence-caption {
-    margin-top: -4px;
-    color: var(--muted);
-    font-size: 0.83rem;
-    text-align: center;
-  }
-
-  .prompt { color: var(--good); }
-  .output { color: var(--text); }
-
-  .accent { color: var(--accent); font-weight: 650; }
-  .warn-text { color: var(--accent-2); font-weight: 650; }
-  .pink { color: var(--accent-3); font-weight: 650; }
-  .good { color: var(--good); font-weight: 650; }
-  .muted { color: var(--muted); }
-
-  .badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 999px;
-    font-size: 0.77rem;
-    font-weight: 700;
-    vertical-align: middle;
-    margin-left: 0.35rem;
-    background: var(--accent);
-    color: #061017;
-  }
-
-  .badge.warn {
-    background: var(--accent-2);
-    color: #1e1200;
-  }
-
-  .badge.risk {
-    background: var(--accent-3);
-    color: #26000c;
-  }
-
-  .badge.good {
-    background: var(--good);
-    color: #07160d;
-  }
-
-  .flow {
-    width: 100%;
-    max-width: 1140px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-  }
-
-  .flow-step {
-    padding: 12px 16px;
-    border-radius: 12px;
-    border: 1px solid var(--line);
-    background: var(--surface);
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 0.92rem;
-  }
-
-  .flow-arrow {
-    font-size: 1.3rem;
-    color: var(--accent);
-    font-weight: 800;
-  }
-
-  .pipe > .flow-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    align-self: stretch;
-  }
-
-  .step-list {
-    width: 100%;
-    max-width: 940px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .step {
-    display: grid;
-    grid-template-columns: 48px 1fr;
-    gap: 14px;
-    align-items: start;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: rgba(255,255,255,0.02);
-    padding: 14px 16px;
-  }
-
-  .step-num {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: #041018;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 0.9rem;
-  }
-
-  .step-label {
-    font-size: 1rem;
-    font-weight: 700;
-    margin-bottom: 0.2rem;
-  }
-
-  .step-detail {
-    font-size: 0.96rem;
-    line-height: 1.5;
-    color: var(--muted);
-  }
-
-  .map-board {
-    width: 100%;
-    max-width: 1160px;
-    display: grid;
-    grid-template-columns: 1.08fr 0.92fr;
-    gap: 20px;
-    align-items: stretch;
-  }
-
-  .stack {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .stack-box {
-    border-radius: 12px;
-    border: 1px solid var(--line);
-    padding: 14px 15px;
-    background: rgba(255,255,255,0.03);
-  }
-
-  .stack-box strong {
-    display: block;
-    margin-bottom: 0.18rem;
-    font-size: 1rem;
-  }
-
-  .stack-box span {
-    color: var(--muted);
-    font-size: 0.94rem;
-    line-height: 1.45;
-  }
-
-  .stack-box.teal { border-left: 5px solid var(--accent); }
-  .stack-box.gold { border-left: 5px solid var(--accent-2); }
-  .stack-box.pink { border-left: 5px solid var(--accent-3); }
-  .stack-box.green { border-left: 5px solid var(--good); }
-
-  .hex-row {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    gap: 12px;
-    align-items: center;
-    padding: 9px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-  }
-
-  .hex-row:last-child { border-bottom: 0; }
-
-  .hex-tag {
-    font-family: "JetBrains Mono", monospace;
-    font-size: 0.82rem;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 999px;
-    padding: 5px 10px;
-    text-align: center;
-    color: var(--text);
-  }
-
-  .hex-row span:last-child {
-    color: var(--muted);
-    font-size: 0.94rem;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    overflow: hidden;
-    border-radius: 12px;
-    border: 1px solid var(--line);
-    background: rgba(255,255,255,0.02);
-  }
-
-  th, td {
-    text-align: left;
-    padding: 12px 14px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    vertical-align: top;
-  }
-
-  tr:last-child td, tr:last-child th { border-bottom: 0; }
-  th {
-    width: 32%;
-    color: var(--text);
-    background: rgba(255,255,255,0.03);
-    font-size: 0.98rem;
-  }
-
-  td {
-    color: var(--muted);
-    font-size: 0.96rem;
-  }
-
-  .big-number {
-    font-size: 4.4rem;
-    line-height: 1;
-    font-weight: 900;
-    color: var(--accent);
-  }
-
-  .tiny {
-    font-size: 0.9rem;
-    color: var(--muted);
-  }
-
-  .callout {
-    width: 100%;
-    max-width: 980px;
-    margin-top: 1.25rem;
-    padding: 14px 16px;
-    border-radius: 12px;
-    border-left: 4px solid var(--accent);
-    background: rgba(79,209,197,0.07);
-    color: var(--text);
-  }
-
-  .hero-diagram {
-    width: 100%;
-    max-width: 1120px;
-    display: grid;
-    grid-template-columns: 1fr auto 1fr auto 1fr;
-    gap: 14px;
-    align-items: center;
-  }
-
-  .hero-node {
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 20px 18px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), var(--surface);
-    min-height: 168px;
-  }
-
-  .hero-node h3 {
-    font-size: 1.15rem;
-    margin-bottom: 0.35rem;
-  }
-
-  .hero-node p {
-    color: var(--muted);
-    font-size: 0.98rem;
-    line-height: 1.5;
-  }
-
-  .hero-arrow {
-    font-size: 2rem;
-    font-weight: 900;
-    color: var(--accent);
-  }
-
-  .diagram-caption {
-    margin-top: 1rem;
-    max-width: 980px;
-    text-align: center;
-    color: var(--muted);
-  }
-
-  .memory-map {
-    width: 100%;
-    max-width: 1140px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    align-items: start;
-  }
-
-  .memory-column {
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 18px 20px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015)), var(--surface);
-  }
-
-  .memory-column h3 {
-    margin-bottom: 0.85rem;
-  }
-
-  .memory-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .memory-seg {
-    border-radius: 12px;
-    border: 1px solid var(--line);
-    padding: 14px 16px;
-    background: rgba(255,255,255,0.03);
-  }
-
-  .memory-seg strong {
-    display: block;
-    margin-bottom: 0.2rem;
-    font-size: 1rem;
-  }
-
-  .memory-seg span {
-    display: block;
-    color: var(--muted);
-    font-size: 0.92rem;
-    line-height: 1.4;
-  }
-
-  .memory-seg.teal { border-left: 5px solid var(--accent); }
-  .memory-seg.gold { border-left: 5px solid var(--accent-2); }
-  .memory-seg.pink { border-left: 5px solid var(--accent-3); }
-  .memory-seg.green { border-left: 5px solid var(--good); }
-
-  .pipe {
-    width: 100%;
-    max-width: 1140px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: stretch;
-    justify-content: center;
-    gap: 12px;
-  }
-
-  .pipe-box {
-    flex: 1 1 180px;
-    min-width: 160px;
-    border-radius: 14px;
-    border: 1px solid var(--line);
-    background: var(--surface);
-    padding: 14px 14px;
-  }
-
-  .pipe-box strong {
-    display: block;
-    margin-bottom: 0.2rem;
-    font-size: 0.98rem;
-  }
-
-  .pipe-box span {
-    color: var(--muted);
-    font-size: 0.9rem;
-    line-height: 1.4;
-  }
-
-  .micro {
-    font-size: 0.9rem;
-    color: var(--muted);
-    line-height: 1.45;
-  }
-
-  .concept-grid {
-    width: 100%;
-    max-width: 1140px;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 18px;
-  }
-
-  .concept-card {
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 18px 18px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015)), var(--surface);
-    min-height: 200px;
-  }
-
-  .concept-card .panel-title {
-    margin-bottom: 0.55rem;
-  }
-
-  .concept-card p {
-    color: var(--muted);
-    font-size: 0.96rem;
-    line-height: 1.48;
-  }
-
-  .concept-card pre {
-    margin-top: 0.8rem;
-  }
-
-  .visual-body {
-    width: 100%;
-    max-width: 1160px;
-    min-height: 390px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  .org-flow {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 1fr 52px 1fr 52px 1fr;
-    align-items: stretch;
-    gap: 10px;
-  }
-
-  .org-flow.five {
-    grid-template-columns: 1fr 38px 1fr 38px 1fr 38px 1fr 38px 1fr;
-  }
-
-  .org-node {
-    min-height: 190px;
-    padding: 22px 20px;
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012)), var(--surface);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  .org-node.compact { min-height: 122px; padding: 16px; }
-  .org-node.soft { border-top: 4px solid var(--accent); }
-  .org-node.warn { border-top: 4px solid var(--accent-2); }
-  .org-node.risk { border-top: 4px solid var(--accent-3); }
-  .org-node.good { border-top: 4px solid var(--good); }
-  .org-node h3 { font-size: 1.15rem; }
-  .org-node p { color: var(--muted); font-size: 0.96rem; line-height: 1.45; }
-
-  .org-arrow {
-    min-width: 38px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent);
-    font-size: 1.8rem;
-    font-weight: 900;
-  }
-
-  .org-tree {
-    width: 100%;
-    display: grid;
-    grid-template-rows: auto 44px auto;
-    align-items: stretch;
-  }
-
-  .tree-root {
-    justify-self: center;
-    width: 38%;
-    min-height: 94px;
-    text-align: center;
-  }
-
-  .tree-junction {
-    position: relative;
-  }
-
-  .tree-junction::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 0;
-    height: 22px;
-    border-left: 2px solid var(--accent);
-  }
-
-  .tree-junction::after {
-    content: "";
-    position: absolute;
-    left: 12.5%;
-    right: 12.5%;
-    top: 22px;
-    border-top: 2px solid var(--accent);
-  }
-
-  .tree-leaves {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-  }
-
-  .tree-leaves.two { grid-template-columns: repeat(2, 1fr); gap: 56px; }
-  .tree-leaves .org-node { position: relative; min-height: 170px; }
-  .tree-leaves .org-node::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: -23px;
-    height: 22px;
-    border-left: 2px solid var(--accent);
-  }
-
-  .swimlanes {
-    display: grid;
-    grid-template-columns: 150px 1fr;
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    overflow: hidden;
-    background: var(--surface);
-  }
-
-  .lane-label {
-    padding: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    color: var(--text);
-    font-weight: 800;
-    border-right: 1px solid var(--line);
-  }
-
-  .lane-label.guest { background: rgba(255,180,84,0.08); color: var(--accent-2); }
-  .lane-label.host { background: rgba(79,209,197,0.08); color: var(--accent); }
-  .lane-track {
-    min-height: 142px;
-    padding: 18px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    border-bottom: 1px solid var(--line);
-  }
-  .lane-track:last-child { border-bottom: 0; }
-  .lane-step {
-    flex: 1;
-    min-height: 78px;
-    padding: 12px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: rgba(255,255,255,0.03);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    color: var(--muted);
-    font-size: 0.9rem;
-    line-height: 1.35;
-  }
-
-  .byte-bar {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 2fr 7fr 10fr 4fr;
-    min-height: 118px;
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    overflow: hidden;
-  }
-  .byte-seg { padding: 16px 10px; display: flex; flex-direction: column; justify-content: center; text-align: center; border-right: 1px solid var(--bg); }
-  .byte-seg:last-child { border-right: 0; }
-  .byte-seg strong { font-size: 1.35rem; color: #07111b; }
-  .byte-seg span { color: #07111b; font-size: 0.82rem; font-weight: 750; line-height: 1.25; }
-  .byte-seg:nth-child(1) { background: var(--accent); }
-  .byte-seg:nth-child(2) { background: var(--accent-2); }
-  .byte-seg:nth-child(3) { background: #8fb8ff; }
-  .byte-seg:nth-child(4) { background: var(--accent-3); }
-
-  .stack-visual {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 0.8fr 1.3fr 0.8fr;
-    gap: 18px;
-    align-items: center;
-  }
-  .stack-frame {
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    overflow: hidden;
-    background: var(--surface);
-  }
-  .stack-cell { padding: 13px 18px; border-bottom: 1px solid var(--line); text-align: center; color: var(--muted); }
-  .stack-cell:last-child { border-bottom: 0; }
-  .stack-cell.hot { color: var(--text); background: rgba(255,180,84,0.08); }
-
-  .cpu-memory {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 1.15fr 70px 0.85fr;
-    gap: 14px;
-    align-items: stretch;
-  }
-
-  .cpu-shell {
-    border: 2px solid var(--accent);
-    border-radius: 22px;
-    padding: 20px;
-    background: rgba(79,209,197,0.045);
-  }
-
-  .cpu-shell > h3,
-  .ram-shell > h3 { text-align: center; margin-bottom: 14px; }
-
-  .register-bank {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-  }
-
-  .register-row {
-    min-height: 168px;
-    padding: 16px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: var(--surface);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  .register-row strong { margin-bottom: 8px; }
-  .register-row span { color: var(--muted); font-size: 0.93rem; line-height: 1.45; }
-  .register-row.general { border-top: 4px solid #8fb8ff; }
-  .register-row.stack-reg { border-top: 4px solid var(--accent-2); }
-  .register-row.segment-reg { border-top: 4px solid var(--accent); }
-
-  .ram-shell {
-    border: 2px solid var(--line);
-    border-radius: 22px;
-    padding: 20px;
-    background: var(--surface);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  .ram-cell {
-    padding: 14px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    color: var(--muted);
-    text-align: center;
-    margin-top: 10px;
-  }
-
-  .address-equation {
-    display: grid;
-    grid-template-columns: 1fr 58px 1fr 58px 1fr;
-    align-items: stretch;
-    gap: 10px;
-  }
-
-  .address-box {
-    min-height: 142px;
-    padding: 18px;
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    background: var(--surface);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    text-align: center;
-  }
-
-  .address-box strong { font-size: 1.06rem; margin-bottom: 8px; }
-  .address-box span { color: var(--muted); font-size: 0.92rem; line-height: 1.4; }
-
-  .legend-line {
-    display: flex;
-    justify-content: center;
-    gap: 18px;
-    margin-top: 12px;
-    color: var(--muted);
-    font-size: 0.88rem;
-  }
-
-  .callout { text-align: center; }
-  .visual-body > .callout:last-child { margin-top: auto; }
-
-  .source-note {
-    margin-top: 0.75rem;
-    color: #7890ad;
-    font-size: 0.72rem;
-    text-align: center;
-  }
-
-  .source-note a { color: #8fa9c8; }
-
-  .route-card {
-    min-height: 210px;
-    border: 1px solid var(--line);
-    border-top: 4px solid var(--accent);
-    border-radius: 16px;
-    padding: 20px;
-    background: var(--surface);
-  }
-
-  .route-card:nth-child(2) { border-top-color: var(--accent-2); }
-  .route-card:nth-child(3) { border-top-color: #8fb8ff; }
-  .route-card:nth-child(4) { border-top-color: var(--accent-3); }
-  .route-card p { color: var(--muted); font-size: 0.96rem; }
-
-  .pivot-board {
-    width: 100%;
-    max-width: 1120px;
-    display: grid;
-    grid-template-columns: 1fr 80px 1.35fr;
-    gap: 18px;
-    align-items: center;
-  }
-
-  .pivot-arrow { color: var(--accent-2); font-size: 3rem; font-weight: 900; text-align: center; }
-
-  .contract-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-
-  .contract-chip {
-    min-height: 92px;
-    padding: 14px;
-    border: 1px solid var(--line);
-    border-radius: 13px;
-    background: rgba(255,255,255,0.025);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  .contract-chip strong { margin-bottom: 4px; }
-  .contract-chip span { color: var(--muted); font-size: 0.88rem; line-height: 1.35; }
-
-  .integration-hub {
-    width: 100%;
-    max-width: 1120px;
-    display: grid;
-    grid-template-columns: 1fr 1.25fr 1fr;
-    gap: 18px;
-    align-items: stretch;
-  }
-
-  .integration-column { display: grid; gap: 12px; }
-  .integration-column .org-node { min-height: 112px; }
-  .doom-core {
-    border: 2px solid var(--accent-2);
-    border-radius: 22px;
-    padding: 26px;
-    background: radial-gradient(circle at top, rgba(255,180,84,0.13), transparent 60%), var(--surface);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-  }
-  .doom-logo { font-size: 2.7rem; font-weight: 900; letter-spacing: 0.08em; color: var(--accent-2); }
-
-  .demo-command {
-    display: inline-block;
-    margin-top: 1rem;
-    padding: 18px 24px;
-    border: 1px solid #304764;
-    border-radius: 12px;
-    background: #05070d;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    color: var(--good);
-    font-size: 1.05rem;
-  }
-
-  .progress-bar {
-    position: fixed;
-    left: 0;
-    bottom: 0;
-    height: 4px;
-    width: 0;
-    background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
-    transition: width 0.34s ease;
-  }
-
-  .slide-counter,
-  .part-indicator,
-  .nav-hint {
-    position: fixed;
-    z-index: 10;
-    font-size: 0.92rem;
-    color: var(--muted);
-  }
-
-  .slide-counter { right: 22px; bottom: 16px; }
-  .part-indicator { left: 22px; bottom: 16px; }
-  .nav-hint { right: 22px; top: 16px; }
-
-  @media (min-width: 1450px) and (min-height: 820px) {
-    .slide { padding: 46px 88px 58px; }
-    h1 { font-size: 3.75rem; }
-    h2 { font-size: 2.55rem; }
-    .section-note { font-size: 1.16rem; }
-    .visual-body { max-width: 1360px; min-height: 520px; }
-    .cols-2, .cols-3, .cols-4, .memory-map, .concept-grid, .pipe { max-width: 1360px; }
-    .org-node { min-height: 220px; padding: 26px 24px; }
-    .org-node.compact { min-height: 148px; }
-    .tree-root { min-height: 112px; }
-    .tree-leaves .org-node { min-height: 200px; }
-    .callout { max-width: 1180px; padding: 16px 20px; }
-    .concept-card { min-height: 245px; padding: 24px; }
-    .memory-column { padding: 22px 24px; }
-    .memory-seg { padding: 16px 18px; }
-    .lane-track { min-height: 162px; }
-    .lane-step { min-height: 92px; }
-    .byte-bar { min-height: 142px; }
-    .evidence-shot { height: 390px; }
-    .register-row { min-height: 205px; }
-    .address-box { min-height: 178px; }
-  }
-
-  @media (max-width: 1100px) {
-    .cols-2, .cols-3, .cols-4, .map-board, .memory-map, .concept-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .hero-diagram {
-      grid-template-columns: 1fr;
-    }
-
-    .hero-arrow {
-      display: none;
-    }
-
-    .pivot-board, .integration-hub { grid-template-columns: 1fr; }
-    .pivot-arrow { display: none; }
-  }
+:root{--bg:#111413;--panel:#1b201e;--line:#3c4741;--text:#f1f0e7;--muted:#b4beb4;--win:#f6b65e;--linux:#70d5c1;--red:#ee826d;--mono:"DejaVu Sans Mono",Consolas,monospace;--sans:"Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:#090c0b;color:var(--text);font-family:var(--sans);overflow:hidden}
+button,a{touch-action:manipulation}button{font:inherit}a{color:var(--linux)}button:focus-visible,a:focus-visible{outline:3px solid var(--win);outline-offset:5px}
+#viewport{width:100vw;height:100vh;display:grid;place-items:center}
+#deck{width:1600px;height:900px;position:relative;flex-shrink:0;transform-origin:center;background:var(--bg);overflow:hidden}
+#deck:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 79px,#ffffff03 80px),linear-gradient(transparent 79px,#ffffff03 80px);background-size:80px 80px;pointer-events:none}
+.masthead{position:absolute;left:76px;right:76px;top:30px;display:flex;justify-content:space-between;align-items:center;font:17px var(--mono);letter-spacing:2px;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:18px;z-index:2}
+.masthead strong{color:var(--win);font-weight:normal}.masthead span:last-child{letter-spacing:1px}
+.slide{position:absolute;inset:100px 76px 132px;display:none;flex-direction:column;gap:26px}
+.slide.active{display:flex}.kicker{font:18px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--win);margin:0}
+h1,h2,h3,p,figure,blockquote{margin:0}h1,h2{font-weight:800;letter-spacing:-2px;line-height:1.05}h1{font-size:88px}h2{font-size:58px;max-width:1350px}h3{font-size:30px;line-height:1.2}
+p,li,td,th{font-size:28px;line-height:1.4}.lead{color:var(--muted);font-size:28px;max-width:1250px}.small{font-size:22px;line-height:1.4;color:var(--muted)}.tiny{font:18px/1.45 var(--mono);color:var(--muted)}
+.win{color:var(--win)}.linux{color:var(--linux)}.danger{color:var(--red)}.muted{color:var(--muted)}
+code{font-family:var(--mono);font-size:.9em}pre{font:25px/1.65 var(--mono);margin:0;white-space:pre-wrap}
+.body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:24px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:46px;align-items:center}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}.four{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.panel{border:1px solid var(--line);background:var(--panel);padding:28px}.panel h3{margin-bottom:16px}.panel p+p{margin-top:16px}.label{font:18px var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:18px}
+.takeaway{font-size:28px;border-left:4px solid var(--win);padding:12px 22px;background:#f6b65e08;flex-shrink:0}
+.definition{font-size:23px;color:var(--muted)}.definition strong{color:var(--text);font-weight:500}
+.flow{display:flex;align-items:center;gap:20px}.flow>*:not(.arrow){flex:1;min-width:0}.arrow{font:38px var(--mono);color:var(--muted);flex:none}
+.node{padding:28px;border-top:3px solid var(--line);background:var(--panel)}.node.windows{border-color:var(--win)}.node.host{border-color:var(--linux)}.node h3{margin-bottom:14px}.node .small{margin-top:12px}
+.number{font:58px var(--mono);color:var(--win);margin-bottom:14px}.rule{height:1px;background:var(--line);margin:16px 0}
+.hero{display:grid;grid-template-columns:1.05fr 1fr;align-items:center;flex:1;gap:30px}.hero h1 span{display:block}.doom-word{font-size:152px;letter-spacing:-8px;color:var(--win);text-shadow:0 6px 0 #81582e;line-height:1.15}
+.hero .lead{margin-top:24px}.terminal{border:1px solid var(--line);padding:24px 28px;background:#090e0c;font:24px/1.5 var(--mono);color:var(--linux)}
+.mission-map{position:relative;width:100%;height:440px}.mission-map svg{width:100%;height:100%}
+.quote{font-size:47px;line-height:1.23;letter-spacing:-1px;max-width:1260px;border-left:5px solid var(--win);padding-left:34px}
+.mini-path{display:flex;gap:20px;align-items:center}.mini-path b{font-size:28px;font-weight:500}.mini-path span{color:var(--muted)}
+.memory{border:1px solid var(--line);background:#101612;padding:22px}.memory-row{display:flex;justify-content:space-between;align-items:center;padding:15px 18px;border-bottom:1px solid var(--line);gap:18px;font-size:25px}.memory-row:last-child{border-bottom:0}.memory-row.hot{background:#f6b65e17;color:var(--win)}.memory-row.cool{background:#70d5c114;color:var(--linux)}.memory-row.free{color:var(--muted);border:1px dashed var(--line);margin-top:10px}.memory-row code{white-space:nowrap}
+table{border-collapse:collapse;width:100%;text-align:left}th,td{border-bottom:1px solid var(--line);padding:17px 22px}th{color:var(--muted);font-size:22px;font-weight:400}td{font-size:26px}
+.equation{font:36px/1.5 var(--mono);padding:30px;border:1px solid var(--line);background:#0d120f}.equation small{display:block;font:22px var(--sans);color:var(--muted);margin-top:12px}
+.register{display:grid;grid-template-columns:140px 1fr;gap:20px;align-items:center;padding:22px 0;border-bottom:1px solid var(--line)}.register code{font-size:32px;color:var(--win)}.register p{font-size:27px}
+.stack-scene h3{margin-bottom:18px}.stack-scene .memory{padding:18px}.stack-scene .memory-row{font-size:23px;padding:11px}.stack-scene .label{margin-top:14px;margin-bottom:0;min-height:32px}
+[data-step]{transition:opacity .22s,transform .22s}.pending{visibility:hidden;opacity:0;transform:translateY(8px)}
+.byte-code{display:grid;grid-template-columns:1fr 1.3fr;gap:40px}.assembly-row{display:grid;grid-template-columns:285px 1fr;gap:20px;padding:13px 0;border-bottom:1px solid var(--line);font-size:25px}.assembly-row code{color:var(--win);font-size:25px}
+.byte-bar{display:flex;gap:4px;height:76px}.byte-bar span{display:grid;place-items:center;background:#f6b65e23;border-bottom:3px solid var(--win);font:23px var(--mono);flex:var(--bytes)}.byte-bar span:nth-child(even){background:#70d5c119;border-color:var(--linux)}
+.format-grid{align-items:center}.format-grid th,.format-grid td{padding:12px 18px}.format-grid .definition{font-size:22px;line-height:1.35}.format-caption{font-size:21px;margin-top:12px}
+.loader-flow{gap:14px;align-items:stretch}.loader-flow .node{padding:22px 20px;border-color:var(--win)}.loader-flow .arrow{align-self:center;font-size:26px}.loader-flow .label{color:var(--win)}.loader-flow h3{font-size:28px}
+.memory-build{display:grid;grid-template-columns:330px 65px 1fr;gap:32px;align-items:center}.memory-build .arrow{text-align:center}.exe-source{padding:32px 26px;border:1px solid var(--line);border-top:4px solid var(--win);background:var(--panel)}.exe-source h3{margin-bottom:20px}.process-memory .label{margin-bottom:12px}.memory-group{border:1px solid var(--win);background:#f6b65e08}.memory-group.runtime{border:1px dashed var(--linux);background:#70d5c108}.memory-group .memory-row{padding:14px 22px;font-size:26px}.memory-group strong{min-width:125px}.process-memory .runtime-label{margin-top:22px;color:var(--linux)}
+.slide[aria-labelledby="title-21"] th,.slide[aria-labelledby="title-21"] td{padding:12px 22px}
+.dispatch-map{width:100%;height:380px;flex-shrink:0;overflow:visible}.dispatch-zone{font:16px var(--mono);letter-spacing:1px}.dispatch-stop{font:27px var(--sans);fill:var(--text);text-anchor:middle}.dispatch-stop circle{fill:var(--win);stroke:#111413;stroke-width:4}.dispatch-stop.host circle{fill:var(--linux)}.dispatch-stop .dispatch-number{font:23px var(--mono);fill:#111413;font-weight:bold}.dispatch-stop .dispatch-detail{font:21px var(--sans);fill:var(--muted)}
+.bridge-grid{display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:0;align-items:stretch}.bridge-grid>div{padding:22px;border-bottom:1px solid var(--line);font-size:26px}.bridge-grid .bridge-head{font:18px var(--mono);color:var(--muted)}.bridge-grid .bridge-mid{background:#70d5c10a}
+.big-check{font:62px var(--mono);color:var(--linux);margin-bottom:12px}.status-row{display:flex;justify-content:space-between;gap:26px;align-items:center;border-bottom:1px solid var(--line);padding:18px 0}.status-row strong{font-size:29px}.status-row span{font-size:24px;color:var(--muted)}
+#footer{position:absolute;bottom:0;left:0;right:0;height:112px;background:#0c110f;border-top:1px solid var(--line);padding:17px 76px;display:grid;grid-template-columns:1fr auto;column-gap:34px}
+#route{display:flex;align-items:center;gap:14px;padding:0;margin:0;list-style:none}#route li{font:18px var(--mono);color:#a2afa5;display:flex;align-items:center;gap:9px;white-space:nowrap}#route li:not(:last-child):after{content:"—";color:var(--line);margin-left:4px}#route .marker{width:25px;height:25px;border:1px solid var(--line);display:grid;place-items:center;font-size:15px}#route li.done{color:var(--linux)}#route li.done .marker{border-color:var(--linux)}#route li.current{color:var(--win)}#route li.current .marker{background:var(--win);color:var(--bg);border-color:var(--win)}
+#nav{display:flex;align-items:center;gap:12px}#nav button{border:1px solid var(--line);background:transparent;color:var(--text);font-size:20px;min-width:40px;height:36px;cursor:pointer}#nav button:disabled{opacity:.3;cursor:default}#nav #appendix{font-size:16px;padding:0 12px}#counter{font:19px var(--mono);min-width:94px;text-align:center}#hint{font:16px var(--mono);color:var(--muted);align-self:end}#step-count{font:16px var(--mono);color:var(--win);align-self:end;text-align:right}
+#help{position:absolute;inset:160px 300px;background:#152019;border:1px solid var(--linux);padding:50px;z-index:5;box-shadow:0 0 0 300px #0009}#help h2{font-size:44px;margin-bottom:25px}#help p{margin-top:15px}#help button{margin-top:24px;padding:10px 20px;background:var(--linux);border:0;font-size:24px}#help[hidden]{display:none}
+.glossary td{font-size:23px;padding:13px 18px}.glossary td:first-child{font-family:var(--mono);color:var(--win);width:175px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media print{@page{size:1600px 900px;margin:0}body{overflow:visible;background:var(--bg);print-color-adjust:exact;-webkit-print-color-adjust:exact}#viewport{display:block;width:auto;height:auto}#deck{width:1600px;height:auto;transform:none!important;overflow:visible}#deck:before,.masthead,#footer,#help{display:none!important}.slide,.slide.active{position:relative;inset:auto;display:flex!important;width:1600px;height:900px;padding:65px 76px;break-after:page;page-break-after:always}.slide:last-of-type{break-after:auto;page-break-after:auto}.pending{visibility:visible;opacity:1;transform:none}}
 </style>
 </head>
 <body>
+<div id="viewport">
+<main id="deck" aria-label="Présentation Objectif DOOM">
+<header class="masthead"><strong>MY_WINE / OBJECTIF DOOM</strong><span id="chapter">BRIEFING · 32 BITS</span></header>
 
-<div class="deck" id="deck">
-
-<!-- SLIDE 1 -->
-<div class="slide title-slide active">
-  <div class="eyebrow">Partie II · la promesse de la dernière présentation</div>
-  <div class="emoji-big">🍷</div>
-  <h1><code>my_wine</code><br><span style="color: var(--accent-2)">du loader à la compatibilité</span></h1>
-  <div class="accent-line"></div>
-  <p class="subtitle">La dernière fois, <code>ld.so</code> s'arrêtait au premier saut. Cette fois, on découvre tout ce qu'il faut construire après.</p>
-  <p class="tagline">un Portable Executable Windows · un processus Linux · des contrats à réconcilier</p>
+<section class="slide active" data-stage="0" data-chapter="Briefing · 32 bits" aria-labelledby="title-1">
+<p class="kicker">Mission 00 / De la curiosité au premier pixel</p>
+<div class="hero">
+<div><h1 id="title-1">Objectif<span class="doom-word">DOOM</span></h1><p class="lead">Faire tourner un jeu Windows sous Linux.<br>Comprendre ce qui le rend possible.<br>Construire les pièces manquantes.</p><p class="small" style="margin-top:22px">Cible : DOOM95, la version Windows en 32 bits.</p></div>
+<figure class="mission-map" aria-label="Carte de mission : cinq pièces à relier du fichier Windows au jeu sous Linux">
+<svg viewBox="0 0 640 440" role="img" aria-label="Un parcours encore incomplet entre DOOM95.EXE et Linux">
+<defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#334237" stroke-width=".6"/></pattern></defs>
+<rect x="1" y="1" width="638" height="438" fill="#111a15" stroke="#3c4741"/><rect width="640" height="440" fill="url(#grid)"/>
+<g fill="none" stroke="#52634e" stroke-width="2"><path d="M48 62H225V151H351V59H578V214H480V372H266V287H48Z"/><path d="M81 95H191V184H385V92H545V182H447V339H300V254H81Z"/></g>
+<path d="M110 137H155V218H335V130H507V255H375V302" fill="none" stroke="#f6b65e" stroke-width="4" stroke-dasharray="9 9"/>
+<g fill="#111413" stroke="#f6b65e" stroke-width="2"><rect x="94" y="121" width="32" height="32"/><rect x="219" y="202" width="32" height="32"/><rect x="319" y="114" width="32" height="32"/><rect x="491" y="239" width="32" height="32"/></g>
+<circle cx="375" cy="302" r="19" fill="#70d5c1"/><path d="m366 302 6 6 12-14" fill="none" stroke="#111413" stroke-width="3"/>
+<g font-family="monospace" font-size="18" fill="#f1f0e7"><text x="32" y="37">DOOM95.EXE</text><text x="148" y="193">IMAGE</text><text x="291" y="103">ÉTAT</text><text x="510" y="227">APPELS</text><text x="343" y="410" fill="#70d5c1">DESTINATION : LINUX</text></g>
+</svg>
+</figure>
 </div>
+<div class="terminal">$ ./my_wine ./DOOM95.EXE</div>
+</section>
 
-<!-- SLIDE 2 -->
-<div class="slide">
-  <h2>Wine ne simule pas un processeur</h2>
-  <p class="section-note">Un programme Windows x86 peut déjà être compris par un processeur x86. Ce qui manque sous Linux, c'est le monde auquel ce programme pense parler.</p>
-  <div class="visual-body">
-    <div class="org-flow">
-      <div class="org-node soft"><div class="panel-title">Code du programme</div><h3>Instructions x86 natives</h3><p>Le processeur exécute directement les instructions de l'application.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node warn"><div class="panel-title">Couche de compatibilité</div><h3>Wine traduit le contrat</h3><p>Appels Windows, objets, fichiers, fenêtres et autres services sont adaptés au système hôte.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node good"><div class="panel-title">Système hôte</div><h3>Linux fournit les mécanismes</h3><p>Processus, mémoire, fichiers, affichage et son restent des ressources Linux.</p></div>
-    </div>
-    <div class="callout"><span class="accent">Wine Is Not an Emulator</span> : la difficulté n'est pas de traduire les instructions du CPU, mais les attentes du programme.</div>
-    <p class="source-note">Source : <a href="https://www.winehq.org/about/">WineHQ · About Wine</a></p>
-  </div>
+<section class="slide" data-stage="0" data-chapter="Briefing · Pourquoi ?" aria-labelledby="title-2">
+<p class="kicker">À l’origine / Un projet personnel</p><h2 id="title-2">D’où vient ce projet ?</h2>
+<div class="body"><p class="lead">L’essor de Wine et Proton m’a donné envie de regarder comment un programme Windows pouvait tourner sous Linux.</p>
+<div class="three">
+<div class="node"><p class="label">L’inspiration</p><h3>Wine</h3><p class="small"><strong>Wine Is Not an Emulator</strong> : une couche de compatibilité avec Windows.</p></div>
+<div class="node"><p class="label">Le déclic côté jeux</p><h3>Proton</h3><p class="small">L’outil de Valve combine Wine et des composants pour jouer sous Linux.</p></div>
+<div class="node windows"><p class="label">Mon terrain d’exploration</p><h3>my_wine</h3><p class="small">Réduire le problème pour suivre chaque adresse, chaque appel, chaque retour.</p></div>
+</div></div><p class="takeaway">Une cible concrète pour guider l’apprentissage : <span class="win">DOOM95</span>.</p>
+</section>
+
+<section class="slide" data-stage="1" data-chapter="Briefing · Le problème" aria-labelledby="title-3">
+<p class="kicker">Hypothèse / Même famille de processeurs</p><h2 id="title-3">Les instructions savent déjà tourner.</h2>
+<p class="lead">Sur un processeur x86 compatible, le code machine x86 s’exécute directement.</p>
+<div class="body two">
+<div class="panel"><p class="label">Le processeur comprend</p><pre><span class="win">mov</span> eax, 42
+<span class="win">add</span> eax, 1</pre><div class="rule"></div><p>Charger une valeur.<br>Ajouter un nombre.</p><p class="small">L’assembleur donne des noms lisibles aux instructions machine.</p></div>
+<div><p class="label">Ce qu’il nous reste à construire</p><div class="status-row"><strong>Charger le fichier Windows</strong><span>01</span></div><div class="status-row"><strong>Préparer la mémoire du programme</strong><span>02</span></div><div class="status-row"><strong>Fournir les fonctions Windows</strong><span>03</span></div></div>
+</div><p class="takeaway">Le pont à construire concerne <span class="win">les attentes du programme</span>.</p>
+</section>
+
+<section class="slide" data-stage="1" data-chapter="Briefing · Acquis de ld.so" aria-labelledby="title-4">
+<p class="kicker">Inventaire / Ce que vous savez déjà</p><h2 id="title-4"><code>ld.so</code> nous a donné la méthode.</h2>
+<p class="lead">Du fichier sur disque à la première instruction : cinq opérations, de gauche à droite.</p>
+<div class="body">
+<div class="flow loader-flow"><div class="node"><p class="label">01 / Le fichier</p><h3>Lire</h3><p class="small">Repérer le code, les données et les informations de chargement.</p></div><span class="arrow">→</span><div class="node"><p class="label">02 / La mémoire</p><h3>Mapper</h3><p class="small">Rendre le code et les données accessibles dans la mémoire du processus.</p></div><span class="arrow">→</span><div class="node"><p class="label">03 / Les pointeurs</p><h3>Relocaliser</h3><p class="small">Corriger les pointeurs concernés si l’image change d’adresse.</p></div><span class="arrow">→</span><div class="node"><p class="label">04 / Les fonctions</p><h3>Résoudre</h3><p class="small">Trouver l’adresse des fonctions demandées par le programme.</p></div><span class="arrow">→</span><div class="node"><p class="label">05 / Le démarrage</p><h3>Exécuter</h3><p class="small">Transférer le contrôle au point d’entrée du programme.</p></div></div>
+<p class="small">Exemple de résolution : le programme demande <code>puts</code> → le chargeur trouve la fonction → il branche son adresse.</p>
+</div><p class="takeaway">Pour DOOM, charger le fichier ne suffit pas : il faut aussi <span class="win">fournir l’environnement Windows attendu</span>.</p>
+</section>
+
+<section class="slide" data-stage="2" data-chapter="Mission 01 · Charger l’image" aria-labelledby="title-5">
+<p class="kicker">Mapper / Le fichier ne fournit pas tout</p><h2 id="title-5">Ce qu’il faut mettre en mémoire pour DOOM.</h2>
+<div class="body">
+<div class="memory-build">
+<div class="exe-source"><p class="label">Sur disque</p><h3><code>DOOM95.EXE</code></h3><p>Des instructions,<br>des données,<br>une recette de chargement.</p></div>
+<div class="arrow" aria-hidden="true">→</div>
+<div class="process-memory"><p class="label">Mémoire du processus / À charger selon le fichier</p><div class="memory-group"><div class="memory-row"><strong class="win">Code</strong><span>les instructions du jeu</span></div><div class="memory-row"><strong class="win">Données</strong><span>valeurs initiales ou mises à zéro</span></div></div><p class="label runtime-label">À créer pour l’exécution</p><div class="memory-group runtime"><div class="memory-row"><strong class="linux">Heap</strong><span>les allocations pendant le jeu</span></div><div class="memory-row"><strong class="linux">Stack</strong><span>les appels et retours des fonctions</span></div></div></div>
 </div>
+</div><p class="takeaway">Commençons par le code et les données : <span class="win">où le fichier indique-t-il comment les charger ?</span></p>
+</section>
 
-<!-- SLIDE 3 -->
-<div class="slide">
-  <h2>Proton applique cette idée au jeu sous Linux</h2>
-  <p class="section-note">Valve assemble Wine et des composants spécialisés dans un outil de compatibilité intégré à Steam Play.</p>
-  <div class="visual-body">
-    <div class="hero-diagram">
-      <div class="hero-node"><div class="panel-title">Entrée</div><h3>Jeu Windows</h3><p>Un exécutable et des API conçus pour Windows.</p></div>
-      <div class="hero-arrow">→</div>
-      <div class="hero-node" style="border-color:var(--accent-2)"><div class="panel-title">Compatibilité</div><h3>Proton</h3><p>Wine, traduction graphique et composants adaptés au contexte Steam.</p></div>
-      <div class="hero-arrow">→</div>
-      <div class="hero-node" style="border-color:var(--good)"><div class="panel-title">Exécution</div><h3>Jeu sous Linux</h3><p>Le système et les pilotes Linux réalisent le travail effectif.</p></div>
-    </div>
-    <div class="callout">Wine et Proton prouvent que cette frontière peut être industrialisée. Mon objectif est plus petit : <span class="warn-text">la rendre compréhensible</span>.</div>
-    <p class="source-note">Source : <a href="https://github.com/ValveSoftware/Proton">ValveSoftware/Proton · README officiel</a></p>
-  </div>
+<section class="slide" data-stage="2" data-chapter="Mission 01 · Charger l’image" aria-labelledby="title-6">
+<p class="kicker">Lire / Une nouvelle carte</p><h2 id="title-6">Portable Executable <span class="win">(PE)</span></h2>
+<p class="lead">La recette de l’image Windows. DOOM95 utilise la variante 32 bits : PE32.</p>
+<div class="body two format-grid">
+<div class="memory"><p class="label">Dans le fichier</p><div class="memory-row"><strong>En-têtes</strong><span>architecture · base · entrée</span></div><div class="memory-row hot"><strong>Sections</strong><span>code · données</span></div><div class="memory-row"><strong>Répertoires de données</strong><span>imports · relocations</span></div></div>
+<div><table><thead><tr><th>Dans ELF</th><th>Dans PE</th></tr></thead><tbody><tr><td>Segments à charger</td><td>Sections à placer</td></tr><tr><td>Symboles à résoudre</td><td>Fonctions à importer</td></tr><tr><td>Relocations</td><td>Corrections de base</td></tr></tbody></table><p class="small format-caption">Une analogie de rôle, pas des structures identiques.</p></div>
+</div><p class="takeaway">Nous savons déjà quoi chercher : <span class="win">où placer, quoi corriger, où commencer</span>.</p>
+</section>
+
+<section class="slide" data-stage="2" data-chapter="Mission 01 · Charger l’image" aria-labelledby="title-7">
+<p class="kicker">Mapper et relocaliser / Du fichier aux adresses</p><h2 id="title-7">Construire une image cohérente.</h2>
+<p class="definition"><strong>Relative Virtual Address (RVA)</strong> : déplacement par rapport au début de l’image en mémoire.</p>
+<div class="body">
+<div class="two"><div class="equation"><span class="muted">base réelle</span> + <span class="win">RVA</span><br>0x00500000 + 0x00002000<br>= <span class="linux">0x00502000</span><small>Adresses d’exemple ; le préfixe 0x indique la base 16.</small></div><div class="memory"><div class="memory-row"><span>Réserver l’espace</span><code>base réelle</code></div><div class="memory-row hot"><span>Placer les sections</span><code>base + RVA</code></div><div class="memory-row"><span>Corriger les pointeurs concernés</span><span>relocations</span></div><div class="memory-row cool"><span>Configurer les permissions</span><span>lire · écrire · exécuter</span></div></div></div>
+<p class="small">Si la base passe de <code>0x00400000</code> à <code>0x00500000</code>, la correction vaut <code>+0x00100000</code> pour les pointeurs désignés par les relocations de base.</p>
+</div><p class="takeaway">Un emplacement dans le fichier et une adresse dans le processus sont <span class="win">deux coordonnées différentes</span>.</p>
+</section>
+
+<section class="slide" data-stage="2" data-chapter="Mission 01 · Charger l’image" aria-labelledby="title-8">
+<p class="kicker">Résoudre / Une demande devient une adresse</p><h2 id="title-8">Brancher les fonctions manquantes.</h2>
+<p class="definition"><strong>Dynamic-Link Library (DLL)</strong> : bibliothèque liée dynamiquement. Ici, <code>kernel32.dll</code> expose des fonctions Windows.</p>
+<div class="body">
+<div class="flow"><div class="node windows"><p class="label">1 / Demande</p><h3><code>kernel32.dll</code><br><code>WriteFile</code></h3><p class="small">Import Lookup Table (ILT)<br>La liste des fonctions attendues.</p></div><span class="arrow" data-step="1">→</span><div class="node" data-step="1"><p class="label">2 / Résolution</p><h3>Trouver une implémentation</h3><p class="small">Une fonction interne ou l’export d’une bibliothèque chargée.</p></div><span class="arrow" data-step="2">→</span><div class="node host" data-step="2"><p class="label">3 / Adresse branchée</p><h3>Un pointeur appelable</h3><p class="small">Import Address Table (IAT)<br>La table utilisée par le programme.</p></div></div>
+<p class="small">Comme pour <code>puts</code> avec <code>ld.so</code>, un nom devient une adresse. Un <strong>handler</strong> est la fonction qui traite la demande.</p>
+</div><p class="takeaway">Les noms sont branchés. Reste à préparer <span class="win">l’état attendu par la première instruction</span>.</p>
+</section>
+
+<section class="slide" data-stage="3" data-chapter="Mission 02 · Construire l’état Windows" aria-labelledby="title-9">
+<p class="kicker">Nouveau niveau / Le premier saut</p><h2 id="title-9">L’image est prête.<br><span class="win">Mais dans quel monde va-t-elle entrer ?</span></h2>
+<div class="body two"><div><p class="number">✓ IMAGE</p><p>Les instructions sont en mémoire.<br>Les adresses sont corrigées.<br>Le point d’entrée est connu.</p></div><div class="memory"><p class="label">Encore à fournir</p><div class="memory-row hot"><span>Une Stack valide</span><span>appeler et revenir</span></div><div class="memory-row"><span>Un état Windows</span><span>thread et processus</span></div><div class="memory-row"><span>Des fonctions compatibles</span><span>arguments et résultats</span></div></div></div>
+<p class="takeaway">Le saut transmet le contrôle. <span class="win">Il ne fabrique pas l’environnement.</span></p>
+</section>
+
+<section class="slide" data-stage="3" data-chapter="Mission 02 · Construire l’état Windows" aria-labelledby="title-10">
+<p class="kicker">Point de repère / Registres</p><h2 id="title-10">Les cases de travail du processeur.</h2>
+<p class="lead">Dans le processeur, un registre conserve une donnée, une adresse ou un état.</p>
+<div class="body two"><div><div class="register"><code>EAX</code><p>Valeur de travail ou résultat d’un appel.</p></div><div class="register"><code>EIP</code><p>L’adresse de l’instruction à exécuter.</p></div><div class="register"><code>ESP</code><p>L’adresse du sommet de la Stack.</p></div></div>
+<div class="panel"><p class="label">Lecture d’une instruction · x86, 32 bits</p><pre><span class="win">mov eax, [esp]</span></pre><div class="rule"></div><p>1. Lire l’adresse contenue dans <code>ESP</code>.</p><p>2. Lire les 4 octets en mémoire à cette adresse.</p><p>3. Placer cette valeur dans <code>EAX</code>.</p><p class="small">Les crochets signifient « accéder à la mémoire ».</p></div></div>
+<p class="takeaway">Un registre peut contenir une adresse. <span class="win">La donnée pointée reste en mémoire.</span></p>
+</section>
+
+<section class="slide" data-stage="3" data-chapter="Mission 02 · Construire l’état Windows" aria-labelledby="title-11">
+<p class="kicker">Point de repère / La Stack en mouvement</p><h2 id="title-11">Appeler, c’est aussi préparer le retour.</h2>
+<p class="lead">Sur x86, empiler 4 octets diminue <code>ESP</code> de 4. Ici, les adresses diminuent vers le bas.</p>
+<div class="body three">
+<div class="stack-scene"><h3>1. Un argument empilé</h3><div class="memory"><div class="memory-row"><code>0x1000</code><span>…</span></div><div class="memory-row hot"><code>0x0FFC</code><span>42 ← ESP</span></div><div class="memory-row free"><code>0x0FF8</code><span>libre</span></div></div><p class="label"><code>push 42</code></p><p class="small">Le sommet pointe sur l’argument.</p></div>
+<div class="stack-scene" data-step="1"><h3>2. L’appel</h3><div class="memory"><div class="memory-row"><code>0x1000</code><span>…</span></div><div class="memory-row"><code>0x0FFC</code><span>42</span></div><div class="memory-row hot"><code>0x0FF8</code><span>retour ← ESP</span></div></div><p class="label"><code>call fonction</code></p><p class="small">L’adresse de l’instruction suivante est empilée ; l’exécution saute dans la fonction.</p></div>
+<div class="stack-scene" data-step="2"><h3>3. Le retour</h3><div class="memory"><div class="memory-row"><code>0x1000</code><span>…</span></div><div class="memory-row hot"><code>0x0FFC</code><span>42 ← ESP</span></div><div class="memory-row free"><code>0x0FF8</code><span>libérée</span></div></div><p class="label"><code>ret</code> sans opérande</p><p class="small">L’adresse de retour est dépilée. L’argument reste à retirer selon la convention.</p></div>
+</div><p class="takeaway">La Stack est <span class="win">une zone de mémoire</span> ; <code>ESP</code> indique où nous en sommes.</p>
+</section>
+
+<section class="slide" data-stage="3" data-chapter="Mission 02 · Construire l’état Windows" aria-labelledby="title-12">
+<p class="kicker">Appeler / Partager les mêmes règles</p><h2 id="title-12">Une bonne adresse ne suffit pas.</h2>
+<p class="definition"><strong>Application Binary Interface (ABI)</strong> : contrat binaire, dont les règles d’appel entre fonctions.</p>
+<div class="body two"><div class="memory"><p class="label">Exemple : appel Windows 32 bits, __stdcall</p><div class="memory-row hot"><code>[ESP]</code><span>adresse de retour</span></div><div class="memory-row"><code>[ESP + 4]</code><span>premier argument</span></div><div class="memory-row"><code>[ESP + 8]</code><span>deuxième argument</span></div><div class="memory-row"><code>EAX</code><span>résultat entier simple</span></div></div><div><h3>Les deux côtés doivent s’accorder.</h3><div class="status-row"><strong>Arguments</strong><span>ordre et emplacement</span></div><div class="status-row"><strong>Registres</strong><span>lesquels préserver</span></div><div class="status-row"><strong>Stack</strong><span>alignement et nettoyage</span></div><p class="small" style="margin-top:20px">Avec <code>__stdcall</code>, la fonction appelée retire ses arguments. Avec <code>__cdecl</code>, l’appelant le fait.</p></div></div>
+<p class="takeaway">La Stack respecte les règles d’appel. Le programme attend aussi <span class="win">son identité Windows</span>.</p>
+</section>
+
+<section class="slide" data-stage="3" data-chapter="Mission 02 · Construire l’état Windows" aria-labelledby="title-13">
+<p class="kicker">S’identifier / L’état du thread et du processus</p><h2 id="title-13">Windows existe aussi dans la mémoire.</h2>
+<p class="lead">Un thread est un fil d’exécution dans un processus. Il possède notamment sa Stack et son état de registres.</p>
+<div class="body">
+<div class="flow"><div class="node windows"><p class="label">Registre de segment FS</p><h3>Base du segment</h3><p class="small">En 32 bits, elle conduit à l’état Windows du thread.</p></div><span class="arrow">→</span><div class="node"><p class="label">Thread Environment Block (TEB)</p><h3>État du thread</h3><p class="small">À l’offset <code>0x30</code> : un pointeur vers l’état du processus.</p></div><span class="arrow">→</span><div class="node host"><p class="label">Process Environment Block (PEB)</p><h3>État du processus</h3><p class="small">Image, paramètres et autres informations attendues par Windows.</p></div></div>
+<p class="small">La base du segment s’ajoute au déplacement. Ici, lire <code>FS:[0x30]</code> donne le pointeur vers le PEB.</p>
+</div><p class="takeaway">L’état Windows est prêt. Que se passe-t-il maintenant lors d’un appel à <span class="win"><code>WriteFile</code></span> ?</p>
+</section>
+
+<section class="slide" data-stage="4" data-chapter="Mission 03 · Traduire les appels" aria-labelledby="title-14">
+<p class="kicker">Traduire / Suivre une demande de bout en bout</p><h2 id="title-14">Écrire des octets : deux contrats.</h2>
+<p class="definition"><strong>Application Programming Interface (API)</strong> : fonctions proposées au programme. Exemple Windows : <code>WriteFile</code>.</p>
+<div class="body">
+<div class="flow"><div class="node windows"><p class="label">Programme Windows · invité</p><h3><code>WriteFile</code></h3><p class="small">Un handle, un tampon, une taille et l’adresse du nombre d’octets écrits.</p></div><span class="arrow">→</span><div class="node"><p class="label">Handler my_wine</p><h3>Adapter la demande</h3><p class="small">Retrouver le descripteur Linux associé au handle, l’identifiant de ressource Windows.</p></div><span class="arrow">→</span><div class="node host"><p class="label">Système Linux · hôte</p><h3><code>write</code></h3><p class="small">L’appel système demande au noyau d’écrire les octets.</p></div></div>
+<div class="panel" style="border-color:var(--linux)"><p><span class="linux">← Au retour :</span> convertir le résultat en succès/échec et renseigner le nombre d’octets écrits.</p></div>
+<p class="small">Ici, le handler appelle directement Linux. Voyons ensuite le mécanisme commun prévu pour répartir d’autres appels.</p>
 </div>
+</section>
 
-<!-- SLIDE 4 -->
-<div class="slide">
-  <h2>Pourquoi reconstruire une version minuscule ?</h2>
-  <p class="section-note">Pas pour remplacer Wine : pour pouvoir suivre chaque adresse, chaque changement de pile et chaque traduction.</p>
-  <div class="visual-body">
-    <div class="cols-3">
-      <div class="concept-card"><div class="panel-title">Observer</div><h3>Une frontière à la fois</h3><p>Le projet reste assez petit pour suivre le chemin du fichier jusqu'au handler Linux.</p></div>
-      <div class="concept-card"><div class="panel-title">Construire</div><h3>Rendre les hypothèses explicites</h3><p>Chaque crash révèle un contrat Windows que le loader n'a pas encore fabriqué.</p></div>
-      <div class="concept-card"><div class="panel-title">Valider</div><h3>Aller jusqu'à Doom95</h3><p>Le jeu sert de test d'intégration pour l'image, les API, l'affichage, le son et les entrées.</p></div>
-    </div>
-    <div class="callout"><code>my_wine</code> est un laboratoire pédagogique : <span class="accent">réduire la couverture pour agrandir la compréhension</span>.</div>
-  </div>
-</div>
+<section class="slide" data-stage="4" data-chapter="Mission 03 · Traduire les appels" aria-labelledby="title-15">
+<p class="kicker">Autre mécanisme / Une porte d’entrée générée</p><h2 id="title-15">Un thunk : 15 octets pour passer la main.</h2>
+<p class="lead">Un petit adaptateur de code indique quel service traiter au dispatcher, le répartiteur commun des appels.</p>
+<div class="body byte-code"><div><p class="label">Version 32 bits réellement générée</p><div class="byte-bar" aria-label="Tailles des six instructions : 1, 5, 5, 2, 1 et 1 octets"><span style="--bytes:1">1</span><span style="--bytes:5">5</span><span style="--bytes:5">5</span><span style="--bytes:2">2</span><span style="--bytes:1">1</span><span style="--bytes:1">1</span></div><p class="small" style="margin-top:24px">Windows New Technology (NT) désigne ici la famille de services Windows bas niveau.</p><p class="small" style="margin-top:18px">Ce numéro sélectionne un handler interne ; il ne devient pas un numéro d’appel système Linux.</p></div><div><div class="assembly-row"><code>push ebp</code><span>Préserver un registre.</span></div><div class="assembly-row"><code>mov eax, adresse</code><span>Où est le dispatcher ?</span></div><div class="assembly-row"><code>mov edx, numéro</code><span>Quel service traiter ?</span></div><div class="assembly-row"><code>call eax</code><span>Entrer dans le dispatcher.</span></div><div class="assembly-row"><code>pop ebp</code><span>Restaurer le registre.</span></div><div class="assembly-row"><code>ret</code><span>Revenir à l’appelant.</span></div></div></div>
+<p class="takeaway">Le thunk transfère au dispatcher. Comment celui-ci travaille-t-il, puis <span class="win">retrouve-t-il l’appelant</span> ?</p>
+</section>
 
-<!-- SLIDE 5 -->
-<div class="slide">
-  <h2><code>ld.so</code> était le prologue</h2>
-  <p class="section-note">La première présentation répondait à une question : comment rendre une image chargeable avant de lui donner le contrôle ?</p>
-  <div class="visual-body">
-    <div class="pipe">
-      <div class="pipe-box"><strong>Lire</strong><span>Les headers décrivent la recette.</span></div><div class="flow-arrow">→</div>
-      <div class="pipe-box"><strong>Mapper</strong><span>Le fichier devient une image mémoire.</span></div><div class="flow-arrow">→</div>
-      <div class="pipe-box"><strong>Reloger</strong><span>Les adresses sont corrigées.</span></div><div class="flow-arrow">→</div>
-      <div class="pipe-box"><strong>Résoudre</strong><span>Les symboles deviennent appelables.</span></div><div class="flow-arrow">→</div>
-      <div class="pipe-box"><strong>Sauter</strong><span>Le loader transmet le contrôle.</span></div>
-    </div>
-    <div class="callout">Pour un PE, cette méthode reste nécessaire. Mais <span class="warn-text">le premier saut devient le début du problème</span>, pas sa conclusion.</div>
-  </div>
-</div>
+<section class="slide" data-stage="4" data-chapter="Mission 03 · Traduire les appels" aria-labelledby="title-16">
+<p class="kicker">Traverser / Suivre l’appel de gauche à droite</p><h2 id="title-16">Un appel. Deux Stacks. Un retour.</h2>
+<p class="lead">On sauvegarde ESP ; les Stacks restent en place, dans le même processus.</p>
+<div class="body">
+<svg class="dispatch-map" viewBox="0 0 1448 380" role="img" aria-labelledby="dispatch-title dispatch-desc">
+<title id="dispatch-title">Le parcours d’un appel dans le dispatcher 32 bits</title>
+<desc id="dispatch-desc">De gauche à droite : entrer depuis le thunk, sauvegarder les registres et ESP côté Windows, utiliser la Stack Linux et traiter la demande, puis restaurer ESP et rendre le résultat côté Windows.</desc>
+<defs><marker id="arrow-win" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#f6b65e"/></marker><marker id="arrow-linux" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L10 5L0 10Z" fill="#70d5c1"/></marker></defs>
+<rect x="1" y="1" width="1446" height="164" fill="#f6b65e09" stroke="#615039"/>
+<rect x="1" y="214" width="1446" height="164" fill="#70d5c109" stroke="#355b51"/>
+<g class="dispatch-zone"><text x="22" y="29" fill="#f6b65e">INVITÉ / WINDOWS</text><text x="22" y="369" fill="#70d5c1">HÔTE / LINUX</text><text x="22" y="198" fill="#b4beb4">TEMPS →</text></g>
+<path d="M126 100H360H505V280H670H950H1104V100H1310" fill="none" stroke="#657467" stroke-width="2" stroke-dasharray="7 8"/>
+<path d="M153 100H329" fill="none" stroke="#f6b65e" stroke-width="5" marker-end="url(#arrow-win)"/>
+<g class="dispatch-stop"><circle cx="126" cy="100" r="25"/><text class="dispatch-number" x="126" y="108">1</text><text x="126" y="62">Entrer</text><text class="dispatch-detail" x="126" y="145">depuis le thunk</text></g>
+<g class="dispatch-stop"><circle cx="360" cy="100" r="25"/><text class="dispatch-number" x="360" y="108">2</text><text x="360" y="62">Sauvegarder</text><text class="dispatch-detail" x="360" y="145">registres + ESP</text></g>
+<g data-step="1">
+<path d="M387 100H505V280H639" fill="none" stroke="#70d5c1" stroke-width="5" marker-end="url(#arrow-linux)"/>
+<path d="M697 280H919" fill="none" stroke="#70d5c1" stroke-width="5" marker-end="url(#arrow-linux)"/>
+<g class="dispatch-stop host"><circle cx="670" cy="280" r="25"/><text class="dispatch-number" x="670" y="288">3</text><text x="670" y="242">Changer de Stack</text><text class="dispatch-detail" x="670" y="327">ESP ← Stack Linux</text></g>
+<g class="dispatch-stop host"><circle cx="950" cy="280" r="25"/><text class="dispatch-number" x="950" y="288">4</text><text x="950" y="242">Traiter</text><text class="dispatch-detail" x="950" y="327">décoder · appeler</text></g>
+</g>
+<g data-step="2">
+<path d="M977 280H1104V100H1279" fill="none" stroke="#f6b65e" stroke-width="5" marker-end="url(#arrow-win)"/>
+<g class="dispatch-stop"><circle cx="1310" cy="100" r="25"/><text class="dispatch-number" x="1310" y="108">5</text><text x="1310" y="62">Revenir</text><text class="dispatch-detail" x="1310" y="145">ESP invité · EAX résultat</text></g>
+</g>
+</svg>
+</div><p class="takeaway">Le retour est prévu. Encore faut-il respecter <span class="win">les conditions du contexte Linux</span>.</p>
+</section>
 
-<!-- SLIDE 6 -->
-<div class="slide">
-  <h2>Route : du format au contrat</h2>
-  <p class="section-note">Quatre étapes, et une seule question directrice : qu'est-ce que le programme observe à cet instant ?</p>
-  <div class="cols-4">
-    <div class="route-card"><div class="panel-title">Partie 1</div><h3>Charger l'image</h3><p>Lire le PE, reconstruire la mémoire et brancher les imports.</p></div>
-    <div class="route-card"><div class="panel-title">Partie 2</div><h3>Créer le processus</h3><p>Fabriquer l'état Windows visible dès la première instruction.</p></div>
-    <div class="route-card"><div class="panel-title">Partie 3</div><h3>Traverser</h3><p>Passer du contexte guest Windows au contexte host Linux.</p></div>
-    <div class="route-card"><div class="panel-title">Partie 4</div><h3>Intégrer</h3><p>Faire fonctionner ensemble affichage, son, entrées et erreurs.</p></div>
-  </div>
-</div>
+<section class="slide" data-stage="4" data-chapter="Mission 03 · Traduire les appels" aria-labelledby="title-17">
+<p class="kicker">Frontières / Ce que le pont garantit vraiment</p><h2 id="title-17">Chaque passage a ses conditions.</h2>
+<div class="body three"><div class="node windows"><p class="label">01 / Services</p><h3>Un appel Windows ne se transmet pas brut.</h3><p class="small">Numéro, arguments, objets et erreurs dépendent du système. Les instructions d’appel système arbitraires ne sont pas toutes interceptées.</p></div><div class="node"><p class="label">02 / Contexte</p><h3>Appeler une bibliothèque Linux demande un état adapté.</h3><p class="small">Les ponts du projet gèrent Stack et segments selon l’architecture. La bibliothèque standard C, <code>libc</code>, n’est pas automatiquement inutilisable dans tout code invité.</p></div><div class="node host"><p class="label">03 / Erreurs</p><h3>Linux reçoit d’abord les fautes du processeur.</h3><p class="small">Une Stack de signal alternative aide au diagnostic. La traduction complète vers les exceptions Windows reste inachevée.</p></div></div>
+<p class="takeaway">Prochain besoin de DOOM : <span class="win">l’image, les touches et le son</span>. Quel relais utiliser côté Linux ?</p>
+</section>
 
-<!-- SLIDE 7 -->
-<div class="slide">
-  <h2>Un PE est une recette d'image mémoire</h2>
-  <p class="section-note">Même principe qu'avec ELF, autre carte : les structures PE indiquent quoi copier, où le placer et où commencer.</p>
-  <div class="visual-body">
-    <div class="map-board">
-      <div class="panel soft"><div class="panel-title">Fichier sur disque</div><div class="stack">
-        <div class="stack-box pink"><strong><code>MZ</code> → <code>e_lfanew</code></strong><span>Le premier header indique où commence la description PE.</span></div>
-        <div class="stack-box teal"><strong><code>PE\0\0</code> + Optional Header</strong><span>Architecture, base préférée, taille de l'image et point d'entrée.</span></div>
-        <div class="stack-box gold"><strong>Table des sections</strong><span><code>.text</code>, <code>.rdata</code>, <code>.data</code> et leurs coordonnées.</span></div>
-        <div class="stack-box green"><strong>Data directories</strong><span>Imports, relocations et autres tables nécessaires au runtime.</span></div>
-      </div></div>
-      <div class="panel warn"><div class="panel-title">Carte équivalente</div><table>
-        <tr><th>ELF</th><td>Program headers et segments</td></tr>
-        <tr><th>PE</th><td>Sections et data directories</td></tr>
-        <tr><th>Question commune</th><td>Comment transformer les octets du disque en état exécutable ?</td></tr>
-      </table></div>
-    </div>
-    <div class="callout">On ne demande pas à Linux d'exécuter le fichier : <span class="accent">on suit la recette pour reconstruire son image</span>.</div>
-  </div>
-</div>
+<section class="slide" data-stage="5" data-chapter="Mission 04 · Faire vivre DOOM" aria-labelledby="title-18">
+<p class="kicker">Intégration / La réponse aux besoins du jeu</p><h2 id="title-18">Le relais multimédia côté Linux.</h2>
+<p class="definition"><strong>Simple DirectMedia Layer, version 2 (SDL2)</strong> : la bibliothèque choisie pour afficher, recevoir les entrées et jouer l’audio.</p>
+<div class="body">
+<div class="bridge-grid"><div class="bridge-head">DOOM95 DEMANDE</div><div class="bridge-head">MY_WINE ADAPTE</div><div class="bridge-head">LINUX RÉALISE</div><div class="win">Une image</div><div class="bridge-mid">DirectDraw → surfaces et palette → SDL2</div><div class="linux">Une fenêtre affichée</div><div class="win">Des entrées</div><div class="bridge-mid">Messages Windows ← événements SDL2</div><div class="linux">Clavier et souris →</div><div class="win">Des effets sonores</div><div class="bridge-mid">DirectSound → mélange audio → SDL2</div><div class="linux">Un flux audio</div></div>
+<p class="small">La musique suit un chemin distinct : les services multimédias Windows, via <code>winmm.dll</code>, utilisent notamment le synthétiseur FluidSynth.</p>
+</div><p class="takeaway">Image, entrées, audio : voilà ce que <span class="win">la démonstration doit maintenant vérifier</span>.</p>
+</section>
 
-<!-- SLIDE 8 -->
-<div class="slide">
-  <h2>Du fichier à l'image exécutable</h2>
-  <p class="section-note">Une seule relation relie toutes les coordonnées utiles : <code>adresse = base réelle + RVA</code>.</p>
-  <div class="visual-body">
-    <div class="pipe">
-      <div class="pipe-box"><strong>1. Réserver</strong><span><code>SizeOfImage</code> octets à une base disponible.</span></div><div class="flow-arrow">→</div>
-      <div class="pipe-box"><strong>2. Copier</strong><span>Chaque section rejoint <code>base + RVA</code> ; le reste est mis à zéro.</span></div><div class="flow-arrow">→</div>
-      <div class="pipe-box"><strong>3. Reloger</strong><span>Si la base préférée est occupée, ajouter le delta aux pointeurs concernés.</span></div><div class="flow-arrow">→</div>
-      <div class="pipe-box"><strong>4. Protéger</strong><span>Appliquer enfin les droits lecture, écriture et exécution.</span></div>
-    </div>
-    <div class="cols-3" style="margin-top:18px">
-      <div class="panel soft"><div class="panel-title">Disque</div><h3>File offset</h3><p>Où lire les octets.</p></div>
-      <div class="panel warn"><div class="panel-title">Image</div><h3>RVA</h3><p>Déplacement depuis la base.</p></div>
-      <div class="panel risk"><div class="panel-title">Processus</div><h3>Adresse virtuelle</h3><p><code>base réelle + RVA</code>.</p></div>
-    </div>
-    <div class="callout">Même besoin que dans <code>ld.so</code>, autre encodage : <span class="accent">l'ordre reste réserver, construire, corriger, protéger</span>.</div>
-  </div>
-</div>
+<section class="slide" data-stage="5" data-chapter="Mission 04 · Démonstration" aria-labelledby="title-19">
+<p class="kicker">Exécution / À vous de jouer</p><h2 id="title-19">Le moment de vérité.</h2>
+<div class="body"><div class="terminal" style="font-size:29px;padding:38px">$ ./my_wine ./DOOM95.EXE</div><div class="three"><div><p class="number">01</p><h3>Voir une image</h3><p class="small">Le rendu traverse le pont.</p></div><div><p class="number">02</p><h3>Déplacer le joueur</h3><p class="small">Les événements reviennent au jeu.</p></div><div><p class="number">03</p><h3>Entendre un effet</h3><p class="small">L’audio fonctionne si la sortie est disponible.</p></div></div></div>
+<p class="takeaway"><span class="win">Trois minutes.</span> Un binaire Windows, exécuté dans notre environnement Linux.</p>
+</section>
 
-<!-- SLIDE 9 -->
-<div class="slide">
-  <h2>Les imports sont des promesses à brancher</h2>
-  <p class="section-note">L'Import Lookup Table (ILT) décrit ce qu'on veut. L'Import Address Table (IAT) contient ce qu'on a finalement branché.</p>
-  <div class="visual-body">
-    <div class="org-flow">
-      <div class="org-node soft"><div class="panel-title">Demande</div><h3>Import Lookup Table</h3><p><code>kernel32.dll</code><br><code>CreateFileA</code><br><code>WriteFile</code></p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node warn"><div class="panel-title">Loader</div><h3>Résoudre chaque nom</h3><p>Trouver un handler interne ou l'export d'un module PE chargé.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node risk"><div class="panel-title">Réponse</div><h3>Import Address Table</h3><p>Une table de pointeurs directement appelables par le guest.</p></div>
-    </div>
-    <div class="callout">Comme <code>ld.so</code>, le loader résout un nom. Mais ici, <span class="warn-text">l'implémentation est souvent une fonction du runtime que j'ai écrite</span>.</div>
-  </div>
-</div>
+<section class="slide" data-stage="5" data-complete="true" data-chapter="Débriefing · Ce que nous avons construit" aria-labelledby="title-20">
+<p class="kicker">Débriefing / Le chemin complet</p><h2 id="title-20">Charger les octets.<br><span class="win">Reconstruire le monde qu’ils attendent.</span></h2>
+<div class="body"><div class="flow"><div class="node windows"><h3>DOOM95.EXE</h3><p class="small">Le fichier Windows</p></div><span class="arrow">→</span><div class="node"><h3>Image + état</h3><p class="small">Adresses, Stack, processus</p></div><span class="arrow">→</span><div class="node"><h3>Appels adaptés</h3><p class="small">Conventions et services</p></div><span class="arrow">→</span><div class="node host"><h3>Linux</h3><p class="small">Image, entrées, audio</p></div></div><div class="two"><p style="font-size:35px">La méthode de <code>ld.so</code>,<br>prolongée jusqu’au jeu.</p><p class="small">Un laboratoire pédagogique : couverture partielle des fonctions Windows, des threads et des exceptions. La compatibilité se vérifie programme par programme.</p></div></div>
+<p class="takeaway">L’envie de comprendre Wine et Proton est devenue <span class="win">un chemin que l’on peut suivre instruction par instruction</span>.</p>
+</section>
 
-<!-- SLIDE 10 -->
-<div class="slide">
-  <h2>Le premier saut ne suffit pas</h2>
-  <p class="section-note">Imaginons que l'image soit parfaite, les relocations appliquées et les imports branchés. Que voit la première instruction ?</p>
-  <div class="visual-body">
-    <div class="pivot-board">
-      <div class="org-node good"><div class="panel-title">Le loader a terminé</div><h3>Image prête</h3><p>Code mappé, adresses corrigées, point d'entrée connu.</p></div>
-      <div class="pivot-arrow">≠</div>
-      <div class="contract-grid">
-        <div class="contract-chip"><strong>Pile Windows</strong><span>Alignement, arguments et retour attendus.</span></div>
-        <div class="contract-chip"><strong>TEB / PEB</strong><span>Identité du thread et du processus.</span></div>
-        <div class="contract-chip"><strong>ABI et API</strong><span>Registres, handles et fonctions Windows.</span></div>
-        <div class="contract-chip"><strong>Noyau NT</strong><span>Syscalls, statuts et exceptions absents.</span></div>
-      </div>
-    </div>
-    <div class="callout">C'est ici que le projet cesse d'être seulement un loader : <span class="accent">il doit fabriquer un environnement observable comme Windows</span>.</div>
-  </div>
-</div>
+<section class="slide" data-appendix="true" data-stage="5" data-chapter="Réserve A · 32 et 64 bits" aria-labelledby="title-21">
+<p class="kicker">Réserve / Deux architectures, une méthode</p><h2 id="title-21">DOOM95 suit la colonne 32 bits.</h2>
+<div class="body"><table><thead><tr><th>Aspect</th><th>32 bits · parcours principal</th><th>64 bits · comparaison</th></tr></thead><tbody><tr><td>Exécutable Linux</td><td><code>my_wine32</code></td><td><code>my_wine64</code></td></tr><tr><td>Image Windows</td><td>PE32</td><td>PE32+</td></tr><tr><td>Stack / résultat entier</td><td><code>ESP / EAX</code></td><td><code>RSP / RAX</code></td></tr><tr><td>État du thread Windows</td><td>Base du segment <code>FS</code></td><td>Base du segment <code>GS</code></td></tr><tr><td>Arguments usuels</td><td>Stack pour <code>__stdcall</code></td><td>Microsoft x64 : <code>RCX, RDX, R8, R9</code></td></tr><tr><td>Thunk du projet</td><td>15 octets</td><td>23 octets</td></tr></tbody></table></div><p class="takeaway">Le lanceur lit le format puis choisit <span class="win">un vrai processus de la bonne largeur</span>.</p>
+</section>
 
-<!-- SLIDE 11 -->
-<div class="slide">
-  <h2>Donner au programme une identité Windows</h2>
-  <p class="section-note">Un registre est une petite case du processeur. FS et GS peuvent fournir une base implicite vers l'état du thread courant.</p>
-  <div class="visual-body">
-    <div class="address-equation">
-      <div class="address-box"><div class="panel-title">Instruction guest</div><strong><code>GS:[offset]</code></strong><span>Le code fournit un petit déplacement, sans recevoir de pointeur.</span></div>
-      <div class="org-arrow">→</div>
-      <div class="address-box"><div class="panel-title">Adresse calculée</div><strong><code>base_GS + offset</code></strong><span>Le processeur ajoute automatiquement la base installée par le loader.</span></div>
-      <div class="org-arrow">→</div>
-      <div class="address-box"><div class="panel-title">Mémoire Windows</div><strong>TEB → PEB</strong><span>État du thread, puis image, heap, paramètres et modules du processus.</span></div>
-    </div>
-    <div class="org-flow" style="grid-template-columns: 1fr 48px 1fr 48px 1fr; margin-top: 18px;">
-      <div class="org-node compact warn"><div class="panel-title">Architecture</div><h3>FS en PE32</h3><p>Le runtime 32-bit installe sa propre base de segment.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node compact soft"><div class="panel-title">Structures</div><h3>TEB puis PEB</h3><p>Le programme retrouve le contexte qu'il attend de Windows.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node compact risk"><div class="panel-title">Architecture</div><h3>GS en PE32+</h3><p>Le runtime 64-bit installe la base avant le handoff.</p></div>
-    </div>
-    <div class="callout">Avant même d'appeler une API, le programme peut demander : <span class="accent">« qui suis-je et dans quel processus suis-je ? »</span></div>
-  </div>
-</div>
+<section class="slide" data-appendix="true" data-stage="4" data-chapter="Réserve B · Fautes et limites" aria-labelledby="title-22">
+<p class="kicker">Réserve / Quand le programme échoue</p><h2 id="title-22">Une faute arrive d’abord à Linux.</h2>
+<div class="body"><div class="flow"><div class="node windows"><h3>Accès invalide</h3><p class="small">Le processeur déclenche une faute.</p></div><span class="arrow">→</span><div class="node"><h3>Signal Linux</h3><p class="small">Par exemple, signal de violation mémoire (<code>SIGSEGV</code>).</p></div><span class="arrow">→</span><div class="node host"><h3>Diagnostic</h3><p class="small">Une Stack alternative permet au gestionnaire de fonctionner même si la Stack invitée est compromise.</p></div></div><div class="panel"><h3>Structured Exception Handling (SEH)</h3><p>Mécanisme d’exceptions structurées Windows. Le projet ne fournit pas sa traduction complète.</p></div><p class="small">De même, les imports bas niveau sont partiellement traités directement ; le dispatcher ne constitue pas une interception universelle des instructions d’appel système.</p></div>
+</section>
 
-<!-- SLIDE 12 -->
-<div class="slide">
-  <h2>Construire la pile et respecter l'ABI guest</h2>
-  <p class="section-note"><code>ld.so</code> termine aussi par un saut. Ici, le saut doit respecter la pile et la convention d'appel attendues par Windows.</p>
-  <div class="visual-body">
-    <div class="stack-visual">
-      <div class="org-node soft"><div class="panel-title">PE32+</div><h3>Arguments en registres</h3><p>RCX, RDX, R8 et R9 portent les quatre premiers arguments Microsoft x64.</p></div>
-      <div class="stack-frame">
-        <div class="stack-cell">sommet de la réservation</div>
-        <div class="stack-cell hot">arguments supplémentaires</div>
-        <div class="stack-cell hot">adresse de retour contrôlée</div>
-        <div class="stack-cell"><strong>RSP / ESP aligné</strong><br>sommet observable par le guest</div>
-        <div class="stack-cell">espace libre de la pile guest</div>
-      </div>
-      <div class="org-node warn"><div class="panel-title">PE32</div><h3>Arguments sur la pile</h3><p>ESP est aligné ; arguments et fausse adresse de retour sont écrits avant le saut.</p></div>
-    </div>
-    <div class="callout">Deux exécutables host évitent de simuler la largeur d'adresse : <code>my_wine32</code> et <code>my_wine64</code> offrent chacun <span class="accent">un vrai processus de la bonne taille</span>.</div>
-  </div>
-</div>
+<section class="slide" data-appendix="true" data-stage="2" data-chapter="Réserve C · Lexique" aria-labelledby="title-23">
+<p class="kicker">Réserve / Formats et contrats</p><h2 id="title-23">Le vocabulaire du passage.</h2>
+<div class="body"><table class="glossary"><tbody><tr><td>PE / ELF</td><td>Portable Executable / Executable and Linkable Format : formats de fichiers Windows / Linux.</td></tr><tr><td>Mémoire</td><td>Random Access Memory (RAM) : mémoire physique. Relative Virtual Address (RVA) : déplacement depuis la base de l’image.</td></tr><tr><td>DLL</td><td>Dynamic-Link Library : bibliothèque liée dynamiquement.</td></tr><tr><td>ILT / IAT</td><td>Import Lookup Table : demandes d’import. Import Address Table : adresses des fonctions résolues.</td></tr><tr><td>ABI / API</td><td>Application Binary Interface : contrat binaire. Application Programming Interface : fonctions proposées.</td></tr><tr><td>TEB / PEB</td><td>Thread Environment Block / Process Environment Block : états Windows du thread / processus.</td></tr><tr><td>NT / SEH</td><td>New Technology : famille Windows. Structured Exception Handling : exceptions structurées.</td></tr><tr><td>SDL2</td><td>Simple DirectMedia Layer, version 2 : bibliothèque multimédia côté Linux.</td></tr></tbody></table></div>
+</section>
 
-<!-- SLIDE 13 -->
-<div class="slide">
-  <h2>Une API Windows doit devenir une adresse callable</h2>
-  <p class="section-note">Après la résolution de l'IAT, l'appel du guest tombe soit dans le runtime, soit dans un module PE déjà chargé.</p>
-  <div class="visual-body">
-    <div class="org-tree">
-      <div class="org-node tree-root"><div class="panel-title">Import du guest</div><h3><code>DLL!fonction</code></h3></div>
-      <div class="tree-junction"></div>
-      <div class="tree-leaves two">
-        <div class="org-node soft"><div class="panel-title">Couverture interne</div><h3>Stub ou handler <code>my_wine</code></h3><p><code>kernel32</code>, <code>user32</code>, <code>ntdll</code>, CRT, DirectDraw…</p></div>
-        <div class="org-node warn"><div class="panel-title">Module dynamique</div><h3>Export d'une DLL PE chargée</h3><p>Le runtime recherche le symbole dans son registre de modules.</p></div>
-      </div>
-    </div>
-    <div class="callout">Le pointeur est maintenant appelable, mais sa cible doit encore <span class="warn-text">respecter l'ABI et reproduire la sémantique Windows</span>.</div>
-  </div>
-</div>
+<section class="slide" data-appendix="true" data-stage="4" data-chapter="Réserve D · Repères et sources" aria-labelledby="title-24">
+<p class="kicker">Réserve / Pour poursuivre l’exploration</p><h2 id="title-24">Des mécanismes que l’on peut inspecter.</h2>
+<div class="body two"><div><div class="status-row"><strong>Invité / hôte</strong><span>programme Windows / Linux</span></div><div class="status-row"><strong>Handler</strong><span>fonction qui traite la demande</span></div><div class="status-row"><strong>Stub</strong><span>implémentation minimale : réponse partielle, parfois fixe</span></div><div class="status-row"><strong>Thunk / dispatcher</strong><span>adaptateur / répartiteur</span></div><div class="status-row"><strong>Appel système</strong><span>demande au noyau</span></div><div class="status-row"><strong>Handle</strong><span>identifiant de ressource</span></div></div><div class="panel"><p class="label">Sources et code</p><p><a href="https://github.com/ValveSoftware/Proton">Proton · présentation officielle</a></p><p><a href="https://learn.microsoft.com/en-us/windows/win32/debug/pe-format">Microsoft · format PE</a></p><p><a href="https://learn.microsoft.com/en-us/cpp/cpp/stdcall">Microsoft · convention __stdcall</a></p><div class="rule"></div><p class="small">Les notes donnent les références du chargeur, des handlers, des thunks et des ponts multimédias de ce dépôt.</p></div></div>
+<p class="takeaway">Revenir au débriefing : touche <span class="win">A</span> ou bouton « Retour ».</p>
+</section>
 
-<!-- SLIDE 14 -->
-<div class="slide">
-  <h2>Un syscall NT n'est pas un syscall Linux</h2>
-  <p class="section-note">Même si le processeur connaît l'opcode <code>syscall</code>, numéro, arguments, handles et résultat appartiennent au contrat du noyau.</p>
-  <div class="visual-body">
-    <div class="org-tree">
-      <div class="org-node tree-root"><div class="panel-title">Demande Windows NT</div><h3>service + arguments + objets Windows</h3></div>
-      <div class="tree-junction"></div>
-      <div class="tree-leaves two">
-        <div class="org-node risk"><div class="panel-title">Chemin incorrect</div><h3>Entrer directement dans Linux</h3><p>Mauvais numéro, mauvais décodage et résultat sans sémantique Windows.</p></div>
-        <div class="org-node good"><div class="panel-title">Chemin construit</div><h3>Intercepter → traduire → reconstruire</h3><p>Un handler host utilise Linux puis rend un handle ou un <code>NTSTATUS</code>.</p></div>
-      </div>
-    </div>
-    <div class="callout">Un syscall n'est pas seulement une instruction : <span class="pink">c'est un accord avec un noyau précis</span>.</div>
-  </div>
-</div>
-
-<!-- SLIDE 15 -->
-<div class="slide">
-  <h2>Un thunk capture et identifie l'appel</h2>
-  <p class="section-note">Un thunk est une minuscule porte d'entrée générée en mémoire. Il ne traduit pas le service : il indique au dispatcher lequel traiter.</p>
-  <div class="visual-body">
-    <div class="panel warn" style="padding: 20px;">
-      <div class="panel-title">Disposition 64-bit générée · largeur proportionnelle au nombre d'octets</div>
-      <div class="byte-bar">
-        <div class="byte-seg"><strong>2</strong><span>sauver le registre guest</span></div>
-        <div class="byte-seg"><strong>7</strong><span>charger le numéro NT</span></div>
-        <div class="byte-seg"><strong>10</strong><span>charger le dispatcher</span></div>
-        <div class="byte-seg"><strong>4</strong><span>appel · restauration · retour</span></div>
-      </div>
-    </div>
-    <div class="org-flow" style="grid-template-columns:1fr 48px 1fr 48px 1fr; margin-top:18px">
-      <div class="org-node compact soft"><strong>Adresse unique</strong><p>Une entrée callable par numéro.</p></div><div class="org-arrow">→</div>
-      <div class="org-node compact warn"><strong>Identité embarquée</strong><p>Le thunk nomme, il ne traduit pas.</p></div><div class="org-arrow">→</div>
-      <div class="org-node compact good"><strong>Dispatcher commun</strong><p>La conversion reste centralisée.</p></div>
-    </div>
-    <div class="callout"><strong>23 octets en 64-bit</strong> pour préserver, nommer et transférer. La variante i386 suit la même idée en 15 octets.</div>
-    <p class="diagram-caption">État actuel : l'infrastructure existe, mais beaucoup d'imports <code>ntdll</code> rejoignent encore directement leurs handlers C.</p>
-  </div>
-</div>
-
-<!-- SLIDE 16 -->
-<div class="slide">
-  <h2>Le dispatcher change de monde</h2>
-  <p class="section-note">Deux couloirs montrent où l'exécution quitte le contexte Windows et rejoint temporairement le contexte Linux.</p>
-  <div class="visual-body">
-    <div class="swimlanes">
-      <div class="lane-label guest">Contexte guest</div>
-      <div class="lane-track"><div class="lane-step">pile Windows<br>RSP / ESP</div><div class="org-arrow">→</div><div class="lane-step">sauver registres,<br>flags et retour</div><div class="org-arrow">↘</div><div class="lane-step">restaurer le résultat</div></div>
-      <div class="lane-label host">Contexte host</div>
-      <div class="lane-track"><div class="lane-step">pile Linux alignée</div><div class="org-arrow">→</div><div class="lane-step">décoder les arguments</div><div class="org-arrow">→</div><div class="lane-step">handler C puis retour ↗</div></div>
-    </div>
-    <div class="callout">Convertir le contexte ne veut pas dire recopier la pile : <span class="accent">on sauve son adresse, on bascule, puis on revient</span>.</div>
-  </div>
-</div>
-
-<!-- SLIDE 17 -->
-<div class="slide">
-  <h2>Quand le code Linux redevient-il utilisable ?</h2>
-  <p class="section-note">Changer de pile et de base GS/FS crée des zones où la libc et SDL2 ne voient plus le contexte Linux qu'elles attendent.</p>
-  <div class="visual-body">
-    <div class="org-flow">
-      <div class="org-node soft"><div class="panel-title">Avant le handoff</div><h3>Contexte host</h3><p>Pile Linux et segments host : libc et SDL2 sont utilisables normalement.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node risk"><div class="panel-title">Pendant le guest</div><h3>Zone sensible</h3><p>Pile Windows et TEB actif : utiliser des helpers contrôlés ou des syscalls bruts.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node good"><div class="panel-title">Bridge explicite</div><h3>Restaurer → appeler → remettre</h3><p>Revenir au contexte host pour SDL2/libc, puis reconstruire le contexte guest.</p></div>
-    </div>
-    <div class="callout">Le piège rencontré une fois au démarrage de <code>ld.so</code> revient ici <span class="warn-text">à chaque traversée guest → host</span>.</div>
-  </div>
-</div>
-
-<!-- SLIDE 18 -->
-<div class="slide">
-  <h2>Une faute Windows arrive comme un signal Linux</h2>
-  <p class="section-note">La frontière concerne aussi les erreurs du processeur : Linux les reçoit avant que le runtime puisse leur donner un sens Windows.</p>
-  <div class="visual-body">
-    <div class="org-flow five">
-      <div class="org-node compact risk"><strong>1. Faute guest</strong><p>Pile potentiellement corrompue.</p></div><div class="org-arrow">→</div>
-      <div class="org-node compact warn"><strong>2. Signal Linux</strong><p><code>SIGSEGV</code>, <code>SIGILL</code>, <code>SIGFPE</code>…</p></div><div class="org-arrow">→</div>
-      <div class="org-node compact soft"><strong>3. Pile alternative</strong><p>Le handler reste exécutable.</p></div><div class="org-arrow">→</div>
-      <div class="org-node compact"><strong>4. Contexte</strong><p>Adresse de faute et registres.</p></div><div class="org-arrow">→</div>
-      <div class="org-node compact good"><strong>5. Sortie sûre</strong><p>Diagnostic sans dépendre du guest.</p></div>
-    </div>
-    <div class="cols-2" style="margin-top:18px"><div class="panel soft"><div class="panel-title">Préparé</div><p>Une chaîne Structured Exception Handling minimale existe dans la TEB.</p></div><div class="panel risk"><div class="panel-title">Limite actuelle</div><p>Toutes les fautes ne deviennent pas encore des exceptions Windows récupérables.</p></div></div>
-    <div class="callout">Le chemin actuel rend le crash <span class="accent">observable et survivable côté host</span>, sans prétendre reproduire tout SEH.</div>
-  </div>
-</div>
-
-<!-- SLIDE 19 -->
-<div class="slide dense">
-  <h2>Doom95 additionne toutes les frontières</h2>
-  <p class="section-note">Le jeu n'introduit pas un mécanisme magique : il oblige les mécanismes précédents à fonctionner ensemble et assez longtemps.</p>
-  <div class="visual-body">
-    <div class="integration-hub">
-      <div class="integration-column">
-        <div class="org-node compact soft"><strong>Loader PE</strong><p>Image, relocations, imports et CRT.</p></div>
-        <div class="org-node compact warn"><strong>Processus Windows</strong><p>TEB, PEB, pile, handles et messages.</p></div>
-      </div>
-      <div class="doom-core"><div class="panel-title">Preuve d'intégration</div><div class="doom-logo">DOOM95</div><p>Le code original s'exécute nativement au milieu de bridges contrôlés.</p></div>
-      <div class="integration-column">
-        <div class="org-node compact risk"><strong>DirectDraw → SDL2</strong><p>Surfaces, palette, fenêtre et entrées.</p></div>
-        <div class="org-node compact good"><strong>Audio → SDL2 / FluidSynth</strong><p>DirectSound pour les effets ; WinMM/MIDI pour la musique.</p></div>
-      </div>
-    </div>
-    <div class="callout">Doom95 est la preuve visible. La contribution réutilisable reste <span class="accent">l'ensemble des ponts qui le rendent possible</span>.</div>
-  </div>
-</div>
-
-<!-- SLIDE 20 -->
-<div class="slide title-slide">
-  <div class="eyebrow">Démonstration · 3 minutes</div>
-  <div class="emoji-big">🎮</div>
-  <h1>Une commande,<br><span style="color:var(--accent-2)">un vrai exécutable Windows</span></h1>
-  <div class="demo-command">$ ./my_wine samples/unpacked/doom95/DOOM95.EXE</div>
-  <p class="subtitle">Observer le résultat, puis relier brièvement l'image, les entrées et le son aux bridges de la slide précédente.</p>
-  <p class="tagline">Repli : capture préparée · vérification minimale : samples/hello_world</p>
-</div>
-
-<!-- SLIDE 21 -->
-<div class="slide title-slide">
-  <div class="eyebrow">Takeaway</div>
-  <div class="emoji-big">🏁</div>
-  <h1>Charger le format,<br><span style="color:var(--accent-2)">reconstruire le contrat</span></h1>
-  <div class="accent-line"></div>
-  <p class="subtitle"><code>ld.so</code> m'a appris à préparer une image avant le premier saut. <code>my_wine</code> montre qu'entre Windows et Linux, ce saut ouvre une suite de frontières explicites.</p>
-  <p class="tagline">Le processeur exécute les instructions · le runtime rend leur monde crédible</p>
-</div>
-
-</div>
-
-
-<div class="progress-bar" id="progress"></div>
-<div class="slide-counter" id="counter"></div>
-<div class="part-indicator" id="part-indicator"></div>
-<div class="nav-hint">← → pour naviguer</div>
-
+<footer id="footer">
+<ol id="route" aria-label="Progression de la mission"><li><span class="marker">1</span>Fichier</li><li><span class="marker">2</span>Image mémoire</li><li><span class="marker">3</span>État Windows</li><li><span class="marker">4</span>Appels traduits</li><li><span class="marker">5</span>DOOM</li></ol>
+<nav id="nav" aria-label="Navigation"><button id="prev" type="button" aria-label="Étape précédente">←</button><span id="counter"></span><button id="next" type="button" aria-label="Étape suivante">→</button><button id="appendix" type="button" aria-label="Ouvrir les slides de réserve">Réserve</button></nav>
+<p id="hint">← → avancer · F plein écran · A réserve · ? aide</p><p id="step-count" aria-live="polite"></p>
+</footer>
+<aside id="help" role="dialog" aria-modal="true" aria-labelledby="help-title" hidden><h2 id="help-title">Commandes de présentation</h2><p>← / → : reculer / avancer, y compris dans les schémas.</p><p>Espace ou Entrée : avancer. Début / Fin : début / fin du parcours.</p><p>A : ouvrir la réserve ou revenir à la présentation.</p><p>F : plein écran. Échap : fermer cette aide.</p><p>Les liens #slide-1 à #slide-24 ouvrent directement une slide.<br>L’impression inclut tous les schémas et la réserve.</p><button id="close-help" type="button">Revenir aux slides</button></aside>
+</main></div>
 <script>
-(function() {
-  const slides = document.querySelectorAll('#deck > .slide');
-  const total = slides.length;
-  const HASH_PREFIX = '#slide-';
-  const partRanges = [
-    { start: 0, end: 5, label: 'Introduction · de Wine à my_wine' },
-    { start: 6, end: 9, label: "Partie 1 · Charger l'image" },
-    { start: 10, end: 12, label: 'Partie 2 · Créer le processus' },
-    { start: 13, end: 17, label: "Partie 3 · Traverser la frontière" },
-    { start: 18, end: 20, label: "Partie 4 · Prouver l'intégration" }
-  ];
-  let current = 0;
-
-  slides.forEach((slide, index) => {
-    slide.id = 'slide-' + (index + 1);
-    slide.setAttribute('aria-hidden', index === 0 ? 'false' : 'true');
-  });
-
-  function getSlideIndexFromHash() {
-    const hash = window.location.hash;
-    if (!hash.startsWith(HASH_PREFIX)) return 0;
-    const value = Number(hash.slice(HASH_PREFIX.length));
-    if (!Number.isInteger(value) || value < 1 || value > total) return 0;
-    return value - 1;
+(() => {
+  'use strict';
+  const deck = document.getElementById('deck');
+  const slides = [...deck.querySelectorAll('.slide')];
+  const mainCount = slides.findIndex(slide => slide.dataset.appendix === 'true');
+  const route = [...document.querySelectorAll('#route li')];
+  const help = document.getElementById('help');
+  const prev = document.getElementById('prev');
+  const next = document.getElementById('next');
+  const appendix = document.getElementById('appendix');
+  const maxStep = slide => Math.max(0, ...[...slide.querySelectorAll('[data-step]')].map(el => Number(el.dataset.step)));
+  let current = 0, step = 0, returnSlide = mainCount - 1, returnStep = 0, focusBeforeHelp = null;
+  slides.forEach((slide, i) => { slide.id = 'slide-' + (i + 1); slide.setAttribute('aria-roledescription', 'diapositive'); });
+  function fit() {
+    const scale = Math.min(innerWidth / 1600, innerHeight / 900);
+    deck.style.transform = 'scale(' + scale + ')';
+    // Keep the fixed canvas centered even when it exceeds the viewport's intrinsic grid size.
+    deck.style.position = 'absolute';
+    deck.style.left = 'calc(50% - 800px)';
+    deck.style.top = 'calc(50% - 450px)';
   }
-
-  function updateHash() {
-    const target = HASH_PREFIX + (current + 1);
-    if (window.location.hash !== target) {
-      window.history.replaceState(null, '', target);
+  function indexFromHash() {
+    const match = /^#slide-([1-9][0-9]*)$/.exec(location.hash);
+    const index = match ? Number(match[1]) - 1 : 0;
+    return index >= 0 && index < slides.length ? index : 0;
+  }
+  function render(syncHash = true) {
+    slides.forEach((slide, i) => {
+      const active = i === current;
+      slide.classList.toggle('active', active);
+      slide.setAttribute('aria-hidden', String(!active));
+      slide.inert = !active;
+      slide.querySelectorAll('[data-step]').forEach(el => {
+        const pending = Number(el.dataset.step) > (active ? step : 0);
+        el.classList.toggle('pending', pending);
+        el.setAttribute('aria-hidden', String(pending));
+      });
+    });
+    const slide = slides[current], reserve = current >= mainCount, stage = Number(slide.dataset.stage);
+    route.forEach((item, i) => {
+      const complete = slide.dataset.complete === 'true' || i + 1 < stage;
+      const active = !complete && i + 1 === stage;
+      item.classList.toggle('done', complete);
+      item.classList.toggle('current', active);
+      item.querySelector('.marker').textContent = complete ? '✓' : String(i + 1);
+      if (active) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current');
+    });
+    document.getElementById('chapter').textContent = slide.dataset.chapter.toUpperCase();
+    document.getElementById('counter').textContent = reserve ? String(current - mainCount + 1).padStart(2, '0') + ' / ' + (slides.length - mainCount) : String(current + 1).padStart(2, '0') + ' / ' + mainCount;
+    const steps = maxStep(slide);
+    document.getElementById('step-count').textContent = steps ? 'SCHÉMA ' + (step + 1) + ' / ' + (steps + 1) : reserve ? 'SLIDE DE RÉSERVE' : 'PARCOURS PRINCIPAL';
+    prev.disabled = step === 0 && (current === 0 || current === mainCount);
+    next.disabled = step === steps && current === (reserve ? slides.length - 1 : mainCount - 1);
+    appendix.textContent = reserve ? 'Retour' : 'Réserve';
+    appendix.setAttribute('aria-label', reserve ? 'Revenir à la présentation' : 'Ouvrir les slides de réserve');
+    if (syncHash) history.replaceState(null, '', '#slide-' + (current + 1));
+  }
+  function forward() {
+    if (step < maxStep(slides[current])) step++;
+    else if (current < (current >= mainCount ? slides.length - 1 : mainCount - 1)) { current++; step = 0; }
+    render();
+  }
+  function backward() {
+    if (step > 0) step--;
+    else if (current > (current >= mainCount ? mainCount : 0)) { current--; step = maxStep(slides[current]); }
+    render();
+  }
+  function toggleAppendix() {
+    if (current < mainCount) { returnSlide = current; returnStep = step; current = mainCount; step = 0; }
+    else { current = returnSlide; step = returnStep; }
+    render();
+  }
+  function closeHelp() {
+    help.hidden = true;
+    document.getElementById('footer').inert = false;
+    slides[current].inert = false;
+    if (focusBeforeHelp instanceof HTMLElement) focusBeforeHelp.focus();
+  }
+  function openHelp() {
+    focusBeforeHelp = document.activeElement;
+    help.hidden = false;
+    document.getElementById('footer').inert = true;
+    slides[current].inert = true;
+    document.getElementById('close-help').focus();
+  }
+  prev.addEventListener('click', backward);
+  next.addEventListener('click', forward);
+  appendix.addEventListener('click', toggleAppendix);
+  document.getElementById('close-help').addEventListener('click', closeHelp);
+  document.addEventListener('keydown', e => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!help.hidden) {
+      if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); closeHelp(); }
+      else if (e.key === 'Tab') { e.preventDefault(); document.getElementById('close-help').focus(); }
+      return;
     }
-  }
-
-  function updateUI() {
-    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
-    document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%';
-    const currentPart = partRanges.find((part) => current >= part.start && current <= part.end);
-    document.getElementById('part-indicator').textContent = currentPart ? currentPart.label : '';
-  }
-
-  function showSlide(idx) {
-    if (idx < 0 || idx >= total || idx === current) return;
-    const previous = current;
-    slides[previous].classList.remove('active');
-    slides[previous].classList.add('exit');
-    slides[previous].setAttribute('aria-hidden', 'true');
-    setTimeout(() => slides[previous].classList.remove('exit'), 380);
-    current = idx;
-    slides[current].classList.add('active');
-    slides[current].setAttribute('aria-hidden', 'false');
-    updateUI();
-    updateHash();
-  }
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('button,a')) return;
+    if (['ArrowRight','PageDown',' ','Enter'].includes(e.key)) { e.preventDefault(); forward(); }
+    else if (['ArrowLeft','PageUp','Backspace'].includes(e.key)) { e.preventDefault(); backward(); }
+    else if (e.key === 'Home') { e.preventDefault(); current = current >= mainCount ? mainCount : 0; step = 0; render(); }
+    else if (e.key === 'End') { e.preventDefault(); current = current >= mainCount ? slides.length - 1 : mainCount - 1; step = maxStep(slides[current]); render(); }
+    else if (e.key.toLowerCase() === 'a') { e.preventDefault(); toggleAppendix(); }
+    else if (e.key === '?') { e.preventDefault(); openHelp(); }
+    else if (e.key.toLowerCase() === 'f') {
       e.preventDefault();
-      showSlide(current + 1);
-    } else if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
-      e.preventDefault();
-      showSlide(current - 1);
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      showSlide(0);
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      showSlide(total - 1);
+      const request = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+      request.catch(() => { document.getElementById('hint').textContent = 'Plein écran indisponible · utilisez le menu du navigateur'; });
     }
   });
-
-  window.addEventListener('hashchange', () => {
-    const idx = getSlideIndexFromHash();
-    if (idx !== current) showSlide(idx);
-  });
-
-  current = getSlideIndexFromHash();
-  slides.forEach((slide, index) => {
-    slide.classList.toggle('active', index === current);
-    slide.setAttribute('aria-hidden', index === current ? 'false' : 'true');
-  });
-  updateUI();
-  updateHash();
+  window.addEventListener('resize', fit);
+  window.addEventListener('hashchange', () => { if (!help.hidden) closeHelp(); current = indexFromHash(); step = 0; render(); });
+  window.addEventListener('beforeprint', () => slides.forEach(slide => slide.querySelectorAll('[data-step]').forEach(el => el.setAttribute('aria-hidden','false'))));
+  window.addEventListener('afterprint', () => render(false));
+  current = indexFromHash();
+  fit(); render();
 })();
 </script>
 </body>
