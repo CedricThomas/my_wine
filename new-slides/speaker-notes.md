@@ -1,114 +1,126 @@
 # `my_wine` — guide de présentation
 
-Référentiel terminologique pour les notes : Portable Executable (PE), Executable and Linkable Format (ELF), Application Binary Interface (ABI), Dynamic Link Library (DLL), Relative Virtual Address (RVA), Virtual Address (VA), Import Lookup Table (ILT), Import Address Table (IAT), Thread Environment Block (TEB), Process Environment Block (PEB), Structured Exception Handling (SEH), Thread Local Storage (TLS), Address Space Layout Randomization (ASLR), Simple DirectMedia Layer 2 (SDL2) et Application Programming Interface (API). Sur les slides, chaque développement apparaît de nouveau avant la première occurrence de son abréviation.
+Format visé : **30 minutes** — 21 minutes de présentation, 3 minutes de démonstration et 6 minutes de marge/questions.
 
-Format visé : **30 minutes** — environ 23 minutes de présentation, 3 minutes de démonstration et 4 minutes de marge/questions.
-
-Le public connaît déjà `m_ldso`. Ne pas refaire le cours sur `mmap`, les relocations ou la résolution de symboles : utiliser `ld.so` comme méthode, puis concentrer le temps sur les écarts entre le contrat d'un PE Windows et celui d'un processus Linux.
+Le public a déjà vu la présentation `ld.so` et se souvient de ses mécanismes principaux : mapping, relocations, résolution des symboles et handoff. Ne pas refaire ce cours. Les slides 5 à 9 servent seulement à reconnecter cette méthode au nouveau problème.
 
 ## Fil narratif
 
-> `ld.so` m'a appris à construire, dans le bon ordre, les invariants nécessaires au premier saut. `my_wine` reprend cette méthode puis ajoute un bridge explicite chaque fois que Windows et Linux ne partagent plus le même contrat.
+> Wine et Proton montrent qu'un programme Windows peut s'exécuter sur Linux sans émuler son processeur. `my_wine` réduit ce problème à une taille pédagogique : `ld.so` fournit la méthode pour charger l'image, puis chaque hypothèse Windows absente devient un bridge explicite.
 
-Les quatre écarts qui structurent le récit sont :
+La présentation suit quatre questions :
 
-1. l'image : Linux ne mappe pas spontanément un PE ;
-2. les symboles : les DLL et fonctions Windows n'existent pas côté host ;
-3. le processus : TEB, PEB, handles et SEH sont absents ;
-4. l'exécution : ABI, pile, syscalls et fautes n'ont pas la même sémantique.
+1. comment reconstruire l'image PE ?
+2. qu'observe le guest dès la première instruction ?
+3. comment passer d'un contexte Windows à un contexte Linux puis revenir ?
+4. comment vérifier que tous ces ponts fonctionnent ensemble ?
 
-Le point important n'est pas le volume de code. Doom95 a demandé beaucoup de boilerplate parce qu'il exerce une large surface Win32. Le cœur du talk est constitué des mécanismes réutilisables qui rendent cette intégration possible.
+## Timing slide par slide
 
-## Timing et notes slide par slide
-
-| # | Slide | Temps | Message à dire |
+| # | Slide | Temps | Message oral |
 |---:|---|---:|---|
-| 1 | Titre | 0:35 | « Je repars de la méthode de `ld.so`, mais cette fois l'environnement attendu n'existe pas : il faut combler les écarts entre un PE Windows et Linux. » |
-| 2 | `ld.so` m'a donné la méthode | 1:05 | Faire lire les trois verbes : lire, construire, mesurer. Le loader n'est pas seulement un morceau de code réutilisé ; c'est une méthode pour rendre vrais des invariants avant le premier saut. |
-| 3 | Quatre trous à combler | 1:10 | Donner la carte du talk. Chaque trou demandera soit une conversion de données, soit une conversion de contrôle, soit une conversion de sémantique. |
-| 4 | Séparer PE32 / PE32+ | 0:55 | Suivre visuellement l'arbre du wrapper vers les deux processus natifs. Ils évitent de simuler la largeur des pointeurs, de la pile et des appels système host. |
-| 5 | Pipeline complète | 1:05 | Un seul passage gauche → droite. `ld.so` fournit mapper, reloger, résoudre, transférer ; `my_wine` ajoute la reconstruction du contrat Windows. |
-| 6 | PE = recette d'image | 0:45 | Rappel rapide : `MZ → e_lfanew → PE → sections`. En ELF on suivait les program headers ; ici on suit sections et data directories. |
-| 7 | Trois coordonnées d'adresse | 0:40 | Lire les trois cartes de gauche à droite, puis une seule équation : `pointeur = actual_base + RVA`. Ne pas développer davantage sauf question. |
-| 8 | Reconstruire l'image | 0:55 | Lire d'abord le passage disque→mémoire, puis le flux du bas : réserver, copier, reloger et enfin appliquer les permissions. Insister sur l'ordre, déjà familier depuis `ld.so`. |
-| 9 | Relocations PE | 0:45 | Même besoin qu'en ELF, autre encodage : blocs par page, `HIGHLOW` en 32-bit, `DIR64` en 64-bit. |
-| 10 | Demande → adresse callable | 0:55 | Suivre l'organigramme : ILT = demande, résolution = travail du loader, IAT = réponse callable. Une fois patchée, l'IAT dirige réellement les appels du guest. |
-| 11 | Résolution par niveaux | 0:50 | Partir du symbole demandé et suivre les deux branches : table interne d'abord, exports d'une DLL PE chargée ensuite. L'implémentation trouvée est souvent mon propre runtime. |
-| 12 | Qu'est-ce qu'un registre ? | 1:40 | Prendre le temps de poser le modèle mental. Un registre est une petite case matérielle dans le processeur, pas une variable en mémoire. Les registres généraux transportent valeurs et arguments ; RSP/ESP désigne la pile ; FS/GS contient une base utilisée pour fabriquer une adresse. Ne pas encore parler de TEB. |
-| 13 | Comment fonctionne FS/GS | 1:45 | Lire l'exemple de gauche à droite : le guest demande `GS:[0x30]`, le processeur calcule `base_GS + 0x30`, puis atteint un champ de la TEB sans recevoir son adresse en argument. Ensuite seulement suivre FS/GS → TEB → PEB. PE32 utilise FS, PE32+ utilise GS. Préciser qu'ici le registre fournit une base implicite ; il ne redécoupe pas toute la mémoire. |
-| 14 | Pile guest | 1:35 | Pivot du talk. Lire d'abord la pile verticale, puis le flux allouer→initialiser→basculer. La première instruction guest doit déjà voir une pile Windows crédible. |
-| 15 | NT ≠ Linux | 1:25 | Partir de la racine puis opposer les deux branches. Un opcode `syscall` n'est pas universel : le numéro, les arguments, les handles et le résultat appartiennent au contrat NT. |
-| 16 | Thunk de 23 octets | 1:40 | La largeur des quatre couleurs représente réellement 2, 7, 10 et 4 octets. Le thunk préserve, identifie et transfère ; il ne traduit pas. Préciser que beaucoup d'imports `ntdll` vont encore directement vers des handlers C. |
-| 17 | Conversion du contexte | 1:45 | Suivre les deux swimlanes. Sauver registres/flags/pile guest, basculer sur la pile Linux, décoder les arguments, appeler le handler, puis restaurer. La pile n'est jamais recopiée. |
-| 18 | Signaux Linux / exceptions Windows | 1:35 | Suivre les cinq nœuds jusqu'à la sortie sûre. `siginfo_t` et `ucontext` donnent l'adresse et les registres ; la pile alternative reste utilisable même si la pile guest est cassée. Rappeler la limite actuelle. |
-| 19 | Zone sans libc | 1:20 | Lire les trois zones d'exécution. Le risque connu dans `ld.so` revient ici à chaque frontière guest→host : restaurer pile et segment host avant SDL2/libc, puis remettre le contexte guest. |
-| 20 | Doom95 comme preuve | 0:55 | Montrer la frame, puis immédiatement séparer les deux colonnes. Doom prouve l'intégration ; son coût vient largement du boilerplate et de la largeur des API. Les mécanismes précédents sont la contribution réutilisable. |
-| 21 | Conclusion | 0:40 | Reprendre la phrase : même processeur, mais contrats différents. `ld.so` donne la méthode ; les bridges explicites donnent le runtime. Pause, puis questions. |
+| 1 | `my_wine` — du loader à la compatibilité | 0:35 | Reprendre la promesse de la fin de `ld.so` : Doom95 était le teaser, cette présentation explique le chemin qui y mène. |
+| 2 | Wine ne simule pas un processeur | 0:55 | Le CPU x86 sait déjà exécuter le code x86. Wine traduit l'environnement et les services attendus par l'application. Ne pas détailler l'architecture de Wine. |
+| 3 | Proton applique cette idée au jeu | 1:00 | Situer Proton comme outil de compatibilité de Valve fondé sur Wine et des composants spécialisés pour le jeu. Rester au niveau des couches et des objectifs. |
+| 4 | Pourquoi une version minuscule ? | 0:55 | Le projet ne concurrence pas Wine : il sacrifie la couverture pour rendre chaque frontière observable et compréhensible. |
+| 5 | `ld.so` était le prologue | 0:55 | Faire lire les cinq verbes. Le pipeline connu reste valide, mais le premier saut ne clôt plus l'histoire. |
+| 6 | Route : du format au contrat | 0:40 | Annoncer les quatre parties. Répéter la question directrice : « qu'est-ce que le programme observe maintenant ? » |
+| 7 | Un PE est une recette d'image | 0:55 | Comparer brièvement sections/data directories aux segments/program headers ELF. Ne pas lire chaque champ. |
+| 8 | Du fichier à l'image exécutable | 1:10 | Suivre réserver → copier → reloger → protéger. Donner une seule équation : `adresse = base réelle + RVA`. |
+| 9 | Les imports sont des promesses | 1:10 | ILT = demande, résolution = loader, IAT = pointeurs appelables. Dans `my_wine`, la cible est souvent un handler interne. |
+| 10 | Le premier saut ne suffit pas | 1:10 | Pivot principal. Même une image parfaite échoue si la pile, le processus, l'ABI et les services Windows n'existent pas. |
+| 11 | Donner une identité Windows | 1:15 | Définir un registre en une phrase, puis suivre GS/FS + offset → TEB → PEB. PE32 utilise FS ; PE32+ utilise GS. |
+| 12 | Construire la pile et respecter l'ABI | 1:15 | Montrer ce qui est observable au handoff : largeur, alignement, arguments et retour. Relier les deux backends à de vrais processus 32 et 64-bit. |
+| 13 | Une API devient une adresse callable | 1:10 | Opposer handlers internes et exports d'une DLL PE chargée. Un pointeur correct ne garantit pas encore une sémantique correcte. |
+| 14 | Un syscall NT n'est pas Linux | 1:15 | Même opcode, mais table de numéros, arguments, handles et statuts différents. Il faut traduire le contrat entier. |
+| 15 | Le thunk capture l'appel | 1:20 | La barre matérialise réellement 23 octets. Le thunk préserve, identifie et transfère ; le dispatcher traduit. Mentionner honnêtement les handlers directs actuels. |
+| 16 | Le dispatcher change de monde | 1:15 | Suivre les deux couloirs : sauver, basculer sur la pile Linux, décoder, appeler, restaurer. La pile guest n'est pas recopiée. |
+| 17 | Quand Linux redevient utilisable | 1:10 | La libc et SDL2 exigent le contexte host. Le risque vu une fois dans `ld.so` revient à chaque traversée du bridge. |
+| 18 | Une faute devient un signal | 1:10 | Linux reçoit d'abord la faute. La pile alternative rend le diagnostic sûr ; préciser que la traduction SEH complète n'existe pas encore. |
+| 19 | Doom95 additionne les frontières | 1:00 | Le jeu valide loader, état du processus, Win32, affichage, son et entrées. Distinguer DirectSound/SDL2 de WinMM/MIDI/FluidSynth. |
+| 20 | Démonstration | 3:00 | Lancer Doom95, montrer une interaction courte, puis relier le résultat à DirectDraw/DirectSound/SDL2. Ne pas compiler en direct. |
+| 21 | Charger le format, reconstruire le contrat | 0:45 | Conclure avec les deux temps du projet : `ld.so` prépare l'image ; `my_wine` rend son monde crédible. |
 
-Total oral estimé : **24:00**.
+Total cible : **24:00**, démonstration comprise.
 
-## Démonstration proposée — 3 minutes
+## Démonstration
 
-Préparer deux terminaux, déjà placés à la racine du dépôt.
-
-### 1. Montrer le wrapper et les deux architectures
-
-```bash
-./my_wine samples/hello_world/hello_world.exe
-./my_wine samples/hello_world_32/hello_world_32.exe
-```
-
-Message : la même commande choisit `my_wine64` ou `my_wine32` après inspection du PE. Le wrapper illustre la décision d'architecture, sans y consacrer plus d'une minute.
-
-### 2. Montrer la cible d'intégration
+Préparer un terminal à la racine du dépôt et décompresser Doom95 avant la présentation :
 
 ```bash
 ./scripts/unpack_samples.sh doom95
 ./my_wine samples/unpacked/doom95/DOOM95.EXE
 ```
 
-Si la démonstration graphique est risquée, utiliser la capture préparée et garder seulement `hello_world` en direct. Ne pas compiler pendant la présentation.
+Limiter la démonstration à trois preuves visibles :
 
-## Transitions utiles avec `m_ldso`
+- une frame est rendue ;
+- une entrée clavier ou souris traverse la boucle de messages ;
+- le son démarre si la configuration de la salle le permet.
 
-- Slide 2 : « Je ne réutilise pas seulement des fonctions de loader ; je réutilise une façon de raisonner par invariants. »
-- Slide 5 : « Même pipeline jusqu'au handoff, mais contrat final beaucoup plus large. »
-- Slide 6 : « Dans ELF je suivais surtout les program headers ; dans PE je suis les sections et les data directories. »
-- Slide 9 : « Même raison de reloger, autre encodage des corrections. »
-- Slide 11 : « `ld.so` trouvait l'implémentation dans une bibliothèque ; ici je dois souvent la fournir. »
-- Slide 12 : « C'est ici que le projet cesse d'être seulement un loader de format. »
-- Slide 14 : « L'image est prête ; il faut maintenant fabriquer l'état depuis lequel elle va s'exécuter. »
-- Slide 19 : « Le problème rencontré une fois au démarrage de `ld.so` réapparaît à chaque traversée du bridge. »
-- Slide 20 : « Doom est le test qui additionne toutes ces frontières, pas une frontière supplémentaire. »
+Préparer deux replis indépendants :
+
+```bash
+./my_wine samples/hello_world/hello_world.exe
+```
+
+et une capture ou courte vidéo locale de Doom95. Ne jamais dépendre du réseau pendant la démonstration.
+
+## Transitions importantes
+
+- Slide 1 → 2 : « Avant mon implémentation, regardons le système qui prouve déjà que l'idée fonctionne. »
+- Slide 3 → 4 : « Proton cherche la compatibilité à grande échelle ; moi, je cherchais à voir les engrenages. »
+- Slide 5 → 6 : « Le loader donne donc le point de départ, pas encore l'environnement. »
+- Slide 9 → 10 : « Imaginons maintenant que toute cette partie soit parfaite : est-ce que le programme peut vraiment démarrer ? »
+- Slide 12 → 13 : « Le processus existe ; il va maintenant demander des services. »
+- Slide 16 → 17 : « Basculer de pile permet d'appeler un handler, mais cela décide aussi quand le code Linux est sûr. »
+- Slide 18 → 19 : « Doom additionne précisément toutes ces traversées, y compris quand elles échouent. »
+- Slide 20 → 21 : « Ce que nous venons de voir tient dans la différence entre charger des octets et reconstruire leur contrat. »
 
 ## Questions probables
 
-**Est-ce de l'émulation ?**  
-Pas au niveau processeur : le code x86 32-bit et 64-bit est exécuté nativement. Le projet traduit et simule une partie de l'environnement Windows en user space.
+**Est-ce de l'émulation ?**
 
-**Pourquoi deux binaires plutôt qu'un processus 64-bit unique ?**  
-Un vrai processus 32-bit fournit naturellement des pointeurs, une pile, un ABI et des syscalls i386 cohérents. Cela évite de virtualiser toutes les hypothèses d'adresse d'un guest PE32.
+Pas au niveau du processeur : le code x86 est exécuté nativement. Le projet reconstruit ou traduit une petite partie de l'environnement Windows en espace utilisateur.
 
-**Un syscall Windows peut-il être envoyé directement à Linux ?**  
-Non. Même instruction processeur ne signifie pas même table de numéros ni même sémantique. Il faut intercepter l'appel NT et traduire ses arguments, objets et résultats.
+**Quelle est la différence avec Wine ?**
 
-**Que contient exactement un thunk ?**  
-Le minimum pour préserver l'état nécessaire, charger l'identité de l'appel NT et rejoindre un dispatcher. La traduction elle-même se fait ensuite dans le dispatcher et ses handlers.
+Wine vise une vaste compatibilité applicative et possède une architecture de production construite sur plusieurs décennies. `my_wine` est un laboratoire pédagogique avec une couverture volontairement limitée.
 
-**Pourquoi générer des thunks s'ils ne sont pas encore la route principale ?**  
-Ils préparent un passage centralisé et donnent une adresse callable distincte par appel NT. Aujourd'hui, les imports `ntdll` courants utilisent encore souvent les handlers directs ; le slide montre l'architecture réelle, pas une couverture déjà universelle.
+**Et Proton ?**
 
-**Pourquoi une pile de signal alternative ?**  
-Parce qu'un crash guest peut avoir endommagé sa pile. Le handler Linux doit disposer d'une pile indépendante pour lire `siginfo_t`/`ucontext`, produire un diagnostic et terminer sans appeler une libc dans un contexte invalide.
+Proton est l'outil de compatibilité de Valve pour Steam Play. Il s'appuie notamment sur Wine et sur des composants orientés jeu. La présentation ne prétend pas reproduire son architecture.
 
-**Pourquoi ne pas utiliser Wine directement ?**  
-Le but est pédagogique et expérimental : garder une chaîne assez petite pour suivre chaque frontière et chaque conversion, pas remplacer Wine.
+**Pourquoi deux binaires ?**
 
-**Qu'est-ce qui empêche d'exécuter n'importe quel `.exe` ?**  
-La couverture API et les modèles runtime incomplets : threading/TLS, Unicode, synchronisation, fichiers et de nombreuses API restent partiellement pris en charge.
+Un vrai processus 32-bit fournit naturellement des pointeurs, une pile et une ABI i386 cohérents. Le wrapper choisit `my_wine32` ou `my_wine64` après lecture du PE.
 
-## Si le temps manque
+**Pourquoi ne pas envoyer un syscall Windows directement à Linux ?**
 
-- Passer les slides 6 à 11 en quatre minutes : le public connaît déjà la logique générale du loader.
-- Ne pas couper les slides 14 à 19 : pile guest, syscalls NT, thunk, dispatcher, signaux et frontière libc portent l'idée nouvelle.
-- Sur Doom95, montrer la capture et faire seulement la distinction « preuve d'intégration / boilerplate ».
+Le numéro, les arguments, les objets manipulés et le code de retour appartiennent au contrat du noyau. L'opcode seul ne suffit pas.
+
+**Que se passe-t-il si le programme exécute directement une instruction `syscall` Windows ?**
+
+Dans l'implémentation actuelle, `my_wine` intercepte surtout les appels NT pendant la résolution des imports : l'entrée IAT de `ntdll!Nt*` pointe vers un handler interne ou vers un thunk. Il ne capture pas encore toutes les instructions `syscall` arbitraires présentes dans le code guest ; un syscall NT inline risquerait donc d'entrer dans Linux avec un numéro et une convention incompatibles.
+
+Le vrai Wine ajoute un filet plus général sous Linux avec **Syscall User Dispatch**. Le noyau autorise les syscalls provenant des zones host de Wine, mais transforme en `SIGSYS` ceux émis depuis le code Windows. Wine lit alors le numéro NT et les registres dans le contexte du signal, redirige l'exécution vers son dispatcher, traduit l'opération — parfois avec plusieurs syscalls Linux ou un échange avec `wineserver` — puis restaure le contexte Windows. Ce n'est donc jamais un simple remapping « numéro NT → numéro Linux ».
+
+**Tous les syscalls passent-ils par les thunks ?**
+
+Non. L'infrastructure de thunks et du dispatcher existe, mais beaucoup d'imports `ntdll` courants rejoignent encore directement leurs handlers C.
+
+**Pourquoi SDL2 ?**
+
+Le backend adapte la surface utile à Doom95 : DirectDraw et DirectSound passent par SDL2, les événements SDL2 alimentent les entrées, et WinMM/MIDI utilise FluidSynth pour la musique.
+
+**Peut-il lancer n'importe quel `.exe` ?**
+
+Non. La couverture API, le threading, TLS, Unicode, la synchronisation et plusieurs modèles runtime restent incomplets.
+
+## Contrôle du temps
+
+- À **5:00**, commencer la route du talk.
+- À **10:00**, être sur le pivot « le premier saut ne suffit pas ».
+- À **17:00**, être dans le dispatcher ou la zone libc.
+- À **21:00**, lancer la démonstration.
+- Si le temps manque, condenser les slides 7 à 9 ; ne pas couper les slides 10, 16, 17 et 19.

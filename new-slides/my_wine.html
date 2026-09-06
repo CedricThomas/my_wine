@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>my_wine — un loader Portable Executable sur Linux</title>
+<title>my_wine — du loader à la compatibilité Windows sur Linux</title>
 <link rel="icon" href="../slides/favicon.svg" type="image/svg+xml">
 <style>
   :root {
@@ -993,6 +993,96 @@
   .callout { text-align: center; }
   .visual-body > .callout:last-child { margin-top: auto; }
 
+  .source-note {
+    margin-top: 0.75rem;
+    color: #7890ad;
+    font-size: 0.72rem;
+    text-align: center;
+  }
+
+  .source-note a { color: #8fa9c8; }
+
+  .route-card {
+    min-height: 210px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--accent);
+    border-radius: 16px;
+    padding: 20px;
+    background: var(--surface);
+  }
+
+  .route-card:nth-child(2) { border-top-color: var(--accent-2); }
+  .route-card:nth-child(3) { border-top-color: #8fb8ff; }
+  .route-card:nth-child(4) { border-top-color: var(--accent-3); }
+  .route-card p { color: var(--muted); font-size: 0.96rem; }
+
+  .pivot-board {
+    width: 100%;
+    max-width: 1120px;
+    display: grid;
+    grid-template-columns: 1fr 80px 1.35fr;
+    gap: 18px;
+    align-items: center;
+  }
+
+  .pivot-arrow { color: var(--accent-2); font-size: 3rem; font-weight: 900; text-align: center; }
+
+  .contract-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .contract-chip {
+    min-height: 92px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    background: rgba(255,255,255,0.025);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .contract-chip strong { margin-bottom: 4px; }
+  .contract-chip span { color: var(--muted); font-size: 0.88rem; line-height: 1.35; }
+
+  .integration-hub {
+    width: 100%;
+    max-width: 1120px;
+    display: grid;
+    grid-template-columns: 1fr 1.25fr 1fr;
+    gap: 18px;
+    align-items: stretch;
+  }
+
+  .integration-column { display: grid; gap: 12px; }
+  .integration-column .org-node { min-height: 112px; }
+  .doom-core {
+    border: 2px solid var(--accent-2);
+    border-radius: 22px;
+    padding: 26px;
+    background: radial-gradient(circle at top, rgba(255,180,84,0.13), transparent 60%), var(--surface);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .doom-logo { font-size: 2.7rem; font-weight: 900; letter-spacing: 0.08em; color: var(--accent-2); }
+
+  .demo-command {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 18px 24px;
+    border: 1px solid #304764;
+    border-radius: 12px;
+    background: #05070d;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    color: var(--good);
+    font-size: 1.05rem;
+  }
+
   .progress-bar {
     position: fixed;
     left: 0;
@@ -1051,6 +1141,9 @@
     .hero-arrow {
       display: none;
     }
+
+    .pivot-board, .integration-hub { grid-template-columns: 1fr; }
+    .pivot-arrow { display: none; }
   }
 </style>
 </head>
@@ -1060,502 +1153,358 @@
 
 <!-- SLIDE 1 -->
 <div class="slide title-slide active">
-  <div class="eyebrow">Partie II · après le loader dynamique Linux</div>
+  <div class="eyebrow">Partie II · la promesse de la dernière présentation</div>
   <div class="emoji-big">🍷</div>
-  <h1>my_wine<br><span style="color: var(--accent-2)">charger un Portable Executable (PE) Windows sur Linux</span></h1>
+  <h1><code>my_wine</code><br><span style="color: var(--accent-2)">du loader à la compatibilité</span></h1>
   <div class="accent-line"></div>
-  <p class="subtitle">Reprendre la méthode du loader dynamique <code>ld.so</code>, puis combler un à un les écarts entre le contrat du PE et celui d'un processus Linux.</p>
-  <p class="tagline">format · mémoire · symboles · conventions d'appel · appels système · exceptions</p>
+  <p class="subtitle">La dernière fois, <code>ld.so</code> s'arrêtait au premier saut. Cette fois, on découvre tout ce qu'il faut construire après.</p>
+  <p class="tagline">un Portable Executable Windows · un processus Linux · des contrats à réconcilier</p>
 </div>
 
 <!-- SLIDE 2 -->
 <div class="slide">
-  <h2><code>ld.so</code> m'a donné la méthode</h2>
-  <p class="section-note">Avant d'écrire « une compatibilité Windows », j'ai réutilisé une question plus simple : qu'est-ce qu'un loader doit rendre vrai avant le premier saut ?</p>
+  <h2>Wine ne simule pas un processeur</h2>
+  <p class="section-note">Un programme Windows x86 peut déjà être compris par un processeur x86. Ce qui manque sous Linux, c'est le monde auquel ce programme pense parler.</p>
   <div class="visual-body">
-  <div class="org-flow">
-    <div class="org-node soft">
-      <div class="panel-title">Même méthode</div>
-      <h3>Lire le format</h3>
-      <p>Headers, tables, adresses relatives : comprendre la recette d'image avant de toucher à l'exécution.</p>
+    <div class="org-flow">
+      <div class="org-node soft"><div class="panel-title">Code du programme</div><h3>Instructions x86 natives</h3><p>Le processeur exécute directement les instructions de l'application.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node warn"><div class="panel-title">Couche de compatibilité</div><h3>Wine traduit le contrat</h3><p>Appels Windows, objets, fichiers, fenêtres et autres services sont adaptés au système hôte.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node good"><div class="panel-title">Système hôte</div><h3>Linux fournit les mécanismes</h3><p>Processus, mémoire, fichiers, affichage et son restent des ressources Linux.</p></div>
     </div>
-    <div class="org-arrow">→</div>
-    <div class="org-node warn">
-      <div class="panel-title">Même méthode</div>
-      <h3>Construire les invariants</h3>
-      <p>Mapper, reloger, résoudre, préparer une pile et seulement ensuite transférer le contrôle.</p>
-    </div>
-    <div class="org-arrow">→</div>
-    <div class="org-node risk">
-      <div class="panel-title">Nouvelle difficulté</div>
-      <h3>Mesurer les écarts</h3>
-      <p>À chaque attente Windows absente sous Linux, ajouter un bridge explicite plutôt qu'un patch opaque.</p>
-    </div>
-  </div>
-  <div class="callout"><span class="warn-text">Le loader est la méthode ; les bridges PE ↔ Linux sont le vrai sujet.</span></div>
+    <div class="callout"><span class="accent">Wine Is Not an Emulator</span> : la difficulté n'est pas de traduire les instructions du CPU, mais les attentes du programme.</div>
+    <p class="source-note">Source : <a href="https://www.winehq.org/about/">WineHQ · About Wine</a></p>
   </div>
 </div>
 
 <!-- SLIDE 3 -->
 <div class="slide">
-  <h2>Entre le PE et Linux : quatre trous à combler</h2>
+  <h2>Proton applique cette idée au jeu sous Linux</h2>
+  <p class="section-note">Valve assemble Wine et des composants spécialisés dans un outil de compatibilité intégré à Steam Play.</p>
   <div class="visual-body">
-  <div class="org-tree">
-    <div class="org-node tree-root"><div class="panel-title">Programme Windows</div><h3>Ce que le PE suppose déjà présent</h3></div>
-    <div class="tree-junction"></div>
-    <div class="tree-leaves">
-    <div class="org-node soft">
-      <div class="panel-title">1. Image</div>
-      <p>Linux ne sait pas mapper ce format comme son propre format exécutable.</p>
+    <div class="hero-diagram">
+      <div class="hero-node"><div class="panel-title">Entrée</div><h3>Jeu Windows</h3><p>Un exécutable et des API conçus pour Windows.</p></div>
+      <div class="hero-arrow">→</div>
+      <div class="hero-node" style="border-color:var(--accent-2)"><div class="panel-title">Compatibilité</div><h3>Proton</h3><p>Wine, traduction graphique et composants adaptés au contexte Steam.</p></div>
+      <div class="hero-arrow">→</div>
+      <div class="hero-node" style="border-color:var(--good)"><div class="panel-title">Exécution</div><h3>Jeu sous Linux</h3><p>Le système et les pilotes Linux réalisent le travail effectif.</p></div>
     </div>
-    <div class="org-node warn">
-      <div class="panel-title">2. Symboles</div>
-      <p>Les bibliothèques dynamiques Windows (DLL) n'existent pas côté Linux.</p>
-    </div>
-    <div class="org-node risk">
-      <div class="panel-title">3. Processus</div>
-      <p>État du thread, état du processus, handles et exceptions sont absents.</p>
-    </div>
-    <div class="org-node good">
-      <div class="panel-title">4. Exécution</div>
-      <p>Conventions d'appel, pile, appels système et fautes divergent.</p>
-    </div>
-    </div>
-  </div>
-  <div class="callout">Chaque trou devient une frontière visible : <span class="accent">conversion de données</span>, <span class="accent">conversion de contrôle</span> ou <span class="accent">conversion de sémantique</span>.</div>
+    <div class="callout">Wine et Proton prouvent que cette frontière peut être industrialisée. Mon objectif est plus petit : <span class="warn-text">la rendre compréhensible</span>.</div>
+    <p class="source-note">Source : <a href="https://github.com/ValveSoftware/Proton">ValveSoftware/Proton · README officiel</a></p>
   </div>
 </div>
 
 <!-- SLIDE 4 -->
 <div class="slide">
-  <h2>Décision n°1 : séparer PE 32-bit (PE32) et PE 64-bit (PE32+)</h2>
-  <p class="section-note">Deux formats proches, mais deux largeurs de pointeurs et deux mécaniques d'exécution.</p>
+  <h2>Pourquoi reconstruire une version minuscule ?</h2>
+  <p class="section-note">Pas pour remplacer Wine : pour pouvoir suivre chaque adresse, chaque changement de pile et chaque traduction.</p>
   <div class="visual-body">
-  <div class="org-tree">
-    <div class="org-node tree-root">
-      <strong><code>my_wine</code></strong>
-      <p>Lit la signature historique <code>MZ</code>, suit <code>e_lfanew</code>, vérifie <code>PE</code>, puis distingue <code>0x10b</code> et <code>0x20b</code>.</p>
+    <div class="cols-3">
+      <div class="concept-card"><div class="panel-title">Observer</div><h3>Une frontière à la fois</h3><p>Le projet reste assez petit pour suivre le chemin du fichier jusqu'au handler Linux.</p></div>
+      <div class="concept-card"><div class="panel-title">Construire</div><h3>Rendre les hypothèses explicites</h3><p>Chaque crash révèle un contrat Windows que le loader n'a pas encore fabriqué.</p></div>
+      <div class="concept-card"><div class="panel-title">Valider</div><h3>Aller jusqu'à Doom95</h3><p>Le jeu sert de test d'intégration pour l'image, les API, l'affichage, le son et les entrées.</p></div>
     </div>
-    <div class="tree-junction"></div>
-    <div class="tree-leaves two">
-    <div class="org-node soft">
-      <strong><code>my_wine64</code></strong>
-      <p>Processus Linux en architecture x86 64-bit (x64) : convention Microsoft côté guest, System V côté host.</p>
-    </div>
-    <div class="org-node warn">
-      <strong><code>my_wine32</code></strong>
-      <p>Processus Linux 32-bit compilé avec <code>-m32</code> : pointeurs, pile et sélecteurs réellement 32-bit.</p>
-    </div>
-    </div>
-  </div>
-  <div class="callout">J'ai choisi deux processus natifs plutôt qu'une couche d'émulation de pointeurs : le noyau et le compilateur garantissent directement la bonne largeur d'adresse.</div>
+    <div class="callout"><code>my_wine</code> est un laboratoire pédagogique : <span class="accent">réduire la couverture pour agrandir la compréhension</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 5 -->
 <div class="slide">
-  <h2>L'implémentation en un seul pipeline</h2>
-  <p class="section-note">Comme dans <code>ld.so</code>, l'ordre n'est pas décoratif : chaque étape fabrique les invariants nécessaires à la suivante.</p>
+  <h2><code>ld.so</code> était le prologue</h2>
+  <p class="section-note">La première présentation répondait à une question : comment rendre une image chargeable avant de lui donner le contrôle ?</p>
   <div class="visual-body">
-  <div class="org-flow five">
-    <div class="org-node compact soft"><strong>1. Détecter</strong><p>Choisir PE32 ou PE32+.</p></div>
-    <div class="org-arrow">→</div>
-    <div class="org-node compact"><strong>2. Mapper</strong><p>Headers, sections, zéro-fill, relocations.</p></div>
-    <div class="org-arrow">→</div>
-    <div class="org-node compact warn"><strong>3. Relier</strong><p>Résoudre les DLL et écrire l'Import Address Table (IAT).</p></div>
-    <div class="org-arrow">→</div>
-    <div class="org-node compact risk"><strong>4. Construire</strong><p>Heap, état du thread et du processus, piles.</p></div>
-    <div class="org-arrow">→</div>
-    <div class="org-node compact good"><strong>5. Franchir</strong><p>Installer le contexte, puis sauter dans le guest.</p></div>
-  </div>
-  <div class="cols-2" style="margin-top: 18px;">
-    <div class="panel soft">
-      <div class="panel-title">Ce que le deck ld.so nous a déjà appris</div>
-      <p>Un format décrit une image mémoire ; un loader mappe, reloge, résout et effectue un handoff.</p>
+    <div class="pipe">
+      <div class="pipe-box"><strong>Lire</strong><span>Les headers décrivent la recette.</span></div><div class="flow-arrow">→</div>
+      <div class="pipe-box"><strong>Mapper</strong><span>Le fichier devient une image mémoire.</span></div><div class="flow-arrow">→</div>
+      <div class="pipe-box"><strong>Reloger</strong><span>Les adresses sont corrigées.</span></div><div class="flow-arrow">→</div>
+      <div class="pipe-box"><strong>Résoudre</strong><span>Les symboles deviennent appelables.</span></div><div class="flow-arrow">→</div>
+      <div class="pipe-box"><strong>Sauter</strong><span>Le loader transmet le contrôle.</span></div>
     </div>
-    <div class="panel warn">
-      <div class="panel-title">Ce que my_wine ajoute</div>
-      <p>Le host ne fournit ni DLL, ni état Windows, ni Application Binary Interface (ABI) Microsoft, ni sémantique Win32.</p>
-    </div>
-  </div>
-  </div>
-</div>
-
-<!-- SLIDE 6 -->
-<div class="slide dense">
-  <h2>Concept 1 : un PE est une recette d'image mémoire</h2>
-  <p class="section-note">Comme l'Executable and Linkable Format (ELF), ce n'est pas « du code à lancer » : le format décrit <span class="warn-text">quelle mémoire construire</span>.</p>
-  <div class="visual-body">
-  <div class="memory-map">
-    <div class="memory-column">
-      <h3>Le chemin de lecture utile</h3>
-      <div class="memory-stack">
-        <div class="memory-seg teal">
-          <strong>Header Disk Operating System (DOS)</strong>
-          <span>Ancien header <code>MZ</code>. Son intérêt principal : <code>e_lfanew</code> donne l'offset des vrais headers PE.</span>
-        </div>
-        <div class="memory-seg gold">
-          <strong>Headers PE</strong>
-          <span>Signature <code>PE\0\0</code>, machine, point d'entrée, <code>ImageBase</code>, <code>SizeOfImage</code>, data directories.</span>
-        </div>
-        <div class="memory-seg pink">
-          <strong>Section table</strong>
-          <span>Sections telles que <code>.text</code>, <code>.rdata</code>, <code>.data</code>, <code>.rsrc</code>, <code>.reloc</code>.</span>
-        </div>
-      </div>
-    </div>
-    <div class="memory-column">
-      <h3>Comparaison utile avec ELF</h3>
-      <table>
-        <tr><th>ELF</th><td>Les segments <code>PT_LOAD</code> et le bloc dynamique dominent l'histoire.</td></tr>
-        <tr><th>PE</th><td>La section table et les <strong>data directories</strong> deviennent le point d'entrée mental.</td></tr>
-        <tr><th>Conséquence</th><td>On suit surtout des adresses relatives, des sections et des data directories.</td></tr>
-      </table>
-    </div>
-  </div>
-  <div class="callout">Même méthode que pour ELF : <span class="accent">lire la recette sur disque pour reconstruire l'image attendue en mémoire</span>.</div>
+    <div class="callout">Pour un PE, cette méthode reste nécessaire. Mais <span class="warn-text">le premier saut devient le début du problème</span>, pas sa conclusion.</div>
   </div>
 </div>
 
 <!-- SLIDE 6 -->
 <div class="slide">
-  <h2>Concept 2 : trois coordonnées pour une même adresse</h2>
-  <p class="section-note">Ces trois mots gouvernent presque toutes les conversions d'adresse du loader.</p>
-  <div class="visual-body">
-  <div class="concept-grid">
-    <div class="concept-card">
-      <div class="panel-title">Distance dans l'image</div>
-      <h3>Relative Virtual Address (RVA)</h3>
-      <p>Distance depuis le début logique de l'image PE. Ce n'est pas un pointeur absolu.</p>
-      <pre><code>RVA(entry) = 0x1230</code></pre>
-    </div>
-    <div class="concept-card">
-      <div class="panel-title">ImageBase</div>
-      <h3>Base préférée</h3>
-      <p>Adresse à laquelle le binaire aimerait être chargé si tout se passe idéalement.</p>
-      <pre><code>ImageBase = 0x00400000</code></pre>
-    </div>
-    <div class="concept-card">
-      <div class="panel-title">Adresse finale</div>
-      <h3>Virtual Address (VA)</h3>
-      <p>Adresse effective après chargement. C'est elle que le processeur lira.</p>
-      <pre><code>VA = actual_base + RVA</code></pre>
-    </div>
-  </div>
-  <div class="callout">Le loader passe son temps à transformer des <code>RVA</code> en vrais pointeurs C. Toute erreur ici se propage ensuite dans les imports, les ressources, les relocations et le point d'entrée.</div>
+  <h2>Route : du format au contrat</h2>
+  <p class="section-note">Quatre étapes, et une seule question directrice : qu'est-ce que le programme observe à cet instant ?</p>
+  <div class="cols-4">
+    <div class="route-card"><div class="panel-title">Partie 1</div><h3>Charger l'image</h3><p>Lire le PE, reconstruire la mémoire et brancher les imports.</p></div>
+    <div class="route-card"><div class="panel-title">Partie 2</div><h3>Créer le processus</h3><p>Fabriquer l'état Windows visible dès la première instruction.</p></div>
+    <div class="route-card"><div class="panel-title">Partie 3</div><h3>Traverser</h3><p>Passer du contexte guest Windows au contexte host Linux.</p></div>
+    <div class="route-card"><div class="panel-title">Partie 4</div><h3>Intégrer</h3><p>Faire fonctionner ensemble affichage, son, entrées et erreurs.</p></div>
   </div>
 </div>
 
 <!-- SLIDE 7 -->
 <div class="slide">
-  <h2>Décision n°2 : reconstruire, pas exécuter le fichier</h2>
-  <p class="section-note">Permissions : lecture + exécution (RX), lecture seule (R), lecture + écriture (RW).</p>
+  <h2>Un PE est une recette d'image mémoire</h2>
+  <p class="section-note">Même principe qu'avec ELF, autre carte : les structures PE indiquent quoi copier, où le placer et où commencer.</p>
   <div class="visual-body">
-  <div class="memory-map">
-    <div class="memory-column">
-      <h3>Sur disque</h3>
-      <div class="memory-stack">
-        <div class="memory-seg teal"><strong><code>.text</code></strong><span>code compilé</span></div>
-        <div class="memory-seg gold"><strong><code>.rdata</code></strong><span>constantes, imports, tables</span></div>
-        <div class="memory-seg pink"><strong><code>.data</code></strong><span>variables globales initialisées</span></div>
-        <div class="memory-seg green"><strong><code>.bss</code></strong><span>souvent implicite, à initialiser à zéro</span></div>
-      </div>
+    <div class="map-board">
+      <div class="panel soft"><div class="panel-title">Fichier sur disque</div><div class="stack">
+        <div class="stack-box pink"><strong><code>MZ</code> → <code>e_lfanew</code></strong><span>Le premier header indique où commence la description PE.</span></div>
+        <div class="stack-box teal"><strong><code>PE\0\0</code> + Optional Header</strong><span>Architecture, base préférée, taille de l'image et point d'entrée.</span></div>
+        <div class="stack-box gold"><strong>Table des sections</strong><span><code>.text</code>, <code>.rdata</code>, <code>.data</code> et leurs coordonnées.</span></div>
+        <div class="stack-box green"><strong>Data directories</strong><span>Imports, relocations et autres tables nécessaires au runtime.</span></div>
+      </div></div>
+      <div class="panel warn"><div class="panel-title">Carte équivalente</div><table>
+        <tr><th>ELF</th><td>Program headers et segments</td></tr>
+        <tr><th>PE</th><td>Sections et data directories</td></tr>
+        <tr><th>Question commune</th><td>Comment transformer les octets du disque en état exécutable ?</td></tr>
+      </table></div>
     </div>
-    <div class="memory-column">
-      <h3>En mémoire</h3>
-      <div class="memory-stack">
-        <div class="memory-seg teal"><strong>RX</strong><span>le processeur peut enfin exécuter <code>.text</code></span></div>
-        <div class="memory-seg gold"><strong>R</strong><span>les tables restent cohérentes et non modifiables</span></div>
-        <div class="memory-seg pink"><strong>RW</strong><span>les globals vivent comme le guest l'attend</span></div>
-        <div class="memory-seg green"><strong>image PE plausible</strong><span>le binaire ressemble désormais à un vrai processus</span></div>
-      </div>
-    </div>
-  </div>
-  <div class="org-flow" style="grid-template-columns: 1fr 38px 1fr 38px 1fr 38px 1fr; margin-top: 14px;">
-    <div class="org-node compact soft"><strong>1. Réserver</strong><p><code>mmap(SizeOfImage)</code></p></div><div class="org-arrow">→</div>
-    <div class="org-node compact"><strong>2. Copier</strong><p>Chaque section à sa VA.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact warn"><strong>3. Reloger</strong><p>Corriger les adresses.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact good"><strong>4. Protéger</strong><p>Appliquer RX, R ou RW.</p></div>
-  </div>
+    <div class="callout">On ne demande pas à Linux d'exécuter le fichier : <span class="accent">on suit la recette pour reconstruire son image</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 8 -->
 <div class="slide">
-  <h2>Concept 3 : reloger si la base préférée est occupée</h2>
-  <p class="section-note">Si l'image n'est pas chargée à son <code>ImageBase</code>, les adresses absolues internes deviennent fausses.</p>
+  <h2>Du fichier à l'image exécutable</h2>
+  <p class="section-note">Une seule relation relie toutes les coordonnées utiles : <code>adresse = base réelle + RVA</code>.</p>
   <div class="visual-body">
-  <div class="cols-2">
-    <div class="panel warn">
-      <div class="panel-title">Équation du problème</div>
-      <div class="hex-row"><div class="hex-tag">ImageBase</div><span><code>0x00400000</code> souhaité par le PE</span></div>
-      <div class="hex-row"><div class="hex-tag">actual_base</div><span><code>0x00600000</code> disponible au runtime</span></div>
-      <div class="hex-row"><div class="hex-tag">delta</div><span><code>actual_base - ImageBase = 0x00200000</code></span></div>
-      <div class="hex-row"><div class="hex-tag">effet</div><span>chaque adresse encodée avec l'ancienne base doit être corrigée</span></div>
+    <div class="pipe">
+      <div class="pipe-box"><strong>1. Réserver</strong><span><code>SizeOfImage</code> octets à une base disponible.</span></div><div class="flow-arrow">→</div>
+      <div class="pipe-box"><strong>2. Copier</strong><span>Chaque section rejoint <code>base + RVA</code> ; le reste est mis à zéro.</span></div><div class="flow-arrow">→</div>
+      <div class="pipe-box"><strong>3. Reloger</strong><span>Si la base préférée est occupée, ajouter le delta aux pointeurs concernés.</span></div><div class="flow-arrow">→</div>
+      <div class="pipe-box"><strong>4. Protéger</strong><span>Appliquer enfin les droits lecture, écriture et exécution.</span></div>
     </div>
-    <div class="panel soft">
-      <div class="panel-title">Travail du loader</div>
-      <div class="step-list">
-        <div class="step"><div class="step-num">1</div><div><div class="step-label">Lire la relocation directory</div><div class="step-detail">des blocs groupés par page, via une data directory PE</div></div></div>
-        <div class="step"><div class="step-num">2</div><div><div class="step-label">Décoder le type + l'offset</div><div class="step-detail"><code>HIGHLOW</code> en PE32, <code>DIR64</code> en PE32+</div></div></div>
-        <div class="step"><div class="step-num">3</div><div><div class="step-label">Ajouter le delta</div><div class="step-detail">corriger la valeur pointée, pas déplacer la section</div></div></div>
-      </div>
+    <div class="cols-3" style="margin-top:18px">
+      <div class="panel soft"><div class="panel-title">Disque</div><h3>File offset</h3><p>Où lire les octets.</p></div>
+      <div class="panel warn"><div class="panel-title">Image</div><h3>RVA</h3><p>Déplacement depuis la base.</p></div>
+      <div class="panel risk"><div class="panel-title">Processus</div><h3>Adresse virtuelle</h3><p><code>base réelle + RVA</code>.</p></div>
     </div>
-  </div>
-  <div class="callout"><code>delta = actual_base − ImageBase</code> : on corrige les pointeurs, pas la position logique des sections.</div>
+    <div class="callout">Même besoin que dans <code>ld.so</code>, autre encodage : <span class="accent">l'ordre reste réserver, construire, corriger, protéger</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 9 -->
 <div class="slide">
-  <h2>Concept 4 : de la demande d'import à l'adresse callable</h2>
+  <h2>Les imports sont des promesses à brancher</h2>
   <p class="section-note">L'Import Lookup Table (ILT) décrit ce qu'on veut. L'Import Address Table (IAT) contient ce qu'on a finalement branché.</p>
   <div class="visual-body">
-  <div class="org-flow">
-    <div class="org-node soft"><div class="panel-title">Demande</div><h3>Import Lookup Table (ILT)</h3><p><code>kernel32.dll</code><br><code>CreateFileA</code><br><code>WriteFile</code></p></div>
-    <div class="org-arrow">→</div>
-    <div class="org-node warn"><div class="panel-title">Travail du loader</div><h3>Résoudre chaque nom</h3><p>Trouver une implémentation interne ou l'export d'un module PE chargé.</p></div>
-    <div class="org-arrow">→</div>
-    <div class="org-node risk"><div class="panel-title">Réponse</div><h3>Import Address Table (IAT)</h3><p>Une table de pointeurs directement appelables par le guest.</p></div>
-  </div>
-  <div class="callout">Le guest n'appelle donc pas « Windows ». Il appelle des pointeurs que le loader a écrits dans l'<code>IAT</code>.</div>
+    <div class="org-flow">
+      <div class="org-node soft"><div class="panel-title">Demande</div><h3>Import Lookup Table</h3><p><code>kernel32.dll</code><br><code>CreateFileA</code><br><code>WriteFile</code></p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node warn"><div class="panel-title">Loader</div><h3>Résoudre chaque nom</h3><p>Trouver un handler interne ou l'export d'un module PE chargé.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node risk"><div class="panel-title">Réponse</div><h3>Import Address Table</h3><p>Une table de pointeurs directement appelables par le guest.</p></div>
+    </div>
+    <div class="callout">Comme <code>ld.so</code>, le loader résout un nom. Mais ici, <span class="warn-text">l'implémentation est souvent une fonction du runtime que j'ai écrite</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 10 -->
 <div class="slide">
-  <h2>Décision n°3 : résoudre par niveaux</h2>
+  <h2>Le premier saut ne suffit pas</h2>
+  <p class="section-note">Imaginons que l'image soit parfaite, les relocations appliquées et les imports branchés. Que voit la première instruction ?</p>
   <div class="visual-body">
-  <div class="org-tree">
-    <div class="org-node tree-root"><div class="panel-title">Symbole demandé</div><h3><code>DLL!fonction</code></h3></div>
-    <div class="tree-junction"></div>
-    <div class="tree-leaves two">
-      <div class="org-node soft"><div class="panel-title">Niveau 1</div><h3>Implémentation interne ?</h3><p>Oui → écrire l'adresse du stub ou handler compilé dans <code>my_wine</code>.</p></div>
-      <div class="org-node warn"><div class="panel-title">Niveau 2</div><h3>Export PE chargé ?</h3><p>Sinon → chercher le symbole dans les modules déjà mappés et enregistrés.</p></div>
+    <div class="pivot-board">
+      <div class="org-node good"><div class="panel-title">Le loader a terminé</div><h3>Image prête</h3><p>Code mappé, adresses corrigées, point d'entrée connu.</p></div>
+      <div class="pivot-arrow">≠</div>
+      <div class="contract-grid">
+        <div class="contract-chip"><strong>Pile Windows</strong><span>Alignement, arguments et retour attendus.</span></div>
+        <div class="contract-chip"><strong>TEB / PEB</strong><span>Identité du thread et du processus.</span></div>
+        <div class="contract-chip"><strong>ABI et API</strong><span>Registres, handles et fonctions Windows.</span></div>
+        <div class="contract-chip"><strong>Noyau NT</strong><span>Syscalls, statuts et exceptions absents.</span></div>
+      </div>
     </div>
+    <div class="callout">C'est ici que le projet cesse d'être seulement un loader : <span class="accent">il doit fabriquer un environnement observable comme Windows</span>.</div>
   </div>
-  <div class="callout">Comparaison <code>ld.so</code> : même idée de recherche de symbole, mais ici la première « bibliothèque » est souvent le runtime que j'ai écrit moi-même.</div>
+</div>
+
+<!-- SLIDE 11 -->
+<div class="slide">
+  <h2>Donner au programme une identité Windows</h2>
+  <p class="section-note">Un registre est une petite case du processeur. FS et GS peuvent fournir une base implicite vers l'état du thread courant.</p>
+  <div class="visual-body">
+    <div class="address-equation">
+      <div class="address-box"><div class="panel-title">Instruction guest</div><strong><code>GS:[offset]</code></strong><span>Le code fournit un petit déplacement, sans recevoir de pointeur.</span></div>
+      <div class="org-arrow">→</div>
+      <div class="address-box"><div class="panel-title">Adresse calculée</div><strong><code>base_GS + offset</code></strong><span>Le processeur ajoute automatiquement la base installée par le loader.</span></div>
+      <div class="org-arrow">→</div>
+      <div class="address-box"><div class="panel-title">Mémoire Windows</div><strong>TEB → PEB</strong><span>État du thread, puis image, heap, paramètres et modules du processus.</span></div>
+    </div>
+    <div class="org-flow" style="grid-template-columns: 1fr 48px 1fr 48px 1fr; margin-top: 18px;">
+      <div class="org-node compact warn"><div class="panel-title">Architecture</div><h3>FS en PE32</h3><p>Le runtime 32-bit installe sa propre base de segment.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node compact soft"><div class="panel-title">Structures</div><h3>TEB puis PEB</h3><p>Le programme retrouve le contexte qu'il attend de Windows.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node compact risk"><div class="panel-title">Architecture</div><h3>GS en PE32+</h3><p>Le runtime 64-bit installe la base avant le handoff.</p></div>
+    </div>
+    <div class="callout">Avant même d'appeler une API, le programme peut demander : <span class="accent">« qui suis-je et dans quel processus suis-je ? »</span></div>
   </div>
 </div>
 
 <!-- SLIDE 12 -->
-<div class="slide dense">
-  <h2>D'abord : qu'est-ce qu'un registre du processeur ?</h2>
-  <p class="section-note">Une instruction travaille d'abord avec quelques cases nommées, situées dans le processeur. La mémoire vive contient le reste.</p>
+<div class="slide">
+  <h2>Construire la pile et respecter l'ABI guest</h2>
+  <p class="section-note"><code>ld.so</code> termine aussi par un saut. Ici, le saut doit respecter la pile et la convention d'appel attendues par Windows.</p>
   <div class="visual-body">
-    <div class="cpu-memory">
-      <div class="cpu-shell">
-        <h3>Dans le processeur · accès immédiat</h3>
-        <div class="register-bank">
-          <div class="register-row general"><strong>Registres généraux</strong><span>RAX, RCX… transportent nombres, adresses et arguments.</span></div>
-          <div class="register-row stack-reg"><strong>Registre de pile</strong><span>RSP en 64-bit ou ESP en 32-bit désigne le sommet de la pile active.</span></div>
-          <div class="register-row segment-reg"><strong>Registres de segment</strong><span>FS et GS conservent une base implicite vers une zone mémoire particulière.</span></div>
-        </div>
+    <div class="stack-visual">
+      <div class="org-node soft"><div class="panel-title">PE32+</div><h3>Arguments en registres</h3><p>RCX, RDX, R8 et R9 portent les quatre premiers arguments Microsoft x64.</p></div>
+      <div class="stack-frame">
+        <div class="stack-cell">sommet de la réservation</div>
+        <div class="stack-cell hot">arguments supplémentaires</div>
+        <div class="stack-cell hot">adresse de retour contrôlée</div>
+        <div class="stack-cell"><strong>RSP / ESP aligné</strong><br>sommet observable par le guest</div>
+        <div class="stack-cell">espace libre de la pile guest</div>
       </div>
-      <div class="org-arrow">⇄</div>
-      <div class="ram-shell">
-        <h3>Dans la mémoire vive · beaucoup plus vaste</h3>
-        <div class="ram-cell">code et données</div>
-        <div class="ram-cell">pile du programme</div>
-        <div class="ram-cell">état du thread et du processus</div>
-      </div>
+      <div class="org-node warn"><div class="panel-title">PE32</div><h3>Arguments sur la pile</h3><p>ESP est aligné ; arguments et fausse adresse de retour sont écrits avant le saut.</p></div>
     </div>
-    <div class="callout">Un registre n'est pas une variable magique : c'est <span class="accent">une petite case matérielle à laquelle l'architecture donne un rôle</span>. FS et GS servent ici à fabriquer une adresse mémoire.</div>
-  </div>
-</div>
-
-<!-- SLIDE 13 -->
-<div class="slide dense">
-  <h2>FS et GS : une base cachée ajoutée à l'adresse</h2>
-  <p class="section-note">Le Thread Environment Block (TEB) décrit le thread ; le Process Environment Block (PEB) décrit le processus.</p>
-  <div class="visual-body">
-    <div class="address-equation">
-      <div class="address-box"><div class="panel-title">Instruction guest</div><strong><code>lire GS:[0x30]</code></strong><span>Le code fournit seulement un petit déplacement : <code>0x30</code>.</span></div>
-      <div class="org-arrow">→</div>
-      <div class="address-box"><div class="panel-title">Travail du processeur</div><strong><code>base_GS + 0x30</code></strong><span>La base associée à GS est ajoutée automatiquement.</span></div>
-      <div class="org-arrow">→</div>
-      <div class="address-box"><div class="panel-title">Adresse obtenue</div><strong>un champ de la TEB</strong><span>L'adresse de la structure n'a pas été passée comme argument.</span></div>
-    </div>
-    <div class="org-flow" style="grid-template-columns: 1fr 48px 1fr 48px 1fr; margin-top: 18px;">
-      <div class="org-node compact warn"><div class="panel-title">Base implicite</div><h3>FS en PE32 · GS en PE32+</h3><p>Le loader installe la base attendue avant le premier saut.</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node compact soft"><div class="panel-title">État du thread</div><h3>TEB</h3><p>Pile, identifiants, PEB et Structured Exception Handling (SEH).</p></div>
-      <div class="org-arrow">→</div>
-      <div class="org-node compact risk"><div class="panel-title">État du processus</div><h3>PEB</h3><p>Image, heap, paramètres et modules chargés.</p></div>
-    </div>
-    <div class="callout">FS et GS ne découpent pas ici toute la mémoire : ils offrent <span class="accent">un raccourci matériel vers le contexte Windows courant</span>. Le bridge doit restaurer le contexte Linux avant d'appeler du code host.</div>
+    <div class="callout">Deux exécutables host évitent de simuler la largeur d'adresse : <code>my_wine32</code> et <code>my_wine64</code> offrent chacun <span class="accent">un vrai processus de la bonne taille</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 13 -->
 <div class="slide">
-  <h2>Le handoff : fabriquer une vraie pile guest</h2>
-  <p class="section-note"><code>ld.so</code> termine aussi par un saut. Ici, le saut doit en plus respecter la pile et la convention d'appel attendues par Windows.</p>
+  <h2>Une API Windows doit devenir une adresse callable</h2>
+  <p class="section-note">Après la résolution de l'IAT, l'appel du guest tombe soit dans le runtime, soit dans un module PE déjà chargé.</p>
   <div class="visual-body">
-  <div class="stack-visual">
-    <div class="org-node soft"><div class="panel-title">PE32+</div><h3>Registres d'arguments</h3><p>Les registres RCX, RDX et R8 reçoivent les premiers arguments Microsoft x64.</p></div>
-    <div class="stack-frame">
-      <div class="stack-cell">sommet de la réservation</div>
-      <div class="stack-cell hot">arguments supplémentaires</div>
-      <div class="stack-cell hot">adresse de retour contrôlée</div>
-      <div class="stack-cell"><strong>registres pointeurs de pile alignés</strong><br>RSP en 64-bit / ESP en 32-bit</div>
-      <div class="stack-cell">espace libre de la pile guest</div>
+    <div class="org-tree">
+      <div class="org-node tree-root"><div class="panel-title">Import du guest</div><h3><code>DLL!fonction</code></h3></div>
+      <div class="tree-junction"></div>
+      <div class="tree-leaves two">
+        <div class="org-node soft"><div class="panel-title">Couverture interne</div><h3>Stub ou handler <code>my_wine</code></h3><p><code>kernel32</code>, <code>user32</code>, <code>ntdll</code>, CRT, DirectDraw…</p></div>
+        <div class="org-node warn"><div class="panel-title">Module dynamique</div><h3>Export d'une DLL PE chargée</h3><p>Le runtime recherche le symbole dans son registre de modules.</p></div>
+      </div>
     </div>
-    <div class="org-node warn"><div class="panel-title">PE32</div><h3>Arguments sur la pile</h3><p>ESP est aligné ; arguments et fausse adresse de retour sont écrits avant le saut.</p></div>
-  </div>
-  <div class="org-flow" style="grid-template-columns: 1fr 38px 1fr 38px 1fr; margin-top: 16px;">
-    <div class="org-node compact"><strong>1. Allouer</strong><p>Taille annoncée par le PE.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact warn"><strong>2. Initialiser</strong><p>Alignement, arguments, retour.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact good"><strong>3. Basculer</strong><p>Remplacer RSP ou ESP puis sauter.</p></div>
-  </div>
-  <div class="callout">Une pile guest n'est pas un simple buffer : c'est <span class="accent">le premier état observable par le code appelé</span>.</div>
+    <div class="callout">Le pointeur est maintenant appelable, mais sa cible doit encore <span class="warn-text">respecter l'ABI et reproduire la sémantique Windows</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 14 -->
 <div class="slide">
-  <h2>Le même opcode <code>syscall</code>, pas le même noyau</h2>
-  <p class="section-note">Dans la famille Windows New Technology (NT), numéro, arguments, handles et code de statut NT (<code>NTSTATUS</code>) forment un contrat indivisible.</p>
+  <h2>Un syscall NT n'est pas un syscall Linux</h2>
+  <p class="section-note">Même si le processeur connaît l'opcode <code>syscall</code>, numéro, arguments, handles et résultat appartiennent au contrat du noyau.</p>
   <div class="visual-body">
-  <div class="org-tree">
-    <div class="org-node tree-root"><div class="panel-title">Appel Windows NT</div><h3>numéro + arguments Microsoft + objets Windows</h3></div>
-    <div class="tree-junction"></div>
-    <div class="tree-leaves two">
-      <div class="org-node risk"><div class="panel-title">Chemin incorrect</div><h3>Instruction envoyée à Linux</h3><p>Mauvaise table de numéros, mauvaise lecture des arguments, résultat Linux sans sémantique Windows.</p></div>
-      <div class="org-node good"><div class="panel-title">Chemin correct</div><h3>Intercepter → décoder → traduire</h3><p>Le bridge appelle un handler host, puis reconstruit un handle ou un <code>NTSTATUS</code> Windows.</p></div>
+    <div class="org-tree">
+      <div class="org-node tree-root"><div class="panel-title">Demande Windows NT</div><h3>service + arguments + objets Windows</h3></div>
+      <div class="tree-junction"></div>
+      <div class="tree-leaves two">
+        <div class="org-node risk"><div class="panel-title">Chemin incorrect</div><h3>Entrer directement dans Linux</h3><p>Mauvais numéro, mauvais décodage et résultat sans sémantique Windows.</p></div>
+        <div class="org-node good"><div class="panel-title">Chemin construit</div><h3>Intercepter → traduire → reconstruire</h3><p>Un handler host utilise Linux puis rend un handle ou un <code>NTSTATUS</code>.</p></div>
+      </div>
     </div>
-  </div>
-  <div class="callout">Le même opcode ne désigne pas le même service : <span class="pink">sans bridge, on entre dans le mauvais noyau avec le mauvais numéro</span>.</div>
+    <div class="callout">Un syscall n'est pas seulement une instruction : <span class="pink">c'est un accord avec un noyau précis</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 15 -->
 <div class="slide">
-  <h2>Anatomie d'un thunk de 23 octets</h2>
-  <p class="section-note">Un <strong>thunk</strong> est le plus petit bridge possible : quelques instructions générées en mémoire pour capturer un appel et rejoindre un dispatcher connu.</p>
+  <h2>Un thunk capture et identifie l'appel</h2>
+  <p class="section-note">Un thunk est une minuscule porte d'entrée générée en mémoire. Il ne traduit pas le service : il indique au dispatcher lequel traiter.</p>
   <div class="visual-body">
-  <div class="panel warn" style="padding: 20px;">
-    <div class="panel-title">Disposition 64-bit générée · la largeur représente le nombre d'octets</div>
-    <div class="byte-bar">
-      <div class="byte-seg"><strong>2</strong><span>sauver le registre guest</span></div>
-      <div class="byte-seg"><strong>7</strong><span>charger le numéro Windows NT</span></div>
-      <div class="byte-seg"><strong>10</strong><span>charger l'adresse absolue du dispatcher</span></div>
-      <div class="byte-seg"><strong>4</strong><span>appel · restauration · retour</span></div>
+    <div class="panel warn" style="padding: 20px;">
+      <div class="panel-title">Disposition 64-bit générée · largeur proportionnelle au nombre d'octets</div>
+      <div class="byte-bar">
+        <div class="byte-seg"><strong>2</strong><span>sauver le registre guest</span></div>
+        <div class="byte-seg"><strong>7</strong><span>charger le numéro NT</span></div>
+        <div class="byte-seg"><strong>10</strong><span>charger le dispatcher</span></div>
+        <div class="byte-seg"><strong>4</strong><span>appel · restauration · retour</span></div>
+      </div>
     </div>
-  </div>
-  <div class="org-flow" style="grid-template-columns: 1fr 48px 1fr 48px 1fr; margin-top: 18px;">
-    <div class="org-node compact soft"><strong>Adresse callable unique</strong><p>Un thunk par numéro d'appel.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact warn"><strong>Identité embarquée</strong><p>Le thunk ne traduit pas : il nomme.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact good"><strong>Dispatcher commun</strong><p>Conversion centralisée du contexte.</p></div>
-  </div>
-  <div class="callout">L'adresse absolue résiste à l'Address Space Layout Randomization (ASLR). La variante i386 suit la même idée en 15 octets.</div>
-  <p class="diagram-caption">État actuel : l'infrastructure existe, mais les imports <code>ntdll</code> sont encore souvent branchés directement sur les handlers C.</p>
+    <div class="org-flow" style="grid-template-columns:1fr 48px 1fr 48px 1fr; margin-top:18px">
+      <div class="org-node compact soft"><strong>Adresse unique</strong><p>Une entrée callable par numéro.</p></div><div class="org-arrow">→</div>
+      <div class="org-node compact warn"><strong>Identité embarquée</strong><p>Le thunk nomme, il ne traduit pas.</p></div><div class="org-arrow">→</div>
+      <div class="org-node compact good"><strong>Dispatcher commun</strong><p>La conversion reste centralisée.</p></div>
+    </div>
+    <div class="callout"><strong>23 octets en 64-bit</strong> pour préserver, nommer et transférer. La variante i386 suit la même idée en 15 octets.</div>
+    <p class="diagram-caption">État actuel : l'infrastructure existe, mais beaucoup d'imports <code>ntdll</code> rejoignent encore directement leurs handlers C.</p>
   </div>
 </div>
 
 <!-- SLIDE 16 -->
 <div class="slide">
-  <h2>Le dispatcher convertit le contexte, pas seulement les arguments</h2>
-  <p class="section-note">Deux couloirs rendent visible l'endroit exact où l'exécution quitte le monde Windows et rejoint le monde Linux.</p>
+  <h2>Le dispatcher change de monde</h2>
+  <p class="section-note">Deux couloirs montrent où l'exécution quitte le contexte Windows et rejoint temporairement le contexte Linux.</p>
   <div class="visual-body">
-  <div class="swimlanes">
-    <div class="lane-label guest">Contexte guest</div>
-    <div class="lane-track"><div class="lane-step">pile Windows<br>RSP / ESP</div><div class="org-arrow">→</div><div class="lane-step">sauver registres,<br>flags et retour</div><div class="org-arrow">↘</div><div class="lane-step">attendre le résultat</div></div>
-    <div class="lane-label host">Contexte host</div>
-    <div class="lane-track"><div class="lane-step">pile Linux alignée</div><div class="org-arrow">→</div><div class="lane-step">décoder les arguments</div><div class="org-arrow">→</div><div class="lane-step">handler C puis restauration ↗</div></div>
-  </div>
-  <div class="cols-2" style="margin-top: 16px;">
-    <div class="panel soft"><div class="panel-title">Microsoft x64</div><p>RCX, RDX, R8 et R9 portent les quatre premiers arguments ; les suivants restent sur la pile guest.</p></div>
-    <div class="panel warn"><div class="panel-title">Convention d'appel C 32-bit (cdecl)</div><p>Tous les arguments sont relus sur la pile, après les frames ajoutées par le thunk et le dispatcher.</p></div>
-  </div>
-  <div class="callout"><span class="accent">Convertir la pile</span> ne veut pas dire la recopier : on sauve son adresse, on bascule vers une pile host, puis on sait décoder les bons offsets.</div>
+    <div class="swimlanes">
+      <div class="lane-label guest">Contexte guest</div>
+      <div class="lane-track"><div class="lane-step">pile Windows<br>RSP / ESP</div><div class="org-arrow">→</div><div class="lane-step">sauver registres,<br>flags et retour</div><div class="org-arrow">↘</div><div class="lane-step">restaurer le résultat</div></div>
+      <div class="lane-label host">Contexte host</div>
+      <div class="lane-track"><div class="lane-step">pile Linux alignée</div><div class="org-arrow">→</div><div class="lane-step">décoder les arguments</div><div class="org-arrow">→</div><div class="lane-step">handler C puis retour ↗</div></div>
+    </div>
+    <div class="callout">Convertir le contexte ne veut pas dire recopier la pile : <span class="accent">on sauve son adresse, on bascule, puis on revient</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 17 -->
 <div class="slide">
-  <h2>Un crash Windows arrive d'abord comme un signal Linux</h2>
-  <p class="section-note">La frontière concerne aussi les fautes du processeur : Linux les reçoit avant que Windows puisse leur donner un sens.</p>
+  <h2>Quand le code Linux redevient-il utilisable ?</h2>
+  <p class="section-note">Changer de pile et de base GS/FS crée des zones où la libc et SDL2 ne voient plus le contexte Linux qu'elles attendent.</p>
   <div class="visual-body">
-  <div class="org-flow five">
-    <div class="org-node compact risk"><strong>1. Faute guest</strong><p>Pile éventuellement corrompue.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact warn"><strong>2. Signal Linux</strong><p><code>SIGSEGV</code>, <code>SIGILL</code>, <code>SIGFPE</code>…</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact soft"><strong>3. Pile alternative</strong><p><code>SA_ONSTACK</code> garde le handler exécutable.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact"><strong>4. Contexte</strong><p><code>siginfo_t</code> + <code>ucontext</code> donnent adresse et registres.</p></div><div class="org-arrow">→</div>
-    <div class="org-node compact good"><strong>5. Sortie sûre</strong><p>Diagnostic puis appel système brut.</p></div>
-  </div>
-  <div class="cols-2" style="margin-top: 18px;">
-    <div class="panel soft"><div class="panel-title">État Windows préparé</div><p>Une chaîne SEH minimale est accessible depuis la TEB.</p></div>
-    <div class="panel risk"><div class="panel-title">Limite actuelle</div><p>Le chemin n'injecte pas encore toutes les fautes comme exceptions Windows récupérables.</p></div>
-  </div>
-  <div class="callout">Aujourd'hui, ce chemin rend les crashs <span class="accent">observables et survivables côté host</span> ; ce n'est pas encore une traduction complète de tous les signaux en exceptions Windows récupérables.</div>
+    <div class="org-flow">
+      <div class="org-node soft"><div class="panel-title">Avant le handoff</div><h3>Contexte host</h3><p>Pile Linux et segments host : libc et SDL2 sont utilisables normalement.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node risk"><div class="panel-title">Pendant le guest</div><h3>Zone sensible</h3><p>Pile Windows et TEB actif : utiliser des helpers contrôlés ou des syscalls bruts.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node good"><div class="panel-title">Bridge explicite</div><h3>Restaurer → appeler → remettre</h3><p>Revenir au contexte host pour SDL2/libc, puis reconstruire le contexte guest.</p></div>
+    </div>
+    <div class="callout">Le piège rencontré une fois au démarrage de <code>ld.so</code> revient ici <span class="warn-text">à chaque traversée guest → host</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 18 -->
 <div class="slide">
-  <h2>Comme dans <code>ld.so</code> : savoir quand la bibliothèque C est interdite</h2>
-  <p class="section-note">Le changement de pile et de registre de segment découpe le programme en zones de sécurité différentes.</p>
+  <h2>Une faute Windows arrive comme un signal Linux</h2>
+  <p class="section-note">La frontière concerne aussi les erreurs du processeur : Linux les reçoit avant que le runtime puisse leur donner un sens Windows.</p>
   <div class="visual-body">
-  <div class="org-flow">
-    <div class="org-node soft">
-      <div class="panel-title">Avant le handoff</div>
-      <h3>zone host</h3>
-      <p>Parsing, configuration et allocation peuvent utiliser normalement la bibliothèque C standard (libc) Linux.</p>
+    <div class="org-flow five">
+      <div class="org-node compact risk"><strong>1. Faute guest</strong><p>Pile potentiellement corrompue.</p></div><div class="org-arrow">→</div>
+      <div class="org-node compact warn"><strong>2. Signal Linux</strong><p><code>SIGSEGV</code>, <code>SIGILL</code>, <code>SIGFPE</code>…</p></div><div class="org-arrow">→</div>
+      <div class="org-node compact soft"><strong>3. Pile alternative</strong><p>Le handler reste exécutable.</p></div><div class="org-arrow">→</div>
+      <div class="org-node compact"><strong>4. Contexte</strong><p>Adresse de faute et registres.</p></div><div class="org-arrow">→</div>
+      <div class="org-node compact good"><strong>5. Sortie sûre</strong><p>Diagnostic sans dépendre du guest.</p></div>
     </div>
-    <div class="org-arrow">→</div>
-    <div class="org-node risk">
-      <div class="panel-title">Après le handoff</div>
-      <h3>zone sensible</h3>
-      <p>Helpers sans libc, syscalls bruts et état explicitement contrôlé.</p>
-    </div>
-    <div class="org-arrow">→</div>
-    <div class="org-node good">
-      <div class="panel-title">Appel natif nécessaire</div>
-      <h3>bridge explicite</h3>
-      <p>Restaurer le contexte host, appeler Simple DirectMedia Layer 2 (SDL2) ou la libc, puis remettre le contexte guest.</p>
-    </div>
-  </div>
-  <div class="callout">C'est le même piège que dans <code>ld.so</code> avant l'initialisation de libc, mais il réapparaît ici <span class="warn-text">à chaque traversée guest → host</span>.</div>
+    <div class="cols-2" style="margin-top:18px"><div class="panel soft"><div class="panel-title">Préparé</div><p>Une chaîne Structured Exception Handling minimale existe dans la TEB.</p></div><div class="panel risk"><div class="panel-title">Limite actuelle</div><p>Toutes les fautes ne deviennent pas encore des exceptions Windows récupérables.</p></div></div>
+    <div class="callout">Le chemin actuel rend le crash <span class="accent">observable et survivable côté host</span>, sans prétendre reproduire tout SEH.</div>
   </div>
 </div>
 
-<!-- SLIDE 20 -->
+<!-- SLIDE 19 -->
 <div class="slide dense">
-  <h2>Doom95 : une preuve d'intégration, pas le cœur du talk</h2>
-  <p class="section-note">Le jeu vérifie que les ponts fonctionnent ensemble. Le temps d'implémentation vient surtout de la largeur de l'interface de programmation applicative (API) et du boilerplate.</p>
+  <h2>Doom95 additionne toutes les frontières</h2>
+  <p class="section-note">Le jeu n'introduit pas un mécanisme magique : il oblige les mécanismes précédents à fonctionner ensemble et assez longtemps.</p>
   <div class="visual-body">
-  <div class="cols-2" style="grid-template-columns: 1.15fr 0.85fr;">
-    <div class="evidence-stack">
-      <img class="evidence-shot" src="../artifacts/screenshots/doom_95_20260529_010517.png" alt="Doom95 exécuté par my_wine sous Linux">
-      <div class="evidence-caption">Une vraie frame de Doom95 produite par le runtime.</div>
-    </div>
-    <div style="display: grid; gap: 14px;">
-      <div class="panel soft">
-        <div class="panel-title">Les mécanismes réutilisables</div>
-        <p>Image PE, IAT, TEB/PEB, pile guest, conversion d'ABI, signaux et passages explicites vers le host.</p>
+    <div class="integration-hub">
+      <div class="integration-column">
+        <div class="org-node compact soft"><strong>Loader PE</strong><p>Image, relocations, imports et CRT.</p></div>
+        <div class="org-node compact warn"><strong>Processus Windows</strong><p>TEB, PEB, pile, handles et messages.</p></div>
       </div>
-      <div class="panel warn">
-        <div class="panel-title">Ce qui a surtout coûté du temps</div>
-        <p>Dialogues, ressources, DirectDraw, DirectSound, Windows Multimedia (WinMM) et multiplication des stubs Win32.</p>
+      <div class="doom-core"><div class="panel-title">Preuve d'intégration</div><div class="doom-logo">DOOM95</div><p>Le code original s'exécute nativement au milieu de bridges contrôlés.</p></div>
+      <div class="integration-column">
+        <div class="org-node compact risk"><strong>DirectDraw → SDL2</strong><p>Surfaces, palette, fenêtre et entrées.</p></div>
+        <div class="org-node compact good"><strong>Audio → SDL2 / FluidSynth</strong><p>DirectSound pour les effets ; WinMM/MIDI pour la musique.</p></div>
       </div>
     </div>
-  </div>
-  <div class="callout">Doom donne une preuve d'intégration spectaculaire ; <span class="accent">la valeur technique durable est dans les mécanismes qui rendent cette intégration possible</span>.</div>
+    <div class="callout">Doom95 est la preuve visible. La contribution réutilisable reste <span class="accent">l'ensemble des ponts qui le rendent possible</span>.</div>
   </div>
 </div>
 
 <!-- SLIDE 20 -->
 <div class="slide title-slide">
+  <div class="eyebrow">Démonstration · 3 minutes</div>
+  <div class="emoji-big">🎮</div>
+  <h1>Une commande,<br><span style="color:var(--accent-2)">un vrai exécutable Windows</span></h1>
+  <div class="demo-command">$ ./my_wine samples/unpacked/doom95/DOOM95.EXE</div>
+  <p class="subtitle">Observer le résultat, puis relier brièvement l'image, les entrées et le son aux bridges de la slide précédente.</p>
+  <p class="tagline">Repli : capture préparée · vérification minimale : samples/hello_world</p>
+</div>
+
+<!-- SLIDE 21 -->
+<div class="slide title-slide">
   <div class="eyebrow">Takeaway</div>
   <div class="emoji-big">🏁</div>
-  <h1>Le processeur s'en fiche que ce soit ELF ou PE</h1>
+  <h1>Charger le format,<br><span style="color:var(--accent-2)">reconstruire le contrat</span></h1>
   <div class="accent-line"></div>
-  <p class="subtitle"><code>ld.so</code> m'a appris à construire les invariants. <code>my_wine</code> applique la même méthode, puis bridge chaque contrat Windows absent sous Linux.</p>
-  <p class="tagline">Le résultat n'est pas seulement un loader PE : c'est une suite de frontières explicites.</p>
+  <p class="subtitle"><code>ld.so</code> m'a appris à préparer une image avant le premier saut. <code>my_wine</code> montre qu'entre Windows et Linux, ce saut ouvre une suite de frontières explicites.</p>
+  <p class="tagline">Le processeur exécute les instructions · le runtime rend leur monde crédible</p>
 </div>
 
 </div>
+
 
 <div class="progress-bar" id="progress"></div>
 <div class="slide-counter" id="counter"></div>
@@ -1564,14 +1513,15 @@
 
 <script>
 (function() {
-  const slides = document.querySelectorAll('.slide');
+  const slides = document.querySelectorAll('#deck > .slide');
   const total = slides.length;
   const HASH_PREFIX = '#slide-';
   const partRanges = [
-    { start: 0, end: 4, label: 'Partie 1 · Partir de la méthode ld.so' },
-    { start: 5, end: 10, label: 'Partie 2 · Combler format et symboles' },
-    { start: 11, end: 18, label: "Partie 3 · Franchir la frontière d'exécution" },
-    { start: 19, end: 20, label: "Partie 4 · Valider l'ensemble" }
+    { start: 0, end: 5, label: 'Introduction · de Wine à my_wine' },
+    { start: 6, end: 9, label: "Partie 1 · Charger l'image" },
+    { start: 10, end: 12, label: 'Partie 2 · Créer le processus' },
+    { start: 13, end: 17, label: "Partie 3 · Traverser la frontière" },
+    { start: 18, end: 20, label: "Partie 4 · Prouver l'intégration" }
   ];
   let current = 0;
 
