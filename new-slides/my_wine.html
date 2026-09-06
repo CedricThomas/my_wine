@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>my_wine — un loader Portable Executable sur Linux</title>
+<link rel="icon" href="../slides/favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #0b1220;
+    --surface: #121c2f;
+    --surface-2: #17243b;
+    --surface-3: #1c2d49;
+    --line: #28405f;
+    --text: #e7edf7;
+    --muted: #9db0ca;
+    --accent: #4fd1c5;
+    --accent-2: #ffb454;
+    --accent-3: #ff7a90;
+    --good: #7bd88f;
+    --code-bg: #0f1728;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(circle at top right, rgba(79,209,197,0.12), transparent 30%),
+      radial-gradient(circle at bottom left, rgba(255,180,84,0.10), transparent 30%),
+      linear-gradient(180deg, #09101c, #0b1220 32%, #0b1220);
+    color: var(--text);
+  }
+
+  .deck {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    padding: 38px 64px 46px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(34px);
+    transition: opacity 0.34s ease, transform 0.34s ease;
+  }
+
+  .slide.active {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
+
+  .slide.exit {
+    opacity: 0;
+    transform: translateX(-34px);
+  }
+
+  .slide.dense {
+    padding-top: 26px;
+    padding-bottom: 34px;
+  }
+
+  .slide.dense h2 {
+    font-size: 2.05rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .slide.dense .section-note {
+    margin-bottom: 0.8rem;
+  }
+
+  h1 {
+    font-size: 3.3rem;
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  h2 {
+    font-size: 2.28rem;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    font-weight: 750;
+    color: var(--accent);
+    margin-bottom: 0.95rem;
+    text-align: center;
+  }
+
+  h3 {
+    font-size: 1.08rem;
+    line-height: 1.35;
+    color: var(--text);
+    margin-bottom: 0.55rem;
+  }
+
+  p, li, td, th {
+    font-size: 1.08rem;
+    line-height: 1.58;
+    color: var(--text);
+  }
+
+  .title-slide {
+    text-align: center;
+  }
+
+  .eyebrow {
+    display: inline-block;
+    margin-bottom: 1rem;
+    padding: 7px 12px;
+    border: 1px solid rgba(79,209,197,0.28);
+    border-radius: 999px;
+    color: var(--accent);
+    font-size: 0.88rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: rgba(79,209,197,0.06);
+  }
+
+  .subtitle {
+    max-width: 980px;
+    margin-top: 1rem;
+    font-size: 1.38rem;
+    line-height: 1.55;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .tagline {
+    margin-top: 1.7rem;
+    color: var(--muted);
+    font-size: 1rem;
+  }
+
+  .section-note {
+    max-width: 980px;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 1.35rem;
+  }
+
+  .accent-line {
+    width: 120px;
+    height: 4px;
+    border-radius: 999px;
+    margin-top: 1.1rem;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+  }
+
+  .emoji-big {
+    font-size: 3.6rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .cols-2 {
+    width: 100%;
+    max-width: 1140px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .cols-3 {
+    width: 100%;
+    max-width: 1160px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+
+  .cols-4 {
+    width: 100%;
+    max-width: 1160px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+  }
+
+  .panel {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015)),
+      var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 20px 22px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+
+  .panel.soft {
+    background:
+      linear-gradient(180deg, rgba(79,209,197,0.05), rgba(255,255,255,0.01)),
+      var(--surface);
+  }
+
+  .panel.warn {
+    background:
+      linear-gradient(180deg, rgba(255,180,84,0.05), rgba(255,255,255,0.01)),
+      var(--surface);
+  }
+
+  .panel.risk {
+    background:
+      linear-gradient(180deg, rgba(255,122,144,0.05), rgba(255,255,255,0.01)),
+      var(--surface);
+  }
+
+  .panel-title {
+    margin-bottom: 0.8rem;
+    color: var(--muted);
+    font-size: 0.84rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  ul {
+    list-style: none;
+    max-width: 760px;
+  }
+
+  li {
+    position: relative;
+    padding: 0.28rem 0 0.28rem 1.2rem;
+  }
+
+  li::before {
+    content: "▸";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+  }
+
+  code {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    background: var(--code-bg);
+    color: var(--accent-2);
+    padding: 0.13em 0.42em;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+
+  pre {
+    width: 100%;
+    overflow-x: auto;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+
+  pre code {
+    background: none;
+    color: var(--text);
+    padding: 0;
+    font-size: 0.9rem;
+    line-height: 1.58;
+  }
+
+  .terminal {
+    width: 100%;
+    background: #05070d;
+    border: 1px solid #243247;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.28);
+  }
+
+  .terminal-head {
+    display: flex;
+    gap: 6px;
+    padding-bottom: 11px;
+    margin-bottom: 11px;
+    border-bottom: 1px solid #223043;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .dot.red { background: #ff5f56; }
+  .dot.yellow { background: #ffbd2e; }
+  .dot.green { background: #27c93f; }
+
+  .terminal-line {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  .evidence-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .evidence-shot {
+    width: 100%;
+    height: 320px;
+    object-fit: cover;
+    object-position: center;
+    border: 1px solid #304764;
+    border-radius: 12px;
+    image-rendering: pixelated;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.24);
+  }
+
+  .evidence-caption {
+    margin-top: -4px;
+    color: var(--muted);
+    font-size: 0.83rem;
+    text-align: center;
+  }
+
+  .prompt { color: var(--good); }
+  .output { color: var(--text); }
+
+  .accent { color: var(--accent); font-weight: 650; }
+  .warn-text { color: var(--accent-2); font-weight: 650; }
+  .pink { color: var(--accent-3); font-weight: 650; }
+  .good { color: var(--good); font-weight: 650; }
+  .muted { color: var(--muted); }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.77rem;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-left: 0.35rem;
+    background: var(--accent);
+    color: #061017;
+  }
+
+  .badge.warn {
+    background: var(--accent-2);
+    color: #1e1200;
+  }
+
+  .badge.risk {
+    background: var(--accent-3);
+    color: #26000c;
+  }
+
+  .badge.good {
+    background: var(--good);
+    color: #07160d;
+  }
+
+  .flow {
+    width: 100%;
+    max-width: 1140px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .flow-step {
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 0.92rem;
+  }
+
+  .flow-arrow {
+    font-size: 1.3rem;
+    color: var(--accent);
+    font-weight: 800;
+  }
+
+  .pipe > .flow-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+  }
+
+  .step-list {
+    width: 100%;
+    max-width: 940px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    gap: 14px;
+    align-items: start;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.02);
+    padding: 14px 16px;
+  }
+
+  .step-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #041018;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 0.9rem;
+  }
+
+  .step-label {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 0.2rem;
+  }
+
+  .step-detail {
+    font-size: 0.96rem;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  .map-board {
+    width: 100%;
+    max-width: 1160px;
+    display: grid;
+    grid-template-columns: 1.08fr 0.92fr;
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .stack-box {
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    padding: 14px 15px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .stack-box strong {
+    display: block;
+    margin-bottom: 0.18rem;
+    font-size: 1rem;
+  }
+
+  .stack-box span {
+    color: var(--muted);
+    font-size: 0.94rem;
+    line-height: 1.45;
+  }
+
+  .stack-box.teal { border-left: 5px solid var(--accent); }
+  .stack-box.gold { border-left: 5px solid var(--accent-2); }
+  .stack-box.pink { border-left: 5px solid var(--accent-3); }
+  .stack-box.green { border-left: 5px solid var(--good); }
+
+  .hex-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 12px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .hex-row:last-child { border-bottom: 0; }
+
+  .hex-tag {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.82rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 999px;
+    padding: 5px 10px;
+    text-align: center;
+    color: var(--text);
+  }
+
+  .hex-row span:last-child {
+    color: var(--muted);
+    font-size: 0.94rem;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.02);
+  }
+
+  th, td {
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    vertical-align: top;
+  }
+
+  tr:last-child td, tr:last-child th { border-bottom: 0; }
+  th {
+    width: 32%;
+    color: var(--text);
+    background: rgba(255,255,255,0.03);
+    font-size: 0.98rem;
+  }
+
+  td {
+    color: var(--muted);
+    font-size: 0.96rem;
+  }
+
+  .big-number {
+    font-size: 4.4rem;
+    line-height: 1;
+    font-weight: 900;
+    color: var(--accent);
+  }
+
+  .tiny {
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
+  .callout {
+    width: 100%;
+    max-width: 980px;
+    margin-top: 1.25rem;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border-left: 4px solid var(--accent);
+    background: rgba(79,209,197,0.07);
+    color: var(--text);
+  }
+
+  .hero-diagram {
+    width: 100%;
+    max-width: 1120px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    gap: 14px;
+    align-items: center;
+  }
+
+  .hero-node {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 20px 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), var(--surface);
+    min-height: 168px;
+  }
+
+  .hero-node h3 {
+    font-size: 1.15rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .hero-node p {
+    color: var(--muted);
+    font-size: 0.98rem;
+    line-height: 1.5;
+  }
+
+  .hero-arrow {
+    font-size: 2rem;
+    font-weight: 900;
+    color: var(--accent);
+  }
+
+  .diagram-caption {
+    margin-top: 1rem;
+    max-width: 980px;
+    text-align: center;
+    color: var(--muted);
+  }
+
+  .memory-map {
+    width: 100%;
+    max-width: 1140px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  .memory-column {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 18px 20px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015)), var(--surface);
+  }
+
+  .memory-column h3 {
+    margin-bottom: 0.85rem;
+  }
+
+  .memory-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .memory-seg {
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .memory-seg strong {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 1rem;
+  }
+
+  .memory-seg span {
+    display: block;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.4;
+  }
+
+  .memory-seg.teal { border-left: 5px solid var(--accent); }
+  .memory-seg.gold { border-left: 5px solid var(--accent-2); }
+  .memory-seg.pink { border-left: 5px solid var(--accent-3); }
+  .memory-seg.green { border-left: 5px solid var(--good); }
+
+  .pipe {
+    width: 100%;
+    max-width: 1140px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .pipe-box {
+    flex: 1 1 180px;
+    min-width: 160px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 14px 14px;
+  }
+
+  .pipe-box strong {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 0.98rem;
+  }
+
+  .pipe-box span {
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+
+  .micro {
+    font-size: 0.9rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  .concept-grid {
+    width: 100%;
+    max-width: 1140px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+
+  .concept-card {
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015)), var(--surface);
+    min-height: 200px;
+  }
+
+  .concept-card .panel-title {
+    margin-bottom: 0.55rem;
+  }
+
+  .concept-card p {
+    color: var(--muted);
+    font-size: 0.96rem;
+    line-height: 1.48;
+  }
+
+  .concept-card pre {
+    margin-top: 0.8rem;
+  }
+
+  .visual-body {
+    width: 100%;
+    max-width: 1160px;
+    min-height: 390px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .org-flow {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 52px 1fr 52px 1fr;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .org-flow.five {
+    grid-template-columns: 1fr 38px 1fr 38px 1fr 38px 1fr 38px 1fr;
+  }
+
+  .org-node {
+    min-height: 190px;
+    padding: 22px 20px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012)), var(--surface);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .org-node.compact { min-height: 122px; padding: 16px; }
+  .org-node.soft { border-top: 4px solid var(--accent); }
+  .org-node.warn { border-top: 4px solid var(--accent-2); }
+  .org-node.risk { border-top: 4px solid var(--accent-3); }
+  .org-node.good { border-top: 4px solid var(--good); }
+  .org-node h3 { font-size: 1.15rem; }
+  .org-node p { color: var(--muted); font-size: 0.96rem; line-height: 1.45; }
+
+  .org-arrow {
+    min-width: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    font-size: 1.8rem;
+    font-weight: 900;
+  }
+
+  .org-tree {
+    width: 100%;
+    display: grid;
+    grid-template-rows: auto 44px auto;
+    align-items: stretch;
+  }
+
+  .tree-root {
+    justify-self: center;
+    width: 38%;
+    min-height: 94px;
+    text-align: center;
+  }
+
+  .tree-junction {
+    position: relative;
+  }
+
+  .tree-junction::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 0;
+    height: 22px;
+    border-left: 2px solid var(--accent);
+  }
+
+  .tree-junction::after {
+    content: "";
+    position: absolute;
+    left: 12.5%;
+    right: 12.5%;
+    top: 22px;
+    border-top: 2px solid var(--accent);
+  }
+
+  .tree-leaves {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  .tree-leaves.two { grid-template-columns: repeat(2, 1fr); gap: 56px; }
+  .tree-leaves .org-node { position: relative; min-height: 170px; }
+  .tree-leaves .org-node::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -23px;
+    height: 22px;
+    border-left: 2px solid var(--accent);
+  }
+
+  .swimlanes {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  .lane-label {
+    padding: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--text);
+    font-weight: 800;
+    border-right: 1px solid var(--line);
+  }
+
+  .lane-label.guest { background: rgba(255,180,84,0.08); color: var(--accent-2); }
+  .lane-label.host { background: rgba(79,209,197,0.08); color: var(--accent); }
+  .lane-track {
+    min-height: 142px;
+    padding: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .lane-track:last-child { border-bottom: 0; }
+  .lane-step {
+    flex: 1;
+    min-height: 78px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.35;
+  }
+
+  .byte-bar {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 2fr 7fr 10fr 4fr;
+    min-height: 118px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .byte-seg { padding: 16px 10px; display: flex; flex-direction: column; justify-content: center; text-align: center; border-right: 1px solid var(--bg); }
+  .byte-seg:last-child { border-right: 0; }
+  .byte-seg strong { font-size: 1.35rem; color: #07111b; }
+  .byte-seg span { color: #07111b; font-size: 0.82rem; font-weight: 750; line-height: 1.25; }
+  .byte-seg:nth-child(1) { background: var(--accent); }
+  .byte-seg:nth-child(2) { background: var(--accent-2); }
+  .byte-seg:nth-child(3) { background: #8fb8ff; }
+  .byte-seg:nth-child(4) { background: var(--accent-3); }
+
+  .stack-visual {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 0.8fr 1.3fr 0.8fr;
+    gap: 18px;
+    align-items: center;
+  }
+  .stack-frame {
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .stack-cell { padding: 13px 18px; border-bottom: 1px solid var(--line); text-align: center; color: var(--muted); }
+  .stack-cell:last-child { border-bottom: 0; }
+  .stack-cell.hot { color: var(--text); background: rgba(255,180,84,0.08); }
+
+  .cpu-memory {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1.15fr 70px 0.85fr;
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .cpu-shell {
+    border: 2px solid var(--accent);
+    border-radius: 22px;
+    padding: 20px;
+    background: rgba(79,209,197,0.045);
+  }
+
+  .cpu-shell > h3,
+  .ram-shell > h3 { text-align: center; margin-bottom: 14px; }
+
+  .register-bank {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .register-row {
+    min-height: 168px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .register-row strong { margin-bottom: 8px; }
+  .register-row span { color: var(--muted); font-size: 0.93rem; line-height: 1.45; }
+  .register-row.general { border-top: 4px solid #8fb8ff; }
+  .register-row.stack-reg { border-top: 4px solid var(--accent-2); }
+  .register-row.segment-reg { border-top: 4px solid var(--accent); }
+
+  .ram-shell {
+    border: 2px solid var(--line);
+    border-radius: 22px;
+    padding: 20px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .ram-cell {
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 10px;
+  }
+
+  .address-equation {
+    display: grid;
+    grid-template-columns: 1fr 58px 1fr 58px 1fr;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .address-box {
+    min-height: 142px;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .address-box strong { font-size: 1.06rem; margin-bottom: 8px; }
+  .address-box span { color: var(--muted); font-size: 0.92rem; line-height: 1.4; }
+
+  .legend-line {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+
+  .callout { text-align: center; }
+  .visual-body > .callout:last-child { margin-top: auto; }
+
+  .progress-bar {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    height: 4px;
+    width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+    transition: width 0.34s ease;
+  }
+
+  .slide-counter,
+  .part-indicator,
+  .nav-hint {
+    position: fixed;
+    z-index: 10;
+    font-size: 0.92rem;
+    color: var(--muted);
+  }
+
+  .slide-counter { right: 22px; bottom: 16px; }
+  .part-indicator { left: 22px; bottom: 16px; }
+  .nav-hint { right: 22px; top: 16px; }
+
+  @media (min-width: 1450px) and (min-height: 820px) {
+    .slide { padding: 46px 88px 58px; }
+    h1 { font-size: 3.75rem; }
+    h2 { font-size: 2.55rem; }
+    .section-note { font-size: 1.16rem; }
+    .visual-body { max-width: 1360px; min-height: 520px; }
+    .cols-2, .cols-3, .cols-4, .memory-map, .concept-grid, .pipe { max-width: 1360px; }
+    .org-node { min-height: 220px; padding: 26px 24px; }
+    .org-node.compact { min-height: 148px; }
+    .tree-root { min-height: 112px; }
+    .tree-leaves .org-node { min-height: 200px; }
+    .callout { max-width: 1180px; padding: 16px 20px; }
+    .concept-card { min-height: 245px; padding: 24px; }
+    .memory-column { padding: 22px 24px; }
+    .memory-seg { padding: 16px 18px; }
+    .lane-track { min-height: 162px; }
+    .lane-step { min-height: 92px; }
+    .byte-bar { min-height: 142px; }
+    .evidence-shot { height: 390px; }
+    .register-row { min-height: 205px; }
+    .address-box { min-height: 178px; }
+  }
+
+  @media (max-width: 1100px) {
+    .cols-2, .cols-3, .cols-4, .map-board, .memory-map, .concept-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-diagram {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-arrow {
+      display: none;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+<!-- SLIDE 1 -->
+<div class="slide title-slide active">
+  <div class="eyebrow">Partie II · après le loader dynamique Linux</div>
+  <div class="emoji-big">🍷</div>
+  <h1>my_wine<br><span style="color: var(--accent-2)">charger un Portable Executable (PE) Windows sur Linux</span></h1>
+  <div class="accent-line"></div>
+  <p class="subtitle">Reprendre la méthode du loader dynamique <code>ld.so</code>, puis combler un à un les écarts entre le contrat du PE et celui d'un processus Linux.</p>
+  <p class="tagline">format · mémoire · symboles · conventions d'appel · appels système · exceptions</p>
+</div>
+
+<!-- SLIDE 2 -->
+<div class="slide">
+  <h2><code>ld.so</code> m'a donné la méthode</h2>
+  <p class="section-note">Avant d'écrire « une compatibilité Windows », j'ai réutilisé une question plus simple : qu'est-ce qu'un loader doit rendre vrai avant le premier saut ?</p>
+  <div class="visual-body">
+  <div class="org-flow">
+    <div class="org-node soft">
+      <div class="panel-title">Même méthode</div>
+      <h3>Lire le format</h3>
+      <p>Headers, tables, adresses relatives : comprendre la recette d'image avant de toucher à l'exécution.</p>
+    </div>
+    <div class="org-arrow">→</div>
+    <div class="org-node warn">
+      <div class="panel-title">Même méthode</div>
+      <h3>Construire les invariants</h3>
+      <p>Mapper, reloger, résoudre, préparer une pile et seulement ensuite transférer le contrôle.</p>
+    </div>
+    <div class="org-arrow">→</div>
+    <div class="org-node risk">
+      <div class="panel-title">Nouvelle difficulté</div>
+      <h3>Mesurer les écarts</h3>
+      <p>À chaque attente Windows absente sous Linux, ajouter un bridge explicite plutôt qu'un patch opaque.</p>
+    </div>
+  </div>
+  <div class="callout"><span class="warn-text">Le loader est la méthode ; les bridges PE ↔ Linux sont le vrai sujet.</span></div>
+  </div>
+</div>
+
+<!-- SLIDE 3 -->
+<div class="slide">
+  <h2>Entre le PE et Linux : quatre trous à combler</h2>
+  <div class="visual-body">
+  <div class="org-tree">
+    <div class="org-node tree-root"><div class="panel-title">Programme Windows</div><h3>Ce que le PE suppose déjà présent</h3></div>
+    <div class="tree-junction"></div>
+    <div class="tree-leaves">
+    <div class="org-node soft">
+      <div class="panel-title">1. Image</div>
+      <p>Linux ne sait pas mapper ce format comme son propre format exécutable.</p>
+    </div>
+    <div class="org-node warn">
+      <div class="panel-title">2. Symboles</div>
+      <p>Les bibliothèques dynamiques Windows (DLL) n'existent pas côté Linux.</p>
+    </div>
+    <div class="org-node risk">
+      <div class="panel-title">3. Processus</div>
+      <p>État du thread, état du processus, handles et exceptions sont absents.</p>
+    </div>
+    <div class="org-node good">
+      <div class="panel-title">4. Exécution</div>
+      <p>Conventions d'appel, pile, appels système et fautes divergent.</p>
+    </div>
+    </div>
+  </div>
+  <div class="callout">Chaque trou devient une frontière visible : <span class="accent">conversion de données</span>, <span class="accent">conversion de contrôle</span> ou <span class="accent">conversion de sémantique</span>.</div>
+  </div>
+</div>
+
+<!-- SLIDE 4 -->
+<div class="slide">
+  <h2>Décision n°1 : séparer PE 32-bit (PE32) et PE 64-bit (PE32+)</h2>
+  <p class="section-note">Deux formats proches, mais deux largeurs de pointeurs et deux mécaniques d'exécution.</p>
+  <div class="visual-body">
+  <div class="org-tree">
+    <div class="org-node tree-root">
+      <strong><code>my_wine</code></strong>
+      <p>Lit la signature historique <code>MZ</code>, suit <code>e_lfanew</code>, vérifie <code>PE</code>, puis distingue <code>0x10b</code> et <code>0x20b</code>.</p>
+    </div>
+    <div class="tree-junction"></div>
+    <div class="tree-leaves two">
+    <div class="org-node soft">
+      <strong><code>my_wine64</code></strong>
+      <p>Processus Linux en architecture x86 64-bit (x64) : convention Microsoft côté guest, System V côté host.</p>
+    </div>
+    <div class="org-node warn">
+      <strong><code>my_wine32</code></strong>
+      <p>Processus Linux 32-bit compilé avec <code>-m32</code> : pointeurs, pile et sélecteurs réellement 32-bit.</p>
+    </div>
+    </div>
+  </div>
+  <div class="callout">J'ai choisi deux processus natifs plutôt qu'une couche d'émulation de pointeurs : le noyau et le compilateur garantissent directement la bonne largeur d'adresse.</div>
+  </div>
+</div>
+
+<!-- SLIDE 5 -->
+<div class="slide">
+  <h2>L'implémentation en un seul pipeline</h2>
+  <p class="section-note">Comme dans <code>ld.so</code>, l'ordre n'est pas décoratif : chaque étape fabrique les invariants nécessaires à la suivante.</p>
+  <div class="visual-body">
+  <div class="org-flow five">
+    <div class="org-node compact soft"><strong>1. Détecter</strong><p>Choisir PE32 ou PE32+.</p></div>
+    <div class="org-arrow">→</div>
+    <div class="org-node compact"><strong>2. Mapper</strong><p>Headers, sections, zéro-fill, relocations.</p></div>
+    <div class="org-arrow">→</div>
+    <div class="org-node compact warn"><strong>3. Relier</strong><p>Résoudre les DLL et écrire l'Import Address Table (IAT).</p></div>
+    <div class="org-arrow">→</div>
+    <div class="org-node compact risk"><strong>4. Construire</strong><p>Heap, état du thread et du processus, piles.</p></div>
+    <div class="org-arrow">→</div>
+    <div class="org-node compact good"><strong>5. Franchir</strong><p>Installer le contexte, puis sauter dans le guest.</p></div>
+  </div>
+  <div class="cols-2" style="margin-top: 18px;">
+    <div class="panel soft">
+      <div class="panel-title">Ce que le deck ld.so nous a déjà appris</div>
+      <p>Un format décrit une image mémoire ; un loader mappe, reloge, résout et effectue un handoff.</p>
+    </div>
+    <div class="panel warn">
+      <div class="panel-title">Ce que my_wine ajoute</div>
+      <p>Le host ne fournit ni DLL, ni état Windows, ni Application Binary Interface (ABI) Microsoft, ni sémantique Win32.</p>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- SLIDE 6 -->
+<div class="slide dense">
+  <h2>Concept 1 : un PE est une recette d'image mémoire</h2>
+  <p class="section-note">Comme l'Executable and Linkable Format (ELF), ce n'est pas « du code à lancer » : le format décrit <span class="warn-text">quelle mémoire construire</span>.</p>
+  <div class="visual-body">
+  <div class="memory-map">
+    <div class="memory-column">
+      <h3>Le chemin de lecture utile</h3>
+      <div class="memory-stack">
+        <div class="memory-seg teal">
+          <strong>Header Disk Operating System (DOS)</strong>
+          <span>Ancien header <code>MZ</code>. Son intérêt principal : <code>e_lfanew</code> donne l'offset des vrais headers PE.</span>
+        </div>
+        <div class="memory-seg gold">
+          <strong>Headers PE</strong>
+          <span>Signature <code>PE\0\0</code>, machine, point d'entrée, <code>ImageBase</code>, <code>SizeOfImage</code>, data directories.</span>
+        </div>
+        <div class="memory-seg pink">
+          <strong>Section table</strong>
+          <span>Sections telles que <code>.text</code>, <code>.rdata</code>, <code>.data</code>, <code>.rsrc</code>, <code>.reloc</code>.</span>
+        </div>
+      </div>
+    </div>
+    <div class="memory-column">
+      <h3>Comparaison utile avec ELF</h3>
+      <table>
+        <tr><th>ELF</th><td>Les segments <code>PT_LOAD</code> et le bloc dynamique dominent l'histoire.</td></tr>
+        <tr><th>PE</th><td>La section table et les <strong>data directories</strong> deviennent le point d'entrée mental.</td></tr>
+        <tr><th>Conséquence</th><td>On suit surtout des adresses relatives, des sections et des data directories.</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="callout">Même méthode que pour ELF : <span class="accent">lire la recette sur disque pour reconstruire l'image attendue en mémoire</span>.</div>
+  </div>
+</div>
+
+<!-- SLIDE 6 -->
+<div class="slide">
+  <h2>Concept 2 : trois coordonnées pour une même adresse</h2>
+  <p class="section-note">Ces trois mots gouvernent presque toutes les conversions d'adresse du loader.</p>
+  <div class="visual-body">
+  <div class="concept-grid">
+    <div class="concept-card">
+      <div class="panel-title">Distance dans l'image</div>
+      <h3>Relative Virtual Address (RVA)</h3>
+      <p>Distance depuis le début logique de l'image PE. Ce n'est pas un pointeur absolu.</p>
+      <pre><code>RVA(entry) = 0x1230</code></pre>
+    </div>
+    <div class="concept-card">
+      <div class="panel-title">ImageBase</div>
+      <h3>Base préférée</h3>
+      <p>Adresse à laquelle le binaire aimerait être chargé si tout se passe idéalement.</p>
+      <pre><code>ImageBase = 0x00400000</code></pre>
+    </div>
+    <div class="concept-card">
+      <div class="panel-title">Adresse finale</div>
+      <h3>Virtual Address (VA)</h3>
+      <p>Adresse effective après chargement. C'est elle que le processeur lira.</p>
+      <pre><code>VA = actual_base + RVA</code></pre>
+    </div>
+  </div>
+  <div class="callout">Le loader passe son temps à transformer des <code>RVA</code> en vrais pointeurs C. Toute erreur ici se propage ensuite dans les imports, les ressources, les relocations et le point d'entrée.</div>
+  </div>
+</div>
+
+<!-- SLIDE 7 -->
+<div class="slide">
+  <h2>Décision n°2 : reconstruire, pas exécuter le fichier</h2>
+  <p class="section-note">Permissions : lecture + exécution (RX), lecture seule (R), lecture + écriture (RW).</p>
+  <div class="visual-body">
+  <div class="memory-map">
+    <div class="memory-column">
+      <h3>Sur disque</h3>
+      <div class="memory-stack">
+        <div class="memory-seg teal"><strong><code>.text</code></strong><span>code compilé</span></div>
+        <div class="memory-seg gold"><strong><code>.rdata</code></strong><span>constantes, imports, tables</span></div>
+        <div class="memory-seg pink"><strong><code>.data</code></strong><span>variables globales initialisées</span></div>
+        <div class="memory-seg green"><strong><code>.bss</code></strong><span>souvent implicite, à initialiser à zéro</span></div>
+      </div>
+    </div>
+    <div class="memory-column">
+      <h3>En mémoire</h3>
+      <div class="memory-stack">
+        <div class="memory-seg teal"><strong>RX</strong><span>le processeur peut enfin exécuter <code>.text</code></span></div>
+        <div class="memory-seg gold"><strong>R</strong><span>les tables restent cohérentes et non modifiables</span></div>
+        <div class="memory-seg pink"><strong>RW</strong><span>les globals vivent comme le guest l'attend</span></div>
+        <div class="memory-seg green"><strong>image PE plausible</strong><span>le binaire ressemble désormais à un vrai processus</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="org-flow" style="grid-template-columns: 1fr 38px 1fr 38px 1fr 38px 1fr; margin-top: 14px;">
+    <div class="org-node compact soft"><strong>1. Réserver</strong><p><code>mmap(SizeOfImage)</code></p></div><div class="org-arrow">→</div>
+    <div class="org-node compact"><strong>2. Copier</strong><p>Chaque section à sa VA.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact warn"><strong>3. Reloger</strong><p>Corriger les adresses.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact good"><strong>4. Protéger</strong><p>Appliquer RX, R ou RW.</p></div>
+  </div>
+  </div>
+</div>
+
+<!-- SLIDE 8 -->
+<div class="slide">
+  <h2>Concept 3 : reloger si la base préférée est occupée</h2>
+  <p class="section-note">Si l'image n'est pas chargée à son <code>ImageBase</code>, les adresses absolues internes deviennent fausses.</p>
+  <div class="visual-body">
+  <div class="cols-2">
+    <div class="panel warn">
+      <div class="panel-title">Équation du problème</div>
+      <div class="hex-row"><div class="hex-tag">ImageBase</div><span><code>0x00400000</code> souhaité par le PE</span></div>
+      <div class="hex-row"><div class="hex-tag">actual_base</div><span><code>0x00600000</code> disponible au runtime</span></div>
+      <div class="hex-row"><div class="hex-tag">delta</div><span><code>actual_base - ImageBase = 0x00200000</code></span></div>
+      <div class="hex-row"><div class="hex-tag">effet</div><span>chaque adresse encodée avec l'ancienne base doit être corrigée</span></div>
+    </div>
+    <div class="panel soft">
+      <div class="panel-title">Travail du loader</div>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div><div class="step-label">Lire la relocation directory</div><div class="step-detail">des blocs groupés par page, via une data directory PE</div></div></div>
+        <div class="step"><div class="step-num">2</div><div><div class="step-label">Décoder le type + l'offset</div><div class="step-detail"><code>HIGHLOW</code> en PE32, <code>DIR64</code> en PE32+</div></div></div>
+        <div class="step"><div class="step-num">3</div><div><div class="step-label">Ajouter le delta</div><div class="step-detail">corriger la valeur pointée, pas déplacer la section</div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="callout"><code>delta = actual_base − ImageBase</code> : on corrige les pointeurs, pas la position logique des sections.</div>
+  </div>
+</div>
+
+<!-- SLIDE 9 -->
+<div class="slide">
+  <h2>Concept 4 : de la demande d'import à l'adresse callable</h2>
+  <p class="section-note">L'Import Lookup Table (ILT) décrit ce qu'on veut. L'Import Address Table (IAT) contient ce qu'on a finalement branché.</p>
+  <div class="visual-body">
+  <div class="org-flow">
+    <div class="org-node soft"><div class="panel-title">Demande</div><h3>Import Lookup Table (ILT)</h3><p><code>kernel32.dll</code><br><code>CreateFileA</code><br><code>WriteFile</code></p></div>
+    <div class="org-arrow">→</div>
+    <div class="org-node warn"><div class="panel-title">Travail du loader</div><h3>Résoudre chaque nom</h3><p>Trouver une implémentation interne ou l'export d'un module PE chargé.</p></div>
+    <div class="org-arrow">→</div>
+    <div class="org-node risk"><div class="panel-title">Réponse</div><h3>Import Address Table (IAT)</h3><p>Une table de pointeurs directement appelables par le guest.</p></div>
+  </div>
+  <div class="callout">Le guest n'appelle donc pas « Windows ». Il appelle des pointeurs que le loader a écrits dans l'<code>IAT</code>.</div>
+  </div>
+</div>
+
+<!-- SLIDE 10 -->
+<div class="slide">
+  <h2>Décision n°3 : résoudre par niveaux</h2>
+  <div class="visual-body">
+  <div class="org-tree">
+    <div class="org-node tree-root"><div class="panel-title">Symbole demandé</div><h3><code>DLL!fonction</code></h3></div>
+    <div class="tree-junction"></div>
+    <div class="tree-leaves two">
+      <div class="org-node soft"><div class="panel-title">Niveau 1</div><h3>Implémentation interne ?</h3><p>Oui → écrire l'adresse du stub ou handler compilé dans <code>my_wine</code>.</p></div>
+      <div class="org-node warn"><div class="panel-title">Niveau 2</div><h3>Export PE chargé ?</h3><p>Sinon → chercher le symbole dans les modules déjà mappés et enregistrés.</p></div>
+    </div>
+  </div>
+  <div class="callout">Comparaison <code>ld.so</code> : même idée de recherche de symbole, mais ici la première « bibliothèque » est souvent le runtime que j'ai écrit moi-même.</div>
+  </div>
+</div>
+
+<!-- SLIDE 12 -->
+<div class="slide dense">
+  <h2>D'abord : qu'est-ce qu'un registre du processeur ?</h2>
+  <p class="section-note">Une instruction travaille d'abord avec quelques cases nommées, situées dans le processeur. La mémoire vive contient le reste.</p>
+  <div class="visual-body">
+    <div class="cpu-memory">
+      <div class="cpu-shell">
+        <h3>Dans le processeur · accès immédiat</h3>
+        <div class="register-bank">
+          <div class="register-row general"><strong>Registres généraux</strong><span>RAX, RCX… transportent nombres, adresses et arguments.</span></div>
+          <div class="register-row stack-reg"><strong>Registre de pile</strong><span>RSP en 64-bit ou ESP en 32-bit désigne le sommet de la pile active.</span></div>
+          <div class="register-row segment-reg"><strong>Registres de segment</strong><span>FS et GS conservent une base implicite vers une zone mémoire particulière.</span></div>
+        </div>
+      </div>
+      <div class="org-arrow">⇄</div>
+      <div class="ram-shell">
+        <h3>Dans la mémoire vive · beaucoup plus vaste</h3>
+        <div class="ram-cell">code et données</div>
+        <div class="ram-cell">pile du programme</div>
+        <div class="ram-cell">état du thread et du processus</div>
+      </div>
+    </div>
+    <div class="callout">Un registre n'est pas une variable magique : c'est <span class="accent">une petite case matérielle à laquelle l'architecture donne un rôle</span>. FS et GS servent ici à fabriquer une adresse mémoire.</div>
+  </div>
+</div>
+
+<!-- SLIDE 13 -->
+<div class="slide dense">
+  <h2>FS et GS : une base cachée ajoutée à l'adresse</h2>
+  <p class="section-note">Le Thread Environment Block (TEB) décrit le thread ; le Process Environment Block (PEB) décrit le processus.</p>
+  <div class="visual-body">
+    <div class="address-equation">
+      <div class="address-box"><div class="panel-title">Instruction guest</div><strong><code>lire GS:[0x30]</code></strong><span>Le code fournit seulement un petit déplacement : <code>0x30</code>.</span></div>
+      <div class="org-arrow">→</div>
+      <div class="address-box"><div class="panel-title">Travail du processeur</div><strong><code>base_GS + 0x30</code></strong><span>La base associée à GS est ajoutée automatiquement.</span></div>
+      <div class="org-arrow">→</div>
+      <div class="address-box"><div class="panel-title">Adresse obtenue</div><strong>un champ de la TEB</strong><span>L'adresse de la structure n'a pas été passée comme argument.</span></div>
+    </div>
+    <div class="org-flow" style="grid-template-columns: 1fr 48px 1fr 48px 1fr; margin-top: 18px;">
+      <div class="org-node compact warn"><div class="panel-title">Base implicite</div><h3>FS en PE32 · GS en PE32+</h3><p>Le loader installe la base attendue avant le premier saut.</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node compact soft"><div class="panel-title">État du thread</div><h3>TEB</h3><p>Pile, identifiants, PEB et Structured Exception Handling (SEH).</p></div>
+      <div class="org-arrow">→</div>
+      <div class="org-node compact risk"><div class="panel-title">État du processus</div><h3>PEB</h3><p>Image, heap, paramètres et modules chargés.</p></div>
+    </div>
+    <div class="callout">FS et GS ne découpent pas ici toute la mémoire : ils offrent <span class="accent">un raccourci matériel vers le contexte Windows courant</span>. Le bridge doit restaurer le contexte Linux avant d'appeler du code host.</div>
+  </div>
+</div>
+
+<!-- SLIDE 13 -->
+<div class="slide">
+  <h2>Le handoff : fabriquer une vraie pile guest</h2>
+  <p class="section-note"><code>ld.so</code> termine aussi par un saut. Ici, le saut doit en plus respecter la pile et la convention d'appel attendues par Windows.</p>
+  <div class="visual-body">
+  <div class="stack-visual">
+    <div class="org-node soft"><div class="panel-title">PE32+</div><h3>Registres d'arguments</h3><p>Les registres RCX, RDX et R8 reçoivent les premiers arguments Microsoft x64.</p></div>
+    <div class="stack-frame">
+      <div class="stack-cell">sommet de la réservation</div>
+      <div class="stack-cell hot">arguments supplémentaires</div>
+      <div class="stack-cell hot">adresse de retour contrôlée</div>
+      <div class="stack-cell"><strong>registres pointeurs de pile alignés</strong><br>RSP en 64-bit / ESP en 32-bit</div>
+      <div class="stack-cell">espace libre de la pile guest</div>
+    </div>
+    <div class="org-node warn"><div class="panel-title">PE32</div><h3>Arguments sur la pile</h3><p>ESP est aligné ; arguments et fausse adresse de retour sont écrits avant le saut.</p></div>
+  </div>
+  <div class="org-flow" style="grid-template-columns: 1fr 38px 1fr 38px 1fr; margin-top: 16px;">
+    <div class="org-node compact"><strong>1. Allouer</strong><p>Taille annoncée par le PE.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact warn"><strong>2. Initialiser</strong><p>Alignement, arguments, retour.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact good"><strong>3. Basculer</strong><p>Remplacer RSP ou ESP puis sauter.</p></div>
+  </div>
+  <div class="callout">Une pile guest n'est pas un simple buffer : c'est <span class="accent">le premier état observable par le code appelé</span>.</div>
+  </div>
+</div>
+
+<!-- SLIDE 14 -->
+<div class="slide">
+  <h2>Le même opcode <code>syscall</code>, pas le même noyau</h2>
+  <p class="section-note">Dans la famille Windows New Technology (NT), numéro, arguments, handles et code de statut NT (<code>NTSTATUS</code>) forment un contrat indivisible.</p>
+  <div class="visual-body">
+  <div class="org-tree">
+    <div class="org-node tree-root"><div class="panel-title">Appel Windows NT</div><h3>numéro + arguments Microsoft + objets Windows</h3></div>
+    <div class="tree-junction"></div>
+    <div class="tree-leaves two">
+      <div class="org-node risk"><div class="panel-title">Chemin incorrect</div><h3>Instruction envoyée à Linux</h3><p>Mauvaise table de numéros, mauvaise lecture des arguments, résultat Linux sans sémantique Windows.</p></div>
+      <div class="org-node good"><div class="panel-title">Chemin correct</div><h3>Intercepter → décoder → traduire</h3><p>Le bridge appelle un handler host, puis reconstruit un handle ou un <code>NTSTATUS</code> Windows.</p></div>
+    </div>
+  </div>
+  <div class="callout">Le même opcode ne désigne pas le même service : <span class="pink">sans bridge, on entre dans le mauvais noyau avec le mauvais numéro</span>.</div>
+  </div>
+</div>
+
+<!-- SLIDE 15 -->
+<div class="slide">
+  <h2>Anatomie d'un thunk de 23 octets</h2>
+  <p class="section-note">Un <strong>thunk</strong> est le plus petit bridge possible : quelques instructions générées en mémoire pour capturer un appel et rejoindre un dispatcher connu.</p>
+  <div class="visual-body">
+  <div class="panel warn" style="padding: 20px;">
+    <div class="panel-title">Disposition 64-bit générée · la largeur représente le nombre d'octets</div>
+    <div class="byte-bar">
+      <div class="byte-seg"><strong>2</strong><span>sauver le registre guest</span></div>
+      <div class="byte-seg"><strong>7</strong><span>charger le numéro Windows NT</span></div>
+      <div class="byte-seg"><strong>10</strong><span>charger l'adresse absolue du dispatcher</span></div>
+      <div class="byte-seg"><strong>4</strong><span>appel · restauration · retour</span></div>
+    </div>
+  </div>
+  <div class="org-flow" style="grid-template-columns: 1fr 48px 1fr 48px 1fr; margin-top: 18px;">
+    <div class="org-node compact soft"><strong>Adresse callable unique</strong><p>Un thunk par numéro d'appel.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact warn"><strong>Identité embarquée</strong><p>Le thunk ne traduit pas : il nomme.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact good"><strong>Dispatcher commun</strong><p>Conversion centralisée du contexte.</p></div>
+  </div>
+  <div class="callout">L'adresse absolue résiste à l'Address Space Layout Randomization (ASLR). La variante i386 suit la même idée en 15 octets.</div>
+  <p class="diagram-caption">État actuel : l'infrastructure existe, mais les imports <code>ntdll</code> sont encore souvent branchés directement sur les handlers C.</p>
+  </div>
+</div>
+
+<!-- SLIDE 16 -->
+<div class="slide">
+  <h2>Le dispatcher convertit le contexte, pas seulement les arguments</h2>
+  <p class="section-note">Deux couloirs rendent visible l'endroit exact où l'exécution quitte le monde Windows et rejoint le monde Linux.</p>
+  <div class="visual-body">
+  <div class="swimlanes">
+    <div class="lane-label guest">Contexte guest</div>
+    <div class="lane-track"><div class="lane-step">pile Windows<br>RSP / ESP</div><div class="org-arrow">→</div><div class="lane-step">sauver registres,<br>flags et retour</div><div class="org-arrow">↘</div><div class="lane-step">attendre le résultat</div></div>
+    <div class="lane-label host">Contexte host</div>
+    <div class="lane-track"><div class="lane-step">pile Linux alignée</div><div class="org-arrow">→</div><div class="lane-step">décoder les arguments</div><div class="org-arrow">→</div><div class="lane-step">handler C puis restauration ↗</div></div>
+  </div>
+  <div class="cols-2" style="margin-top: 16px;">
+    <div class="panel soft"><div class="panel-title">Microsoft x64</div><p>RCX, RDX, R8 et R9 portent les quatre premiers arguments ; les suivants restent sur la pile guest.</p></div>
+    <div class="panel warn"><div class="panel-title">Convention d'appel C 32-bit (cdecl)</div><p>Tous les arguments sont relus sur la pile, après les frames ajoutées par le thunk et le dispatcher.</p></div>
+  </div>
+  <div class="callout"><span class="accent">Convertir la pile</span> ne veut pas dire la recopier : on sauve son adresse, on bascule vers une pile host, puis on sait décoder les bons offsets.</div>
+  </div>
+</div>
+
+<!-- SLIDE 17 -->
+<div class="slide">
+  <h2>Un crash Windows arrive d'abord comme un signal Linux</h2>
+  <p class="section-note">La frontière concerne aussi les fautes du processeur : Linux les reçoit avant que Windows puisse leur donner un sens.</p>
+  <div class="visual-body">
+  <div class="org-flow five">
+    <div class="org-node compact risk"><strong>1. Faute guest</strong><p>Pile éventuellement corrompue.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact warn"><strong>2. Signal Linux</strong><p><code>SIGSEGV</code>, <code>SIGILL</code>, <code>SIGFPE</code>…</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact soft"><strong>3. Pile alternative</strong><p><code>SA_ONSTACK</code> garde le handler exécutable.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact"><strong>4. Contexte</strong><p><code>siginfo_t</code> + <code>ucontext</code> donnent adresse et registres.</p></div><div class="org-arrow">→</div>
+    <div class="org-node compact good"><strong>5. Sortie sûre</strong><p>Diagnostic puis appel système brut.</p></div>
+  </div>
+  <div class="cols-2" style="margin-top: 18px;">
+    <div class="panel soft"><div class="panel-title">État Windows préparé</div><p>Une chaîne SEH minimale est accessible depuis la TEB.</p></div>
+    <div class="panel risk"><div class="panel-title">Limite actuelle</div><p>Le chemin n'injecte pas encore toutes les fautes comme exceptions Windows récupérables.</p></div>
+  </div>
+  <div class="callout">Aujourd'hui, ce chemin rend les crashs <span class="accent">observables et survivables côté host</span> ; ce n'est pas encore une traduction complète de tous les signaux en exceptions Windows récupérables.</div>
+  </div>
+</div>
+
+<!-- SLIDE 18 -->
+<div class="slide">
+  <h2>Comme dans <code>ld.so</code> : savoir quand la bibliothèque C est interdite</h2>
+  <p class="section-note">Le changement de pile et de registre de segment découpe le programme en zones de sécurité différentes.</p>
+  <div class="visual-body">
+  <div class="org-flow">
+    <div class="org-node soft">
+      <div class="panel-title">Avant le handoff</div>
+      <h3>zone host</h3>
+      <p>Parsing, configuration et allocation peuvent utiliser normalement la bibliothèque C standard (libc) Linux.</p>
+    </div>
+    <div class="org-arrow">→</div>
+    <div class="org-node risk">
+      <div class="panel-title">Après le handoff</div>
+      <h3>zone sensible</h3>
+      <p>Helpers sans libc, syscalls bruts et état explicitement contrôlé.</p>
+    </div>
+    <div class="org-arrow">→</div>
+    <div class="org-node good">
+      <div class="panel-title">Appel natif nécessaire</div>
+      <h3>bridge explicite</h3>
+      <p>Restaurer le contexte host, appeler Simple DirectMedia Layer 2 (SDL2) ou la libc, puis remettre le contexte guest.</p>
+    </div>
+  </div>
+  <div class="callout">C'est le même piège que dans <code>ld.so</code> avant l'initialisation de libc, mais il réapparaît ici <span class="warn-text">à chaque traversée guest → host</span>.</div>
+  </div>
+</div>
+
+<!-- SLIDE 20 -->
+<div class="slide dense">
+  <h2>Doom95 : une preuve d'intégration, pas le cœur du talk</h2>
+  <p class="section-note">Le jeu vérifie que les ponts fonctionnent ensemble. Le temps d'implémentation vient surtout de la largeur de l'interface de programmation applicative (API) et du boilerplate.</p>
+  <div class="visual-body">
+  <div class="cols-2" style="grid-template-columns: 1.15fr 0.85fr;">
+    <div class="evidence-stack">
+      <img class="evidence-shot" src="../artifacts/screenshots/doom_95_20260529_010517.png" alt="Doom95 exécuté par my_wine sous Linux">
+      <div class="evidence-caption">Une vraie frame de Doom95 produite par le runtime.</div>
+    </div>
+    <div style="display: grid; gap: 14px;">
+      <div class="panel soft">
+        <div class="panel-title">Les mécanismes réutilisables</div>
+        <p>Image PE, IAT, TEB/PEB, pile guest, conversion d'ABI, signaux et passages explicites vers le host.</p>
+      </div>
+      <div class="panel warn">
+        <div class="panel-title">Ce qui a surtout coûté du temps</div>
+        <p>Dialogues, ressources, DirectDraw, DirectSound, Windows Multimedia (WinMM) et multiplication des stubs Win32.</p>
+      </div>
+    </div>
+  </div>
+  <div class="callout">Doom donne une preuve d'intégration spectaculaire ; <span class="accent">la valeur technique durable est dans les mécanismes qui rendent cette intégration possible</span>.</div>
+  </div>
+</div>
+
+<!-- SLIDE 20 -->
+<div class="slide title-slide">
+  <div class="eyebrow">Takeaway</div>
+  <div class="emoji-big">🏁</div>
+  <h1>Le processeur s'en fiche que ce soit ELF ou PE</h1>
+  <div class="accent-line"></div>
+  <p class="subtitle"><code>ld.so</code> m'a appris à construire les invariants. <code>my_wine</code> applique la même méthode, puis bridge chaque contrat Windows absent sous Linux.</p>
+  <p class="tagline">Le résultat n'est pas seulement un loader PE : c'est une suite de frontières explicites.</p>
+</div>
+
+</div>
+
+<div class="progress-bar" id="progress"></div>
+<div class="slide-counter" id="counter"></div>
+<div class="part-indicator" id="part-indicator"></div>
+<div class="nav-hint">← → pour naviguer</div>
+
+<script>
+(function() {
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  const HASH_PREFIX = '#slide-';
+  const partRanges = [
+    { start: 0, end: 4, label: 'Partie 1 · Partir de la méthode ld.so' },
+    { start: 5, end: 10, label: 'Partie 2 · Combler format et symboles' },
+    { start: 11, end: 18, label: "Partie 3 · Franchir la frontière d'exécution" },
+    { start: 19, end: 20, label: "Partie 4 · Valider l'ensemble" }
+  ];
+  let current = 0;
+
+  slides.forEach((slide, index) => {
+    slide.id = 'slide-' + (index + 1);
+    slide.setAttribute('aria-hidden', index === 0 ? 'false' : 'true');
+  });
+
+  function getSlideIndexFromHash() {
+    const hash = window.location.hash;
+    if (!hash.startsWith(HASH_PREFIX)) return 0;
+    const value = Number(hash.slice(HASH_PREFIX.length));
+    if (!Number.isInteger(value) || value < 1 || value > total) return 0;
+    return value - 1;
+  }
+
+  function updateHash() {
+    const target = HASH_PREFIX + (current + 1);
+    if (window.location.hash !== target) {
+      window.history.replaceState(null, '', target);
+    }
+  }
+
+  function updateUI() {
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%';
+    const currentPart = partRanges.find((part) => current >= part.start && current <= part.end);
+    document.getElementById('part-indicator').textContent = currentPart ? currentPart.label : '';
+  }
+
+  function showSlide(idx) {
+    if (idx < 0 || idx >= total || idx === current) return;
+    const previous = current;
+    slides[previous].classList.remove('active');
+    slides[previous].classList.add('exit');
+    slides[previous].setAttribute('aria-hidden', 'true');
+    setTimeout(() => slides[previous].classList.remove('exit'), 380);
+    current = idx;
+    slides[current].classList.add('active');
+    slides[current].setAttribute('aria-hidden', 'false');
+    updateUI();
+    updateHash();
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      showSlide(current + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
+      e.preventDefault();
+      showSlide(current - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      showSlide(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      showSlide(total - 1);
+    }
+  });
+
+  window.addEventListener('hashchange', () => {
+    const idx = getSlideIndexFromHash();
+    if (idx !== current) showSlide(idx);
+  });
+
+  current = getSlideIndexFromHash();
+  slides.forEach((slide, index) => {
+    slide.classList.toggle('active', index === current);
+    slide.setAttribute('aria-hidden', index === current ? 'false' : 'true');
+  });
+  updateUI();
+  updateHash();
+})();
+</script>
+</body>
+</html>

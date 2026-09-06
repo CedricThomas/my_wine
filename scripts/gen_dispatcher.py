@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
 """
-gen_dispatcher.py — Regenerate dispatcher switch body from nt_syscalls.def
+gen_dispatcher.py — Regenerate dispatcher switch bodies from nt_syscalls.def
 
-Reads include/nt_syscalls.def (new declarative format) and generates
-src/syscall/dispatcher_generated.c with the DISPATCHER_C_BODY switch body.
+Reads include/nt_syscalls.def and generates the switch body included by
+src/syscall/dispatcher.c.
 
 Usage:
   python3 scripts/gen_dispatcher.py               # verify mode
   python3 scripts/gen_dispatcher.py --generate     # write dispatcher_generated.c
+  python3 scripts/gen_dispatcher.py --check        # verify generated file freshness
   python3 scripts/gen_dispatcher.py --help
-
-Version note:
-  The syscall numbers in nt_syscalls.def are version-specific (Windows 10+
-  x86_64).  When regenerating for a different Windows version, ensure the
-  syscall numbers in nt_syscalls.def are updated to match the target version
-  first.  This generator does NOT validate syscall numbers — it assumes
-  nt_syscalls.def contains correct values for the target Windows version.
 """
 
 import sys
@@ -176,10 +170,9 @@ def gen_validation(args):
             n = a["name"]
             pn = p_name_for(n)
             lines.append(
-                '        if (dispatch_ptr_inout(%s, &%s, &%s, "%s", &result) != 0) break;' %
-                (a["src"], n, a["p_name"], a.get("label", a["name"])))
+                '        if (%s(%s, &%s, &%s, "%s", &result) != 0) break;' %
+                ("dispatch_ptr_inout", a["src"], n, a["p_name"], a.get("label", a["name"])))
     # ptr(ro) — reuse `status` var across multiple read_guest_ptr calls
-    ret = "return (uint64_t)status;"
     first_ro = True
     for a in args:
         if a["type"] == "ro":
@@ -189,7 +182,7 @@ def gen_validation(args):
                 first_ro = False
             else:
                 lines.append('        status = read_guest_ptr(%s, NULL, NULL, "%s");' % (src, a["label"]))
-            lines.append("        if (status != 0) %s" % ret)
+            lines.append("        if (status != 0) return (uint64_t)status;")
     return "\n".join(lines)
 
 
@@ -202,6 +195,8 @@ def expand_call(call_template, args):
     raw_src = find_raw_source(args)
     if raw_src and "raw" in result:
         result = result.replace("raw", raw_src)
+    # Suppress pointer-to-int-cast warnings on 32-bit: cast through uintptr_t first
+    result = result.replace("(PVOID)", "(PVOID)(uintptr_t)")
     return result
 
 
@@ -252,11 +247,11 @@ def gen_default():
     return """    default:
     {
         char buf[39];
-        format_err_unhandled_syscall(buf, nr);
+        format_err_unhandled_syscall(buf, %s);
         INLINE_SYSCALL_WRITE_ERR(buf, sizeof(buf) - 1);
     }
     result = STATUS_NOT_IMPLEMENTED;
-    break;"""
+    break;""" % "nr"
 
 
 def gen_switch_body(syscalls):
@@ -279,16 +274,11 @@ def generate_output():
         "/*\n"
         " * dispatcher_generated.c — Auto-generated from include/nt_syscalls.def\n"
         " * DO NOT EDIT BY HAND — run scripts/gen_dispatcher.py --generate\n"
-        " * Contains the switch body for the dispatcher entry point.\n"
-        " * Included from dispatcher.c via #define + #include.\n"
+        " * Included from dispatcher.c inside dispatcher_core().\n"
         " */\n"
         "\n"
         "#ifndef DISPATCHER_GENERATED_C\n"
         "#define DISPATCHER_GENERATED_C\n"
-        "\n"
-        "#ifndef DISPATCHER_C_BODY\n"
-        '#error "Define DISPATCHER_C_BODY before including this file"\n'
-        "#endif\n"
         "\n"
         "switch (nr) {\n"
         + body +
@@ -299,6 +289,33 @@ def generate_output():
 
 
 # ── CLI ─────────────────────────────────────────────────────────
+
+def write_generated(path):
+    output = generate_output()
+    with open(path, "w") as f:
+        f.write(output)
+    print("Generated: %s" % path)
+    print("Syscall count: %d" % len(parse_def()))
+
+
+def check_generated(path):
+    expected = generate_output()
+    if not os.path.exists(path):
+        print("FAIL: missing generated file: %s" % path)
+        print("Run: python3 scripts/gen_dispatcher.py --generate")
+        return 1
+
+    with open(path) as f:
+        actual = f.read()
+
+    if actual != expected:
+        print("FAIL: stale generated file: %s" % path)
+        print("Run: python3 scripts/gen_dispatcher.py --generate")
+        return 1
+
+    print("OK: generated file is fresh: %s" % path)
+    return 0
+
 
 def main():
     if len(sys.argv) > 1:
@@ -311,11 +328,18 @@ def main():
         return
 
     if mode == "--generate":
-        output = generate_output()
-        with open(OUT_FILE, "w") as f:
-            f.write(output)
-        print("Generated: %s" % OUT_FILE)
-        print("Syscall count: %d" % len(parse_def()))
+        write_generated(OUT_FILE)
+        return
+
+    if mode == "--check":
+        sys.exit(check_generated(OUT_FILE))
+        return
+
+    if mode == "--output":
+        if len(sys.argv) < 3:
+            print("FAIL: --output requires a path")
+            sys.exit(1)
+        write_generated(sys.argv[2])
         return
 
     if mode == "--verify":
@@ -340,7 +364,7 @@ def main():
 
         try:
             body = gen_switch_body(syscalls)
-            print("OK: DISPATCHER_C_BODY body generated (%d chars)" % len(body))
+            print("OK: dispatcher body generated (%d chars)" % len(body))
         except Exception as e:
             print("FAIL: %s" % e)
             import traceback

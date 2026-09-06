@@ -1,0 +1,5 @@
+type=graphical
+arch=32
+window_title=Input Echo 32
+window_width=360
+window_height=220

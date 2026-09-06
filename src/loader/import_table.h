@@ -26,6 +26,7 @@ typedef struct {
 struct import_flat {
     uint64_t   ilt_value;      /* OriginalFirstThunk[i].AddressOfData */
     uint64_t   resolved_addr;  /* FirstThunk[i].AddressOfData (from pass 1) */
+    uint64_t   iat_addr;       /* Actual address of the IAT entry (FirstThunk[i]) */
     const char *dll_name;
     const char *func_name;
 };
@@ -38,21 +39,16 @@ extern size_t import_table_count;
 void set_import(const char *name, void *address);
 void init_import_table(void);
 int import_cmp_by_name(const void *key, const void *elem);
-int build_flat_import_array(void *base, IMAGE_NT_HEADERS64 *nt,
+int build_flat_import_array(void *base, IMAGE_NT_HEADERS *nt,
                             struct import_flat flat[]);
 
 /* Pass 2 resolution strategies */
-bool strategy_resolved_overlap(uint64_t current_val,
+bool strategy_resolved_overlap(uint64_t current_val, void *target_ptr,
                                struct import_flat *flat, int num_flat);
-bool strategy_ilt_value_match(uint64_t *target_ptr, uint64_t current_val,
-                              uint64_t target,
+bool strategy_ilt_value_match(void *target_ptr, uint64_t current_val,
+                              uint64_t target, size_t thunk_size,
                               struct import_flat *flat, int num_flat);
-bool strategy_ilt_offset_match(uint64_t *target_ptr, uint64_t target,
-                               uint64_t current_val,
-                               uint64_t import_dir_va, uint64_t import_dir_end,
+bool strategy_ilt_offset_match(void *target_ptr, uint64_t target,
+                               uint64_t current_val, size_t thunk_size,
                                struct import_flat *flat, int num_flat);
-bool strategy_positional(uint64_t *target_ptr, uint64_t target,
-                         int thunk_idx,
-                         struct import_flat *flat, int num_flat);
-
 #endif /* MY_WINE_IMPORT_TABLE_H */

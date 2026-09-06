@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <strings.h>
+#include "include/syscall_safe_utils.h"
 
 typedef struct {
     const char *dll_name;
@@ -165,6 +165,9 @@ static const ordinal_entry_t ordinal_table[] = {
     { "kernel32.dll", 302, "GetProcessHeap" },
     { "kernel32.dll", 303, "HeapDestroy" },
     { "kernel32.dll", 304, "GetProcessHeaps" },
+    { "comctl32.dll", 17, "InitCommonControls" },
+    { "dplay.dll", 1, "DPCreate" },
+    { "dplay.dll", 2, "DirectPlayEnumerateA" },
     /* msvcrt.dll ordinals (subset) */
     { "msvcrt.dll", 1,  "abort" },
     { "msvcrt.dll", 5,  "_amsg_exit" },
@@ -194,7 +197,7 @@ static const ordinal_entry_t ordinal_table[] = {
 const char *ordinal_lookup(const char *dll_name, uint16_t ordinal)
 {
     for (int i = 0; ordinal_table[i].dll_name != NULL; i++) {
-        if (strcasecmp(ordinal_table[i].dll_name, dll_name) == 0 &&
+        if (syscall_safe_strcasecmp(ordinal_table[i].dll_name, dll_name) == 0 &&
             ordinal_table[i].ordinal == ordinal) {
             return ordinal_table[i].func_name;
         }

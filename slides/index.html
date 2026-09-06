@@ -1,0 +1,3150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ELF magic: A quick tour of dynamic linking/loading on Linux</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --accent: #6c63ff;
+    --accent2: #ff6584;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --code-bg: #12141c;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --elf-header: #ff6584;
+    --elf-header-bg: rgba(255,101,132,0.18);
+    --elf-header-bg-strong: rgba(255,101,132,0.34);
+    --elf-pht: #6c63ff;
+    --elf-pht-bg: rgba(108,99,255,0.18);
+    --elf-pht-bg-strong: rgba(108,99,255,0.34);
+    --elf-segments: #34d399;
+    --elf-segments-bg: rgba(52,211,153,0.12);
+    --elf-dynamic: #fbbf24;
+    --elf-dynamic-bg: rgba(251,191,36,0.16);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  .deck {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 60px 80px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    transform: translateX(40px);
+  }
+
+  .slide.active {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+  }
+
+  .slide.exit {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+
+  h1 {
+    font-size: 3.2rem;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 0.5em;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 1.2em;
+    color: var(--accent);
+  }
+
+  h3 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-bottom: 0.6em;
+    color: var(--accent2);
+  }
+
+  p, li {
+    font-size: 1.25rem;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .subtitle {
+    font-size: 1.5rem;
+    color: var(--muted);
+    margin-top: 0.3em;
+  }
+
+  .tagline {
+    font-size: 1.1rem;
+    color: var(--muted);
+    margin-top: 1.5em;
+  }
+
+  ul {
+    list-style: none;
+    text-align: left;
+    max-width: 720px;
+  }
+
+  ul li {
+    padding: 0.35em 0;
+    padding-left: 1.5em;
+    position: relative;
+  }
+
+  ul li::before {
+    content: "▸";
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+  }
+
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: var(--code-bg);
+    padding: 0.15em 0.45em;
+    border-radius: 4px;
+    font-size: 0.92em;
+    color: var(--accent2);
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid #2a2d3a;
+    border-radius: 8px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    max-width: 100%;
+    width: 100%;
+    margin: 0.8em 0;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    color: var(--text);
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+
+  .terminal-block {
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 16px 24px;
+    margin: 0.8em 0;
+  }
+
+  .terminal-header {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #333;
+  }
+
+  .terminal-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .terminal-dot.red { background: #ff5f56; }
+  .terminal-dot.yellow { background: #ffbd2e; }
+  .terminal-dot.green { background: #27c93f; }
+
+  .terminal-line {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: #e4e4e7;
+    margin: 0;
+    white-space: pre;
+  }
+
+  .terminal-line .prompt {
+    color: var(--green);
+  }
+
+  .terminal-line .output {
+    color: var(--text);
+  }
+
+  .code-file {
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 0;
+    margin: 0.8em 0;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+
+  .code-file-header {
+    display: flex;
+    align-items: center;
+    background: #252526;
+    padding: 0;
+    border-bottom: 1px solid #3c3c3c;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.8rem;
+    color: #858585;
+    overflow: hidden;
+  }
+
+  .code-file-header span {
+    background: #1e1e1e;
+    padding: 8px 16px;
+    border-top: 2px solid #007acc;
+    color: #e7e7e7;
+    border-right: 1px solid #252526;
+    border-left: 1px solid #252526;
+  }
+
+  .code-file-header::after {
+    content: "✕";
+    padding: 0 12px;
+    font-size: 0.7rem;
+    color: #858585;
+    cursor: default;
+  }
+
+  .code-file-header::after:hover {
+    background: #c75450;
+    color: #fff;
+  }
+
+  .code-file pre {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 16px 20px;
+  }
+
+  .code-file pre code {
+    color: #d4d4d4;
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+
+  .code-file .keyword { color: #569cd6; }
+  .code-file .string { color: #ce9178; }
+  .code-file .function { color: #dcdcaa; }
+  .code-file .type { color: #4ec9b0; }
+  .code-file .number { color: #b5cea8; }
+  .code-file .preprocessor { color: #c586c0; }
+  .code-file .comment { color: #6a9955; font-style: italic; }
+  .code-file .punctuation { color: #d4d4d4; }
+
+  .col {
+    display: flex;
+    gap: 40px;
+    align-items: flex-start;
+    max-width: 1100px;
+    width: 100%;
+  }
+
+  .col > div {
+    flex: 1;
+  }
+
+  .highlight {
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  .warn {
+    color: var(--yellow);
+    font-weight: 600;
+  }
+
+  .accent {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .big-number {
+    font-size: 5rem;
+    font-weight: 900;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  .stat-row {
+    display: flex;
+    gap: 50px;
+    margin: 1em 0;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat-label {
+    font-size: 0.95rem;
+    color: var(--muted);
+    margin-top: 0.3em;
+  }
+
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 900px;
+  }
+
+  .flow-step {
+    background: var(--surface);
+    border: 1px solid #2a2d3a;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-family: monospace;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+
+  .flow-arrow {
+    color: var(--accent);
+    font-size: 1.3rem;
+  }
+
+  .badge {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    vertical-align: middle;
+    margin-left: 0.4em;
+  }
+
+  .badge.red {
+    background: var(--accent2);
+  }
+
+  .badge.green {
+    background: var(--green);
+    color: #000;
+  }
+
+  .badge.yellow {
+    background: var(--yellow);
+    color: #000;
+  }
+
+  .badge.gray {
+    background: #3b4252;
+    color: var(--text);
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    max-width: 900px;
+    width: 100%;
+  }
+
+  .grid-card {
+    background: var(--surface);
+    border: 1px solid #2a2d3a;
+    border-radius: 10px;
+    padding: 20px 24px;
+  }
+
+  .grid-card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.5em;
+  }
+
+  .grid-card p, .grid-card code {
+    font-size: 1rem;
+  }
+
+  .grid-card p {
+    line-height: 1.6;
+  }
+
+  .diagram-board {
+    width: 100%;
+    max-width: 1080px;
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 22px;
+  }
+
+  .diagram-panel {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)),
+      var(--surface);
+    border: 1px solid #2a2d3a;
+    border-radius: 14px;
+    padding: 22px 24px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+
+  .diagram-title {
+    font-size: 0.9rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.8em;
+  }
+
+  .ascii-hero {
+    font-size: 0.94rem;
+    line-height: 1.45;
+  }
+
+  .concept-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .concept-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #34384a;
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+
+  .concept-item strong {
+    display: block;
+    color: var(--text);
+    margin-bottom: 0.25em;
+    font-size: 1rem;
+  }
+
+  .concept-item span {
+    color: var(--muted);
+    font-size: 0.98rem;
+    line-height: 1.5;
+  }
+
+  .elf-explainer {
+    width: 100%;
+    max-width: 940px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .elf-explainer-copy {
+    text-align: center;
+    max-width: 820px;
+  }
+
+  .elf-explainer-copy h2 {
+    margin-bottom: 0.45em;
+  }
+
+  .elf-explainer-copy p {
+    color: var(--muted);
+    font-size: 1.35rem;
+    line-height: 1.8;
+  }
+
+  .memory-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .memory-layer {
+    border-radius: 12px;
+    padding: 14px 16px;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .memory-layer strong {
+    display: inline-block;
+    min-width: 150px;
+    color: var(--text);
+  }
+
+  .memory-layer code {
+    margin-right: 10px;
+  }
+
+  .arrow-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 0.4em;
+  }
+
+  .arrow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #34384a;
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+
+  .arrow-step b {
+    color: var(--accent);
+    font-size: 1rem;
+    min-width: 28px;
+  }
+
+  .arrow-step span {
+    color: var(--muted);
+    line-height: 1.5;
+    font-size: 0.98rem;
+  }
+
+  .section-note {
+    max-width: 920px;
+    text-align: center;
+    color: var(--muted);
+    margin-top: -0.5em;
+    margin-bottom: 1.2em;
+    font-size: 1.05rem;
+  }
+
+  .legend-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 1em;
+  }
+
+  .legend-chip {
+    font-size: 0.82rem;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.03);
+    color: var(--muted);
+  }
+
+  .dense-list li {
+    font-size: 1rem;
+    line-height: 1.55;
+    padding-top: 0.22em;
+    padding-bottom: 0.22em;
+  }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    padding-left: 14px;
+    margin-top: 1em;
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+
+  .elf-layout {
+    width: 100%;
+    max-width: 1100px;
+    display: grid;
+    grid-template-columns: 1.1fr auto 0.72fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  .elf-layout.centered {
+    align-items: center;
+  }
+
+  .elf-bridge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 80px;
+  }
+
+  .elf-bridge-arrow {
+    font-size: 4.2rem;
+    line-height: 1;
+    font-weight: 800;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(108,99,255,0.28);
+  }
+
+  .elf-main {
+    background:
+      radial-gradient(circle at top left, rgba(108,99,255,0.16), transparent 38%),
+      linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+      var(--surface);
+    border: 1px solid #34384a;
+    border-radius: 20px;
+    padding: 18px;
+  }
+
+  .elf-file {
+    border: 1px solid #3a4157;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #171b26;
+  }
+
+  .elf-block {
+    position: relative;
+    padding: 13px 15px;
+    border-bottom: 1px solid #2c3347;
+  }
+
+  .elf-block:last-child {
+    border-bottom: 0;
+  }
+
+  .elf-block.header {
+    background: linear-gradient(90deg, var(--elf-header-bg-strong), var(--elf-header-bg));
+    border-left: 4px solid var(--elf-header);
+  }
+
+  .elf-block.pht {
+    background: linear-gradient(90deg, var(--elf-pht-bg-strong), var(--elf-pht-bg));
+    border-left: 4px solid var(--elf-pht);
+  }
+
+  .elf-block.segments {
+    background: var(--elf-segments-bg);
+    border-left: 4px solid var(--elf-segments);
+  }
+
+  .elf-block.misc {
+    background: rgba(255,255,255,0.02);
+  }
+
+  .elf-label-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+
+  .elf-label-row strong {
+    font-size: 1rem;
+    color: var(--text);
+  }
+
+  .elf-label-row code,
+  .mini-elf-block code {
+    color: var(--text);
+    background: transparent;
+    padding: 0;
+  }
+
+  .map-note h3 code {
+    color: inherit;
+    background: transparent;
+    padding: 0;
+  }
+
+  .elf-offset {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.86rem;
+    color: var(--muted);
+  }
+
+  .elf-block p {
+    font-size: 0.88rem;
+    line-height: 1.42;
+    color: var(--muted);
+  }
+
+  .entry-badge {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+  }
+
+  .entry-badge.single {
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+  }
+
+  .entry-badge.multi {
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+  }
+
+  .segment-stack {
+    margin-top: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .segment-item {
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid #374057;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .segment-item.dynamic {
+    background: linear-gradient(90deg, var(--elf-dynamic-bg), rgba(255,255,255,0.03) 55%);
+    border-color: rgba(251,191,36,0.28);
+  }
+
+  .segment-item strong {
+    color: var(--text);
+    font-size: 0.88rem;
+  }
+
+  .segment-item span {
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.35;
+  }
+
+  .segment-flags {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    color: var(--green);
+    border: 1px solid #355648;
+    border-radius: 999px;
+    padding: 4px 9px;
+    white-space: nowrap;
+  }
+
+  .segment-item.dynamic .segment-flags {
+    color: var(--elf-dynamic);
+    border-color: rgba(251,191,36,0.35);
+  }
+
+  .elf-side {
+    display: grid;
+    gap: 14px;
+    align-items: center;
+  }
+
+  .elf-zoom {
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    border: 1px solid #34384a;
+    border-radius: 18px;
+    padding: 18px 18px 20px;
+  }
+
+  .elf-zoom h3 {
+    margin-bottom: 0.45em;
+  }
+
+  .elf-zoom p {
+    font-size: 0.96rem;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+
+  .zoom-grid {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .zoom-row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 12px;
+    padding: 11px 12px;
+    border-radius: 12px;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .zoom-row code {
+    justify-self: start;
+  }
+
+  .zoom-row span {
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.45;
+  }
+
+  .mini-elf-layout {
+    display: grid;
+    grid-template-columns: 0.82fr 1.18fr;
+    gap: 18px;
+    align-items: start;
+  }
+
+  .mini-elf-layout.bridged {
+    grid-template-columns: 0.82fr auto 1.18fr;
+    align-items: center;
+  }
+
+  .mini-elf-file {
+    border: 1px solid #39415a;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #171b26;
+  }
+
+  .mini-elf-block {
+    padding: 10px 12px;
+    border-bottom: 1px solid #293044;
+    font-size: 0.8rem;
+    color: var(--text);
+    font-weight: 600;
+    position: relative;
+  }
+
+  .mini-elf-block:last-child {
+    border-bottom: 0;
+  }
+
+  .mini-elf-block small {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--muted);
+    line-height: 1.35;
+  }
+
+  .mini-elf-block.header {
+    background: linear-gradient(90deg, rgba(255,101,132,0.42), var(--elf-header-bg));
+    border-left: 4px solid var(--elf-header);
+  }
+
+  .mini-elf-block.pht {
+    background: linear-gradient(90deg, rgba(108,99,255,0.42), var(--elf-pht-bg));
+    border-left: 4px solid var(--elf-pht);
+  }
+
+  .mini-elf-block.loads {
+    background: var(--elf-segments-bg);
+    border-left: 4px solid var(--elf-segments);
+  }
+
+  .mini-elf-block.dynamic {
+    background: var(--elf-dynamic-bg);
+    border-left: 4px solid var(--elf-dynamic);
+  }
+
+  .map-notes {
+    display: grid;
+    gap: 12px;
+  }
+
+  .map-note {
+    padding: 12px 14px;
+    border: 1px solid #34384a;
+    border-left-width: 5px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .map-note h3 {
+    font-size: 0.98rem;
+    margin-bottom: 0.25em;
+    color: var(--text);
+  }
+
+  .map-note p {
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+
+  .map-note.header {
+    border-left-color: var(--elf-header);
+    background: linear-gradient(90deg, var(--elf-header-bg), rgba(255,255,255,0.03) 48%);
+  }
+
+  .map-note.pht {
+    border-left-color: var(--elf-pht);
+    background: linear-gradient(90deg, var(--elf-pht-bg), rgba(255,255,255,0.03) 48%);
+  }
+
+  .map-note.loads {
+    border-left-color: var(--elf-segments);
+    background: linear-gradient(90deg, var(--elf-segments-bg), rgba(255,255,255,0.03) 48%);
+  }
+
+  .map-note.dynamic {
+    border-left-color: var(--elf-dynamic);
+    background: linear-gradient(90deg, var(--elf-dynamic-bg), rgba(255,255,255,0.03) 48%);
+  }
+
+  .fork-card {
+    border-left: 4px solid var(--accent);
+    position: relative;
+  }
+
+  .fork-card.loads {
+    border-left-color: var(--elf-segments);
+    background: linear-gradient(90deg, var(--elf-segments-bg), var(--surface) 50%);
+  }
+
+  .fork-card.dynamic {
+    border-left-color: var(--elf-dynamic);
+    background: linear-gradient(90deg, var(--elf-dynamic-bg), var(--surface) 50%);
+  }
+
+  .fork-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 0.8em;
+  }
+
+  .fork-icon {
+    font-size: 1.6rem;
+    line-height: 1;
+  }
+
+  .fork-label {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .fork-desc {
+    font-size: 1rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-bottom: 0.8em;
+  }
+
+  .fork-card ul {
+    list-style: none;
+    padding: 0;
+    max-width: none;
+  }
+
+  .fork-card ul li {
+    font-size: 0.95rem;
+    color: var(--muted);
+  }
+
+  /* --- mmap visual --- */
+  .mmap-visual {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.86fr) 36px minmax(260px, 1fr) 78px minmax(290px, 1.08fr);
+    grid-template-rows: auto 1fr;
+    column-gap: 18px;
+    row-gap: 14px;
+    align-items: start;
+    max-width: 1260px;
+    width: 100%;
+  }
+
+  .mmap-side {
+    grid-column: auto;
+    grid-row: 1 / span 2;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    align-items: stretch;
+    justify-items: center;
+    gap: 14px;
+    height: 100%;
+  }
+
+  .mmap-side .mmap-side-blocks {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    align-self: center;
+    gap: 12px;
+    width: min(100%, 340px);
+    margin: 0 auto;
+    min-height: 100%;
+  }
+
+  .mmap-pipeline {
+    grid-column: 1;
+    grid-row: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-right: 4px;
+  }
+
+  .mmap-splitter {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    border-right: 2px dashed rgba(255,255,255,0.1);
+    align-self: stretch;
+  }
+
+  /* Arrow column */
+  .mmap-arrow-col {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    font-size: 4.8rem;
+    line-height: 1;
+    font-weight: 800;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(108,99,255,0.28);
+  }
+
+  .mmap-side-label {
+    align-self: start;
+    text-align: center;
+    width: 100%;
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0;
+  }
+
+  .mmap-block {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 126px;
+    padding: 20px 22px;
+    border-radius: 16px;
+    border: 1px solid #34384a;
+    background: var(--surface);
+    font-size: 1.16rem;
+    align-self: center;
+  }
+
+  .mmap-block.seg-rx {
+    border-left: 5px solid var(--elf-segments);
+    background: linear-gradient(90deg, var(--elf-segments-bg), var(--surface) 50%);
+  }
+
+  .mmap-block.seg-r {
+    border-left: 5px solid var(--elf-pht);
+    background: linear-gradient(90deg, var(--elf-pht-bg), var(--surface) 50%);
+  }
+
+  .mmap-block.seg-rw {
+    border-left: 5px solid var(--elf-dynamic);
+    background: linear-gradient(90deg, var(--elf-dynamic-bg), var(--surface) 50%);
+  }
+
+  .mmap-block.bss {
+    border-left: 5px solid #4b5563;
+    border-style: dashed;
+    background: rgba(255,255,255,0.02);
+  }
+
+  .mmap-block strong {
+    display: block;
+    color: var(--text);
+    font-size: 1.24rem;
+  }
+
+  .mmap-block .mmap-vaddr {
+    display: inline-block;
+    width: fit-content;
+    margin-top: 2px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    color: var(--text);
+  }
+
+  .mmap-block span {
+    color: var(--muted);
+    font-size: 0.98rem;
+    line-height: 1.38;
+  }
+
+  .mmap-block.inline strong,
+  .mmap-block.inline code,
+  .mmap-block.inline span,
+  .mmap-block.inline small,
+  .mmap-block.inline .mem-flags {
+    display: initial;
+  }
+
+  .mmap-block.inline {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-self: center;
+    gap: 8px;
+    min-height: 126px;
+  }
+
+  .mmap-block.inline .mem-flags {
+    display: inline-block;
+    width: fit-content;
+    padding: 5px 10px;
+    border-radius: 7px;
+    background: rgba(255,255,255,0.05);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.9rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  .mmap-block.seg-rx .mem-flags {
+    color: var(--elf-segments);
+    border: 1px solid rgba(52,211,153,0.25);
+    background: rgba(52,211,153,0.08);
+  }
+
+  .mmap-block.seg-r .mem-flags {
+    color: var(--elf-pht);
+    border: 1px solid rgba(108,99,255,0.25);
+    background: rgba(108,99,255,0.08);
+  }
+
+  .mmap-block.seg-rw .mem-flags {
+    color: var(--elf-dynamic);
+    border: 1px solid rgba(251,191,36,0.25);
+    background: rgba(251,191,36,0.08);
+  }
+
+  .mmap-block.bss .mem-flags {
+    color: #6b7280;
+    border: 1px dashed rgba(107,114,128,0.35);
+    background: rgba(107,114,128,0.08);
+  }
+
+
+
+  .mmap-step {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid #2a2d3a;
+    background: rgba(255,255,255,0.02);
+    font-size: 1.08rem;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .mmap-step.code { border-left: 4px solid var(--elf-segments); }
+  .mmap-step.const { border-left: 4px solid var(--elf-pht); }
+  .mmap-step.data { border-left: 4px solid var(--elf-dynamic); }
+  .mmap-step.bss { border-left: 4px dashed #4b5563; }
+
+  .mmap-step code {
+    font-size: 1.03rem;
+  }
+
+  .mmap-step-desc {
+    color: var(--muted);
+    font-size: 0.98rem;
+  }
+
+  .mmap-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .mmap-group-brace {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.1rem;
+    color: var(--accent);
+    font-weight: 600;
+    padding: 8px 14px;
+    border: 1px solid rgba(108,99,255,0.25);
+    border-radius: 10px;
+    background: rgba(108,99,255,0.08);
+  }
+
+  .mmap-group-brace .brace-text {
+    font-size: 0.88rem;
+    opacity: 0.7;
+    font-weight: 400;
+  }
+
+  .mmap-group-items {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 2px 0 0;
+  }
+
+  .mmap-divider {
+    text-align: center;
+    color: var(--accent);
+    font-size: 1.35rem;
+    line-height: 1;
+    opacity: 0.38;
+  }
+
+  .mmap-side .offset-annotation {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    width: 100%;
+    min-height: 40px;
+    padding: 2px 0;
+    text-align: center;
+  }
+
+  .mmap-side .offset-annotation .offset-value {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    margin: 0 auto;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(251,191,36,0.28);
+    background: rgba(251,191,36,0.08);
+    font-size: 0.8rem;
+    color: var(--yellow);
+    line-height: 1.3;
+  }
+
+  .mmap-side .offset-annotation .offset-label {
+    max-width: 220px;
+    font-size: 0.74rem;
+    color: var(--muted);
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    line-height: 1.3;
+    opacity: 0.78;
+  }
+
+  .mmap-step.ellipsis {
+    opacity: 0.4;
+    border-style: dashed;
+    justify-content: center;
+  }
+
+  .mmap-side .offset-line {
+    width: 2px;
+    height: 14px;
+    background: rgba(251,191,36,0.3);
+    margin: 0 auto;
+  }
+
+  /* --- step cards --- */
+  .step-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    max-width: 1040px;
+    width: 100%;
+  }
+
+  .step-card {
+    padding: 18px 16px;
+    border-radius: 12px;
+    border: 1px solid #2a2d3a;
+    background: var(--surface);
+    text-align: center;
+  }
+
+  .step-num {
+    display: inline-block;
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+  }
+
+  .step-card h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+
+  .step-card p {
+    font-size: 0.82rem;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  /* --- relocation visual --- */
+  .reloc-visual {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 24px;
+    max-width: 1000px;
+    width: 100%;
+  }
+
+  .reloc-panel {
+    padding: 18px 22px;
+    border-radius: 14px;
+    border: 1px solid #2a2d3a;
+    background: var(--surface);
+  }
+
+  .reloc-panel-title {
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .mem-slot {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #2a2d3a;
+    background: rgba(255,255,255,0.02);
+    margin-bottom: 8px;
+  }
+
+  .mem-slot:last-child {
+    margin-bottom: 0;
+  }
+
+  .mem-addr {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--accent);
+    min-width: 80px;
+  }
+
+  .mem-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--code-bg);
+  }
+
+  .mem-value.hole {
+    color: var(--accent2);
+    border: 1px dashed var(--accent2);
+  }
+
+  .mem-value.filled {
+    color: var(--green);
+    border: 1px solid var(--green);
+    background: rgba(52,211,153,0.1);
+  }
+
+  .mem-label {
+    flex: 1;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+
+  .fork-card ul li {
+    font-size: 0.95rem;
+    color: var(--muted);
+  }
+
+  .reloc-example {
+    margin-top: 20px;
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.02);
+  }
+
+  .reloc-example-title {
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .reloc-equation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-size: 1rem;
+    color: var(--text);
+  }
+
+  .reloc-equation .op {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .offset-board {
+    width: 100%;
+    max-width: 1080px;
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 22px;
+    align-items: start;
+  }
+
+  .offset-board.bridged {
+    grid-template-columns: 1.1fr auto 0.9fr;
+    align-items: center;
+  }
+
+  .offset-board.bridged.wide-header {
+    grid-template-columns: 1.24fr auto 0.76fr;
+  }
+
+  .offset-file {
+    border: 1px solid #39415a;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #171b26;
+  }
+
+  .offset-row {
+    display: grid;
+    grid-template-columns: 86px 1fr;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #293044;
+    align-items: center;
+  }
+
+  .offset-row:last-child {
+    border-bottom: 0;
+  }
+
+  .offset-mark {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    color: var(--text);
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    text-align: center;
+  }
+
+  .offset-label {
+    font-size: 0.92rem;
+    color: var(--muted);
+  }
+
+  .offset-row.header {
+    background: linear-gradient(90deg, rgba(255,101,132,0.30), var(--elf-header-bg));
+    border-left: 4px solid var(--elf-header);
+  }
+
+  .offset-board.wide-header .offset-row.header {
+    grid-template-columns: 94px 1fr;
+  }
+
+  .offset-board.wide-header .offset-row.header .offset-label {
+    white-space: nowrap;
+  }
+
+  .offset-row.pht {
+    background: linear-gradient(90deg, rgba(108,99,255,0.30), var(--elf-pht-bg));
+    border-left: 4px solid var(--elf-pht);
+  }
+
+  .offset-subtable {
+    margin-top: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .offset-subrow {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid #3b4258;
+    background: rgba(255,255,255,0.04);
+  }
+
+  .offset-subrow.null {
+    background: rgba(255,255,255,0.025);
+    border-style: dashed;
+    opacity: 0.82;
+  }
+
+  .offset-submark {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.76rem;
+    color: var(--text);
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    text-align: center;
+  }
+
+  .offset-subrow span {
+    font-size: 0.84rem;
+    line-height: 1.35;
+    color: var(--muted);
+  }
+
+  .offset-row.loads {
+    background: linear-gradient(90deg, rgba(52,211,153,0.18), rgba(52,211,153,0.08));
+    border-left: 4px solid var(--elf-segments);
+  }
+
+  .offset-row.dynamic {
+    background: linear-gradient(90deg, rgba(251,191,36,0.22), var(--elf-dynamic-bg));
+    border-left: 4px solid var(--elf-dynamic);
+  }
+
+  .offset-row.ghost {
+    background: rgba(255,255,255,0.025);
+    border-left: 4px solid #495067;
+  }
+
+  .offset-row.ghost .offset-mark,
+  .offset-row.ghost .offset-label {
+    opacity: 0.62;
+  }
+
+  .offset-jumps {
+    display: grid;
+    gap: 14px;
+  }
+
+  .offset-jump {
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .offset-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 14px;
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #34384a;
+  }
+
+  .offset-card {
+    border: 1px solid #34384a;
+    border-left-width: 5px;
+    border-radius: 14px;
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .offset-card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.25em;
+    color: var(--text);
+  }
+
+  .offset-card p {
+    font-size: 0.93rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+
+  .offset-card.header {
+    border-left-color: var(--elf-header);
+    background: linear-gradient(90deg, var(--elf-header-bg), rgba(255,255,255,0.03) 52%);
+  }
+
+  .offset-card.pht {
+    border-left-color: var(--elf-pht);
+    background: linear-gradient(90deg, var(--elf-pht-bg), rgba(255,255,255,0.03) 52%);
+  }
+
+  .offset-card.loads {
+    border-left-color: var(--elf-segments);
+    background: linear-gradient(90deg, var(--elf-segments-bg), rgba(255,255,255,0.03) 52%);
+  }
+
+  .arrow-link-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .arrow-link {
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 10px 12px;
+    border: 1px solid #34384a;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .arrow-glyph {
+    color: var(--accent);
+    font-size: 1.05rem;
+    line-height: 1.2;
+    text-align: center;
+    padding-top: 1px;
+  }
+
+  .arrow-link strong {
+    display: block;
+    font-size: 0.92rem;
+    margin-bottom: 0.18em;
+  }
+
+  .arrow-link span {
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+
+  .elf-steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    width: 100%;
+    max-width: 1180px;
+  }
+
+  .elf-step-card {
+    min-height: 250px;
+    padding: 18px 18px 20px;
+    border-radius: 18px;
+    border: 1px solid #34384a;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  }
+
+  .elf-step-card .step-no {
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.9em;
+  }
+
+  .elf-step-card h3 {
+    font-size: 1.02rem;
+    margin-bottom: 0.55em;
+  }
+
+  .elf-step-card p {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    color: var(--muted);
+  }
+
+  .mini-stack {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .mini-stack div {
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-size: 0.88rem;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.03);
+    color: var(--text);
+  }
+
+  .stack-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    width: 100%;
+    max-width: 1080px;
+  }
+
+  .stack-card {
+    background: var(--surface);
+    border: 1px solid #2a2d3a;
+    border-radius: 14px;
+    padding: 18px 20px;
+  }
+
+  .stack-card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.7em;
+  }
+
+  .dependency-graph {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.93rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .route-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+    width: 100%;
+    max-width: 1200px;
+  }
+
+  .route-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+    width: 100%;
+    max-width: 1100px;
+  }
+
+  .route-card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    border: 1px solid #2f3443;
+    border-radius: 16px;
+    padding: 20px 22px;
+    min-height: 220px;
+  }
+
+  .route-card.conclusion {
+    display: flex;
+    flex-direction: column;
+    min-height: 260px;
+    padding: 36px 36px 36px;
+  }
+
+  .route-card.conclusion h3 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    min-height: 2.4rem;
+    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    margin: 0 0 0.8em 0;
+  }
+
+  .route-card.conclusion p {
+    font-size: 1.05rem;
+    margin-top: 0;
+  }
+
+  .route-card .step-no {
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 1em;
+  }
+
+  .route-card h3 {
+    margin-bottom: 0.5em;
+  }
+
+  .route-card p {
+    font-size: 1rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  .layer-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.02);
+  }
+
+  .layer-table th,
+  .layer-table td {
+    padding: 14px 16px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid #2f3443;
+  }
+
+  .layer-table tr:last-child td,
+  .layer-table tr:last-child th {
+    border-bottom: 0;
+  }
+
+  .layer-table th {
+    width: 34%;
+    color: var(--text);
+    font-size: 1rem;
+    background: rgba(255,255,255,0.025);
+  }
+
+  .layer-table td {
+    color: var(--muted);
+    font-size: 0.98rem;
+    line-height: 1.5;
+  }
+
+  .responsibility-board {
+    width: 100%;
+    max-width: 1120px;
+    display: grid;
+    gap: 18px;
+  }
+
+  .responsibility-track {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .responsibility-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #34384a;
+    border-radius: 18px;
+    padding: 18px 18px 20px;
+    min-height: 220px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)),
+      var(--surface);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    overflow: hidden;
+  }
+
+  .responsibility-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 4px;
+    background: var(--accent);
+    opacity: 0.9;
+  }
+
+  .responsibility-card.file::before {
+    background: var(--accent2);
+  }
+
+  .responsibility-card.kernel::before {
+    background: #7dd3fc;
+  }
+
+  .responsibility-card.loader::before {
+    background: var(--accent);
+  }
+
+  .responsibility-card.crt::before {
+    background: var(--yellow);
+  }
+
+  .responsibility-card.program::before {
+    background: var(--green);
+  }
+
+  .responsibility-stage {
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.9em;
+  }
+
+  .responsibility-card h3 {
+    font-size: 1.08rem;
+    margin-bottom: 0.5em;
+  }
+
+  .responsibility-card p {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    color: var(--muted);
+    margin-bottom: 18px;
+  }
+
+  .responsibility-chip {
+    display: inline-block;
+    margin-top: auto;
+    align-self: flex-start;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+  }
+
+  .symbol-flow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    width: 100%;
+    max-width: 1080px;
+  }
+
+  .symbol-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #34384a;
+    border-radius: 14px;
+    padding: 18px 18px;
+  }
+
+  .symbol-card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.7em;
+  }
+
+  .symbol-card p {
+    font-size: 0.98rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  .path-line {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 1050px;
+  }
+
+  .path-node {
+    padding: 12px 16px;
+    border-radius: 999px;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.03);
+    font-size: 0.98rem;
+    color: var(--text);
+  }
+
+  .path-arrow {
+    color: var(--accent);
+    font-size: 1.2rem;
+  }
+
+  .progress-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: var(--accent);
+    transition: width 0.3s ease;
+    z-index: 999;
+  }
+
+  .slide-counter {
+    position: fixed;
+    bottom: 16px;
+    right: 24px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    z-index: 999;
+  }
+
+  .nav-hint {
+    position: fixed;
+    bottom: 16px;
+    left: 24px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    z-index: 999;
+  }
+
+  .part-indicator {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.85rem;
+    color: var(--muted);
+    z-index: 999;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid #34384a;
+    background: rgba(255,255,255,0.03);
+    white-space: nowrap;
+  }
+
+  .part-indicator:empty {
+    display: none;
+  }
+
+  /* Title slide special */
+  .title-slide h1 {
+    font-size: 3.3rem;
+  }
+
+  .title-slide .accent-line {
+    width: 80px;
+    height: 4px;
+    background: var(--accent);
+    border-radius: 2px;
+    margin: 1em 0;
+  }
+
+  .emoji-big {
+    font-size: 3rem;
+    margin-bottom: 0.3em;
+  }
+
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: center;
+    max-width: 900px;
+    width: 100%;
+  }
+
+  .vs {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--muted);
+  }
+
+  .dim {
+    color: #555;
+  }
+
+  /* --- struct / chain visuals --- */
+  .struct-block {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--text);
+    background: var(--code-bg);
+    border: 1px solid #2a2d3a;
+    border-radius: 10px;
+    padding: 16px 20px;
+    white-space: pre;
+  }
+
+  .struct-field { color: var(--green); font-weight: 600; }
+  .struct-type  { color: var(--yellow); }
+  .struct-cmt   { color: var(--muted); font-size: 0.82rem; }
+
+  .chain-list   { display: grid; gap: 6px; }
+
+  .chain-link {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 14px;
+    border: 1px solid #34384a;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.88rem;
+  }
+
+  .chain-link.exec  { border-left: 4px solid #6b7280; }
+  .chain-link.libc  { border-left: 4px solid var(--green); }
+  .chain-link.libm  { border-left: 4px solid var(--accent); }
+
+  .chain-arrow  { color: var(--accent); font-size: 1.1rem; }
+  .chain-info   { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .chain-name   { color: var(--text); font-weight: 600; }
+  .chain-addr   { color: var(--accent); }
+  .chain-export { color: var(--green); margin-left: auto; }
+
+  /* --- resolution step blocks --- */
+  .resolve-steps { display: grid; gap: 20px; }
+
+  .resolve-step {
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 16px;
+    align-items: center;
+    padding: 20px 22px;
+    border: 1px solid #34384a;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+  }
+
+  .resolve-step.match  { border-left: 4px solid var(--green); }
+  .resolve-step.calc   { border-left: 4px solid var(--yellow); }
+  .resolve-step.write  { border-left: 4px solid var(--accent); }
+
+  .resolve-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid #34384a;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+
+  .resolve-step.match .resolve-num  { background: rgba(52,211,153,0.15); border-color: var(--green); color: var(--green); }
+  .resolve-step.calc .resolve-num   { background: rgba(251,191,36,0.15);  border-color: var(--yellow); color: var(--yellow); }
+  .resolve-step.write .resolve-num  { background: rgba(108,99,255,0.15); border-color: var(--accent); color: var(--accent); }
+
+  .resolve-label { font-weight: 600; font-size: 1rem; color: var(--text); margin-bottom: 8px; }
+  .resolve-detail { font-size: 0.92rem; color: var(--muted); line-height: 1.6; }
+
+  /* --- timeline visual for payoff --- */
+  .timeline-steps { display: grid; gap: 8px; }
+
+  .timeline-step {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 12px;
+    align-items: center;
+    padding: 9px 12px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid #2a2d3a;
+  }
+
+  .timeline-step.highlight-box {
+    border-color: rgba(108,99,255,0.35);
+    background: rgba(108,99,255,0.08);
+  }
+
+  .timeline-step.green-box {
+    border-color: rgba(52,211,153,0.35);
+    background: rgba(52,211,153,0.08);
+  }
+
+  .timeline-glyph {
+    text-align: center;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+
+  .timeline-step.green-box .timeline-glyph { color: var(--green); }
+
+  .timeline-text  { font-size: 0.92rem; color: var(--muted); line-height: 1.5; }
+  .timeline-text strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+<!-- SLIDE 1: Title -->
+<div class="slide title-slide active">
+  <div class="emoji-big">🔗</div>
+  <h1>ELF magic:<br><span style="color: var(--accent)">A quick tour of dynamic linking/loading on Linux</span></h1>
+  <div class="accent-line"></div>
+  <p class="subtitle">Quand vous lancez un programme Linux, un chargeur caché trouve ses bibliothèques et prépare la mémoire avant de lancer votre programme</p>
+  <p class="tagline">x86_64 · ELF · Freestanding C · Systèmes Linux</p>
+</div>
+
+<!-- SLIDE 2: Problem -->
+<div class="slide">
+  <div class="elf-explainer">
+    <div class="elf-explainer-copy">
+      <h2>📄 Qu'est-ce qu'un ELF ?</h2>
+      <p><strong>ELF</strong> signifie <strong>Executable and Linkable Format</strong>.</p>
+      <p>Le format binaire standard utilisé sur Linux.</p>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 3: Problem -->
+<div class="slide">
+  <h2>🧭 Route de la présentation</h2>
+  <p class="section-note">En 30 minutes, l'objectif est simple : comprendre qui intervient au démarrage d'un programme, comment un fichier ELF est chargé, comment les bibliothèques sont chargées, et comment le programme les utilise.</p>
+  <div class="route-grid">
+    <div class="route-card">
+      <div class="step-no">Partie 1</div>
+      <h3>Qui fait quoi ?</h3>
+      <p>Pourquoi <code>main()</code> arrive tard, et comment le kernel puis <code>ld.so</code> se partagent le travail.</p>
+    </div>
+    <div class="route-card">
+      <div class="step-no">Partie 2</div>
+      <h3>Lire un ELF</h3>
+      <p>Voir le binaire comme une carte de navigation plutôt que comme un tas opaque d'octets.</p>
+    </div>
+    <div class="route-card">
+      <div class="step-no">Partie 3</div>
+      <h3>Passer à l'exécution</h3>
+      <p>Mapper des segments, charger des dépendances, résoudre les symboles, et appliquer les relocations.</p>
+    </div>
+    <div class="route-card">
+      <div class="step-no">Partie 4</div>
+      <h3>Apprentissages</h3>
+      <p>Ce que ce projet m'a appris et ce que j'ai voulu explorer avec ce projet.</p>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 4: Problem -->
+<div class="slide">
+  <h2>📦 Pourquoi des bibliothèques partagées existent ?</h2>
+  <div class="comparison">
+    <div class="grid-card">
+      <h3>Sans partage <span class="badge red">coûteux</span></h3>
+      <p>Chaque programme contient <strong>sa propre copie</strong> de libc, libm, etc.</p>
+      <ul style="margin-top: 0.8em;">
+        <li>Le binaire grossit vite</li>
+        <li>Le même code est dupliqué en mémoire</li>
+        <li>Une mise à jour impose de tout recompiler</li>
+      </ul>
+    </div>
+    <div class="vs">vs</div>
+    <div class="grid-card">
+      <h3>Avec partage <span class="badge green">mieux</span></h3>
+      <p>Le code commun vit dans des fichiers <strong>.so</strong> chargés au lancement</p>
+      <ul style="margin-top: 0.8em;">
+        <li>Le programme principal reste petit</li>
+        <li>Les pages de code peuvent être partagées</li>
+        <li>Mettre à jour une bibliothèque profite à tous</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 4: Solution -->
+<div class="slide">
+  <h2>💡 Gardons un exemple simple en tête</h2>
+  <p style="max-width: 700px; text-align: center; margin-bottom: 1.5em;">
+    Le but: découvrir comment <strong>hello</strong>  peut utiliser <code>puts("hello")</code>
+  </p>
+  <div class="col" style="align-items: center;">
+    <div>
+      <div class="code-file">
+        <div class="code-file-header"><span>hello.c</span></div>
+        <pre><code><span class="preprocessor">#include</span> <span class="string">&lt;stdio.h&gt;</span>
+
+<span class="type">int</span> <span class="function">main</span>(<span class="keyword">void</span>) {
+    <span class="function">puts</span>(<span class="string">"hello"</span>);
+    <span class="keyword">return</span> <span class="number">0</span>;
+}</code></pre>
+      </div>
+
+      <div class="terminal-block">
+        <div class="terminal-header">
+          <div class="terminal-dot red"></div>
+          <div class="terminal-dot yellow"></div>
+          <div class="terminal-dot green"></div>
+        </div>
+        <div class="terminal-line"><span class="prompt">$ gcc hello.c -o hello</span></div>
+        <div class="terminal-line"><span class="prompt">$ ./hello</span></div>
+        <div class="terminal-line"><span class="output">hello</span></div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
+      <ul style="text-align: left; max-width: none; margin: 0 auto;">
+        <li>Le binaire ELF <code>hello</code> ne contient pas l'implémentation de <code>puts()</code></li>
+        <li>Il déclare simplement : "j'aurai besoin de la lib C au démarrage"</li>
+        <li>Un composant <strong>invisible</strong> va trouver cette librairie et la brancher</li>
+        <li><span class="highlight">Ce composant, c'est <code>ld.so</code></span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 5: Challenge 1 -->
+<div class="slide">
+  <h2>⚡ Premier piège : pas de libc avant l'initialisation de libc</h2>
+  <p style="max-width: 750px; text-align: center; margin-bottom: 1.5em;">
+    Le chargeur démarre très tôt. Donc au moment où il tourne, il ne peut pas encore s'appuyer sur les conforts habituels.
+  </p>
+  <div class="grid-2">
+    <div class="grid-card">
+      <h3>Ce qui manque au départ <span class="badge red">contraintes</span></h3>
+      <ul>
+        <li>Pas de <code>malloc()</code> prêt à l'emploi</li>
+        <li>Pas de <code>printf()</code> confortable</li>
+        <li>Pas de couches haut niveau autour des syscalls</li>
+        <li>Très peu d'outils de debug</li>
+        <li>Presque aucun filet de sécurité</li>
+      </ul>
+    </div>
+    <div class="grid-card">
+      <h3>Donc il faut <span class="badge green">se débrouiller</span></h3>
+      <ul>
+        <li>Compiler sans librairies dynamiques</li>
+        <li>Faire des syscalls directs au kernel</li>
+        <li>Écrire un mini <code>printf</code> si besoin</li>
+        <li>Écrire un mini allocateur si besoin</li>
+        <li>Garder le code simple et robuste</li>
+      </ul>
+    </div>
+  </div>
+  <pre style="max-width: 700px; margin-top: 1em;"><code><span class="dim">// Pas de main classique pour le loader dynamique !</span>
+<span class="highlight">.global _start</span>
+_start:
+    xor %ebp, %ebp
+    mov %rsp, %rdi
+    call ldso_main        <span class="dim">// appel du main</span></code></pre>
+</div>
+
+<!-- SLIDE 6: Enter ld.so -->
+<div class="slide">
+  <h2>🎯 <code>main()</code> is a lie</h2>
+  <p style="max-width: 700px; text-align: center; margin-bottom: 1.5em;">
+    Avant <code>main()</code>, plusieurs acteurs interviennent !
+  </p>
+  <div class="flow">
+    <div class="flow-step" style="border-color: #4b5563; background: rgba(75,85,99,0.16);">
+      <strong>kernel</strong>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="border-color: var(--accent); background: rgba(108,99,255,0.1);">
+      <strong>ld.so</strong> <span class="badge">linking</span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="border-color: var(--yellow); background: rgba(251,191,36,0.12);">
+      <strong>_start()</strong> <span class="badge yellow">runtime C</span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step" style="border-color: var(--green); background: rgba(52,211,153,0.1);">
+      <strong>main()</strong> <span class="badge green">votre code</span>
+    </div>
+  </div>
+  <div style="margin-top: 1.5em;">
+    <ul style="max-width: 600px;">
+      <li>Le <strong>kernel</strong> lance le processus</li>
+      <li><code>ld.so</code> est le loader dynamique</li>
+      <li><code>_start()</code> est le point d'entrée du binaire</li>
+      <li><code>main()</code> c'est le début de votre code applicatif,</li>
+      <li><span class="highlight">Chaque couche prépare la suivante</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- HIDDEN SLIDE 7: Layers -->
+<!--
+<div class="slide">
+  <h2>🎭 Les couches de responsabilité</h2>
+  <div class="responsibility-board" style="margin-top: 18px;">
+    <div class="responsibility-track">
+    <div class="responsibility-card file">
+      <div class="responsibility-stage">1 · description</div>
+      <h3>Le fichier</h3>
+      <p>Contient le code compilé et les plans permettant le chargement en mémoire.</p>
+      <div class="responsibility-chip">décrit</div>
+    </div>
+    <div class="responsibility-card kernel">
+      <div class="responsibility-stage">2 · lancement</div>
+      <h3>Le kernel</h3>
+      <p>Charge le binaire en mémoire et délègue le cablage à ld.so.</p>
+      <div class="responsibility-chip">démarre</div>
+    </div>
+    <div class="responsibility-card loader">
+      <div class="responsibility-stage">3 · câblage</div>
+      <h3><code>ld.so</code></h3>
+      <p>Trouve les bibliothèques, prépare la mémoire, et lance le programme.</p>
+      <div class="responsibility-chip">relie</div>
+    </div>
+    <div class="responsibility-card crt">
+      <div class="responsibility-stage">4 · transition</div>
+      <h3>Le CRT startup</h3>
+      <p>Prépare l'environnement C et appelle <code>main()</code>.</p>
+      <div class="responsibility-chip">prépare</div>
+    </div>
+    <div class="responsibility-card program">
+      <div class="responsibility-stage">5 · exécution</div>
+      <h3>Votre programme</h3>
+      <p>Tout est prêt ! C'est votre code qui tourne.</p>
+      <div class="responsibility-chip">utilise</div>
+    </div>
+    </div>
+  </div>
+</div>
+-->
+
+<!-- SLIDE 7: Superpower -->
+<div class="slide">
+  <h2>🦸 Le super-pouvoir de <code>ld.so</code></h2>
+  <div class="grid-2" style="max-width: 1040px; align-items: center;">
+      <pre style="width: 100%; max-width: 460px; margin: 0;">
+<code><span class="dim"># Le kernel mappe l’exécutable en mémoire</span>
+<span class="dim"># mappe ld.so, puis saute dans ld.so</span>
+$ ./hello
+hello
+
+<span class="dim"># ld.so charge lui même le binaire</span>
+<span class="dim"># puis s'occupe de la relocation</span>
+$ ./ld.so ./hello
+hello</code></pre>
+    <div class="grid-card">
+      <h3>ld.so est polyvalent</h3>
+      <ul class="dense-list">
+        <li>En général, le kernel charge le binaire en mémoire et lance le loader demandé par le binaire.</li>
+        <li>Cependant, <code>ld.so</code> peut aussi <strong>charger le binaire principal lui-même</strong>, pas seulement les bibliothèques.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout" style="max-width: 900px; margin-top: 4em;">Pour le reste de la présentation, on assumera que <code>ld.so</code> ouvre le programme cible lui même.</div>
+</div>
+
+<!-- SLIDE 8: Binary vs SO -->
+<div class="slide">
+  <h2>⚖️ Binaire principal vs bibliothèque <code>.so</code></h2>
+  <p class="section-note">Même format ELF, mais pas le même rôle.</p>
+  <div class="comparison" style="max-width: 1100px;">
+    <div class="grid-card">
+      <h3>Exécutable principal</h3>
+      <ul class="dense-list" style="margin-top: 0.8em;">
+        <li><strong>Qui charge le binaire</strong> : le kernel / <code>ld.so</code></li>
+        <li><strong>Rôle</strong> : fournir le point d'entrée du programme</li>
+        <li><strong>Ce qu'il contient souvent</strong> : un chemin vers le loader dynamique et une liste de dépendances</li>
+      </ul>
+    </div>
+    <div class="vs">vs</div>
+    <div class="grid-card">
+      <h3>Bibliothèque partagée</h3>
+      <ul class="dense-list" style="margin-top: 0.8em;">
+        <li><strong>Qui charge le binaire</strong> : <code>ld.so</code></li>
+        <li><strong>Rôle</strong> : apporter du code et des variables réutilisables</li>
+        <li><strong>Ce qu'elle contient souvent</strong> : des exports de fonctions et une liste de dépendances</li>
+      </ul>
+    </div>
+  </div>
+  
+  <div class="path-line" style="margin-top: 1.3em;">
+    <div class="path-node">même structure ELF</div>
+    <div class="path-arrow">→</div>
+    <div class="path-node">mêmes segments</div>
+    <div class="path-arrow">→</div>
+    <div class="path-node">usage différent</div>
+  </div>
+</div>
+
+<!-- SLIDE 9: ELF Map -->
+<div class="slide">
+  <h2>🗺️ ELF map : que trouve <code>ld.so</code> dans un binaire ?</h2>
+  <div class="elf-layout centered">
+    <div class="elf-main">
+      <div class="diagram-title">Vue D'ensemble Du Fichier ELF</div>
+      <div class="elf-file">
+        <div class="elf-block header">
+          <div class="elf-label-row">
+            <strong><code>ELF header</code></strong>
+            <span class="elf-offset">tout en haut du fichier</span>
+          </div>
+          <p>La carte d'identité du fichier</p>
+          <span class="entry-badge single">une seule structure</span>
+        </div>
+        <div class="elf-block pht">
+          <div class="elf-label-row">
+            <strong><code>Program Header Table</code></strong>
+            <span class="elf-offset">liste d'entrées</span>
+          </div>
+          <p>Une cartographie complète du programme</p>
+          <span class="entry-badge multi">plusieurs entrées</span>
+        </div>
+        <div class="elf-block segments">
+          <div class="elf-label-row">
+            <strong>Segments</strong>
+            <span class="elf-offset">les données brutes du programme</span>
+          </div>
+          <p>Des parties référencés par la Program Header Table</p>
+          <div class="segment-stack">
+            <div class="segment-item">
+              <strong>Bloc de code</strong>
+              <span>Instructions exécutables du programme.</span>
+            </div>
+            <div class="segment-item">
+              <strong>Bloc constant</strong>
+              <span>Constantes et tables consultées en lecture seule.</span>
+            </div>
+            <div class="segment-item">
+              <strong>Bloc modifiable</strong>
+              <span>Données globales et autres.</span>
+            </div>
+            <div class="segment-item dynamic">
+              <strong>Bloc dynamique</strong>
+              <span>Dépendances, symboles et relocations à traiter.</span>
+            </div>
+          </div>
+        </div>
+        <div class="elf-block misc">
+          <div class="elf-label-row">
+            <strong>Autres zones</strong>
+            <span class="elf-offset">souvent pour les outils de debugging</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="elf-bridge" aria-hidden="true">
+      <div class="elf-bridge-arrow">&gt;</div>
+    </div>
+    <div class="elf-side">
+      <div class="elf-zoom">
+        <div class="diagram-title">À retenir</div>
+        <h3>Le chemin utile est court</h3>
+        <div class="map-notes">
+          <div class="map-note header">
+            <h3>1. Header</h3>
+            <p>Une structure unique pour identifier le fichier.</p>
+          </div>
+          <div class="map-note pht">
+            <h3>2. Table</h3>
+            <p>Plusieurs entrées qui décrivent les segments du fichier ou aide à préparer l'éxécution.</p>
+          </div>
+          <div class="map-note loads">
+            <h3>3. Segments</h3>
+            <p>Les morceaux utilisés par le loader pour construire la mémoire du processus.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 10: Navigation -->
+<div class="slide">
+  <h2>⛏️ Comment le loader navigue dans un ELF ?</h2>
+  <p class="section-note">Un ELF c'est comme un jeu d'enquête : chaque couche répond à une question et en pose deux nouvelles.</p>
+  <div class="offset-board bridged wide-header">
+    <div class="offset-file">
+      <div class="offset-row header">
+        <div class="offset-mark">0x00</div>
+        <div class="offset-label">Le bloc <strong>ELF Header</strong> référence la <strong>header table</strong> à l'offset <code>0x40</code></div>
+      </div>
+      <div class="offset-row pht">
+        <div class="offset-mark">0x40</div>
+        <div class="offset-label">
+          Le bloc <strong>Program Header Table</strong> contient plusieurs entrées
+          <div class="offset-subtable">
+            <div class="offset-subrow">
+              <div class="offset-submark">[0]</div>
+              <span><strong>PT_LOAD</strong> -> segment de code à l'offset <code>0x1000</code></span>
+            </div>
+            <div class="offset-subrow">
+              <div class="offset-submark">[1]</div>
+              <span><strong>PT_LOAD</strong> -> segment de données à l'offset <code>0x2000</code></span>
+            </div>
+            <div class="offset-subrow">
+              <div class="offset-submark">[2]</div>
+              <span><strong>PT_DYNAMIC</strong> -> bloc dynamique à l'offset <code>0x2800</code></span>
+            </div>
+            <div class="offset-subrow">
+              <div class="offset-submark">[n]</div>
+              <span><strong>...</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="offset-row loads">
+        <div class="offset-mark">0x1000</div>
+        <div class="offset-label">segment de code</div>
+      </div>
+      <div class="offset-row ghost">
+        <div class="offset-mark">...</div>
+        <div class="offset-label">autres entrées / segments non utiles</div>
+      </div>
+      <div class="offset-row loads">
+        <div class="offset-mark">0x2000</div>
+        <div class="offset-label">segment de données</div>
+      </div>
+      <div class="offset-row dynamic">
+        <div class="offset-mark">0x2800</div>
+        <div class="offset-label">bloc dynamique</div>
+      </div>
+    </div>
+    <div class="elf-bridge" aria-hidden="true">
+      <div class="elf-bridge-arrow">&gt;</div>
+    </div>
+    <div class="offset-jumps">
+      <div class="offset-jump">
+        <div class="offset-arrow">1</div>
+        <div class="offset-card header">
+          <h3>On récupère la carte</h3>
+          <p>Le loader lit le début du fichier, puis récupère un <strong>offset</strong> vers la <strong>table suivante</strong>.</p>
+        </div>
+        
+      </div>
+      <div class="offset-jump">
+        <div class="offset-arrow">2</div>
+        <div class="offset-card pht">
+          <h3>On lit la carte</h3>
+          <p>Le loader additionne l'<strong>offset</strong> depuis le début du fichier et arrive au début de la <strong>Program Header Table</strong>.</p>
+        </div>
+      </div>
+      <div class="offset-jump">
+        <div class="offset-arrow">3</div>
+        <div class="offset-card loads">
+          <h3>On conserve les bonnes adresses</h3>
+          <p>Le loader <strong>parcourt les entrées</strong> une par une, recupère les <strong>offsets</strong> des segments utiles et en sauvegarde les <strong>adresses</strong>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 11: Two Families -->
+<div class="slide">
+  <h2>🧩 Deux familles de segments utiles</h2>
+  <p class="section-note">Après avoir parcouru la <code>Program Header Table</code>, le loader sépare son travail en deux branches.</p>
+  <div class="grid-2">
+    <div class="grid-card fork-card loads">
+      <div class="fork-header">
+        <span class="fork-icon">📦</span>
+        <span class="fork-label">Segments <code>PT_LOAD</code> <span class="badge green">mapper</span></span>
+      </div>
+      <p class="fork-desc">Ce que le loader va <strong>mapper en mémoire</strong> :</p>
+      <ul style="margin-top: 12px;">
+        <li><strong>Code</strong> <span class="badge green">R | X</span> — les instructions</li>
+        <li><strong>Constantes</strong> <span class="badge green">R</span> — données en lecture seule</li>
+        <li><strong>Données</strong> <span class="badge green">R | W</span> — variables globales</li>
+      </ul>
+    </div>
+    <div class="grid-card fork-card dynamic">
+      <div class="fork-header">
+        <span class="fork-icon">🔗</span>
+        <span class="fork-label">Segment <code>PT_DYNAMIC</code> <span class="badge yellow">relier</span></span>
+      </div>
+      <p class="fork-desc">Ce que le loader va <strong>lire pour faire le lien</strong> :</p>
+      <ul style="margin-top: 12px;">
+        <li><strong>Dépendances</strong> — les <em>.so</em> à charger (<em>libc.so</em>...)</li>
+        <li><strong>Symboles</strong> — les noms externes (<em>puts</em>, <em>malloc</em>...)</li>
+        <li><strong>Relocations</strong> — les trous à combler</li>
+      </ul>
+    </div>
+  </div>
+  <p class="callout">Idée à retenir : <strong>la table a ouvert deux chantiers</strong> pour le loader — on suit l'un après l'autre.</p>
+</div>
+
+
+<!-- SLIDE 12: mmap visual -->
+<div class="slide">
+  <h2>🗺️ Comment un fichier ELF devient-il de la mémoire ?</h2>
+  <div class="mmap-visual">
+    <div class="mmap-pipeline">
+      <div class="mmap-step">
+        <code>open()</code>
+        <span class="mmap-step-desc">fichier .so</span>
+      </div>
+      <div class="mmap-divider">↓</div>
+      <div class="mmap-group">
+        <div class="mmap-group-brace">mmap(PT_LOAD) <span class="brace-text">× n</span></div>
+        <div class="mmap-group-items">
+          <div class="mmap-step code"><code>→ code</code></div>
+          <div class="mmap-step const"><code>→ constantes</code></div>
+          <div class="mmap-step data"><code>→ données</code></div>
+          <div class="mmap-step ellipsis"><code>…</code></div>
+        </div>
+      </div>
+      <div class="mmap-divider">↓</div>
+      <div class="mmap-group">
+        <div class="mmap-group-brace">mprotect(PT_LOAD) <span class="brace-text">× n</span></div>
+        <div class="mmap-group-items">
+          <div class="mmap-step code"><code>RX</code></div>
+          <div class="mmap-step const"><code>R</code></div>
+          <div class="mmap-step data"><code>RW</code></div>
+          <div class="mmap-step ellipsis"><code>…</code></div>
+        </div>
+      </div>
+    </div>
+    <div class="mmap-splitter"></div>
+    <div class="mmap-side">
+      <div class="mmap-side-label">📄 Sur disque</div>
+      <div class="mmap-side-blocks">
+        <div class="mmap-block seg-rx">
+          <strong>Code</strong>
+          <span class="mmap-vaddr">vaddr +0x0000</span>
+          <span>Instructions à exécuter</span>
+        </div>
+        <div class="offset-annotation">
+          <span class="offset-value">position virtuel + 0x4000</span>
+        </div>
+        <div class="mmap-block seg-r">
+          <strong>Constantes</strong>
+          <span class="mmap-vaddr">vaddr +0x4000</span>
+          <span>Données fixes</span>
+        </div>
+        <div class="offset-annotation">
+          <span class="offset-value">position virtuel + 0x2000</span>
+        </div>
+        <div class="mmap-block seg-rw">
+          <strong>Données</strong>
+          <span class="mmap-vaddr">vaddr +0x6000</span>
+          <span>Variables modifiables</span>
+        </div>
+      </div>
+    </div>
+    <div class="mmap-arrow-col">&gt;</div>
+    <div class="mmap-side">
+      <div class="mmap-side-label">🧠 En mémoire</div>
+      <div class="mmap-side-blocks">
+        <div class="mmap-block seg-rx inline">
+          <strong>0x7f...0000</strong>
+          <div class="mem-flags">PROT_READ | PROT_EXEC</div>
+        </div>
+        <div class="offset-annotation">
+          <span class="offset-value">+ 0x4000</span>
+        </div>
+        <div class="mmap-block seg-r inline">
+          <strong>0x7f...4000</strong>
+          <div class="mem-flags">PROT_READ</div>
+        </div>
+        <div class="offset-annotation">
+          <span class="offset-value">+ 0x2000</span>
+        </div>
+        <div class="mmap-block seg-rw inline">
+          <strong>0x7f...6000</strong>
+          <div class="mem-flags">PROT_READ | PROT_WRITE</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 13: Link Map -->
+<div class="slide">
+  <h2>📊 La structure la plus importante : la link map</h2>
+  <p class="section-note">Chaque bibliothèque chargée obtient une entrée dans cette liste chaînée — c'est le registre central du loader.</p>
+  <div class="diagram-board" style="margin-top: 18px;">
+    <div class="diagram-panel" style="padding-bottom: 14px;">
+      <div class="diagram-title">Les Structures de données</div>
+      <div class="struct-block" style="margin-top: 27px;"><span class="struct-cmt">/* Une entrée par DSO chargé */</span><br><span class="dim">struct</span> <span class="struct-type">link_map</span> {<br>  <span class="struct-field">l_name</span>        <span class="struct-type">char*</span>          <span class="struct-cmt">// "libc.so.6"</span><br>  <span style="color: var(--elf-header); font-weight: 600;">l_addr</span>        <span class="struct-type">Elf64_Addr</span>     <span class="struct-cmt">// adresse de base</span><br>  <span class="struct-field">l_sym</span>         <span class="struct-type">Elf64_Sym*</span>     <span class="struct-cmt">// ↓ table de symboles</span><br>  <span class="struct-field">l_next</span>, <span class="struct-field">l_prev</span>  <span class="struct-type">link_map*</span>    <span class="struct-cmt">// ◄ pointeurs de navigation ►</span><br>};</div>
+      <div class="struct-block" style="margin-top: 12px; border-style: dashed; opacity: 0.88;"><span class="struct-cmt">/* Une entrée = un symbole / une fonction */</span><br><span class="dim">struct</span> <span class="struct-type">Elf64_Sym</span> {<br>  <span class="struct-field">st_name</span>     <span class="struct-type">uint32_t</span>   <span class="struct-cmt">// offset dans une liste de noms</span><br>  <span style="color: var(--elf-header); font-weight: 600;">st_value</span>    <span class="struct-type">Elf64_Addr</span> <span class="struct-cmt">// adresse relative de la fonction</span><br>};</div>
+    </div>
+    <div class="diagram-panel">
+      <div class="diagram-title">La link map de hello</div>
+      <div class="chain-list">
+        <div class="chain-link exec">
+          <div class="chain-arrow"></div>
+          <div class="chain-info">
+            <span class="chain-name">./hello</span>
+            <span class="chain-addr">0x401000</span>
+            <span class="chain-export">—</span>
+          </div>
+        </div>
+        <div style="color: var(--accent); font-size: 0.75rem; text-align: center; margin: 2px 0;"></div>
+        <div class="chain-link libc">
+          <div class="chain-arrow">◀▶</div>
+          <div class="chain-info">
+            <span class="chain-name">libc.so.6</span>
+            <span class="chain-addr">0x7f...a000</span>
+            <span class="chain-export">puts</span>
+          </div>
+        </div>
+
+      </div>
+      <div style="margin-top: 2em; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.8rem; color: var(--muted);">
+        <div style="font-size: 0.78rem; color: var(--muted); margin-bottom: 6px;">ex: comment on trouve <span style="color: var(--green);">puts</span> dans <span style="color: var(--green);">libc</span></div>
+        <div style="padding: 10px 12px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid #34384a; font-size: 0.78rem;">
+          <div style="margin-bottom: 6px;">
+            <span style="color: var(--elf-header); font-weight: 600;">l_addr</span> = <span style="color: var(--green);">BASE</span>
+            <span style="color: var(--muted); font-size: 0.72rem;"> — où le loader a placé libc en mémoire</span>
+          </div>
+          <div style="margin-bottom: 8px;">
+            <span style="color: var(--elf-header); font-weight: 600;">st_value</span> de puts = <span style="color: var(--green);">OFFSET</span>
+            <span style="color: var(--muted); font-size: 0.72rem;"> — la distance de puts depuis le début de libc</span>
+          </div>
+          <div style="border-top: 1px solid #34384a; padding-top: 6px;">
+            <span style="color: var(--muted);">adresse réelle de puts =</span>
+            <span style="color: var(--green);"> BASE + OFFSET</span>
+          </div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top: 1.8em;">
+        <strong>3 rôles</strong> : <span class="accent">partage de code</span>, <span class="warn">recherche de symboles</span>, <span class="highlight">calcul d'adresses</span>.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 14: Relocation -->
+<div class="slide">
+  <h2>🔀 Relocation = remplacer des trous par de vraies adresses</h2>
+  <div class="reloc-visual">
+    <div class="reloc-panel" style="grid-column: 1; grid-row: 1 / 3; align-self: center; display: flex; flex-direction: column; gap: 12px;">
+      <div class="reloc-panel-title">La GOT (Global Offset Table)</div>
+      <p class="fork-desc">Une petite liste qui a été mappé plus tôt par le loader. Un emplacement est réservé pour chaque fonction externe.</p>
+      <div class="mem-slot" style="margin-bottom: 4px;">
+        <span class="mem-value hole">0x????????</span>
+        <span class="mem-label">→ case pour <code>puts</code></span>
+      </div>
+      <div class="mem-slot" style="margin-bottom: 4px;">
+        <span class="mem-value hole">0x????????</span>
+        <span class="mem-label">→ case pour <code>malloc</code></span>
+      </div>
+      <div class="mem-slot">
+        <span class="mem-value hole">0x????????</span>
+        <span class="mem-label">→ case pour <code>__libc_start_main</code></span>
+      </div>
+      <p class="callout" style="margin-top: 8px; font-size: 0.9rem;">Quand le compilateur ne connaît pas une adresse réelle il ajoute une entrée pour elle dans la GOT — le loader viendra la mettre à jour.</p>
+    </div>
+    <div class="reloc-panel" style="grid-column: 2; grid-row: 2; display: flex; flex-direction: column;">
+      <div class="reloc-panel-title">La PLT (Procedure Linkage Table)</div>
+      <p class="fork-desc">Les adresses de fonctions dans la GOT ne sont pas exploitable sans un petit wrapper autour pour les exécuter.</p>
+      <div class="mem-slot">
+        <span class="mem-value filled">call 0x401000</span>
+        <span class="mem-label">→ le programme appelle la <strong>PLT</strong></span>
+      </div>
+      <div class="mem-slot">
+        <span class="mem-value filled">jmp GOT[n]</span>
+        <span class="mem-label">→ la PLT lit la <strong>GOT</strong> et saute</span>
+      </div>
+      <div class="mem-slot">
+        <span class="mem-value filled">0x7f...a1b2c3</span>
+        <span class="mem-label">→ l'adresse réelle dans <strong>libc</strong></span>
+      </div>
+      <p class="callout" style="margin-top: 14px; font-size: 0.9rem;">La <strong>PLT</strong> est un trampoline : son role est de sauter sur une adresse de fonction précisé dans la GOT.</p>
+    </div>
+    <div class="reloc-panel" style="grid-column: 2; grid-row: 1; display: flex; flex-direction: column;">
+      <div class="reloc-panel-title">Vrai role de la GOT</div>
+      <div class="mem-slot">
+        <span class="mem-value hole">0x????????</span>
+        <span class="mem-label">→ <code>fonction_externe</code> <span class="badge green">function</span></span>
+      </div>
+      <div class="mem-slot">
+        <span class="mem-value hole">0x????????</span>
+        <span class="mem-label">→ <code>variable_externe</code> <span class="badge yellow">data</span></span>
+      </div>
+      <p class="callout" style="margin-top: auto; font-size: 0.82rem;">La GOT peut servir pour plusieurs type de symboles externes.</p>
+    </div>
+  </div>
+  <div class="reloc-example">
+    <div class="reloc-example-title">En résumé</div>
+    <div class="reloc-equation">
+      <span class="mem-value hole">GOT[n] = ?</span>
+      <span class="op">→</span>
+      <span>le loader cherche <code>puts</code> dans libc</span>
+      <span class="op">→</span>
+      <span class="mem-value filled">GOT[n] = &puts</span>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- SLIDE 15: Symbol Lookup -->
+<div class="slide">
+  <h2>🔎 Enfin résoudre un symbole !</h2>
+  <div style="max-width: 820px; margin: 18px auto 0;">
+    <div class="diagram-panel" style="margin-bottom: 24px; padding: 20px 32px; text-align: center; max-width: 600px; margin-left: auto; margin-right: auto;">
+      <div class="diagram-title">Le Problème</div>
+      <div class="mem-slot" style="display: inline-flex; align-items: center; gap: 12px; padding: 12px 18px; margin: 12px auto 18px;">
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--accent2);">0x4011a8</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--warn);">0x????????</span>
+        <span style="font-size: 0.88rem; color: var(--muted);">GOT[puts]</span>
+      </div>
+      <p style="font-size: 0.92rem; color: var(--muted); line-height: 1.8; margin: 0 auto; max-width: 560px;">
+        Le binaire contient une relocation sur <code style="color: var(--accent2);">puts</code><br>
+      </p>
+    </div>
+    <div class="resolve-steps">
+      <div class="resolve-step">
+        <div class="resolve-num">1</div>
+        <div>
+          <div class="resolve-label">Parcourir la link map</div>
+          <div class="resolve-detail">
+            <span style="color: #6b7280;">./hello</span> <span style="color: var(--accent);">→</span> <span style="color: var(--green); font-weight: 700;">libc.so.6</span> <span style="color: var(--accent);">→</span> <span style="color: var(--warn);">NULL</span>
+            <br><span style="font-size: 0.82rem;"><strong>libc.so.6</strong> contient <code>puts</code> → ✅</span>
+          </div>
+        </div>
+      </div>
+      <div class="resolve-step match">
+        <div class="resolve-num">2</div>
+        <div>
+          <div class="resolve-label">Lire le symbole</div>
+          <div class="resolve-detail"><code style="color: var(--elf-header);">puts.st_value</code> = <code>0x48a30</code> (offset dans libc)</div>
+        </div>
+      </div>
+      <div class="resolve-step calc">
+        <div class="resolve-num">3</div>
+        <div>
+          <div class="resolve-label">Calculer l'adresse absolue</div>
+          <div class="resolve-detail"><code style="color: var(--elf-header);">l_addr</code> + <code style="color: var(--elf-header);">st_value</code> = <code>0x7f...a000</code> + <code>0x48a30</code> = <code style="color: var(--green);">0x7f...48a30</code></div>
+        </div>
+      </div>
+      <div class="resolve-step write">
+        <div class="resolve-num">4</div>
+        <div>
+          <div class="resolve-label">Patcher la GOT (Global Offset Table)</div>
+          <div class="resolve-detail"><code>*0x4011a8</code> ← <code style="color: var(--green);">0x7f...48a30</code> — slot comblé ✓</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 16: Full Pipeline -->
+<div class="slide">
+  <h2>🔁 hello, de la ligne de commande à l'écran</h2>
+  <p class="section-note">De l'invite de commande à <code>hello</code> sur l'écran.</p>
+  <div style="max-width: 720px;">
+    <div class="resolve-steps">
+      <div class="resolve-step calc">
+        <div class="resolve-num">1</div>
+        <div>
+          <div class="resolve-label">Shell lance <code>ld.so ./hello</code></div>
+          <div class="resolve-detail">ld.so reçoit le binaire cible.</div>
+        </div>
+      </div>
+      <div class="resolve-step match">
+        <div class="resolve-num">2</div>
+        <div>
+          <div class="resolve-label">ld.so parse <code>hello</code></div>
+          <div class="resolve-detail">Header, PHT, segments, bloc dynamique.</div>
+        </div>
+      </div>
+      <div class="resolve-step match">
+        <div class="resolve-num">3</div>
+        <div>
+          <div class="resolve-label">ld.so mappe <code>hello</code> + ses dépendances</div>
+          <div class="resolve-detail">Chargement récursif des dépendances.</div>
+        </div>
+      </div>
+      <div class="resolve-step write">
+        <div class="resolve-num">4</div>
+        <div>
+          <div class="resolve-label">ld.so applique les relocations GOT</div>
+          <div class="resolve-detail">Résolution des symboles, patch de la GOT.</div>
+        </div>
+      </div>
+      <div class="resolve-step write">
+        <div class="resolve-num">5</div>
+        <div>
+          <div class="resolve-label"><code>_start</code> → <code>puts</code> <span class="badge green">✓</span></div>
+          <div class="resolve-detail">Appel <code>puts</code> via PLT/GOT dans libc.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 17: Apprentissages -->
+<div class="slide">
+  <h2>🧠 Ce que ce projet m'a appris</h2>
+  <div class="route-grid">
+    <div class="route-card conclusion">
+      <h3>Comprendre comment Linux marche</h3>
+      <p>Du <code>kernel</code> au <code>main()</code>, il y a plusieurs étapes.</p>
+    </div>
+    <div class="route-card conclusion">
+      <h3>Naviguer dans un binaire structuré</h3>
+      <p>Lire les entêtes, suivre les pointeurs, déchiffrer les segments et leurs sous-sections.</p>
+    </div>
+    <div class="route-card conclusion">
+      <h3>Manipuler la mémoire et ses permissions</h3>
+      <p>Utiliser <code>mmap</code> et <code>mprotect</code>. Manipuler le layout en RAM.</p>
+    </div>
+    <div class="route-card conclusion">
+      <h3>Se sentir plus à l'aise avec l'ASM et gcc</h3>
+      <p>Lire un peu d'ASM et ce que le compilateur génère.</p>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 18: Windows Comparison -->
+<div class="slide">
+  <h2>🪟 Même problème, autre monde : Linux vs Windows</h2>
+  <div class="comparison" style="max-width: 1100px;">
+    <div class="grid-card">
+      <h3>Linux / ELF</h3>
+      <ul class="dense-list">
+        <li><strong>Format</strong> : <strong>ELF</strong></li>
+        <li><strong>Quoi charger</strong> : segments <code>PT_LOAD</code> et <code>PT_DYNAMIC</code></li>
+        <li><strong>Quoi résoudre</strong> : symboles externes</li>
+        <li><strong>Quoi patcher</strong> : relocations ELF</li>
+        <li><strong>Qui saute à la fin</strong> : <code>ld.so</code> vers l'entry point</li>
+      </ul>
+    </div>
+    <div class="vs">vs</div>
+    <div class="grid-card">
+      <h3>Windows / PE</h3>
+      <ul class="dense-list">
+        <li><strong>Format</strong> : <strong>PE</strong> (<strong>.exe</strong>)</li>
+        <li><strong>Quoi charger</strong> : ?</li>
+        <li><strong>Quoi résoudre</strong> : imports de DLL</li>
+        <li><strong>Quoi patcher</strong> : ?</li>
+        <li><strong>Qui saute à la fin</strong> : loader Windows vers l'entry point</li>
+      </ul>
+    </div>
+  </div>
+  <p style="max-width: 900px; text-align: center; margin-top: 1.3em;">
+    <span class="highlight">Même problème. Autre vocabulaire. Le pipeline est similaire.</span>
+  </p>
+</div>
+
+<!-- SLIDE 19: ASM is ASM -->
+<div class="slide">
+  <h2>💡 ASM is ASM</h2>
+  <p class="section-note">Le format fichier n'est qu'une enveloppe. Sous le capot, c'est toujours la même machine.</p>
+  <div class="grid-2">
+    <div class="grid-card">
+      <h3>La réalité <span class="badge green">CPU</span></h3>
+      <ul>
+        <li>Le CPU ne connaît ni <em>ELF</em> ni <em>PE</em>.</li>
+        <li>Il exécute des <strong>instructions x86_64</strong>, point.</li>
+      </ul>
+      <p class="fork-desc">Un <code>mov rax, rcx</code> compilé sur Windows est <strong>bit-identique</strong> au même sur Linux.</p>
+    </div>
+    <div class="grid-card">
+      <h3>L'idée <span class="badge yellow">implication</span></h3>
+      <ul>
+        <li>Un binaire PE <strong>pourrait</strong> tourner sur Linux.</li>
+        <li>Il lui manque une couche de traduction et surtout un <strong>loader</strong> !</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 20: Teaser -->
+<div class="slide title-slide">
+  <div class="emoji-big">🚀</div>
+  <h1>Prochaine présentation</h1>
+  <div class="accent-line"></div>
+  <p style="font-size: 1.8rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; text-align: center; margin-top: 2.5em;">Homemade Wine</p>
+  <p style="max-width: 800px; font-size: 3rem; margin-top: 1em; line-height: 1.3; text-align: center;">
+    De <em>"Hello World !"</em> à <strong>Doom95.exe</strong> sous Linux
+  </p>
+  <p style="max-width: 600px; margin-left: auto; margin-right: auto; margin-top: 2em; color: var(--muted); font-size: 1.3rem; text-align: center;">
+    Présentation de la roadmap complète d'un loader PE <em>"minimaliste"</em> pour Linux (garanti sans mal de crâne)
+  </p>
+</div>
+
+
+</div><!-- /deck -->
+
+
+<div class="progress-bar" id="progress"></div>
+<div class="slide-counter" id="counter"></div>
+<div class="part-indicator" id="part-indicator"></div>
+<div class="nav-hint">← → pour naviguer</div>
+
+<script>
+(function() {
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  const HASH_PREFIX = '#slide-';
+  const partRanges = [
+    { start: 3, end: 7, label: 'Partie 1 · Qui fait quoi ?' },
+    { start: 8, end: 11, label: 'Partie 2 · Comment lire un ELF' },
+    { start: 12, end: 17, label: 'Partie 3 · Comment passer à l\'exécution' },
+    { start: 18, end: 21, label: 'Partie 4 · Apprentissages' }
+  ];
+  let current = 0;
+
+  slides.forEach((slide, index) => {
+    slide.setAttribute('aria-hidden', index === 0 ? 'false' : 'true');
+    slide.id = 'slide-' + (index + 1);
+  });
+
+  function getSlideIndexFromHash() {
+    const hash = window.location.hash;
+    if (!hash.startsWith(HASH_PREFIX)) return 0;
+    const value = Number(hash.slice(HASH_PREFIX.length));
+    if (!Number.isInteger(value) || value < 1 || value > total) return 0;
+    return value - 1;
+  }
+
+  function updateHash() {
+    const target = HASH_PREFIX + (current + 1);
+    if (window.location.hash !== target) {
+      window.history.replaceState(null, '', target);
+    }
+  }
+
+  function showSlide(idx) {
+    if (idx < 0 || idx >= total) return;
+    const previous = current;
+    slides[previous].classList.remove('active');
+    slides[previous].classList.add('exit');
+    slides[current].setAttribute('aria-hidden', 'true');
+    setTimeout(() => slides[previous].classList.remove('exit'), 400);
+    current = idx;
+    slides[current].classList.add('active');
+    slides[current].setAttribute('aria-hidden', 'false');
+    updateUI();
+    updateHash();
+  }
+
+  function updateUI() {
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%';
+    const currentPart = partRanges.find((part) => current >= part.start && current <= part.end);
+    document.getElementById('part-indicator').textContent = currentPart ? currentPart.label : '';
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      showSlide(current + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
+      e.preventDefault();
+      showSlide(current - 1);
+    }
+  });
+
+  // Touch support
+  let touchStartX = 0;
+  document.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; });
+  document.addEventListener('touchend', (e) => {
+    const diff = touchStartX - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 50) {
+      diff > 0 ? showSlide(current + 1) : showSlide(current - 1);
+    }
+  });
+
+  window.addEventListener('hashchange', () => {
+    const idx = getSlideIndexFromHash();
+    if (idx !== current) showSlide(idx);
+  });
+
+  const initialSlide = getSlideIndexFromHash();
+  if (initialSlide !== 0) {
+    slides[0].classList.remove('active');
+    slides[0].setAttribute('aria-hidden', 'true');
+    current = initialSlide;
+    slides[current].classList.add('active');
+    slides[current].setAttribute('aria-hidden', 'false');
+  }
+  updateUI();
+  updateHash();
+})();
+</script>
+</body>
+</html>

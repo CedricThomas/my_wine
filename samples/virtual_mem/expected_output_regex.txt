@@ -1,0 +1,10 @@
+VirtualAlloc OK.*
+Write to RW page OK
+Read verification OK
+VirtualProtect -> PAGE_READONLY OK
+RO read verification OK
+Write to RO page expected to fail \(skipped — no SEH\)
+VirtualProtect -> PAGE_READWRITE OK
+Post-RW write OK
+VirtualFree OK
+All tests passed

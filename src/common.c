@@ -1,16 +1,28 @@
 #include "include/common.h"
+#include "loader/loader_state.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include <sys/mman.h>
 
-// ── Debug global flag ──────────────────────────────────────────
-// Set from main() by scanning envp for MY_WINE_DEBUG
-int g_debug_enabled = 0;
+/* Set from MY_WINE_DEBUG_LEVEL before guest handoff. */
+int g_debug_level = 0;
 
-// ── Cached WINE_DLL_PATH ────────────────────────────────────────
-// Populated in main() before GS switch so find_dll_path is syscall-safe
+wine_loader_state_t g_loader = { .dll_base_next = DLL_ALLOC_BASE };
+
+/* Populated in main() before GS switch so find_dll_path is syscall-safe. */
 char g_wine_dll_path[WINE_DLL_PATH_MAX] = {0};
+
+void loader_set_pe_path(const char *path)
+{
+    if (path == NULL) {
+        g_loader.pe_path[0] = '\0';
+        return;
+    }
+
+    strncpy(g_loader.pe_path, path, sizeof(g_loader.pe_path) - 1);
+    g_loader.pe_path[sizeof(g_loader.pe_path) - 1] = '\0';
+}
 
 void set_wine_dll_path(const char *path)
 {
@@ -22,11 +34,29 @@ void set_wine_dll_path(const char *path)
     g_wine_dll_path[sizeof(g_wine_dll_path) - 1] = '\0';
 }
 
-// Override debug_check_fn (weak in debug.c) to check g_debug_enabled
-static int debug_enabled(void) { return g_debug_enabled; }
+static int debug_enabled(void) { return g_debug_level != 0; }
+static int debug_level(void) { return g_debug_level; }
 int (*debug_check_fn)(void) = &debug_enabled;
+int (*debug_level_fn)(void) = &debug_level;
 
-// ── format_hex ──────────────────────────────────────────────────
+int parse_debug_level(const char *value)
+{
+    int level = 0;
+
+    if (value == NULL) {
+        return 0;
+    }
+
+    while (*value >= '0' && *value <= '9') {
+        level = (level * 10) + (*value - '0');
+        if (level > 9) {
+            return 9;
+        }
+        value++;
+    }
+
+    return level;
+}
 
 void format_hex(char *buf, int buf_size, uint64_t val) {
     static const char hex_digits[] = "0123456789abcdef";
@@ -40,8 +70,6 @@ void format_hex(char *buf, int buf_size, uint64_t val) {
     }
     buf[16] = '\0';
 }
-
-// ── format_ptr ──────────────────────────────────────────────────
 
 void format_ptr(char *buf, int buf_size, void *p) {
     if (p == NULL) {

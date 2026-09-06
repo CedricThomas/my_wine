@@ -1,0 +1,6 @@
+type=graphical
+window_title=Sigint Window
+window_width=320
+window_height=200
+ready_log=HARNESS:READY sigint-window
+ready_only=true

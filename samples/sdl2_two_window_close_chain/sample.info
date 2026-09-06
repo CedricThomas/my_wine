@@ -1,0 +1,8 @@
+type=graphical
+window_title=Window A
+window_width=320
+window_height=200
+timeout=15
+ready_log=HARNESS:READY window-a
+ready_window_timeout=10
+ready_only=true

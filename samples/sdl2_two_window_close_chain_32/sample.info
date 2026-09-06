@@ -1,0 +1,8 @@
+type=graphical
+arch=32
+window_title=Window A 32-bit
+window_width=320
+window_height=200
+timeout=15
+ready_log=HARNESS:READY window-a
+ready_window_timeout=10

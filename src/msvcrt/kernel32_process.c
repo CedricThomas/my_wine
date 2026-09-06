@@ -5,9 +5,11 @@
 
 /* ── ExitProcess ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void ExitProcess(uint32_t uExitCode)
 {
+    DEBUG_WRITE_ERR("kernel32: ExitProcess\n",
+                    sizeof("kernel32: ExitProcess\n") - 1);
     /* Validate the syscall thunk exists (thunk resolution via lookup_thunk) */
     void *thunk = lookup_thunk(NT_SYSCALL_TERMINATE_PROCESS);
     if (thunk == NULL) {
@@ -26,7 +28,7 @@ void ExitProcess(uint32_t uExitCode)
 
 /* ── GetStartupInfoA ────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void GetStartupInfoA(STARTUPINFOA *lpStartupInfo)
 {
     if (lpStartupInfo) {
@@ -37,7 +39,7 @@ void GetStartupInfoA(STARTUPINFOA *lpStartupInfo)
 
 /* ── SetUnhandledExceptionFilter ───────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *SetUnhandledExceptionFilter(void *callback)
 {
     (void)callback;
@@ -46,7 +48,7 @@ void *SetUnhandledExceptionFilter(void *callback)
 
 /* ── Sleep ──────────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void Sleep(uint32_t dwMilliseconds)
 {
     /* Inline formatting — avoids glibc sprintf which accesses vDSO via GS. */
@@ -72,4 +74,36 @@ void Sleep(uint32_t dwMilliseconds)
     ts.tv_nsec = (dwMilliseconds % 1000) * 1000000L;
     /* Call nanosleep syscall directly (avoids ABI mismatch with libc wrapper) */
     (void)INLINE_SYSCALL_NANOSLEEP(&ts, (const void *)0);
+}
+
+KERNEL32_STUB
+void *CreateThread(void *lpThreadAttributes, uintptr_t dwStackSize, void *lpStartAddress,
+                   void *lpParameter, uint32_t dwCreationFlags, uint32_t *lpThreadId)
+{
+    uint32_t handle;
+    (void)lpThreadAttributes;
+    (void)dwStackSize;
+    (void)lpStartAddress;
+    (void)lpParameter;
+    (void)dwCreationFlags;
+
+    if (debug_level_at_least(1)) {
+        DEBUG("kernel32: CreateThread start=%p param=%p stack=%lu flags=0x%x",
+              lpStartAddress, lpParameter, (unsigned long)dwStackSize, dwCreationFlags);
+    }
+
+    handle = (uint32_t)wine_handle_alloc(HANDLE_TYPE_THREAD, NULL);
+    if (lpThreadId)
+        *lpThreadId = handle;
+    return FORCE_PTR_RETURN((void *)(uintptr_t)handle);
+}
+
+KERNEL32_STUB
+__attribute__((noreturn)) void ExitThread(uint32_t dwExitCode)
+{
+#ifdef MY_WINE32
+    INLINE_SYSCALL_EXIT((int)dwExitCode);
+#else
+    _exit((int)dwExitCode);
+#endif
 }

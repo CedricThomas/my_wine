@@ -1,68 +1,71 @@
 #ifndef MY_WINE_MSVCRT_H
 #define MY_WINE_MSVCRT_H
 
+#include "wine_abi.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "common.h"
+#include "crt.h"
 
 /* ── MSVCRT CRT Startup Stubs ──────────────────────────────── */
 
-/* Global variables accessed by CRT startup code */
-extern int __msvcrt_app_type;
-extern int _commode;
-extern int _fmode;
-extern char **_msvcrt_environ;
-extern char *_acmdln;
-
-/* Guest argv/envp set from main.c before entry jump */
-extern char **g_guest_argv;
-extern char **g_guest_envp;
-
-/* _cmdline_storage buffer and pointer - set from main.c before entry jump */
-extern char _cmdline_storage[PAGE_SIZE];
+/*
+ * All CRT global state is now in g_crt (wine_crt_state_t, defined in include/crt.h).
+ * Access via g_crt.app_type, g_crt.commode, g_crt.fmode, g_crt.environ,
+ * g_crt.acmdln, g_crt.guest_argv, g_crt.guest_envp, g_crt.cmdline_storage,
+ * g_crt.initenv, etc.
+ */
 
 /* CRT startup functions */
-__attribute__((ms_abi))
+GUEST_ABI
 void __set_app_type(int type);
-__attribute__((ms_abi))
+GUEST_ABI
 void __getmainargs(int *argc, char ***argv, char ***envp, int expand_env, void *pStartInfo);
-__attribute__((ms_abi))
-void __initenv(void);
-__attribute__((ms_abi))
-void _initterm(void);
-__attribute__((ms_abi))
-void *_initterm_e(const void **pi, const void **pe);
-__attribute__((ms_abi))
-void *_onexit(void (*func)(void));
-__attribute__((ms_abi))
+#ifdef MY_WINE32
+/* 32-bit: these are data symbols (from crt_32_stub.c) */
+extern char **__initenv;
+extern char *__p__acmdln;
+extern char *__p__commode;
+extern char *__p__fmode;
+#else
+/* 64-bit: __p__commode/__p__fmode are function stubs (from crt_startup.c).
+ * __initenv is now g_crt.initenv (in g_crt, from include/crt.h). */
+GUEST_ABI
 void *__p__commode(void);
-__attribute__((ms_abi))
+GUEST_ABI
 void *__p__fmode(void);
+#endif
+GUEST_ABI
+void _initterm(void);
+GUEST_ABI
+void *_initterm_e(const void **pi, const void **pe);
+GUEST_ABI
+void *_onexit(void (*func)(void));
 
 /* IO buffers */
-__attribute__((ms_abi))
+GUEST_ABI
 void *__iob_func(void);
-__attribute__((ms_abi))
+GUEST_ABI
 void *__acrt_iob_func(void);
 
 /* Locale */
-__attribute__((ms_abi))
+GUEST_ABI
 void __lconv_init(void);
 
 /* Math error */
-__attribute__((ms_abi))
+GUEST_ABI
 void __setusermatherr(void (*handler)(void));
 
 /* Stdlib functions */
-__attribute__((ms_abi))
+GUEST_ABI
 void _amsg_exit(int msg);
-__attribute__((ms_abi))
+GUEST_ABI
 void _cexit(void);
 /* _exit and exit: main.c calls these directly with SysV ABI, so no ms_abi */
 void _exit(int code);
 void exit(int code);
 /* abort: declared in stdlib.h, PE gets it via import table pointer */
-__attribute__((ms_abi))
+GUEST_ABI
 void *_setargv(void);
 
 /* Memory functions */
@@ -98,20 +101,5 @@ extern void *__msvcrt_exit;
 extern void *__msvcrt__exit;
 extern void *__msvcrt_abort;
 extern void *__msvcrt_signal;
-
-/* CRT context — image base and .bss VA */
-typedef struct {
-    uint64_t image_base;       /* Base address of the loaded PE image */
-    uint64_t bss_vaddr;        /* VirtualAddress of the .bss section */
-    uint32_t argc_bss_offset;  /* offset within .bss for argc (default 0x028) */
-    uint32_t argv_bss_offset;  /* offset within .bss for argv (default 0x020) */
-    uint32_t envp_bss_offset;  /* offset within .bss for envp (default 0x018) */
-} crt_context_t;
-
-extern crt_context_t g_crt_ctx;
-
-/* Patch refptrs in the PE's .rdata to point to our globals */
-#include "pe.h"
-void patch_crt_refptrs(const char *file_path, void *image_base, IMAGE_NT_HEADERS64 *nt, IMAGE_SECTION_HEADER *sections);
 
 #endif /* MY_WINE_MSVCRT_H */

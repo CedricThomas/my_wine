@@ -9,18 +9,21 @@
  * and thunk generation code.
  *
  * =====================================================================
- * ARCHITECTURE NOTE: x86_64 ONLY
+ * ARCHITECTURE NOTE: x86_64 and x86_32
  * =====================================================================
  *
- * All TEB field offsets (TEB_SEH_CHAIN, TEB_TEB_SELF_REF,
- * TEB_THREAD_PTR, TEB_PEB_PTR) are specific to x86_64 Windows
- * (PE32+ / AMD64).
+ * TEB field offsets come in two variants:
+ *   TEB64_* for x86_64 (PE32+ / AMD64)
+ *   TEB32_* for x86_32 (PE32 / I386)
  *
- * All PEB field offsets (PEB_BEING_DEBUGGED, PEB_IMAGE_BASE,
- * PEB_PROCESS_HEAP, PEB_LDR) are specific to x86_64 Windows.
+ * PEB field offsets come in two variants:
+ *   PEB64_* for x86_64 (PE32+ / AMD64)
+ *   PEB32_* for x86_32 (PE32 / I386)
  *
- * These offsets will differ on x86_32, ARM64, and other architectures.
- * This code will not work on non-x86_64 architectures without updating
+ * Backward-compat aliases (TEB_*, PEB_*) map to the 64-bit variants.
+ *
+ * These offsets will differ on ARM64 and other architectures.
+ * This code will not work on non-x86 architectures without updating
  * these offsets.
  * =====================================================================
  */
@@ -62,20 +65,54 @@
 
 /* ── TEB field offsets (x86_64 Windows) ───────────────────────── */
 
-#define TEB_SEH_CHAIN        0x00   /* NextExceptionHandler */
-#define TEB_TEB_SELF_REF     0x08   /* Self pointer */
-#define TEB_THREAD_PTR       0x30   /* Thread pointer (fake self-ref) */
-#define TEB_PEB_PTR          0x60   /* PEB pointer */
+#define TEB64_SEH_CHAIN      0x00   /* NextExceptionHandler */
+#define TEB64_TEB_SELF_REF   0x08   /* Self pointer */
+#define TEB64_THREAD_PTR     0x48   /* ThreadPointer field in x86_64 TEB */
+#define TEB64_PEB_PTR        0x60   /* PEB pointer */
+
+/* ── TEB field offsets (x86_32 Windows) ───────────────────────── */
+
+#define TEB32_SEH_CHAIN      0x00   /* NextExceptionHandler */
+#define TEB32_TEB_SELF_REF   0x04   /* Self pointer */
+#define TEB32_THREAD_PTR     0x24   /* ThreadPointer field in x86_32 TEB */
+#define TEB32_PEB_PTR        0x30   /* PEB pointer */
+#define TEB32_LAST_STATUS    0x34   /* LastStatusValue */
+#define TEB32_CLIENT_ID_PID  0x40   /* ClientId.UniqueProcess */
+#define TEB32_CLIENT_ID_TID  0x44   /* ClientId.UniqueThread */
+#define TEB32_ENV_PTR        0x48   /* EnvironmentPointer */
+#define TEB32_FIBER_DATA     0x10   /* FiberData field in x86_32 TEB */
+#define TEB32_GDI_TEB_OFFSET 0x18   /* GdiTebOffset field in x86_32 TEB */
+#define TEB32_GDI_PROCESS_LOCAL 0x1C  /* GdiProcessLocals field in x86_32 TEB */
 
 /* ── PEB field offsets (x86_64 Windows) ───────────────────────── */
 
-#define PEB_BEING_DEBUGGED   0x002  /* BeingDebugged flag */
-#define PEB_IMAGE_BASE       0x008  /* ImageBaseAddress */
-#define PEB_PROCESS_HEAP     0x030  /* ProcessHeap */
+#define PEB64_BEING_DEBUGGED 0x002  /* BeingDebugged flag */
+#define PEB64_IMAGE_BASE     0x008  /* ImageBaseAddress */
+#define PEB64_PROCESS_HEAP   0x030  /* ProcessHeap */
 
-#ifndef PEB_LDR
-#define PEB_LDR              0x18   /* PEB_LDR_DATA pointer offset in PEB */
+#ifndef PEB64_LDR
+#define PEB64_LDR            0x18   /* PEB_LDR_DATA pointer offset in PEB */
 #endif
+
+/* ── PEB field offsets (x86_32 Windows) ───────────────────────── */
+
+#define PEB32_BEING_DEBUGGED 0x002  /* BeingDebugged flag */
+#define PEB32_IMAGE_BASE     0x008  /* ImageBaseAddress */
+#define PEB32_PROCESS_HEAP   0x03C  /* ProcessHeap — Win7+ (0x03C); WinXP/2000 (0x018) */
+                                        /* Ref: Microsoft TEB/PEB layout (MSDN: ntdef.h, PEB structure) */
+#define PEB32_LDR            0x00C  /* PEB_LDR_DATA pointer offset in PEB */
+
+/* ── Backward-compat aliases (default to 64-bit) ──────────────── */
+
+#define TEB_SEH_CHAIN        TEB64_SEH_CHAIN
+#define TEB_TEB_SELF_REF     TEB64_TEB_SELF_REF
+#define TEB_THREAD_PTR       TEB64_THREAD_PTR
+#define TEB_PEB_PTR          TEB64_PEB_PTR
+
+#define PEB_BEING_DEBUGGED   PEB64_BEING_DEBUGGED
+#define PEB_IMAGE_BASE       PEB64_IMAGE_BASE
+#define PEB_PROCESS_HEAP     PEB64_PROCESS_HEAP
+#define PEB_LDR              PEB64_LDR
 
 /* ── Data Directory entries ───────────────────────────────────── */
 
@@ -103,9 +140,20 @@
 #define ERROR_ACCESS_DENIED          5
 #define ERROR_INVALID_PARAMETER     87
 #define ERROR_INSUFFICIENT_BUFFER  122
+#define ERROR_FILE_NOT_FOUND       2
 
 /* ── NT status codes ────────────────────────────────────────── */
 
 #define STATUS_ACCESS_VIOLATION   0xC0000005
+
+/* ── Address space limits ─────────────────────────────────────── */
+
+#define ADDR32_LIMIT             0x100000000ULL  /* 4 GB — upper bound of 32-bit address space */
+
+/* ── PE32 default image base ─────────────────────────────────── */
+
+#ifndef PE32_DEFAULT_IMAGE_BASE
+#define PE32_DEFAULT_IMAGE_BASE  0x00400000ULL  /* Default base for PE32 (x86) images */
+#endif
 
 #endif /* MY_WINE_NT_CONSTANTS_H */

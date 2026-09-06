@@ -14,14 +14,11 @@
 #include "../syscall/syscalls_inline.h"
 #include "../syscall/abi_wrappers.h"
 #include "include/common.h"
+#include "include/handle_manager.h"
 
-/* ── Section / View storage ────────────────────────────────────── */
+/* ── Kernel objects global (single definition) ────────────────── */
 
-wine_section_t sections[MAX_SECTIONS];
-int section_count = 0;
-
-wine_view_t views[MAX_SECTIONS];
-int view_count = 0;
+wine_kernel_objects_t g_ko = {0};
 
 /* Map Windows PAGE_* protect values to Linux PROT_* flags */
 int map_protect(uint64_t protect)
@@ -101,12 +98,10 @@ uint64_t handler_NtMapViewOfSection(uint64_t section_handle, uint64_t process,
     (void)allocation_type;
     (void)view_untyped;
 
-    /* Look up section by handle (handle = index+3) */
-    unsigned idx = (unsigned)(section_handle - 3);
-    if (section_handle < 3 || idx >= (unsigned)section_count)
+    /* Look up section by handle via handle_manager */
+    wine_section_t *sec = wine_handle_get((uint32_t)section_handle);
+    if (!sec)
         return STATUS_INVALID_HANDLE;
-
-    wine_section_t *sec = &sections[idx];
     size_t view_sz = (commit_size != 0) ? (size_t)commit_size : sec->size;
     if (view_sz > sec->size)
         view_sz = sec->size;
@@ -142,10 +137,10 @@ uint64_t handler_NtMapViewOfSection(uint64_t section_handle, uint64_t process,
         *view_size = (uint64_t)view_sz;
 
     /* Register the view so NtUnmapViewOfSection can find its full size */
-    if (view_count < MAX_SECTIONS) {
-        views[view_count].base = result;
-        views[view_count].size = view_sz;
-        view_count++;
+    if (ko_view_count() < MAX_SECTIONS) {
+        ko_view(ko_view_count())->base = result;
+        ko_view(ko_view_count())->size = view_sz;
+        ko_set_view_count(ko_view_count() + 1);
     }
 
     return STATUS_SUCCESS;
@@ -155,8 +150,8 @@ uint64_t handler_NtMapViewOfSection(uint64_t section_handle, uint64_t process,
 int find_view(void *base)
 {
     int i;
-    for (i = 0; i < view_count; i++) {
-        if (views[i].base == base)
+    for (i = 0; i < ko_view_count(); i++) {
+        if (ko_view(i)->base == base)
             return i;
     }
     return -1;
@@ -175,15 +170,15 @@ uint64_t handler_NtUnmapViewOfSection(uint64_t process, uint64_t base_address)
     if (idx < 0)
         return STATUS_INVALID_PARAMETER;
 
-    size_t view_sz = views[idx].size;
+    size_t view_sz = ko_view(idx)->size;
 
-    long res = INLINE_SYSCALL_MUNMAP(views[idx].base, view_sz);
+    long res = INLINE_SYSCALL_MUNMAP(ko_view(idx)->base, view_sz);
     if (res != 0)
         return STATUS_UNSUCCESSFUL;
 
     /* Remove the view from the registry */
-    views[idx] = views[view_count - 1];
-    view_count--;
+    *ko_view(idx) = *ko_view(ko_view_count() - 1);
+    ko_set_view_count(ko_view_count() - 1);
 
     return STATUS_SUCCESS;
 }
@@ -198,7 +193,7 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
     (void)object_attributes;
     (void)section_attributes;
 
-    if (section_count >= MAX_SECTIONS)
+    if (ko_section_count() >= MAX_SECTIONS)
         return STATUS_MEMORY_NOT_AVAILABLE;
 
     int fd = -1;
@@ -234,14 +229,15 @@ uint64_t handler_NtCreateSection(uint64_t *section_handle, uint64_t desired_acce
         INLINE_SYSCALL_MUNMAP(temp_map, size);
     }
 
-    int idx = section_count++;
-    sections[idx].base     = base;
-    sections[idx].size     = size;
-    sections[idx].fd       = fd;
-    sections[idx].max_size = *max_size;
+    int idx = ko_section_count();
+    ko_set_section_count(ko_section_count() + 1);
+    ko_section(idx)->base     = base;
+    ko_section(idx)->size     = size;
+    ko_section(idx)->fd       = fd;
+    ko_section(idx)->max_size = *max_size;
 
-    /* Return section handle (index+3 to avoid stdin/stdout/stderr) */
-    *section_handle = (uint64_t)(idx + 3);
+    /* Return section handle via handle_manager */
+    *section_handle = wine_handle_alloc(HANDLE_TYPE_SECTION, ko_section(idx));
 
     return STATUS_SUCCESS;
 }

@@ -10,16 +10,16 @@
  */
 
 #define _GNU_SOURCE
+#include <stdbool.h>
 #include <unistd.h>
 #include "kernel32_priv.h"
-#include <pthread.h>
 
 /* ── CreateEventA ────────────────────────────────────────────── */
 /*
  * Create an event object. Maps to NtCreateEvent.
  * lpAttributes, lpName ignored → NULL. ManualReset=event_type, initialState.
  */
-WINE_STUB
+KERNEL32_STUB
 void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, const char *lpName)
 {
     (void)lpAttributes;
@@ -31,16 +31,16 @@ void *CreateEventA(void *lpAttributes, int bManualReset, int bInitialState, cons
 
 /* ── SetEvent ────────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int SetEvent(void *hEvent)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hEvent;
+    uintptr_t handle = (uintptr_t)hEvent;
     if (handle == 0) {
         g_last_error = 6; /* ERROR_INVALID_HANDLE */
         return 0;
     }
     uint64_t prev = 0;
-    uint64_t status = handler_NtSetEvent(handle, (uint64_t)&prev);
+    uint64_t status = handler_NtSetEvent(handle, (uint64_t)(uintptr_t)&prev);
     if (status != 0) {
         g_last_error = 6;
         return 0;
@@ -50,16 +50,16 @@ int SetEvent(void *hEvent)
 
 /* ── ResetEvent ──────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int ResetEvent(void *hEvent)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hEvent;
+    uintptr_t handle = (uintptr_t)hEvent;
     if (handle == 0) {
         g_last_error = 6;
         return 0;
     }
     uint64_t prev = 0;
-    uint64_t status = handler_NtResetEvent(handle, (uint64_t)&prev);
+    uint64_t status = handler_NtResetEvent(handle, (uint64_t)(uintptr_t)&prev);
     if (status != 0) {
         g_last_error = 6;
         return 0;
@@ -72,10 +72,19 @@ int ResetEvent(void *hEvent)
  * dwMilliseconds: INFINITE=0xFFFFFFFF, else milliseconds.
  * Maps to NtWaitForSingleObject with relative timeout.
  */
-WINE_STUB
+KERNEL32_STUB
 uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hHandle;
+    static uint32_t wait_count = 0;
+    uintptr_t handle = (uintptr_t)hHandle;
+    uint32_t count = ++wait_count;
+
+    if (debug_level_at_least(1) &&
+        ((count & (count - 1)) == 0 || (count % 100000u) == 0)) {
+        DEBUG("kernel32: WaitForSingleObject count=%u handle=0x%lx timeout=%u",
+              count, (unsigned long)handle, dwMilliseconds);
+    }
+
     if (handle == 0) {
         g_last_error = 6;
         return 0x00000103UL; /* WAIT_ABANDONED - placeholder */
@@ -91,14 +100,14 @@ uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 
     if (dwMilliseconds == 0) {
         timeout_100ns = 0;
-        uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uint64_t)&timeout_100ns);
+        uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uintptr_t)&timeout_100ns);
         if (status == 0) return 0; /* WAIT_OBJECT_0 */
         return 0x00000102UL; /* WAIT_TIMEOUT */
     }
 
     /* Convert ms → 100ns (relative = negative) */
     timeout_100ns = -((int64_t)dwMilliseconds * 10000LL);
-    uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uint64_t)&timeout_100ns);
+    uint64_t status = handler_NtWaitForSingleObject(handle, 0, (uintptr_t)&timeout_100ns);
     if (status == 0) return 0; /* WAIT_OBJECT_0 */
     if (status == 0x00000080UL) return 0x00000102UL; /* WAIT_TIMEOUT */
     return 0x00000103UL; /* WAIT_FAILED */
@@ -106,7 +115,7 @@ uint64_t WaitForSingleObject(void *hHandle, uint32_t dwMilliseconds)
 
 /* ── CreateMutexA ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName)
 {
     (void)lpAttributes;
@@ -119,10 +128,10 @@ void *CreateMutexA(void *lpAttributes, int bInitialOwner, const char *lpName)
 
 /* ── ReleaseMutex ────────────────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 int ReleaseMutex(void *hMutex)
 {
-    uint64_t handle = (uint64_t)(uintptr_t)hMutex;
+    uintptr_t handle = (uintptr_t)hMutex;
     uint64_t status = handler_NtReleaseMutex(handle, 0);
     if (status != 0) {
         g_last_error = 6;
@@ -133,7 +142,7 @@ int ReleaseMutex(void *hMutex)
 
 /* ── Critical Section stubs ─────────────────────────────────── */
 
-WINE_STUB
+KERNEL32_STUB
 void InitializeCriticalSection(CRITICAL_SECTION *cs)
 {
     if (cs) {
@@ -146,7 +155,7 @@ void InitializeCriticalSection(CRITICAL_SECTION *cs)
     }
 }
 
-WINE_STUB
+KERNEL32_STUB
 void EnterCriticalSection(CRITICAL_SECTION *cs)
 {
     if (!cs) return;
@@ -157,25 +166,22 @@ void EnterCriticalSection(CRITICAL_SECTION *cs)
         cs->OwningThread = getpid();
         return;
     }
-    // CAS failed — contention
     if (cs->OwningThread == (uint64_t)getpid()) {
-        // Recursive entry by same thread
         cs->RecursionCount++;
         return;
     }
-    // Slow path: loop until we win the CAS after being woken.
-    // Each iteration: create event if needed, reset it (so we don't
-    // consume another thread's pending signal), wait, then retry CAS.
+    /*
+     * Slow path: reset the auto-reset event before each wait so this thread
+     * does not consume another release signal, then retry the CAS.
+     */
     for (;;) {
         if (cs->LockSemaphore == 0) {
-            // Lazy-create event (initially non-signaled, auto-reset)
-            handler_NtCreateEvent(&cs->LockSemaphore, 0, 0, 0, 0);
+            uint64_t handle = 0;
+            handler_NtCreateEvent(&handle, 0, 0, 0, 0);
+            cs->LockSemaphore = (uintptr_t)handle;
         }
-        // Reset event first so we wait on a clean state.
-        // If event is already unsignaled this is a no-op / harmless error.
         handler_NtResetEvent(cs->LockSemaphore, 0);
         handler_NtWaitForSingleObject(cs->LockSemaphore, 0, 0);
-        // Wake up — try to atomically claim the lock.
         expected = -1;
         if (__atomic_compare_exchange_n(&cs->LockCount, &expected, 0, false,
                                          __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
@@ -183,12 +189,10 @@ void EnterCriticalSection(CRITICAL_SECTION *cs)
             cs->OwningThread = getpid();
             return;
         }
-        // CAS failed — another thread took it between signal and here.
-        // Loop back: reset + wait for the next release.
     }
 }
 
-WINE_STUB
+KERNEL32_STUB
 void LeaveCriticalSection(CRITICAL_SECTION *cs)
 {
     if (!cs) return;
@@ -202,7 +206,7 @@ void LeaveCriticalSection(CRITICAL_SECTION *cs)
     }
 }
 
-WINE_STUB
+KERNEL32_STUB
 void DeleteCriticalSection(CRITICAL_SECTION *cs)
 {
     if (!cs) return;
@@ -212,4 +216,3 @@ void DeleteCriticalSection(CRITICAL_SECTION *cs)
     }
     __builtin_memset(cs, 0, sizeof(*cs));
 }
-

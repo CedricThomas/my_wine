@@ -15,12 +15,41 @@
 #include "include/common.h"
 #include "ntdll_priv.h"
 #include "../syscall/syscalls_inline.h"
+#include "include/syscall_safe_utils.h"
 
 /* Shared helper: write a static message to stderr via direct syscall */
-WINE_STUB
+KERNEL32_STUB
 void write_to_stderr(const char *msg);
 
 /* Thread-local last-error code (defined in kernel32_misc.c) */
-extern __thread uint32_t g_last_error;
+extern uint32_t g_last_error;
+
+typedef struct {
+    uint32_t dwFileAttributes;
+    uint32_t ftCreationTimeLow;
+    uint32_t ftCreationTimeHigh;
+    uint32_t ftLastAccessTimeLow;
+    uint32_t ftLastAccessTimeHigh;
+    uint32_t ftLastWriteTimeLow;
+    uint32_t ftLastWriteTimeHigh;
+    uint32_t nFileSizeHigh;
+    uint32_t nFileSizeLow;
+    uint32_t dwReserved0;
+    uint32_t dwReserved1;
+    char cFileName[260];
+    char cAlternateFileName[14];
+} WIN32_FIND_DATAA_WINE;
+
+typedef struct {
+    void *dir;
+    char directory[1024];
+    char pattern[260];
+    int exact_done;
+} wine_find_handle;
+
+int wine_resolve_path(const char *src, char *dst, size_t dst_size);
+const char *wine_get_current_directory(void);
+int wine_set_current_directory(const char *path);
+void wine_reset_current_directory_cache(void);
 
 #endif /* MY_WINE_KERNEL32_PRIV_H */

@@ -1,297 +1,164 @@
-# my_wine — Minimal PE Loader for Linux x86_64
+# my_wine
 
-A minimal user-space PE (Portable Executable) loader that runs
-mingw-w64-compiled Windows x86_64 executables on Linux without Wine.
+A minimal user-space PE loader for Linux. Runs PE32 and PE32+ Windows executables natively — without Wine — by mapping the image into memory, resolving imports to stub implementations, setting up the TEB/PEB environment, and intercepting NT syscalls via dynamically generated thunks.
 
-It maps the PE image into memory, resolves imports to our stub
-implementations, sets up the Windows TEB/PEB environment, and
-jumps to the entry point — intercepting NT syscalls via dynamically
-generated thunks that call `__wine_dispatcher`.
+## What It Does
 
----
+```
+./my_wine samples/hello_world/hello_world.exe
+# Hello from Windows!
+```
 
-## Getting Started
+The `my_wine` wrapper auto-detects the PE format:
 
-New to the project? Here's everything you need to get up and running.
+| PE Type | Backend | Description |
+|---|---|---|
+| **PE32+** (64-bit) | `my_wine64` | Native x86_64 ELF loader for 64-bit Windows binaries |
+| **PE32** (32-bit) | `my_wine32` | Standalone 32-bit ELF loader for 32-bit Windows binaries |
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    my_wine (wrapper)                         │
+│         Detects PE format → execvp(my_wine64|32)             │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                     my_wine64 / my_wine32                    │
+│                                                              │
+│  1. Map PE image into memory (image_mapper)                  │
+│  2. Resolve imports → stub implementations (pe_imports)      │
+│  3. Patch .refptr CRT globals (crt_refptrs)                  │
+│  4. Set up TEB/PEB + GS or FS base (teb_peb)                 │
+│  5. Generate syscall thunks (thunk_gen)                      │
+│  6. Jump to entry point on guest stack (run_guest)           │
+│                                                              │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐   │
+│  │  Stub APIs  │  │  Syscall     │  │  SDL2 Backend      │   │
+│  │  kernel32   │  │  Dispatcher  │  │  (DirectDraw/      │   │
+│  │  user32     │  │  ~25 NT      │  │   DirectSound)     │   │
+│  │  ntdll      │  │  Handlers    │  │                    │   │
+│  │  msvcrt     │  │              │  │                    │   │
+│  │  ddraw      │  │              │  │                    │   │
+│  │  dsound     │  │              │  │                    │   │
+│  │  gdi32      │  │              │  │                    │   │
+│  │  winmm      │  │              │  │                    │   │
+│  └─────────────┘  └──────────────┘  └────────────────────┘   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Single-process model:** The loader and guest code share the same address space. No forking, no separate preloader.
+
+## Quickstart
 
 ### Prerequisites
 
-- **gcc** — the C compiler
-- **Docker** — required to cross-compile sample Windows binaries with mingw-w64
-
-Install the system dependencies (Debian/Ubuntu):
-
 ```bash
-sudo apt install gcc docker.io
+# Debian/Ubuntu
+sudo apt install gcc gcc-multilib docker.io
+
+# Optional — for graphical samples (DOOM95, draw tests)
+sudo apt install libsdl2-dev
 ```
 
-### Build the Loader
+### Build
 
 ```bash
-make           # compile the my_wine binary
-make clean     # remove build artifacts
-make test      # build and run the test suite
+# Build the three runtime binaries
+make my_wine my_wine64 my_wine32
+
+# Build everything (requires Docker for cross-compiled samples)
+make
+
+# Run the test suite
+make run-tests
 ```
 
-### Build and Run a Sample
-
-Samples are cross-compiled to PE `.exe` via a Docker container (mingw-w64):
-
-```bash
-make samples                  # build all samples
-make samples SAMPLE=hello_world # build one sample
-make run-sample SAMPLE=hello_world  # build + run under ./my_wine
-```
-
-You should see `Hello from Windows!` printed to the terminal.
-
-### Run a PE Binary Directly
-
-```bash
-./my_wine <path_to_pe_binary>
-```
-
-For example:
+### Run a PE Binary
 
 ```bash
 ./my_wine samples/hello_world/hello_world.exe
+./my_wine samples/hello_world_32/hello_world_32.exe
+
+# Run a sample with scenarios
+make samples SAMPLE=hello_world
+make run-samples-scenarios SAMPLE=hello_world
 ```
 
----
+### Run DOOM95
 
-## Build
+Unpack the bundled archive and run directly:
 
-### Targets
+```bash
+./scripts/unpack_samples.sh doom95
+./my_wine samples/unpacked/doom95/DOOM95.EXE
+```
 
-| Target | Description |
+## Samples
+
+The project ships with 47 sample directories, covering both 32-bit and 64-bit variants:
+
+| Sample | Description |
 |---|---|
-| `make` or `make all` | Build the `my_wine` binary |
-| `make clean` | Remove the `build/` directory |
-| `make test` | Build and run unit tests |
-| `make samples` | Cross-compile all samples via Docker |
-| `make samples SAMPLE=foo` | Cross-compile one sample |
-| `make run-sample SAMPLE=foo` | Build sample + run it under `./my_wine` |
-
-### Dependencies
-
-- **gcc** — C compiler
-- **Docker** — cross-compilation with `x86_64-w64-mingw32-gcc`
-
----
-
-## Usage
-
-```
-./my_wine <pe_binary>
-```
-
-Example:
-
-```
-./my_wine samples/hello_world/hello_world.exe
-```
-
-The loader will:
-
-1. Open and parse the PE file.
-2. Map sections at the preferred image base with correct protections.
-3. Patch CRT `.refptr` entries to point at our global stubs.
-4. Resolve all imports (ntdll, kernel32, msvcrt) to our stub
-   implementations.
-5. Set up the TEB (Thread Environment Block), PEB (Process
-   Environment Block), and guest stack.
-6. Install the direct dispatch trampoline and jump to the PE
-   entry point.
-7. Return from the entry point and clean up guest resources.
-
----
-
-## Architecture Overview
-
-```
-┌────────────────────────────────────────────────────────────┐
-│                     my_wine (single process)               │
-│                                                            │
-│  main()                                                    │
-│   │                                                        │
-│   ├──► map_image()              # PE file → mmap at base   │
-│   ├──► patch_crt_refptrs()      # .refptr → our stubs      │
-│   ├──► resolve_imports()        # IAT → our functions      │
-│   ├──► setup_teb_peb()          # TEB + PEB + GS base      │
-│   ├──► setup_stack()            # guest stack (mmap)       │
-│   └──► jump_to_entry()          # stack-switch + jump      │
-│                        │                                    │
-│                        └──► guest_setup()                   │
-│                             ├── patch __acrt_iob_func      │
-│                             ├── install dispatcher trampoline │
-│                             └── run_guest() → entry point  │
-│                                                      │
-│              ┌─────────────────────────────────────┐       │
-│              │   Guest PE code runs here           │       │
-│              │                                     │       │
-│              │   PE code → syscall                 │       │
-│              │     │                               │       │
-│              │     ├─ syscall < 0xF000 → Linux OS  │       │
-│              │     └─ syscall >= 0xF000 → __wine_dispatcher │       │
-│              │                          │           │       │
-│              │                   dispatcher()       │       │
-│              │                   │                   │       │
-│              │                   └─ handler_NtXXX()  │       │
-│              │                       │               │       │
-│              │               stub (mprotect, syscall  │       │
-│              │                to Linux kernel, etc.)  │       │
-│              └─────────────────────────────────────┘       │
-└────────────────────────────────────────────────────────────┘
-```
-
-### Data Flow
-
-```
-PE file ──► mmap(file) ──► parse headers
-                  │
-                  ▼
-          mmap(image_base)  ← preferred base from PE header
-                  │
-                  ├──► copy section data (from file mmap to image)
-                  ├──► set per-section protections (mprotect)
-                  └──► unmap file (no longer needed)
-                           │
-                           ▼
-                  patch_crt_refptrs()  ← fix .refptr → our stubs
-                           │
-                           ▼
-                  resolve_imports()    ← IAT entries → our functions
-                           │
-                           ▼
-                  setup_teb_peb()      ← TEB @ GS:0, PEB, GS base
-                  setup_stack()        ← guest stack (downward)
-                           │
-                           ▼
-                  guest_setup()  ← single-process, stack-switch
-                   ├── patch __acrt_iob_func
-                   └── jump to entry point via dispatcher trampoline
-```
-
-See [docs/architecture.md](docs/architecture.md) for a detailed
-architectural walkthrough.
-
----
+| `hello_world` / `hello_world_32` | Basic console output |
+| `file_io` / `file_io_32` | `CreateFile`, `ReadFile`, `WriteFile` |
+| `heap_test` / `heap_test_32` | `HeapAlloc`, `HeapFree` |
+| `multi_syscall` / `multi_syscall_32` | Multiple NT syscall dispatching |
+| `dll_loader` / `dll_loader_32` | `LoadLibrary` / `GetProcAddress` |
+| `sdl2_window` / `sdl2_window_32` | SDL2 window creation |
+| `ddraw_sample` / `ddraw_sample_32` | DirectDraw rendering |
+| `dsound_sample` / `dsound_sample_32` | DirectSound playback |
+| `doom95` | Full DOOM95 game (uses SDL2 backend) |
 
 ## Project Structure
 
 ```
-├── Makefile                    # build system
+my_wine/
+├── Makefile                # Build system (wrapper + PE32+ + PE32 backends)
+├── Dockerfile              # Cross-compilation environment for samples
+├── include/                # 19 header files (PE format, NT constants, types)
 ├── src/
-│   ├── main.c                  # entry point: map, resolve, run
-│   ├── common.c                # shared utilities
-│   ├── pe_headers.c            # PE DOS/NT header parsing
-│   ├── pe_imports.c            # import descriptor chain traversal
-│   ├── pe_symbols.c            # COFF symbol table parsing
-│   ├── pe_rip_scan.c           # RIP-relative thunk scanning
-│   ├── pe_priv.h               # internal PE parser declarations
-│   ├── run_guest.S             # naked assembly trampoline
-│   ├── syscalls_inline.h       # inline syscall helpers
-│   ├── loader/
-│   │   ├── image_mapper.c      # mmap image, copy sections, mprotect
-│   │   ├── import_table.c      # stub function registration table
-│   │   ├── import_resolve.c    # IAT resolution (pass 1 + pass 2)
-│   │   ├── import_init.c       # import resolution orchestrator
-│   │   ├── teb_peb.c           # TEB + PEB allocation and setup
-│   │   ├── entry.c             # fork(), child setup, __acrt_iob patch
-│   │   ├── guest_setup.c       # guest process initialization
-│   │   ├── crash_handlers.c    # exception/crash handling in child
-│   │   ├── gs_base.c           # GS segment base setup via arch_prctl
-│   │   └── loader_priv.h       # internal loader declarations
-│   ├── stubs/                  # Windows API stub implementations
-│   │   ├── ntdll_*.c           # ntdll handlers (handle, io, memory,
-│   │   │                        #   process, objects)
-│   │   ├── kernel32_*.c        # kernel32 stubs (console, process,
-│   │   │                        #   module, misc)
-│   │   ├── crt_*.c             # CRT globals, stdio, stdlib, file I/O,
-│   │   │                        #   startup, refptrs, offset discovery
-│   │   ├── abi_wrappers.c      # ABI compatibility wrappers
-│   │   ├── handler_abi.h       # handler calling convention macros
-│   │   ├── ntdll_priv.h        # private ntdll declarations
-│   │   ├── kernel32_priv.h     # private kernel32 declarations
-│   │   └── msvcrt_priv.h       # private msvcrt declarations
-│   └── syscall/
-│       ├── dispatcher_entry.S  # assembly entry into dispatcher
-│       ├── dispatcher_entry.c  # dispatcher entry glue
-│       └── dispatcher.c        # NT syscall number → handler dispatch
-├── include/                    # public headers
-│   ├── pe.h                    # PE format structures (IMAGE_*)
-│   ├── pe_parser.h             # header parsing declarations
-│   ├── ntdll.h                 # ntdll API declarations
-│   ├── kernel32.h              # kernel32 API declarations
-│   ├── msvcrt.h                # msvcrt API declarations
-│   ├── nt_constants.h          # NT syscall numbers, TEB/PEB offsets,
-│   │                           # Wine syscall offset as named constants
-│   ├── wine_abi.h              # WINE_STUB / WINE_STUB_STATIC macros
-│   ├── abi_wrappers.h          # ABI wrapper declarations
-│   ├── common.h                # shared utility declarations
-│   └── syscall/
-│       ├── dispatcher_entry.h  # dispatcher entry declarations
-│       └── dispatcher.h        # dispatcher function type
-├── tests/                      # unit/integration tests
-│   ├── test_parse.c            # PE header parsing tests
-│   ├── test_import_resolution.c # import resolution tests
-│   ├── test_teb_peb.c          # TEB/PEB setup tests
-│   └── test_syscall_dispatch.c # syscall dispatch tests
-├── samples/                    # sample Windows programs
-│   ├── hello_world/
-│   │   └── hello.c             # minimal hello-world PE target
-│   ├── Dockerfile              # mingw-w64 cross-compile container
-│   └── samples.sh              # build/run samples via Docker
-└── docs/
-    ├── architecture.md         # architecture diagrams & data flow
-    └── refptr.md               # .refptr patching deep-dive
+│   ├── main.c              # PE32+ loader orchestrator
+│   ├── wrapper_main.c      # Format detection wrapper
+│   ├── loader/             # PE image mapping, import resolution, TEB/PEB
+│   ├── syscall/            # Syscall dispatcher, thunk generation
+│   ├── msvcrt/             # ~80 Windows API stubs (kernel32, user32, ntdll, ddraw, ...)
+│   ├── heap/               # musl malloc (PE32+) / mmap allocator (PE32)
+│   ├── crt/                # CRT detection and patching (MinGW, Watcom)
+│   ├── backend/            # SDL2 rendering (DirectDraw/DirectSound emulation)
+│   └── *.S                 # Assembly: run_guest, dispatcher_entry, clone64
+├── tests/                  # 33 unit tests
+├── samples/                # 48 sample programs (with scenarios)
+├── docs/                   # Architecture docs, quickstart, glossary
+└── scripts/                # Build and test automation
 ```
 
----
+## Limitations
 
-## Known Limitations
+`my_wine` is a **research and educational** project, not a general-purpose Windows compatibility layer.
 
-- **Shared-TEB threading model** — all threads share the same TEB and GS
-  base. No per-thread SEH, no per-thread TLS, no `NtTerminateThread`.
-  `NtGetContextThread`/`NtSetContextThread` are stubs.
-- **No TLS support** — `TlsGetValue` returns `NULL`;
-  `__declspec(thread)` is not supported.
-- **No `NtCreateFile`** — only `NtOpenFile` is implemented.
-  `CreateFileA`/`CreateFileW` are not registered.
-- **No `NtTerminateThread`** — threads exit via `INLINE_SYSCALL_EXIT(0)`
-  which kills the entire process.
-- **No `NtProtectVirtualMemory`** — `VirtualProtect` is a kernel32 stub
-  using `mprotect`, but the NT syscall is unregistered.
-- **No `NtWaitForMultipleObjects`** — only `NtWaitForSingleObject` is
-  implemented.
-- **No `NtQueryAttributesFile`** — no file attribute queries.
-- **No Unicode conversion** — `MultiByteToWideChar`/`WideCharToMultiByte`
-  return `0`. `NtOpenFile` handles ASCII only.
-- **Missing kernel32 stubs** — `CreateFileA/W`, `CloseHandle`,
-  `GetTickCount`, `GetModuleFileNameA/W`, `GetFileAttributesA/W`,
-  `GetStartupInfoW`, `GetModuleHandleW`, `SetUnhandledExceptionFilter`
-  are not registered.
-- **Only mingw-w64 executables** — the loader assumes the specific CRT
-  layout and import patterns produced by mingw-w64 with GCC.
+- **Threading** — partial support; no robust per-thread TEB/SEH/TLS
+- **TLS** — `__declspec(thread)` not fully implemented
+- **File I/O** — `NtOpenFile` only (no `NtCreateFile`, no `CreateFileA`/`W`)
+- **Memory** — no `NtProtectVirtualMemory` syscall (stub via `mprotect`)
+- **Synchronization** — `NtWaitForSingleObject` only (no `NtWaitForMultipleObjects`)
+- **Unicode** — basic ASCII conversion only; unsupported code pages return `0`
+- **API coverage** — enough for the included samples, not for arbitrary Windows applications
+- **CRT** — MinGW is best-supported; Watcom support exists for DOOM95
 
-### Capabilities
+## Documentation
 
-PE loading (preferred base + MAP_STACK fallback), base relocations (DIR64),
-import resolution (Pass 1 IAT + Pass 2 thunk scanning), dynamic loading
-(`LoadLibraryA`/`FreeLibraryA`), export table parsing + lookup,
-module registry + PEB LDR, TEB/PEB + GS base, heap management (musl malloc
-backend with `HeapCreate/Alloc/Free/ReAlloc/Destroy/Size/GetProcessHeap`),
-synchronization (CRITICAL_SECTION, Events, Mutexes), thread creation
-(`NtCreateThreadEx` via `clone()`), 25 NT syscall handlers (auto-generated
-from `nt_syscalls.def`), file I/O (`NtOpenFile`, `NtReadFile`, `NtWriteFile`),
-virtual memory (`NtAllocate/FreeVirtualMemory`, `NtCreateSection`,
-`NtMapViewOfSection`), time (`NtQuerySystemTime`,
-`NtQueryPerformanceCounter/Frequency`, `NtDelayExecution`), CRT startup
-(`__getmainargs`, `_initterm`, `__iob_func`, `__acrt_iob_func`),
-ordinal imports (ntdll/kernel32/msvcrt), SEH + POSIX signal crash handlers.
-
----
-
-## License
-
-This project is provided as-is for educational and research purposes.
+- [Quickstart](docs/quickstart.md) — Build and run in five minutes
+- [Glossary](docs/glossary.md) — PE format, Windows runtime, and project terminology
+- [Architecture Overview](docs/architecture/overview.md) — Three-binary layout, subsystem design
+- [Loader Pipeline](docs/architecture/loader.md) — Image mapping, import resolution, entry point
+- [Syscall Dispatcher](docs/architecture/syscall.md) — Thunk generation, ABI translation, handlers
+- [Windows API Stubs](docs/architecture/stubs.md) — Reference for all stub implementations
+- [Heap Management](docs/architecture/heap.md) — musl vs mmap backends
+- [CRT Handling](docs/architecture/crt.md) — MinGW and Watcom patching
+- [SDL2 Backend](docs/architecture/backend.md) — DOOM95 rendering and audio
+- [Build System](docs/guides/build.md) — Makefile targets, Docker, cross-compilation
+- [Debugging](docs/guides/debugging.md) — Diagnostic levels, crash handling
+- [Samples Guide](docs/guides/samples.md) — Catalog and scenario system
+- [Contributing](docs/guides/contributing.md) — Code standards and conventions

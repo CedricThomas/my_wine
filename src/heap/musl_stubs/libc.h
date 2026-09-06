@@ -1,7 +1,7 @@
 /*
  * musl_stubs/libc.h — Stub for musl's internal libc.h
  *
- * Provides the minimal definitions musl oldmalloc needs:
+ * Provides the minimal definitions needed by the vendored musl malloc files:
  *   libc struct, PAGE_SIZE, hidden, weak_alias
  */
 

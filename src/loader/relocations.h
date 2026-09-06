@@ -9,6 +9,6 @@
 
 #include "include/pe.h"
 
-int apply_relocations(void *base, IMAGE_NT_HEADERS64 *nt);
+int apply_relocations(void *base, IMAGE_NT_HEADERS *nt);
 
 #endif /* MY_WINE_RELOCATIONS_H */

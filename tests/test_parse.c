@@ -24,14 +24,14 @@
 int parse_dos_header(const void *base, size_t file_size, IMAGE_DOS_HEADER *out_header);
 int parse_nt_headers(const void *base, size_t file_size,
                      const IMAGE_DOS_HEADER *dos_header,
-                     IMAGE_NT_HEADERS64 *out_nt_headers);
+                     IMAGE_NT_HEADERS *out_nt_headers);
 int parse_sections(const void *base, size_t file_size,
-                   const IMAGE_NT_HEADERS64 *nt_headers,
+                   const IMAGE_NT_HEADERS *nt_headers,
                    IMAGE_SECTION_HEADER **out_sections);
 int parse_imports(const void *base, size_t file_size,
-                  const IMAGE_NT_HEADERS64 *nt_headers,
+                  const IMAGE_NT_HEADERS *nt_headers,
                   IMAGE_IMPORT_DESCRIPTOR **out_first_descriptor);
-void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS64 *nt,
+void dump_headers(const IMAGE_DOS_HEADER *dos, const IMAGE_NT_HEADERS *nt,
                   const IMAGE_SECTION_HEADER *sections);
 
 /* ── Test harness ─────────────────────────────────────────────── */
@@ -134,15 +134,15 @@ static void test_positive(const char *path)
     }
 
     /* 2. NT Headers */
-    IMAGE_NT_HEADERS64 nt_headers;
+    IMAGE_NT_HEADERS nt_headers;
     rc = parse_nt_headers(base, file_size, &dos_header, &nt_headers);
     check("NT headers parse succeeds", rc == 0);
     check("PE signature valid",
-          nt_headers.Signature == IMAGE_NT_SIGNATURE);
+          nt_headers.u.nt64.Signature == IMAGE_NT_SIGNATURE);
     check("Machine == IMAGE_FILE_MACHINE_AMD64",
-          nt_headers.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64);
+          nt_headers.u.nt64.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64);
     check("Optional header magic == PE32+",
-          nt_headers.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
+          nt_headers.u.nt64.OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC);
 
     if (rc != 0) {
         munmap((void *)base, file_size);
@@ -217,7 +217,7 @@ static void test_bad_pe_signature(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds (MZ is valid)", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt;
+    IMAGE_NT_HEADERS nt;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt);
     check("parse_nt_headers fails on bad PE signature", rc == -1);
 
@@ -225,24 +225,26 @@ static void test_bad_pe_signature(void)
     close(fd);
 }
 
-static void test_non_amd64_machine(void)
+static void test_unsupported_machine(void)
 {
-    printf("\n--- Non-AMD64 machine type ---\n");
+    printf("\n--- Unsupported machine type ---\n");
 
-    /* Build a minimal PE32+ header with x86 (0x14c) machine type */
+    /* Build a minimal PE32+ header with ARM (0x1c0) machine type — not supported */
     unsigned char buf[1024] = {0};
     IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)buf;
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 64;
 
-    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(buf + 64);
-    nt->Signature = IMAGE_NT_SIGNATURE;
-    nt->FileHeader.Machine = 0x14c; /* IMAGE_FILE_MACHINE_I386 */
-    nt->FileHeader.NumberOfSections = 0;
-    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
-    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    /* Write raw PE32+ data to buffer (IMAGE_NT_HEADERS64 layout = raw PE layout) */
+    IMAGE_NT_HEADERS64 *nt64 = (IMAGE_NT_HEADERS64 *)(buf + 64);
+    memset(nt64, 0, sizeof(IMAGE_NT_HEADERS64));
+    nt64->Signature = IMAGE_NT_SIGNATURE;
+    nt64->FileHeader.Machine = 0x1c0; /* IMAGE_FILE_MACHINE_ARM — unsupported */
+    nt64->FileHeader.NumberOfSections = 0;
+    nt64->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt64->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
 
-    int fd = create_temp_file(buf, sizeof(buf), "non_amd64");
+    int fd = create_temp_file(buf, sizeof(buf), "unsupported_machine");
     if (fd < 0) return;
 
     void *base = map_temp_fd(fd, sizeof(buf));
@@ -252,9 +254,9 @@ static void test_non_amd64_machine(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt_out;
+    IMAGE_NT_HEADERS nt_out;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt_out);
-    check("parse_nt_headers fails on non-AMD64 machine", rc == -1);
+    check("parse_nt_headers fails on unsupported machine (ARM)", rc == -1);
 
     munmap(base, sizeof(buf));
     close(fd);
@@ -290,7 +292,9 @@ static void test_empty_imports_directory(void)
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 64;
 
+    /* Write raw PE data as IMAGE_NT_HEADERS64 (matches raw PE file layout) */
     IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(buf + 64);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS64));
     nt->Signature = IMAGE_NT_SIGNATURE;
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
     nt->FileHeader.NumberOfSections = 0;
@@ -309,7 +313,7 @@ static void test_empty_imports_directory(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt_out;
+    IMAGE_NT_HEADERS nt_out;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt_out);
     check("parse_nt_headers succeeds", rc == 0);
 
@@ -319,6 +323,102 @@ static void test_empty_imports_directory(void)
     check("parse_imports sets output to NULL for empty imports", first == NULL);
 
     munmap(base, sizeof(buf));
+    close(fd);
+}
+
+static void setup_minimal_import_pe(unsigned char *buf, size_t buf_size,
+                                    uint32_t import_size)
+{
+    (void)buf_size;
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)buf;
+    dos->e_magic = IMAGE_DOS_SIGNATURE;
+    dos->e_lfanew = 64;
+
+    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(buf + 64);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS64));
+    nt->Signature = IMAGE_NT_SIGNATURE;
+    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+    nt->FileHeader.NumberOfSections = 1;
+    nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+    nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+    nt->OptionalHeader.SizeOfHeaders = 0x200;
+    nt->OptionalHeader.SizeOfImage = 0x2000;
+    nt->OptionalHeader.NumberOfRvaAndSizes = 16;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0x1000;
+    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = import_size;
+
+    size_t sec_off = 64 + sizeof(uint32_t) + sizeof(IMAGE_FILE_HEADER) + sizeof(IMAGE_OPTIONAL_HEADER64);
+    IMAGE_SECTION_HEADER *sec = (IMAGE_SECTION_HEADER *)(buf + sec_off);
+    memcpy(sec[0].Name, ".rdata\0\0", 8);
+    sec[0].Misc.VirtualSize = 0x400;
+    sec[0].VirtualAddress = 0x1000;
+    sec[0].SizeOfRawData = 0x400;
+    sec[0].PointerToRawData = 0x200;
+    sec[0].Characteristics = IMAGE_SCN_MEM_READ;
+}
+
+static void test_imports_missing_terminator(void)
+{
+    printf("\n--- Imports missing descriptor terminator ---\n");
+
+    unsigned char buf[2048] = {0};
+    setup_minimal_import_pe(buf, sizeof(buf), sizeof(IMAGE_IMPORT_DESCRIPTOR));
+
+    IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)(buf + 0x200);
+    desc->Name = 0x1100;
+    memcpy(buf + 0x300, "kernel32.dll", 13);
+
+    int fd = create_temp_file(buf, sizeof(buf), "imports_no_terminator");
+    if (fd < 0) return;
+
+    void *base = map_temp_fd(fd, sizeof(buf));
+    if (!base) { close(fd); return; }
+
+    IMAGE_DOS_HEADER dos_header;
+    IMAGE_NT_HEADERS nt_out;
+    int rc = parse_dos_header(base, sizeof(buf), &dos_header);
+    check("parse_dos_header succeeds", rc == 0);
+    rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt_out);
+    check("parse_nt_headers succeeds", rc == 0);
+
+    IMAGE_IMPORT_DESCRIPTOR *first = NULL;
+    int num = parse_imports(base, sizeof(buf), &nt_out, &first);
+    check("parse_imports rejects missing descriptor terminator", num == -1);
+
+    munmap(base, sizeof(buf));
+    close(fd);
+}
+
+static void test_imports_unterminated_name(void)
+{
+    printf("\n--- Imports unterminated DLL name ---\n");
+
+    unsigned char buf[2048] = {0};
+    setup_minimal_import_pe(buf, sizeof(buf), 2 * sizeof(IMAGE_IMPORT_DESCRIPTOR));
+
+    IMAGE_IMPORT_DESCRIPTOR *desc = (IMAGE_IMPORT_DESCRIPTOR *)(buf + 0x200);
+    desc[0].Name = 0x13ff;
+    buf[0x5ff] = 'x';
+
+    size_t file_len = 0x600;
+    int fd = create_temp_file(buf, file_len, "imports_bad_name");
+    if (fd < 0) return;
+
+    void *base = map_temp_fd(fd, file_len);
+    if (!base) { close(fd); return; }
+
+    IMAGE_DOS_HEADER dos_header;
+    IMAGE_NT_HEADERS nt_out;
+    int rc = parse_dos_header(base, file_len, &dos_header);
+    check("parse_dos_header succeeds", rc == 0);
+    rc = parse_nt_headers(base, file_len, &dos_header, &nt_out);
+    check("parse_nt_headers succeeds", rc == 0);
+
+    IMAGE_IMPORT_DESCRIPTOR *first = NULL;
+    int num = parse_imports(base, file_len, &nt_out, &first);
+    check("parse_imports rejects unterminated DLL name", num == -1);
+
+    munmap(base, file_len);
     close(fd);
 }
 
@@ -333,7 +433,9 @@ static void test_overlapping_sections(void)
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 64;
 
+    /* Write raw PE data as IMAGE_NT_HEADERS64 (matches raw PE file layout) */
     IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(buf + 64);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS64));
     nt->Signature = IMAGE_NT_SIGNATURE;
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
     nt->FileHeader.NumberOfSections = 2;
@@ -370,7 +472,7 @@ static void test_overlapping_sections(void)
     int rc = parse_dos_header(base, sizeof(buf), &dos_header);
     check("parse_dos_header succeeds", rc == 0);
 
-    IMAGE_NT_HEADERS64 nt_out;
+    IMAGE_NT_HEADERS nt_out;
     rc = parse_nt_headers(base, sizeof(buf), &dos_header, &nt_out);
     check("parse_nt_headers succeeds", rc == 0);
 
@@ -471,10 +573,10 @@ int main(int argc, char *argv[])
         pe_path = argv[1];
     } else {
         /* Check common locations */
-        if (access("hello.exe", F_OK) == 0) {
-            pe_path = "hello.exe";
-        } else if (access("examples/hello.exe", F_OK) == 0) {
-            pe_path = "examples/hello.exe";
+        if (access("hello_world.exe", F_OK) == 0) {
+            pe_path = "hello_world.exe";
+        } else if (access("samples/hello_world/hello_world.exe", F_OK) == 0) {
+            pe_path = "samples/hello_world/hello_world.exe";
         }
     }
 
@@ -489,9 +591,11 @@ int main(int argc, char *argv[])
     printf("\n=== Error Case Tests ===\n");
     test_bad_mz_signature();
     test_bad_pe_signature();
-    test_non_amd64_machine();
+    test_unsupported_machine();
     test_truncated_file();
     test_empty_imports_directory();
+    test_imports_missing_terminator();
+    test_imports_unterminated_name();
     test_overlapping_sections();
 
     /* ── t7.6: Negative tests ───────────────────────────────────── */

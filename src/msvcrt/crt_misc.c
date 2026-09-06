@@ -40,6 +40,8 @@ int ___mb_cur_max_func(void)
     return 6;
 }
 
+int __mb_cur_max = 6;
+
 /* ── _errno ────────────────────────────────────────────────── */
 /*
  * Thread-local errno storage that the MSVCRT expects at a known address.
@@ -79,7 +81,7 @@ void _unlock(int locknum)
 static int wine_fputc(int ch, void *stream)
 {
     if (stream == NULL) return -1;
-    uintptr_t base = (uintptr_t)__wine_iob.bytes;
+    uintptr_t base = (uintptr_t)g_crt.iob.bytes;
     uintptr_t addr = (uintptr_t)stream;
     if (addr < base || addr >= base + WINE_FILE_SIZE * 3) return -1;
     wine_FILE *f = (wine_FILE *)stream;
@@ -150,6 +152,55 @@ static const char *wine_strerror(int errnum)
         if (msgs[errnum] != NULL) return msgs[errnum];
     }
     return "Unknown error";
+}
+
+WINE_STUB
+int _m_atoi(const char *s)
+{
+    int sign = 1;
+    int value = 0;
+
+    if (!s)
+        return 0;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
+        s++;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+    while (*s >= '0' && *s <= '9') {
+        value = value * 10 + (*s - '0');
+        s++;
+    }
+    return value * sign;
+}
+
+WINE_STUB
+char *_m_strchr(const char *s, int c)
+{
+    unsigned char needle = (unsigned char)c;
+
+    if (!s)
+        return NULL;
+    while (*s) {
+        if ((unsigned char)*s == needle)
+            return (char *)s;
+        s++;
+    }
+    if (needle == 0)
+        return (char *)s;
+    return NULL;
+}
+
+WINE_STUB
+char *_m_setlocale(int category, const char *locale)
+{
+    static char c_locale[] = "C";
+    (void)category;
+    (void)locale;
+    return c_locale;
 }
 
 /* ── wcslen ────────────────────────────────────────────────── */

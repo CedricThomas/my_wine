@@ -1,0 +1,2 @@
+sleep 3500
+sigint

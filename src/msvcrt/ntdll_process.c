@@ -27,13 +27,18 @@ uint64_t handler_NtTerminateProcess(uint64_t process_handle, uint64_t exit_statu
     if (process_handle != 0xFFFFFFFF)
         return STATUS_SUCCESS;
 
-    /* Exit immediately — INLINE_SYSCALL_EXIT never returns.
-     * We cannot call cleanup_unix_stack() or cleanup_thunk_pages() first:
+    /* Exit the entire process, not just the current thread.
+     * SDL and the host runtime may have spawned helper threads by the time a
+     * window-close path reaches ExitProcess. Using sys_exit can leave those
+     * threads alive after the guest main thread terminates, which matches the
+     * observed "window gone but process still running" hang.
+     *
+     * We still cannot call cleanup_unix_stack() or cleanup_thunk_pages() here:
      * cleanup_unix_stack() unmaps the UNIX stack we're currently executing on,
      * and cleanup_thunk_pages() unmaps the thunk code the dispatcher returns to.
-     * All cleanup is deferred to the OS (the process dies and everything is freed).
+     * All cleanup is deferred to the OS when exit_group tears down the process.
      */
-    INLINE_SYSCALL_EXIT((unsigned long)exit_status);
+    INLINE_SYSCALL_EXIT_GROUP((unsigned long)exit_status);
 }
 
 HANDLER

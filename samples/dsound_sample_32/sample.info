@@ -1,0 +1,3 @@
+arch=32
+libs=dsound
+runtime_env=SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy

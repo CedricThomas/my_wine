@@ -1,0 +1,13 @@
+# Verify key events by observing deterministic window title updates.
+focus
+sleep 100
+key a
+key b
+key c
+expect_title Input Echo: ABC
+key BackSpace
+expect_title Input Echo: AB
+key z
+key 9
+expect_title Input Echo: ABZ9
+altf4

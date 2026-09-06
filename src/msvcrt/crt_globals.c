@@ -1,5 +1,7 @@
 /*
  * crt_globals.c — Global variable definitions for MSVCRT stubs.
+ *
+ * Owns the singleton CRT state shared by the MSVCRT stubs.
  */
 
 #define _GNU_SOURCE
@@ -7,75 +9,48 @@
 #include "msvcrt_priv.h"
 #include "include/common.h"
 
-/* ── Global variables ──────────────────────────────────────── */
-
 /*
- * SINGLE-THREAD ONLY: these CRT globals are not safe for concurrent access.
- * g_crt_ctx is written during patch_crt_refptrs() and read in __getmainargs().
- * No synchronization is applied. If multi-threaded support is added, protect
- * with a mutex or use atomic operations for read/write access.
+ * SINGLE-THREAD ONLY: g_crt is not safe for concurrent access.
+ * g_crt.crt_ctx is written during patch_crt_refptrs() and read in
+ * __getmainargs(). No synchronization is applied.
  */
 
-int __msvcrt_app_type = 0;
-int _commode = 0;
-int _fmode = 0;
-char **_msvcrt_environ = NULL;
+wine_crt_state_t g_crt = {
+    .ctor_list_stub = { 0 },
+    .dtor_list_stub = { 0 },
+    .iob = {
+        .f[0] = { ._fd = 0, ._flag = (uintptr_t)(WINE_IOREAD | WINE_IONBF) },
+        .f[1] = { ._fd = 1, ._flag = (uintptr_t)(WINE_IOWRT  | WINE_IONBF) },
+        .f[2] = { ._fd = 2, ._flag = (uintptr_t)(WINE_IOWRT  | WINE_IONBF) },
+    },
+};
 
-/* Set from main.c before run_guest_entry; used by __getmainargs and _acmdln */
-char **g_guest_argv  = NULL;
-char **g_guest_envp  = NULL;
-
-char _cmdline_storage[PAGE_SIZE];
-char *_acmdln = _cmdline_storage;
-
-/* Static variables for additional CRT refptr patches */
-uint64_t native_startup_lock = 0;
-int native_startup_state = 0;
-int dowildcard_val = 0;
-int newmode_val = 0;
 /*
- * SINGLE-THREAD ONLY: g_crt_ctx is not safe for concurrent access.
- * Written during patch_crt_refptrs() and read in __getmainargs().
- * No synchronization is applied — this creates a data race if another
- * thread accesses CRT state while patching is in progress.
+ * Self-referential pointer fixup.
+ * _acmdln and __p__acmdln must point to the cmdline_storage buffer
+ * inside g_crt, but we can't express &g_crt.cmdline_storage in a
+ * compile-time initializer (the struct isn't fully materialized yet).
+ * A constructor function runs before main() to fix these pointers.
  */
-crt_context_t g_crt_ctx = { 0 };
+static __attribute__((constructor)) void crt_init_self_refs(void)
+{
+    g_crt.acmdln   = g_crt.cmdline_storage;
+    g_crt.p_acmdln = g_crt.cmdline_storage;
+}
 
 /*
- * Zero-valued stubs for two-level refptrs.
- * The CRT startup code does two-level indirection:
- *   mov refptr(%rip), %rax   ; loads the value we store here
- *   mov (%rax), %rax          ; dereferences that value
+ * Wrapper functions that return pointer values.
+ * These MUST be functions (not data) because MinGW CRT imports them
+ * via JMP thunks — if the IAT contains a data address, the CPU will
+ * try to execute it as instructions → SIGSEGV.
  *
- * If we write 0 directly into the refptr, the second mov dereferences
- * address 0 → SIGSEGV. Instead, we store a pointer to a real global
- * that contains 0. The CRT reads our stub's address, dereferences it,
- * gets 0, and proceeds safely.
+ * These are excluded under MY_WINE32 because the 32-bit standalone
+ * build (crt_32_stub.c) provides its own implementations that avoid
+ * musl's ifunc resolution issues in that environment.
  */
-uint64_t dyn_tls_callback_stub     = 0;
-uint64_t mingw_excpt_handler_stub  = 0;
-uint64_t xc_a_stub                 = 0;
-uint64_t xc_z_stub                 = 0;
-
-/*
- * Stub arrays for __CTOR_LIST__ / __DTOR_LIST__.
- * __do_global_ctors reads the first element: if 0, no constructors exist.
- * A single {0} entry means "empty list" — the CRT skips the loop.
- */
-uint32_t ctor_list_stub[] = { 0 };
-uint32_t dtor_list_stub[] = { 0 };
-
-/*
- * __xi_a / __xi_z mark the constructor range. When equal, no constructors.
- * The CRT compares them: if __xi_a == __xi_z, skip __do_global_ctors.
- */
-uint64_t xi_a_stub = 0;
-uint64_t xi_z_stub = 0;
-
-/*
- * __imp___initenv stub: the PE code does mov %r8,(%rax) to store envp.
- * This means __imp___initenv must point to a writable location where
- * envp is stored. We set this dynamically to point to PE's .bss envp.
- * Initialize to 0, fix up in patch_crt_refptrs.
- */
-void **__imp___initenv_stub = 0;
+#ifndef MY_WINE32
+char *__p__acmdln_func(void) { return g_crt.acmdln; }
+char **__initenv_func(void)  { return g_crt.initenv; }
+char *__p__fmode_func(void)  { return (char*)&g_crt.fmode; }
+char *__p__commode_func(void){ return (char*)&g_crt.commode; }
+#endif

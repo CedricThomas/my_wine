@@ -1,0 +1,5 @@
+type=graphical
+arch=32
+window_title=AltF4 Window 32-bit
+window_width=320
+window_height=200

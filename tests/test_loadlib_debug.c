@@ -14,7 +14,6 @@
 #include "include/common.h"
 
 void *setup_teb_peb(void);
-extern void *g_image_base;
 
 int find_dll_path(const char *dll_name, char *path, size_t path_size);
 loaded_module_t *load_dll(const char *path, int depth);
@@ -33,7 +32,9 @@ static int build_dll(void) {
     dos->e_magic = IMAGE_DOS_SIGNATURE;
     dos->e_lfanew = 0x80;
 
+    /* Write as IMAGE_NT_HEADERS64 (raw PE layout for file) */
     IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(p + 0x0080);
+    memset(nt, 0, sizeof(IMAGE_NT_HEADERS64));
     nt->Signature = IMAGE_NT_SIGNATURE;
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
     nt->FileHeader.NumberOfSections = 2;

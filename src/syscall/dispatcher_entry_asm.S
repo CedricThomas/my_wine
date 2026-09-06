@@ -1,6 +1,26 @@
 /*
  * dispatcher_entry.S — Wine-style stack-switching dispatcher entry
  *
+ * Implements the dispatcher entry point for both x86-64 and i386 guests.
+ *
+ * x86-64 (below): called via `call __wine_dispatcher` from generated thunks.
+ *   On entry: RDI = syscall number, RSP = guest stack, RCX/RDX/R8/R9 = guest args.
+ *   Saves all guest state EXCEPT RDI (thunk handles it with push/pop),
+ *   switches to UNIX stack, calls c_dispatch_syscall(), restores state, returns.
+ *
+ * i386 (below): called via `call eax` (eax = dispatcher) from generated thunks.
+ *   On entry: EDX = syscall number, ESP = guest stack, [ESP] = thunk_ret.
+ *   Thunk wraps with push ebp/pop ebp (callee-saved, EBP preserved by thunk).
+ *   Dispatcher saves/restores EAX-EBX, ECX-EDX, ESI-EDI, ESP, EIP.
+ *   Switches to UNIX stack, calls c_dispatch_syscall(), restores state, returns.
+ *
+ * NO RED ZONE — this function must not use red zone,
+ * as the guest stack is still active during stack switch.
+ */
+
+/*
+ * x86-64 dispatcher entry.
+ *
  * Called via `call __wine_dispatcher` from generated thunks.
  * On entry: RDI = syscall number, [RSP] = return address (pushed by thunk's call),
  *           [RSP+8] = original RDI (pushed by thunk's `push rdi`),
@@ -10,10 +30,9 @@
  * Saves all guest state EXCEPT RDI (the thunk handles RDI save/restore with push/pop
  * so the dispatcher's `ret` lands on the thunk's `pop rdi`).
  * Switches to UNIX stack, calls c_dispatch_syscall(), restores state, returns.
- *
- * NO RED ZONE — this function must not be compiled with red zone,
- * as the guest stack is still active during stack switch.
  */
+
+#ifndef __i386__
 
 .section .text
 
@@ -68,13 +87,10 @@ __wine_dispatcher:
 
     /* ── Switch to UNIX stack ── */
 
-    /* Load unix_stack_ptr_val into RAX, subtract 8 for ABI stack alignment.
-     * System V ABI: before `call`, RSP must be 8 mod 16 so that after the
-     * 8-byte return address is pushed, RSP is 16-byte aligned inside the callee.
-     * unix_stack_ptr_val points to base+128KB (16-byte aligned), so
-     * unix_stack_ptr_val - 8 gives us 8 mod 16. */
+    /* Load unix_stack_ptr_val for ABI stack alignment.
+     * System V ABI: before `call`, RSP must be 16-byte aligned so that after
+     * the 8-byte return address is pushed, RSP is 8 mod 16 inside the callee. */
     mov unix_stack_ptr_val(%rip), %rsp
-    sub $8, %rsp
 
     /* ── Call C dispatcher (RDI already = syscall_nr) ── */
 
@@ -108,3 +124,130 @@ __wine_dispatcher:
      */
 
     ret
+
+#endif /* !__i386__ */
+
+#if defined(__i386__)
+
+/*
+ * 32-bit dispatcher entry.
+ *
+ * Called via `call eax` from generated thunks (eax = dispatcher address).
+ * On entry: EDX = syscall number (set by thunk),
+ *           [ESP] = EIP (return address pushed by thunk's `call eax`),
+ *           ESP = guest stack pointer at dispatch time.
+ *
+ * Saves all guest registers (EAX-EBP, ESP, EIP) to __wine_guest_regs,
+ * switches to UNIX stack, calls c_dispatch_syscall(edx), restores state,
+ * and returns to guest via EIP.
+ *
+ * NO RED ZONE — this function must not use red zone,
+ * as the guest stack is still active during stack switch.
+ */
+
+.section .text
+
+/* Offsets into guest_regs struct (all uint32_t = 4 bytes each) */
+.equ EAX_OFF,       0
+.equ EBX_OFF,       4
+.equ ECX_OFF,       8
+.equ EDX_OFF,       12
+.equ ESI_OFF,       16
+.equ EDI_OFF,       20
+.equ EBP_OFF,       24
+.equ ESP_OFF,       28
+.equ EIP_OFF,       32
+.equ EFLAGS_OFF,    36
+
+.extern __wine_guest_regs
+.extern unix_stack_ptr_val
+.extern c_dispatch_syscall
+
+.globl __wine_dispatcher
+.type __wine_dispatcher, @function
+.code32
+
+__wine_dispatcher:
+    /* ── Save guest state to __wine_guest_regs ── */
+
+    /* Stack on entry (thunk does: push ebp; movl $disp,%eax; movl $NR,%edx; call eax):
+     * [ESP]     = thunk_ret (return to thunk's pop ebp; ret, pushed by thunk's call)
+     * [ESP+4]   = original EBP (pushed by thunk)
+     * [ESP+8]   = guest caller's return address (pushed by guest's call to thunk)
+     *
+     * EDX = syscall number (set by thunk)
+     * EAX = dispatcher address (set by thunk, clobbered by dispatcher work)
+     *
+     * EBP is handled by thunk push/pop (like RDI in 64-bit) — NOT saved/restored
+     * here. EAX is used to carry the dispatcher address in and the syscall
+     * result out. We save EDX, ESP, EIP, and remaining guest registers. */
+
+    /* Save EDX (syscall nr) first — we'll reuse EDX as temp below */
+    movl %edx, __wine_guest_regs + EDX_OFF
+
+    /* Save EFLAGS onto guest stack (pushf). After this:
+     * [ESP]     = saved EFLAGS
+     * [ESP+4]   = thunk_ret (pushed by thunk's call eax)
+     * [ESP+8]   = original EBP (pushed by thunk)
+     * [ESP+12]  = guest caller's return address
+     * ESP now points to the saved EFLAGS so we can popf on restore. */
+    pushf
+    movl %esp, __wine_guest_regs + ESP_OFF
+
+    /* EIP at [ESP+4], EFLAGS at [ESP] — use EDX as temp (already saved) */
+    movl 4(%esp), %edx
+    movl %edx, __wine_guest_regs + EIP_OFF
+
+    movl (%esp), %edx
+    movl %edx, __wine_guest_regs + EFLAGS_OFF
+
+    /* Restore EDX (syscall nr) */
+    movl __wine_guest_regs + EDX_OFF, %edx
+
+    /* Save volatile guest registers */
+    movl %ecx, __wine_guest_regs + ECX_OFF
+
+    /* Save callee-saved guest registers (except EBP — thunk handles it) */
+    movl %ebx, __wine_guest_regs + EBX_OFF
+    movl %esi, __wine_guest_regs + ESI_OFF
+    movl %edi, __wine_guest_regs + EDI_OFF
+
+    /* ── Switch to UNIX stack ── */
+
+    movl unix_stack_ptr_val, %esp
+    subl $8, %esp
+
+    /* ── Call C dispatcher (EDX still has syscall nr) ── */
+
+    pushl %edx
+    call c_dispatch_syscall
+    addl $4, %esp
+
+    /* ── Save return value (in EAX) ── */
+
+    movl %eax, __wine_guest_regs + EAX_OFF
+
+    /* ── Switch back to guest stack ── */
+
+    movl __wine_guest_regs + ESP_OFF, %esp  /* ESP points to saved EFLAGS on stack */
+
+    /* ── Restore guest registers ── */
+
+    movl __wine_guest_regs + EBX_OFF, %ebx
+    movl __wine_guest_regs + ECX_OFF, %ecx
+    movl __wine_guest_regs + EDX_OFF, %edx
+    movl __wine_guest_regs + ESI_OFF, %esi
+    movl __wine_guest_regs + EDI_OFF, %edi
+    movl __wine_guest_regs + EAX_OFF, %eax
+
+    /* Restore EFLAGS from guest stack (pushf/popf pair),
+     * then ESP += 4 so it points to thunk_ret for the return. */
+    popf
+
+    /* EBP is NOT restored here — the thunk's `pop ebp` after our ret handles it.
+     * ret: jump to thunk_ret (at ESP), thunk does pop ebp + ret → guest caller.
+     * EAX carries the syscall result (restored from guest_regs above). */
+
+    ret
+
+#endif /* __i386__ */

@@ -1,5 +1,5 @@
 /*
- * musl_stubs/malloc_impl.h — Copied from musl src/malloc/oldmalloc/malloc_impl.h
+ * musl_stubs/malloc_impl.h — copied from the musl malloc implementation.
  *
  * With #include "dynlink.h" removed (provided by our stub).
  */

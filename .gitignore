@@ -1,5 +1,6 @@
 # Build directory
 build/
+build32/
 
 # Object files (defense in depth, already covered by build/)
 *.o
@@ -10,22 +11,33 @@ build/
 # GDB debug scripts
 *.gdb
 
+# Editor-local review metadata
+.vscode/local-reviews/
+
 # Windows executables
 *.exe
 
 # Windows libraries
 *.dll
 
-# Main binary
+# Main binaries
 my_wine
+my_wine64
+my_wine32
 
 # Test binaries (ignore all in tests/, keep .c sources)
 tests/*
 !tests/*.c
+!tests/*.h
 
 # Auto-generated files
 include/crt_offsets_generated.h
 src/syscall/dispatcher_generated.c
+.gen_crt_offsets.*/
+
+# Visual debug captures
+artifacts/screenshots/
+doom95_*.png
 
 # Python
 __pycache__/
