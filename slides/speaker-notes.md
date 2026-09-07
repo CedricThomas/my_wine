@@ -38,7 +38,7 @@ Repères : chargement jusqu’à **9:30** ; état Windows et WriteFile jusqu’�
 
 ## Parcours principal
 
-### 1 — [Objectif DOOM](my_wine.html#slide-1) · 0:45
+### 1 — [Objectif DOOM](my_wine.html#slide-1) · 0:45 · Temps cumulé : 0:45
 
 Le point d’arrivée, c’est cette commande : lancer DOOM95, la version Windows de DOOM, avec my_wine sous Linux.
 
@@ -48,7 +48,7 @@ Le projet sert à comprendre ce qu’il faut construire entre le fichier et le j
 
 **Transition :** D’abord, pourquoi avoir commencé ce projet ?
 
-### 2 — [D’où vient ce projet ?](my_wine.html#slide-2) · 1:00
+### 2 — [D’où vient ce projet ?](my_wine.html#slide-2) · 1:00 · Temps cumulé : 1:45
 
 L’essor de Wine et de Proton m’a donné envie de comprendre comment un programme Windows pouvait fonctionner sous Linux.
 
@@ -58,7 +58,7 @@ DOOM95 donne une cible concrète : charger un exécutable, afficher quelque chos
 
 **Transition :** Qu’est-ce qui empêche son code de tourner directement ?
 
-### 3 — [Les instructions savent déjà tourner.](my_wine.html#slide-3) · 1:00
+### 3 — [Les instructions savent déjà tourner.](my_wine.html#slide-3) · 1:00 · Temps cumulé : 2:45
 
 Le processeur comprend déjà ces instructions. Ici, on place 42 dans EAX, puis on ajoute 1. Sur une machine x86 compatible avec le 32 bits, ces opérations peuvent s’exécuter directement.
 
@@ -70,7 +70,7 @@ C’est ce travail que my_wine prend en charge.
 
 **Transition :** Pour la partie chargement, on a déjà des repères avec ld.so.
 
-### 4 — [ld.so nous a donné la méthode.](my_wine.html#slide-4) · 1:00
+### 4 — [ld.so nous a donné la méthode.](my_wine.html#slide-4) · 1:00 · Temps cumulé : 3:45
 
 On retrouve les étapes du chargeur dynamique Linux : lire le fichier, placer le code et les données en mémoire, corriger les adresses, trouver les fonctions demandées, puis donner le contrôle au programme.
 
@@ -82,7 +82,7 @@ On reprend cette méthode pour un fichier Windows. Après le chargement, il rest
 
 **Transition :** Commençons par ce qui doit se retrouver en mémoire.
 
-### 5 — [Ce qu’il faut mettre en mémoire pour DOOM.](my_wine.html#slide-5) · 1:15
+### 5 — [Ce qu’il faut mettre en mémoire pour DOOM.](my_wine.html#slide-5) · 1:15 · Temps cumulé : 5:00
 
 Le fichier contient les instructions, des données et les informations nécessaires pour les charger. En mémoire, on place le code, on recopie les données initialisées et on met à zéro les zones qui doivent l’être.
 
@@ -94,7 +94,7 @@ Toutes ces zones ne viennent donc pas d’une simple copie du fichier.
 
 **Transition :** Comment le fichier décrit-il ce chargement ?
 
-### 6 — [Portable Executable (PE)](my_wine.html#slide-6) · 1:00
+### 6 — [Portable Executable (PE)](my_wine.html#slide-6) · 1:00 · Temps cumulé : 6:00
 
 Le format s’appelle Portable Executable, ou PE. DOOM95 utilise la variante PE32.
 
@@ -106,7 +106,7 @@ Avec ELF, le format Linux, on cherchait déjà des informations de ce genre. Les
 
 **Transition :** Il faut maintenant convertir ces indications en adresses dans le processus.
 
-### 7 — [Construire une image cohérente.](my_wine.html#slide-7) · 1:00
+### 7 — [Construire une image cohérente.](my_wine.html#slide-7) · 1:00 · Temps cumulé : 7:00
 
 Une RVA est un déplacement depuis le début de l’image en mémoire. Ici, la base est 0x00500000 et le déplacement vaut 0x2000 : on obtient 0x00502000.
 
@@ -118,7 +118,7 @@ Enfin, les zones reçoivent leurs permissions de lecture, d’écriture et d’e
 
 **Transition :** Le programme est en mémoire. Où trouver les fonctions qui lui manquent ?
 
-### 8 — [Brancher les fonctions manquantes.](my_wine.html#slide-8) · 1:00
+### 8 — [Brancher les fonctions manquantes.](my_wine.html#slide-8) · 1:00 · Temps cumulé : 8:00
 
 Le programme demande WriteFile dans kernel32.dll. Une DLL est une bibliothèque liée dynamiquement. L’ILT décrit les fonctions attendues.
 
@@ -130,7 +130,7 @@ Un nom est devenu une adresse appelable. Ici, « handler » désigne simplement 
 
 **Transition :** Dans my_wine, cette adresse peut venir de deux endroits.
 
-### 9 — [Où trouve-t-on les fonctions des DLL ?](my_wine.html#slide-9) · 1:30
+### 9 — [Où trouve-t-on les fonctions des DLL ?](my_wine.html#slide-9) · 1:30 · Temps cumulé : 9:30
 
 Avec ld.so, puts venait d’une bibliothèque partagée, libc.so. Pour simplifier my_wine, nos fonctions Windows sont compilées directement dans le runtime.
 
@@ -144,7 +144,7 @@ Dans les deux cas, on obtient une adresse pour l’IAT.
 
 **Transition :** Une fois ces adresses trouvées, peut-on simplement sauter au point d’entrée ?
 
-### 10 — [L’image est prête. Le programme aussi ?](my_wine.html#slide-10) · 1:00
+### 10 — [L’image est prête. Le programme aussi ?](my_wine.html#slide-10) · 1:00 · Temps cumulé : 10:30
 
 Nous savons où se trouvent les instructions et où commencer l’exécution. Mais le premier appel de fonction aura besoin d’une Stack valide.
 
@@ -156,7 +156,7 @@ Le saut au point d’entrée ne prépare rien de tout cela. C’est au chargeur 
 
 **Transition :** Pour expliquer ces règles, il nous faut trois registres.
 
-### 11 — [Les cases de travail du processeur.](my_wine.html#slide-11) · 1:00
+### 11 — [Les cases de travail du processeur.](my_wine.html#slide-11) · 1:00 · Temps cumulé : 11:30
 
 Un registre est une petite case de travail dans le processeur. EAX contient notamment des résultats, EIP l’adresse de l’instruction à exécuter, et ESP l’adresse du sommet de la Stack.
 
@@ -168,7 +168,7 @@ Nous suivons les conventions cdecl et stdcall en 32 bits : dans ces exemples, le
 
 **Transition :** Regardons ce que fait un appel à cette Stack.
 
-### 12 — [Après le retour, l’argument reste.](my_wine.html#slide-12) · 1:30
+### 12 — [Après le retour, l’argument reste.](my_wine.html#slide-12) · 1:30 · Temps cumulé : 13:00
 
 On empile 42 : ESP diminue de quatre et pointe sur cet argument.
 
@@ -180,7 +180,7 @@ Mais 42 est encore là. Ce ret sans opérande a retiré l’adresse de retour, p
 
 **Transition :** Qui doit s’en charger ? C’est une règle de la convention d’appel.
 
-### 13 — [Même fonction, même convention d’appel.](my_wine.html#slide-13) · 1:15
+### 13 — [Même fonction, même convention d’appel.](my_wine.html#slide-13) · 1:15 · Temps cumulé : 14:15
 
 cdecl et stdcall sont deux conventions d’appel. Pour le nettoyage des arguments, cdecl donne la responsabilité à l’appelant ; stdcall à la fonction appelée.
 
@@ -194,7 +194,7 @@ Il faut faire correspondre la signature et la convention de chaque fonction remp
 
 **Transition :** Le programme peut aussi obtenir des informations sans appeler de fonction.
 
-### 14 — [Le programme lit aussi son environnement en mémoire.](my_wine.html#slide-14) · 1:00
+### 14 — [Le programme lit aussi son environnement en mémoire.](my_wine.html#slide-14) · 1:00 · Temps cumulé : 15:15
 
 Windows met à disposition des structures en mémoire : le TEB décrit le thread, et le PEB décrit le processus. Le TEB contient un pointeur vers le PEB.
 
@@ -206,7 +206,7 @@ my_wine prépare ces données et configure FS avant le lancement du code Windows
 
 **Transition :** Voyons le contenu sous une forme C simplifiée.
 
-### 15 — [Zoom sur le PEB et le TEB](my_wine.html#slide-15) · 1:00
+### 15 — [Zoom sur le PEB et le TEB](my_wine.html#slide-15) · 1:00 · Temps cumulé : 16:15
 
 Dans le PEB, ImageBaseAddress pointe vers l’image du programme. ProcessHeap désigne l’objet qui gère sa Heap. ProcessParameters mène aux paramètres de lancement.
 
@@ -218,7 +218,7 @@ Dans le TEB, on retrouve le pointeur vers le PEB, une référence au TEB lui-mê
 
 **Transition :** L’environnement est préparé. Suivons maintenant un appel à WriteFile.
 
-### 16 — [De WriteFile sous Windows à write sous Linux.](my_wine.html#slide-16) · 1:15
+### 16 — [De WriteFile sous Windows à write sous Linux.](my_wine.html#slide-16) · 1:15 · Temps cumulé : 17:30
 
 Le jeu appelle WriteFile avec un handle, un tampon et un nombre d’octets. Le handle est un identifiant de ressource Windows.
 
@@ -232,7 +232,7 @@ La réimplémentation traduit donc les paramètres et le résultat, pas seulemen
 
 **Transition :** Pour l’affichage, nous réutilisons une bibliothèque Linux. Cela introduit un autre chemin.
 
-### 17 — [Deux Stacks: une Linux et une Windows.](my_wine.html#slide-17) · 1:15
+### 17 — [Deux Stacks: une Linux et une Windows.](my_wine.html#slide-17) · 1:15 · Temps cumulé : 18:45
 
 La Stack du jeu est une zone réservée avec mmap. Au lancement, on y prépare les arguments et une adresse de retour. Si le point d’entrée retourne, cette adresse mène au code qui termine le processus. ESP est positionné sur ce cadre avant le saut au programme.
 
@@ -242,7 +242,7 @@ Pendant ces appels, la Stack du jeu reste en mémoire. Changer de Stack consiste
 
 **Transition :** Quand est-ce qu’on garde la Stack du jeu, et quand est-ce qu’on bascule ?
 
-### 18 — [Garder la Stack ou appeler une bibliothèque ?](my_wine.html#slide-18) · 1:15
+### 18 — [Garder la Stack ou appeler une bibliothèque ?](my_wine.html#slide-18) · 1:15 · Temps cumulé : 20:00
 
 Notre WriteFile reste sur la Stack du jeu. C’est une fonction C compilée avec la convention Windows, qui effectue un appel système direct. Elle ne passe pas par la fonction write de la libc.
 
@@ -254,7 +254,7 @@ Deux Stacks sont un choix du projet. Une autre Stack ne suffit pas, à elle seul
 
 **Transition :** Qu’est-ce que ces bibliothèques nous permettent de faire pour DOOM ?
 
-### 19 — [Le relais multimédia côté Linux.](my_wine.html#slide-19) · 1:00
+### 19 — [Le relais multimédia côté Linux.](my_wine.html#slide-19) · 1:00 · Temps cumulé : 21:00
 
 SDL2 signifie Simple DirectMedia Layer, version 2. Elle nous donne les fonctions Linux pour l’affichage, les entrées et les effets sonores.
 
@@ -266,7 +266,7 @@ Les demandes DirectSound passent par le mélange audio et la sortie sonore. La m
 
 **Transition :** On lance le jeu.
 
-### 20 — [Le moment de vérité.](my_wine.html#slide-20) · 3:00
+### 20 — [Le moment de vérité.](my_wine.html#slide-20) · 3:00 · Temps cumulé : 24:00
 
 « Voici le binaire Windows. Je le lance avec my_wine. »
 
@@ -278,7 +278,7 @@ Les images de la slide illustrent le jeu. La démonstration se déroule dans la 
 
 **Transition :** Revenons aux trois choses que my_wine prend en charge.
 
-### 21 — [Faire tourner DOOM sous Linux.](my_wine.html#slide-21) · 1:00
+### 21 — [Faire tourner DOOM sous Linux.](my_wine.html#slide-21) · 1:00 · Temps cumulé : 25:00
 
 Charger les sections et les DLL, puis relier les imports. Préparer la Stack et les structures Windows. Réimplémenter les fonctions demandées par le jeu avec le noyau et les bibliothèques Linux.
 
