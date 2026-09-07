@@ -15,7 +15,7 @@
 /* ── PEB_LDR_DATA ──────────────────────────────────────────────── */
 typedef struct peb_ldr_data {
     uint8_t Reserved[8];
-    LIST_ENTRY InLoadOrderModuleList;
+    LIST_ENTRY  ;
     LIST_ENTRY InMemoryOrderModuleList;
     LIST_ENTRY InInitializationOrderModuleList;
     uint8_t Reserved2[32];   /* Windows x64: 0x38–0x57, total 0x58 */

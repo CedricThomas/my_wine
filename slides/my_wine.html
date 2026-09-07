@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Objectif DOOM — un exécutable Windows, un processus Linux</title>
-<link rel="icon" href="../slides/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
 :root{--bg:#111413;--panel:#1b201e;--line:#3c4741;--text:#f1f0e7;--muted:#b4beb4;--win:#f6b65e;--linux:#70d5c1;--red:#ee826d;--mono:"DejaVu Sans Mono",Consolas,monospace;--sans:"Segoe UI",Arial,sans-serif}
 *{box-sizing:border-box}body{margin:0;background:#090c0b;color:var(--text);font-family:var(--sans);overflow:hidden}
@@ -17,6 +17,7 @@ button,a{touch-action:manipulation}button{font:inherit}a{color:var(--linux)}butt
 .masthead strong{color:var(--win);font-weight:normal}.masthead span:last-child{letter-spacing:1px}
 .slide{position:absolute;inset:100px 76px 132px;display:none;flex-direction:column;gap:26px}
 .slide.active{display:flex}.kicker{font:18px var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--win);margin:0}
+.intro-kicker{display:flex;align-items:center;gap:8px;flex-shrink:0}.wine-emoji{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;font-size:18px;line-height:1;letter-spacing:0;transform:translateY(-5px)}
 h1,h2,h3,p,figure,blockquote{margin:0}h1,h2{font-weight:800;letter-spacing:-2px;line-height:1.05}h1{font-size:88px}h2{font-size:58px;max-width:1350px}h3{font-size:30px;line-height:1.2}
 p,li,td,th{font-size:28px;line-height:1.4}.lead{color:var(--muted);font-size:28px;max-width:1250px}.small{font-size:22px;line-height:1.4;color:var(--muted)}.tiny{font:18px/1.45 var(--mono);color:var(--muted)}
 .win{color:var(--win)}.linux{color:var(--linux)}.danger{color:var(--red)}.muted{color:var(--muted)}
@@ -66,9 +67,9 @@ table{border-collapse:collapse;width:100%;text-align:left}th,td{border-bottom:1p
 <header class="masthead"><strong>MY_WINE / OBJECTIF DOOM</strong><span id="chapter">BRIEFING · 32 BITS</span></header>
 
 <section class="slide active" data-stage="0" data-chapter="Briefing · 32 bits" aria-labelledby="title-1">
-<p class="kicker">Mission 00 / De la curiosité au premier pixel</p>
+<p class="kicker intro-kicker"><span>Mission 00 / Homemade wine</span><span class="wine-emoji" role="img" aria-label="verre de vin">🍷</span></p>
 <div class="hero">
-<div><h1 id="title-1">Objectif<span class="doom-word">DOOM</span></h1><p class="lead">Faire tourner un jeu Windows sous Linux.<br>Comprendre ce qui le rend possible.<br>Construire les pièces manquantes.</p><p class="small" style="margin-top:22px">Cible : DOOM95, la version Windows en 32 bits.</p></div>
+<div><h1 id="title-1">Objectif<span class="doom-word">DOOM</span></h1><p class="lead">Faire tourner un jeu Windows sous Linux.<br>Comprendre ce qui le rend possible.<br>Construire les pièces manquantes.</p></div>
 <figure class="mission-map" aria-label="Carte de mission : cinq pièces à relier du fichier Windows au jeu sous Linux">
 <svg viewBox="0 0 640 440" role="img" aria-label="Un parcours encore incomplet entre DOOM95.EXE et Linux">
 <defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#334237" stroke-width=".6"/></pattern></defs>
